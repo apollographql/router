@@ -713,6 +713,7 @@ supergraph:
   introspection: false
   listen: example_listen
   path: /
+  redact_query_validation_errors: false
   query_planning:
     cache:
       in_memory:
@@ -1490,6 +1491,8 @@ traffic_shaping:
     deduplicate_query: false
     dns_resolution_strategy: ipv4_only
     experimental_http2: enable
+    experimental_http2_keep_alive_interval: null
+    experimental_http2_keep_alive_timeout: null
     global_rate_limit:
       capacity: 1
       interval: 30s
@@ -1499,6 +1502,8 @@ traffic_shaping:
       compression: gzip
       dns_resolution_strategy: ipv4_only
       experimental_http2: enable
+      experimental_http2_keep_alive_interval: null
+      experimental_http2_keep_alive_timeout: null
       global_rate_limit:
         capacity: 1
         interval: 30s

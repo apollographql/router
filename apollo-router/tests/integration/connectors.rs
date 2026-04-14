@@ -558,6 +558,42 @@ mod coprocessor {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_incompatible_warnings_for_connector_stage() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                coprocessor:
+                  url: http://127.0.0.1:8081
+                  connector:
+                    all:
+                      request:
+                        body: true
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+            .assert_log_not_contains(
+                r#"coprocessors which hook into `subgraph_request` or `subgraph_response`"#,
+            )
+            .await;
+
+        Ok(())
+    }
 }
 
 mod entity_cache {

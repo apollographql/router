@@ -1,4 +1,4 @@
-mod compose_directive_manager;
+pub(crate) mod compose_directive_manager;
 pub(crate) mod error_reporter;
 pub(crate) mod hints;
 #[path = "merger.rs"]

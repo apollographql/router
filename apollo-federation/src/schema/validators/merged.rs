@@ -279,7 +279,6 @@ pub(crate) fn validate_merged_schema(
             }
         }
     }
-
     Ok(())
 }
 

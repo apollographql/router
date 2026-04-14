@@ -1,5 +1,11 @@
+use std::path::PathBuf;
+
 use apollo_router::_private::create_test_service_factory_from_yaml;
+use serde_json::json;
 use tower::ServiceExt;
+
+use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test]
 async fn test_supergraph_validation_errors_are_passed_on() {
@@ -204,4 +210,72 @@ async fn test_lots_of_validation_errors() {
         serde_json::Value::from("GRAPHQL_VALIDATION_FAILED")
     );
     assert!(errors.len() <= 100, "should return limited error count");
+}
+
+#[rstest::rstest]
+#[case::enforce(Some("enforce"), true, false)]
+#[case::measure(Some("measure"), false, true)]
+#[case::missing(None, true, false)]
+#[tokio::test(flavor = "multi_thread")]
+async fn variable_validation_mode_propagates_fully(
+    #[case] strict_variable_validation: Option<&str>,
+    #[case] response_should_be_error: bool,
+    #[case] logs_should_contain_warning: bool,
+) {
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(strict_variable_validation.unwrap_or("missing"));
+    settings.set_sort_maps(true);
+    let _guard = settings.bind_to_scope();
+
+    let mut config = json!({"supergraph": {}});
+    if let Some(strict_variable_validation) = strict_variable_validation {
+        config["supergraph"] = json!({ "strict_variable_validation": strict_variable_validation });
+    }
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .supergraph(PathBuf::from(
+            "tests/fixtures/supergraph_input_variables.graphql",
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute a query to trigger all the callbacks
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "query($msg: MessageInput) { send(message: $msg) { id } }",
+                    "variables": {
+                        "msg": {
+                            "content": "Hello",
+                            "author": "Me",
+                            "canvas": [{"input": 4, "innput": 4}],
+                        }
+                    }
+                }))
+                .build(),
+        )
+        .await;
+
+    assert_eq!(
+        response.status().is_client_error(),
+        response_should_be_error
+    );
+    let response_body: serde_json::Value =
+        serde_json::from_slice(response.text().await.unwrap().as_bytes()).unwrap();
+    insta::assert_json_snapshot!(response_body);
+
+    router.read_logs();
+    const VALIDATION_MESSAGE: &str = "encountered unexpected variable(s)";
+    if logs_should_contain_warning {
+        router.assert_log_contained(VALIDATION_MESSAGE);
+    } else {
+        router.assert_log_not_contained(VALIDATION_MESSAGE);
+    }
+
+    router.graceful_shutdown().await;
 }

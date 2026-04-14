@@ -5,7 +5,6 @@ use std::ops::ControlFlow;
 
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower_service::Service;
 use tracing::Span;
@@ -19,6 +18,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
+use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::services::supergraph;
 
 pub mod async_checkpoint;
@@ -26,6 +26,7 @@ pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
+pub mod unconstrained_buffer;
 
 // Note: We use Buffer in many places throughout the router. 50_000 represents
 // the "maximal number of requests that can be queued for the buffered
@@ -173,7 +174,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///             .service(service);
     /// # }
     /// ```
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>>;
 
     /// Place a span around the request.
     ///
@@ -331,8 +332,8 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         ServiceBuilder::layer(self, layer)
     }
 
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
-        self.buffer(DEFAULT_BUFFER_SIZE)
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>> {
+        self.layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
     }
 }
 

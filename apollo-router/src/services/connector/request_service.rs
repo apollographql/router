@@ -26,12 +26,12 @@ use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -85,6 +85,9 @@ pub struct Request {
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
+    /// The request context
+    pub(crate) context: Context,
+
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -94,6 +97,7 @@ pub struct Response {
 
 impl Response {
     pub(crate) fn error_new(
+        context: Context,
         error: Error,
         message: impl Into<String>,
         response_key: ResponseKey,
@@ -107,6 +111,7 @@ impl Response {
         };
 
         Self {
+            context,
             transport_result: Err(error),
             mapped_response,
         }
@@ -114,6 +119,7 @@ impl Response {
 
     #[cfg(test)]
     pub(crate) fn test_new(
+        context: Context,
         response_key: ResponseKey,
         problems: Vec<Problem>,
         data: serde_json_bytes::Value,
@@ -135,6 +141,7 @@ impl Response {
         let http_response = HttpResponse { inner: parts };
 
         Self {
+            context,
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
@@ -143,7 +150,8 @@ impl Response {
 
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Buffer<Request, BoxFuture<'static, ServiceResult>>>>,
+    pub(crate) services:
+        Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
 impl ConnectorRequestServiceFactory {
@@ -154,7 +162,7 @@ impl ConnectorRequestServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
-            let service = Buffer::new(
+            let service = UnconstrainedBuffer::new(
                 plugins
                     .iter()
                     .rev()

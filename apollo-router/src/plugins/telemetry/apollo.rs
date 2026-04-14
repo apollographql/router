@@ -85,11 +85,13 @@ pub(crate) struct Config {
     pub(crate) client_version_header: HeaderName,
 
     /// The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.
+    /// Valid values must match the regex `^[ a-zA-Z0-9.@/_\-]{1,60}$`. Invalid values result in a `400` response.
     #[schemars(with = "Option<String>", default = "library_name_header_default_str")]
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) library_name_header: HeaderName,
 
     /// The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.
+    /// Valid values must match the regex `^[ a-zA-Z0-9.@/_\-]{1,60}$`. Invalid values result in a `400` response.
     #[schemars(
         with = "Option<String>",
         default = "library_version_header_default_str"

@@ -90,7 +90,13 @@ You can attach custom attributes using [router selectors](/router/configuration/
 
 ## Session
 
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests
+- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
+
+<Note>
+
+`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
+
+</Note>
 
 ## Cache
 
@@ -116,7 +122,7 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
-- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds  
+- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
 - `experimental.apollo.router.cache.redis.response_size_avg` - Average Redis response size in bytes
 
@@ -242,6 +248,31 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 - `apollo.router.opened.subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated). This metric contains `graphql.operation.name` label to know exactly which subscription is still opened.
 - `apollo.router.skipped.event.count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
+- `apollo.router.operations.subscriptions.rejected` - Number of subscription requests rejected. Attributes:
+  - `reason`: The reason the subscription was rejected (`max_opened_subscriptions_limit_reached` or `subgraph`).
+  - `subgraph.name`: The name of the subgraph that rejected the connection (empty string if not applicable).
+- `apollo.router.operations.subscriptions.terminated.client` - Number of subscription client streams that have ended. Incremented once per client connection. When deduplication is enabled, a single subgraph WebSocket closure produces one event per deduplicated client (each with `reason=server_close`). Default attributes:
+  - `reason`: The reason the subscription ended (`server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, or `config_reload`).
+  - `subgraph.name`: The name of the subgraph (empty string if not applicable).
+
+  Optional attributes (disabled by default):
+  - `client.name`: The name of the client (empty string if not applicable).
+
+  Attributes are configurable. For example, to enable `client.name`:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        apollo.router.operations.subscriptions.terminated.client:
+          attributes:
+            reason: true
+            subgraph.name: true
+            client.name: true
+```
+- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket connections closed by the subgraph. Incremented once per subgraph connection closure. Each deduplicated client sharing that connection will also emit a corresponding `terminated` event with `reason=server_close`. Attributes:
+  - `subgraph.name`: The name of the subgraph that closed the connection.
 
 ## Batching
 
@@ -260,7 +291,8 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
-- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.
+  - `metric.name`: The name of the metric that exceeded its cardinality limit.
 
 ## Internals
 
@@ -278,3 +310,8 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
   - `http.connection.state` - Either `active` or `terminating`.
+
+## Query parsing
+
+- `apollo.router.operations.recursion` - A histogram of the query parser recursion depth.
+- `apollo.router.operations.lexical_tokens` - A histogram of the lexical token count for queries.

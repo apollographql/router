@@ -124,14 +124,36 @@ pub(crate) use internal::MockInternalHttpClientService;
 #[cfg(test)]
 mod internal {
     use futures::Future;
-    use http::Request as HyperRequest;
-    use http::Response as HyperResponse;
 
-    use crate::services::router::body::RouterBody;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
 
-    mock_async_service!(
-        InternalHttpClient,
-        HyperRequest<RouterBody>,
-        HyperResponse<RouterBody>
-    );
+    mockall::mock! {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        pub InternalHttpClientService {
+            pub fn call(&mut self, req: HttpRequest) -> impl Future<Output = Result<HttpResponse, tower::BoxError>> + Send + 'static;
+        }
+
+        #[allow(dead_code)]
+        impl Clone for InternalHttpClientService {
+            fn clone(&self) -> MockInternalHttpClientService;
+        }
+    }
+
+    impl tower::Service<HttpRequest> for MockInternalHttpClientService {
+        type Response = HttpResponse;
+        type Error = tower::BoxError;
+        type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), tower::BoxError>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, req: HttpRequest) -> Self::Future {
+            Box::pin(self.call(req))
+        }
+    }
 }

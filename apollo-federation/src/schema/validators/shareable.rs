@@ -6,6 +6,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::schema::FederationSchema;
+use crate::schema::position::HasAppliedDirectives;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 

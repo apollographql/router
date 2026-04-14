@@ -154,7 +154,7 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             None,
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],
@@ -191,7 +191,7 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             None,
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],
@@ -228,7 +228,7 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             None,
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],
@@ -266,7 +266,7 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new()),
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],
@@ -304,13 +304,13 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new().with_remote_span_context(SpanContext::new(
-                TraceId::from_u128(1),
-                SpanId::from_u64(1),
+                TraceId::from(1),
+                SpanId::from(1),
                 TraceFlags::SAMPLED,
                 true,
                 TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
             ))),
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],
@@ -348,13 +348,13 @@ mod tests {
 
         let result = datadog_sampler.should_sample(
             Some(&Context::new().with_remote_span_context(SpanContext::new(
-                TraceId::from_u128(1),
-                SpanId::from_u64(1),
+                TraceId::from(1),
+                SpanId::from(1),
                 TraceFlags::default(),
                 true,
                 TraceState::default().with_priority_sampling(SamplingPriority::UserReject),
             ))),
-            TraceId::from_u128(1),
+            TraceId::from(1),
             "test_span",
             &SpanKind::Internal,
             &[],

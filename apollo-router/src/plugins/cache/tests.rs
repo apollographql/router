@@ -44,6 +44,10 @@ impl MockStore {
             map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.map.lock().len()
+    }
 }
 
 impl Mocks for MockStore {
@@ -225,7 +229,7 @@ async fn insert() {
         }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -247,7 +251,7 @@ async fn insert() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.1:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+        format!("version:1.2:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -269,7 +273,7 @@ async fn insert() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -365,7 +369,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -387,7 +391,7 @@ async fn insert_with_requires() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.1:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
+        format!("version:1.2:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -410,7 +414,7 @@ async fn insert_with_requires() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA_REQUIRES)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -497,7 +501,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -522,7 +526,7 @@ async fn insert_with_nested_field_set() {
     );
 
     let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key = format!("version:1.1:subgraph:users:type:User:entity:{hashed_entity_key}");
+    let prefix_key = format!("version:1.2:subgraph:users:type:User:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -547,7 +551,7 @@ async fn insert_with_nested_field_set() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
         .schema(SCHEMA_NESTED_KEYS)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -617,7 +621,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -645,7 +649,7 @@ async fn no_cache_control() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -734,7 +738,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_private_plugin(entity_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -763,7 +767,7 @@ async fn private() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -892,7 +896,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -957,7 +961,7 @@ async fn no_data() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
                 let mut subgraph = MockSubgraphService::new();
@@ -1081,7 +1085,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1143,7 +1147,7 @@ async fn missing_entities() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1206,7 +1210,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_private_plugin(entity_cache.clone())
         .extra_plugin(subgraphs)
         .build_supergraph()
         .await
@@ -1229,7 +1233,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache.clone())
+        .extra_private_plugin(entity_cache.clone())
         .build_supergraph()
         .await
         .unwrap();
@@ -1260,7 +1264,7 @@ async fn invalidate() {
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
-        .extra_plugin(entity_cache)
+        .extra_private_plugin(entity_cache)
         .build_supergraph()
         .await
         .unwrap();
@@ -1278,3 +1282,258 @@ async fn invalidate() {
     insta::assert_json_snapshot!(response);
     panic!()
 }*/
+
+#[tokio::test]
+async fn no_cache_from_request() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "user",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                        serde_json::json! {{"data": {"currentUser": { "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1"
+                        } }}}},
+                    )
+                    .with_header(
+                        CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=3600"),
+                    )
+                    .build(),
+            ),
+            (
+                "orga",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
+                            "variables": {
+                                "representations": [{"id": "1", "__typename": "Organization"}]
+                            }
+                        }},
+                        serde_json::json! {{"data": {
+                            "_entities": [{"creatorUser": {"__typename": "User", "id": 2}}]
+                        }}},
+                    )
+                    .with_header(
+                        CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=3600"),
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    // Phase 1: Populate the cache with a normal request (no Cache-Control on request)
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+
+    // Phase 2: Request with `no-cache` should bypass cache lookup and call subgraphs.
+    // Without mocked subgraphs, the subgraph call fails — proving the cache was not served.
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "headers": {
+                "all": {
+                    "request": [{"propagate": {"named": "cache-control"}}]
+                }
+            }
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-cache"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    // Errors expected because cache was bypassed and no subgraph mocks are configured
+    insta::assert_json_snapshot!(response);
+
+    // Phase 3: Without `no-cache`, data is still served from cache (Phase 1 data was not evicted)
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn no_store_from_request() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "user",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                        serde_json::json! {{"data": {"currentUser": { "activeOrganization": {
+                            "__typename": "Organization",
+                            "id": "1"
+                        } }}}},
+                    )
+                    .with_header(
+                        CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=3600"),
+                    )
+                    .build(),
+            ),
+            (
+                "orga",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
+                            "variables": {
+                                "representations": [{"id": "1", "__typename": "Organization"}]
+                            }
+                        }},
+                        serde_json::json! {{"data": {
+                            "_entities": [{"creatorUser": {"__typename": "User", "id": 2}}]
+                        }}},
+                    )
+                    .with_header(
+                        CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=3600"),
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let mock_store = Arc::new(MockStore::new());
+    let redis_cache = RedisCacheStorage::from_mocks(mock_store.clone())
+        .await
+        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    // Phase 1: Request with `no-store` calls subgraphs and returns data, but does NOT store the
+    // response in cache.
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "headers": {
+                "all": {
+                    "request": [{"propagate": {"named": "cache-control"}}]
+                }
+            }
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    insta::assert_json_snapshot!(response);
+
+    // Verify that `no-store` prevented any writes to the cache store
+    assert_eq!(
+        mock_store.len(),
+        0,
+        "no-store should not have written anything to the cache"
+    );
+
+    // Phase 2: Without subgraph mocks and without `no-store`, the request fails because nothing was
+    // stored in Phase 1 — proving that `no-store` prevented caching.
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+    // Errors expected because the cache is empty (no-store prevented storage in Phase 1)
+    insta::assert_json_snapshot!(response);
+}

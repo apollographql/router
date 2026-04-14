@@ -230,7 +230,7 @@ fn merge_nullable_values(
 /// data structures here have been changed to account for that. As part of this change, this
 /// function will now always deduplicate elements of a conjunction, whereas the JS code would only
 /// sometimes deduplicate that.
-fn dnf_conjunction(values: &[Value]) -> Value {
+pub(crate) fn dnf_conjunction(values: &[Value]) -> Value {
     // Copy the 2D arrays to sort them and remove duplicates. Note that we assume the arrays here
     // are lists-of-lists-of-values, as GraphQL validation should have already verified this.
     let mut filtered = values

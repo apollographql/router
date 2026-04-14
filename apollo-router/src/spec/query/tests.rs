@@ -2515,55 +2515,57 @@ fn reformat_response_unknown_typename() {
         .test();
 }
 
-macro_rules! run_validation {
-    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let variables = match $variables {
-            Value::Object(object) => object,
-            _ => unreachable!("variables must be an object"),
-        };
-        let schema = Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
-        let request = Request::builder()
-            .variables(variables)
-            .query($query.to_string())
-            .build();
-        let query = Query::parse(
-            request
-                .query
-                .as_ref()
-                .expect("query has been added right above; qed"),
-            None,
-            &schema,
-            &Default::default(),
-        )
-        .expect("could not parse query");
-        query.validate_variables(&request, &schema)
-    }};
+#[allow(clippy::result_large_err)]
+fn run_validation(
+    schema: String,
+    query: &str,
+    variables: serde_json_bytes::Value,
+    mode: Mode,
+) -> Result<(), Response> {
+    let variables = match variables {
+        Value::Object(object) => object,
+        _ => unreachable!("variables must be an object"),
+    };
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let request = Request::builder()
+        .variables(variables)
+        .query(query.to_string())
+        .build();
+    let query = Query::parse(
+        request
+            .query
+            .as_ref()
+            .expect("query has been added right above; qed"),
+        None,
+        &schema,
+        &Default::default(),
+    )
+    .expect("could not parse query");
+    query.validate_variables(&request, &schema, mode)
 }
 
-macro_rules! assert_validation {
-    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(
-            with_supergraph_boilerplate($schema, "Query"),
-            $query,
-            $variables
-        );
-        assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
-    }};
+fn assert_validation(schema: &str, query: &str, variables: serde_json_bytes::Value) {
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        variables,
+        Mode::Enforce,
+    );
+    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
-macro_rules! assert_validation_error {
-    ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(
-            with_supergraph_boilerplate($schema, "Query"),
-            $query,
-            $variables
-        );
-        assert!(res.is_err(), "validation should have failed");
-    }};
+fn assert_validation_error(schema: &str, query: &str, variables: serde_json_bytes::Value) {
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        variables,
+        Mode::Enforce,
+    );
+    assert!(res.is_err(), "validation should have failed");
 }
 
 #[test]
-fn variable_validation() {
+fn variable_validation_enforce_mode() {
     let schema = r#"
         type Query {
             int(a: Int): String
@@ -2577,304 +2579,304 @@ fn variable_validation() {
         }
     "#;
     // https://spec.graphql.org/June2018/#sec-Int
-    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({}));
-    assert_validation_error!(schema, "query($foo:Int!){int(a:$foo)}", json!({}));
-    assert_validation!(schema, "query($foo:Int=1){int(a:$foo)}", json!({}));
-    assert_validation!(schema, "query($foo:Int!=1){int(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Int){int(a:$foo)}", json!({}));
+    assert_validation_error(schema, "query($foo:Int!){int(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Int=1){int(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Int!=1){int(a:$foo)}", json!({}));
     // When expected as an input type, only integer input values are accepted.
-    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2}));
-    assert_validation!(
+    assert_validation(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2}));
+    assert_validation(
         schema,
         "query($foo:Int){int(a:$foo)}",
-        json!({ "foo": i32::MAX })
+        json!({ "foo": i32::MAX }),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:Int){int(a:$foo)}",
-        json!({ "foo": i32::MIN })
+        json!({ "foo": i32::MIN }),
     );
     // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"2"}));
-    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2.0}));
-    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"str"}));
-    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":{}}));
+    assert_validation_error(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"2"}));
+    assert_validation_error(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2.0}));
+    assert_validation_error(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"str"}));
+    assert_validation_error(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":true}));
+    assert_validation_error(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":{}}));
     //  If the integer input value represents a value less than -231 or greater than or equal to 231, a query error should be raised.
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Int){int(a:$foo)}",
-        json!({ "foo": i32::MAX as i64 + 1 })
+        json!({ "foo": i32::MAX as i64 + 1 }),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Int){int(a:$foo)}",
-        json!({ "foo": i32::MIN as i64 - 1 })
+        json!({ "foo": i32::MIN as i64 - 1 }),
     );
 
     // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
-    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({}));
-    assert_validation_error!(schema, "query($foo:Float!){float(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Float){float(a:$foo)}", json!({}));
+    assert_validation_error(schema, "query($foo:Float!){float(a:$foo)}", json!({}));
 
     // When expected as an input type, both integer and float input values are accepted.
-    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({"foo":2}));
-    assert_validation!(
+    assert_validation(schema, "query($foo:Float){float(a:$foo)}", json!({"foo":2}));
+    assert_validation(
         schema,
         "query($foo:Float){float(a:$foo)}",
-        json!({"foo":2.0})
+        json!({"foo":2.0}),
     );
     // double precision floats are valid
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:Float){float(a:$foo)}",
-        json!({"foo":1600341978193i64})
+        json!({"foo":1600341978193i64}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:Float){float(a:$foo)}",
-        json!({"foo":1600341978193f64})
+        json!({"foo":1600341978193f64}),
     );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Float){float(a:$foo)}",
-        json!({"foo":"2.0"})
+        json!({"foo":"2.0"}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Float){float(a:$foo)}",
-        json!({"foo":"2"})
+        json!({"foo":"2"}),
     );
 
     // https://spec.graphql.org/June2018/#sec-String
-    assert_validation!(schema, "query($foo:String){str(a:$foo)}", json!({}));
-    assert_validation_error!(schema, "query($foo:String!){str(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:String){str(a:$foo)}", json!({}));
+    assert_validation_error(schema, "query($foo:String!){str(a:$foo)}", json!({}));
 
     // When expected as an input type, only valid UTF‐8 string input values are accepted.
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo": "str"})
+        json!({"foo": "str"}),
     );
 
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo":true})
+        json!({"foo":true}),
     );
-    assert_validation_error!(schema, "query($foo:String){str(a:$foo)}", json!({"foo": 0}));
-    assert_validation_error!(
+    assert_validation_error(schema, "query($foo:String){str(a:$foo)}", json!({"foo": 0}));
+    assert_validation_error(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo": 42.0})
+        json!({"foo": 42.0}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo": {}})
+        json!({"foo": {}}),
     );
 
     // https://spec.graphql.org/June2018/#sec-Boolean
-    assert_validation!(schema, "query($foo:Boolean){bool(a:$foo)}", json!({}));
-    assert_validation_error!(schema, "query($foo:Boolean!){bool(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Boolean){bool(a:$foo)}", json!({}));
+    assert_validation_error(schema, "query($foo:Boolean!){bool(a:$foo)}", json!({}));
     // When expected as an input type, only boolean input values are accepted.
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:Boolean!){bool(a:$foo)}",
-        json!({"foo":true})
+        json!({"foo":true}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Boolean!){bool(a:$foo)}",
-        json!({"foo":"true"})
+        json!({"foo":"true"}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Boolean!){bool(a:$foo)}",
-        json!({"foo": 0})
+        json!({"foo": 0}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:Boolean!){bool(a:$foo)}",
-        json!({"foo": "no"})
+        json!({"foo": "no"}),
     );
 
-    assert_validation!(schema, "query($foo:Boolean=true){bool(a:$foo)}", json!({}));
-    assert_validation!(schema, "query($foo:Boolean!=true){bool(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Boolean=true){bool(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:Boolean!=true){bool(a:$foo)}", json!({}));
 
     // https://spec.graphql.org/June2018/#sec-ID
-    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({}));
-    assert_validation_error!(schema, "query($foo:ID!){id(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:ID){id(a:$foo)}", json!({}));
+    assert_validation_error(schema, "query($foo:ID!){id(a:$foo)}", json!({}));
     // When expected as an input type, any string (such as "4") or integer (such as 4)
     // input value should be coerced to ID as appropriate for the ID formats a given GraphQL server expects.
-    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4}));
-    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": "4"}));
-    assert_validation!(
+    assert_validation(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4}));
+    assert_validation(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": "4"}));
+    assert_validation(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo": "str"})
+        json!({"foo": "str"}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:String){str(a:$foo)}",
-        json!({"foo": "4.0"})
+        json!({"foo": "4.0"}),
     );
     // Any other input value, including float input values (such as 4.0), must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4.0}));
-    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": true}));
-    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": {}}));
+    assert_validation_error(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4.0}));
+    assert_validation_error(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": true}));
+    assert_validation_error(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": {}}));
 
     // https://spec.graphql.org/June2018/#sec-Type-System.List
-    assert_validation!(schema, "query($foo:[Int]){intList(a:$foo)}", json!({}));
-    assert_validation!(schema, "query($foo:[Int!]){intList(a:$foo)}", json!({}));
-    assert_validation!(
+    assert_validation(schema, "query($foo:[Int]){intList(a:$foo)}", json!({}));
+    assert_validation(schema, "query($foo:[Int!]){intList(a:$foo)}", json!({}));
+    assert_validation(
         schema,
         "query($foo:[Int!]){intList(a:$foo)}",
-        json!({ "foo": null })
+        json!({ "foo": null }),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":1})
+        json!({"foo":1}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[String]){strList(a:$foo)}",
-        json!({"foo":"bar"})
+        json!({"foo":"bar"}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[[Int]]){intListList(a:$foo)}",
-        json!({"foo":1})
+        json!({"foo":1}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[[Int]]){intListList(a:$foo)}",
-        json!({"foo":[[1], [2, 3]]})
+        json!({"foo":[[1], [2, 3]]}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":"str"})
+        json!({"foo":"str"}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":{}})
+        json!({"foo":{}}),
     );
-    assert_validation_error!(schema, "query($foo:[Int]!){intList(a:$foo)}", json!({}));
-    assert_validation_error!(
+    assert_validation_error(schema, "query($foo:[Int]!){intList(a:$foo)}", json!({}));
+    assert_validation_error(
         schema,
         "query($foo:[Int!]){intList(a:$foo)}",
-        json!({"foo":[1, null]})
+        json!({"foo":[1, null]}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[Int]!){intList(a:$foo)}",
-        json!({"foo":[]})
+        json!({"foo":[]}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":[1,2,3]})
+        json!({"foo":[1,2,3]}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":["f","o","o"]})
+        json!({"foo":["f","o","o"]}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":["1","2","3"]})
+        json!({"foo":["1","2","3"]}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[String]){strList(a:$foo)}",
-        json!({"foo":["1","2","3"]})
+        json!({"foo":["1","2","3"]}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[String]){strList(a:$foo)}",
-        json!({"foo":[1,2,3]})
+        json!({"foo":[1,2,3]}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[Int!]){intList(a:$foo)}",
-        json!({"foo":[1,2,3]})
+        json!({"foo":[1,2,3]}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         schema,
         "query($foo:[Int!]){intList(a:$foo)}",
-        json!({"foo":[1,null,3]})
+        json!({"foo":[1,null,3]}),
     );
-    assert_validation!(
+    assert_validation(
         schema,
         "query($foo:[Int]){intList(a:$foo)}",
-        json!({"foo":[1,null,3]})
+        json!({"foo":[1,null,3]}),
     );
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
-    assert_validation!(
+    assert_validation(
         "input Foo{ y: String } type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({})
+        json!({}),
     );
-    assert_validation!(
+    assert_validation(
         "input Foo{ y: String } type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":{}})
+        json!({"foo":{}}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         "input Foo{ y: String } type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":1})
+        json!({"foo":1}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         "input Foo{ y: String } type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":"str"})
+        json!({"foo":"str"}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         "input Foo{x:Int!} type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":{}})
+        json!({"foo":{}}),
     );
-    assert_validation!(
+    assert_validation(
         "input Foo{x:Int!} type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":{"x":1}})
+        json!({"foo":{"x":1}}),
     );
-    assert_validation!(
+    assert_validation(
         "scalar Foo type Query { x(foo: Foo): String }",
         "query($foo:Foo!){x(foo: $foo)}",
-        json!({"foo":{}})
+        json!({"foo":{}}),
     );
-    assert_validation!(
+    assert_validation(
         "scalar Foo type Query { x(foo: Foo): String }",
         "query($foo:Foo!){x(foo: $foo)}",
-        json!({"foo":1})
+        json!({"foo":1}),
     );
-    assert_validation_error!(
+    assert_validation_error(
         "scalar Foo type Query { x(foo: Foo): String }",
         "query($foo:Foo!){x(foo: $foo)}",
-        json!({})
+        json!({}),
     );
-    assert_validation!(
+    assert_validation(
         "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x(foo: Foo): String }",
         "query($foo:Foo){x(foo: $foo)}",
-        json!({"foo":{"bar":{"x":1}}})
+        json!({"foo":{"bar":{"x":1}}}),
     );
 
-    assert_validation!(
+    assert_validation(
         "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
         "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
-        json!({"availability": "AVAILABLE"})
+        json!({"availability": "AVAILABLE"}),
     );
 
-    assert_validation!(
+    assert_validation(
         "input MessageInput {
             content: String
             author: String
@@ -2891,10 +2893,10 @@ fn variable_validation() {
             }) {
                 id
             }}",
-        json!({"availability": "AVAILABLE"})
+        json!({"availability": "AVAILABLE"}),
     );
 
-    assert_validation!(
+    assert_validation(
         "input MessageInput {
             content: String
             author: String
@@ -2911,10 +2913,10 @@ fn variable_validation() {
         json!({"msg":  {
             "content": "Hello",
             "author": "Me"
-        }})
+        }}),
     );
 
-    assert_validation_error!(
+    assert_validation_error(
         "input MessageInput {
             content: String
             author: String
@@ -2932,11 +2934,11 @@ fn variable_validation() {
             "content": "Hello",
             "author": "Me",
             "unknownField": "unknown",
-        }})
+        }}),
     );
 
     // Tests if nested inputs are correctly validated
-    assert_validation_error!(
+    assert_validation_error(
         "input MessageInput {
             content: String
             author: String
@@ -2962,7 +2964,7 @@ fn variable_validation() {
                 {"input": 4},
                 {"input": 5, "unknownField": "unknown"}
                 ],
-        }})
+        }}),
     );
 
     let schema = r#"
@@ -3009,15 +3011,75 @@ fn variable_validation() {
         }
         "#;
 
-    let res = run_validation!(
-        schema,
+    let res = run_validation(
+        schema.to_string(),
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
-        json!({"input":{}})
+        json!({"input":{}}),
+        Mode::Enforce,
     );
     assert!(res.is_ok(), "validation should have succeeded: {res:?}");
+}
+
+#[test]
+#[rstest::rstest]
+#[case::top_level_unexpected_field(
+    json!({"content": "Hello", "canvas": [], "unknownField": "unknown"}),
+    Ok(())
+)]
+#[case::nested_unexpected_field(
+    json!({"canvas": [{"input": 3}, {"input": 5, "unknownField": "unknown"}]}),
+    Ok(())
+)]
+#[case::top_level_missing_field(
+    json!({}),
+    Err("VALIDATION_INVALID_TYPE_VARIABLE")
+)]
+#[case::nested_missing_field(
+    json!({"canvas": [{"unknownField": 3}, {"input": 4}]}),
+    Err("VALIDATION_INVALID_TYPE_VARIABLE")
+)]
+fn variable_validation_measure_mode(
+    #[case] msg_variables: Value,
+    #[case] expected_result: Result<(), &str>,
+) {
+    let schema = "
+        input MessageInput {
+            content: String
+            canvas: [CanvasInput]!
+        }
+        input CanvasInput {
+            input: Int!
+        }
+        type Query {
+            send(message: MessageInput): ID
+        }";
+
+    // Tests validation of variable fields
+    let result = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        "query($msg: MessageInput) { send(message: $msg) }",
+        json!({"msg": msg_variables}),
+        Mode::Measure,
+    );
+
+    match (result, expected_result) {
+        (Ok(()), Ok(())) => {}
+        (Err(response), Err(expected_code)) => {
+            assert!(
+                response.contains_error_code(expected_code),
+                "response = {response:?}"
+            );
+        }
+        (Err(response), Ok(())) => {
+            panic!("expected validation to pass: response = {response:?}");
+        }
+        (Ok(()), Err(code)) => {
+            panic!("expected validation to fail with code {code}");
+        }
+    }
 }
 
 #[test]
@@ -7032,4 +7094,352 @@ fn filtered_defer_fragment() {
     );
 
     assert_json_snapshot!(response);
+}
+
+// ─── ROUTER-1598: fragment spread non-null nullification tests ────────────────
+//
+// The bug: when two named-fragment spreads BOTH target the *parent* type (Thing),
+// and the FIRST fragment processes a child field that triggers a non-null
+// violation (setting output["collection"] = null), the SECOND fragment would
+// re-encounter the same field, see input["collection"] still non-null, miss the
+// guard, call format_named_type, which overwrites the null with a fresh empty
+// object, and ultimately return {"__typename":"A"} instead of null.
+//
+// Fixing the guard to ALSO skip when output[field].is_null() closes the hole.
+//
+// Schema: Thing.collection is a nullable union U = A | B.  A has id: ID! (non-
+// null).  When the response carries {"__typename":"A"} but omits id, the null
+// must propagate to collection.
+//
+// The query structure that triggers the bug has BOTH fragments on Thing (the
+// parent), so apply_selection_set sees "collection" twice in the same pass:
+//   ...AThingFrag on Thing  → processes collection → null propagation → collection=null
+//   ...BThingFrag on Thing  → processes collection again → (bug) overwrites null
+//
+// If fragments were on the union members (on A / on B) instead of on Thing,
+// only one fragment would match and the second pass never happens.
+
+const NULLIFICATION_SCHEMA: &str = "
+    type Query {
+        thing: Thing
+    }
+    type Thing {
+        collection: U
+    }
+    union U = A | B
+    type A {
+        id: ID!
+        a: String
+    }
+    type B {
+        b: String
+    }
+";
+
+// Both fragments are on Thing (parent) so apply_selection_set processes
+// "collection" twice in the same invocation — the exact condition the guard
+// must defend against.
+//
+// BThingFrag includes __typename in its collection selection so the buggy
+// output is the recognisable {"__typename":"A"} rather than the less obvious {}.
+const NULLIFICATION_QUERY: &str = "
+    query TestQuery {
+        thing {
+            ...AThingFrag
+            ...BThingFrag
+        }
+    }
+    fragment AThingFrag on Thing {
+        collection {
+            ... on A { id a }
+        }
+    }
+    fragment BThingFrag on Thing {
+        collection {
+            __typename
+            ... on B { b }
+        }
+    }
+";
+
+#[test]
+fn reformat_response_data_nested_fragment_spread_with_unions() {
+    // Happy path — id is present.
+    // AThingFrag writes {id, a}; BThingFrag then merges __typename into the
+    // same (non-null) object.  The new guard must NOT fire here because
+    // output["collection"] is an object, not null.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A", "id": "a1", "a": null }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": { "id": "a1", "a": null, "__typename": "A" }
+            }
+        }))
+        .test();
+
+    // Primary bug — __typename is "A" but required `id: ID!` is absent.
+    //
+    // Without the fix:
+    //   AThingFrag: collection = null  (null propagation from missing id)
+    //   BThingFrag: input["collection"] is non-null {"__typename":"A"}, old
+    //               guard only checked input_value.is_null(), so it didn't fire,
+    //               format_named_type overwrote null with {"__typename":"A"}.
+    //   Final output: {"collection": {"__typename": "A"}}  ← spec-incorrect
+    //
+    // With the fix:
+    //   BThingFrag: guard also checks output["collection"].is_null() → true →
+    //               skips the field entirely; null is preserved.
+    //   Final output: {"collection": null}  ← correct
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        // The missing-field error must be reported; path stops at "collection"
+        // because the absent "id" field is never pushed onto the response path.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type ID",
+                    "path": ["thing", "collection"]
+                }
+            ]
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_inline() {
+    // Same bug, exercised via inline fragments on the parent type instead of
+    // named fragment spreads.  Exercises the InlineFragment branch of
+    // apply_selection_set (lines ~810-847 in query.rs).
+    const INLINE_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ... on Thing {
+                    collection {
+                        ... on A { id a }
+                    }
+                }
+                ... on Thing {
+                    collection {
+                        __typename
+                        ... on B { b }
+                    }
+                }
+            }
+        }
+    ";
+
+    // Happy path — both inline fragments contribute to collection.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(INLINE_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A", "id": "a1", "a": null }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": { "id": "a1", "a": null, "__typename": "A" }
+            }
+        }))
+        .test();
+
+    // Bug case — missing id must propagate null despite the second ... on Thing
+    // fragment trying to re-process collection.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(INLINE_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_non_null_parent() {
+    // Regression guard for propagation through a non-null parent field.
+    // When collection is U! (non-null), the InvalidValue from missing id propagates
+    // via format_non_nullable_value all the way up through apply_selection_set
+    // for AThingFrag — causing an early return before BThingFrag can run.
+    // format_named_type for thing catches the error and sets thing = null.
+    // This works correctly with and without the fix, confirming the propagation
+    // chain is intact.
+    const NON_NULL_SCHEMA: &str = "
+        type Query {
+            thing: Thing
+        }
+        type Thing {
+            collection: U!
+        }
+        union U = A | B
+        type A {
+            id: ID!
+            a: String
+        }
+        type B {
+            b: String
+        }
+    ";
+
+    FormatTest::builder()
+        .schema(NON_NULL_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_nullification_reverse_order() {
+    // Regression guard: BThingFrag first, AThingFrag second.
+    //
+    // BThingFrag runs first — type is A, ... on B doesn't match, but __typename
+    // is written, leaving collection = {"__typename":"A"} (non-null object).
+    //
+    // AThingFrag runs second — output["collection"] is a non-null object, so the
+    // new guard's is_null() branch does NOT fire.  Processing continues, format_
+    // named_type finds id missing, nullifies collection.
+    //
+    // Result must be the same as the forward-order case: collection = null.
+    // This verifies the fix doesn't break nullification when it happens on the
+    // *second* fragment rather than the first.
+    const REVERSED_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ...BThingFrag
+                ...AThingFrag
+            }
+        }
+        fragment AThingFrag on Thing {
+            collection {
+                ... on A { id a }
+            }
+        }
+        fragment BThingFrag on Thing {
+            collection {
+                __typename
+                ... on B { b }
+            }
+        }
+    ";
+
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(REVERSED_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": { "__typename": "A" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_merge_still_works() {
+    // Regression guard: two fragments on the same parent type (Thing) that both
+    // select the same nested object (review) but contribute *different* leaf
+    // fields — and neither triggers a non-null violation.
+    //
+    // After the fix, the guard fires only when output[field].is_null().  Here
+    // IdThingFrag writes {id: "r1"} (non-null object), so BothThingFrag's
+    // output["review"].is_null() is FALSE, the guard does not fire, and body
+    // gets merged in correctly.  Both fields must be present in the output.
+    const MERGE_SCHEMA: &str = "
+        type Query {
+            thing: Thing
+        }
+        type Thing {
+            review: Review
+        }
+        type Review {
+            id: ID!
+            body: String
+        }
+    ";
+    // Both fragments on Thing (parent), each contributes one leaf field of review.
+    const MERGE_QUERY: &str = "
+        query TestQuery {
+            thing {
+                ...IdThingFrag
+                ...BodyThingFrag
+            }
+        }
+        fragment IdThingFrag on Thing   { review { id   } }
+        fragment BodyThingFrag on Thing { review { body } }
+    ";
+
+    FormatTest::builder()
+        .schema(MERGE_SCHEMA)
+        .query(MERGE_QUERY)
+        .response(json!({
+            "thing": {
+                "review": { "id": "r1", "body": "Great!" }
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "review": { "id": "r1", "body": "Great!" }
+            }
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_data_fragment_semantic_null_not_overwritten() {
+    // Regression guard for the semantic-null case raised during review.
+    //
+    // When the subgraph returns `null` for `collection` explicitly (a semantic
+    // null — the field exists but is intentionally null), a subsequent fragment
+    // must NOT overwrite it.  The guard `output[field].is_null()` must fire and
+    // preserve the null rather than re-entering format_value with a non-null
+    // input object.
+    FormatTest::builder()
+        .schema(NULLIFICATION_SCHEMA)
+        .query(NULLIFICATION_QUERY)
+        .response(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "collection": null
+            }
+        }))
+        .test();
 }

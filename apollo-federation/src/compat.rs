@@ -200,6 +200,9 @@ fn coerce_value(
         // Accept non-composite values if they match the type.
         (Value::String(_), Some(ExtendedType::Scalar(scalar)))
             if !scalar.is_built_in() || matches!(scalar.name.as_str(), "ID" | "String") => {}
+        (Value::String(value), Some(ExtendedType::Enum(_))) => {
+            *target.make_mut() = Value::Enum(Name::new_unchecked(value));
+        }
         (Value::Boolean(_), Some(ExtendedType::Scalar(scalar)))
             if !scalar.is_built_in() || scalar.name == "Boolean" => {}
         (Value::Int(_), Some(ExtendedType::Scalar(scalar)))
@@ -210,10 +213,10 @@ fn coerce_value(
         (Value::Object(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::List(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
         (Value::Enum(_), Some(ExtendedType::Scalar(scalar))) if !scalar.is_built_in() => {}
-        (Value::Enum(_), Some(ExtendedType::Scalar(scalar)))
+        (Value::Enum(value), Some(ExtendedType::Scalar(scalar)))
             if scalar.is_built_in() && matches!(scalar.name.as_str(), "String") =>
         {
-            *target.make_mut() = Value::String(target.as_enum().unwrap().to_string());
+            *target.make_mut() = Value::String(value.to_string());
         }
         // Enums must match the type.
         (Value::Enum(value), Some(ExtendedType::Enum(enum_)))

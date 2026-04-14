@@ -12,7 +12,7 @@ use mediatype::MediaType;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use rand::RngCore;
+use rand::Rng as _;
 
 use super::MultipartRequest;
 use super::Result as UploadResult;

@@ -103,11 +103,12 @@ impl<'a> Builder<'a> {
             crate::plugins::telemetry::metrics::allocation::register_memory_allocation_views(
                 &mut builder,
             );
-            builder.configure_views(MeterProviderType::Public)?;
+            builder.configure_views(MeterProviderType::Public);
 
             let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation
                 .with_prometheus_registry(prometheus_registry);
+
             self.activation.add_meter_providers(meter_providers);
         }
         // Always create Prometheus endpoint if we have a registry (either new or existing).
@@ -171,7 +172,7 @@ impl<'a> Builder<'a> {
                     aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
                     allowed_attribute_keys: None,
                 }
-                .try_into()?,
+                .into_view_fn(),
             );
         }
 
@@ -244,8 +245,6 @@ impl<'a> Builder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::config::Exporters;
@@ -425,10 +424,14 @@ mod tests {
             instr.logging_layer_set,
             "First run should set logging layer"
         );
-        // One meter provider is added for memory tracking
-        assert_eq!(
-            instr.meter_providers_added,
-            HashSet::from([MeterProviderType::Public])
+        // A noop Public provider is always set when metrics config changes,
+        // even without exporters. This ensures any previous provider is replaced
+        // during hot reload when exporters are disabled.
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider (noop) should be set on first run"
         );
     }
 

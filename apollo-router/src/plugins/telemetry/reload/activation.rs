@@ -25,10 +25,13 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
+use tokio::task::block_in_place;
+#[cfg(not(test))]
 use tokio::task::spawn_blocking;
 use tracing_subscriber::Layer;
 
@@ -46,7 +49,7 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// then atomically applies them during the activation phase via [`Activation::commit()`].
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
-    new_trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    new_trace_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 
     /// The new tracer propagator. None means leave the existing one
     new_trace_propagator: Option<TextMapCompositePropagator>,
@@ -135,7 +138,7 @@ impl Activation {
 
     pub(crate) fn with_tracer_provider(
         &mut self,
-        tracer_provider: opentelemetry_sdk::trace::TracerProvider,
+        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
     ) {
         self.new_trace_provider = Some(tracer_provider);
         #[cfg(test)]
@@ -191,17 +194,16 @@ impl Activation {
             && let Some(tracer_provider) = self.new_trace_provider.take()
         {
             // Build a new tracer from the provider and hot-swap it into the tracing subscriber
-            let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
+            let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
                 .with_version(env!("CARGO_PKG_VERSION"))
                 .build();
+            let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            // Install the new provider globally and safely drop the old one in a blocking task
-            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            spawn_blocking(move || {
-                drop(last_provider);
-            });
+            // Install the new provider globally. The old provider is returned and must be
+            // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
+            // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
+            block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
         }
     }
 
@@ -246,14 +248,31 @@ impl Activation {
 /// 2. **If preparation fails**: Drops the new providers that were never activated
 impl Drop for Activation {
     fn drop(&mut self) {
-        // Drop all meter providers in blocking tasks to avoid runtime deadlocks
-        for meter_provider in std::mem::take(&mut self.new_meter_providers).into_values() {
-            spawn_blocking(move || drop(meter_provider));
+        let meter_providers = std::mem::take(&mut self.new_meter_providers);
+        let tracer_provider = self.new_trace_provider.take();
+
+        // In tests, drop providers synchronously via block_in_place. This avoids a race
+        // condition between spawn_blocking and Runtime::drop: when the tokio test runtime
+        // shuts down, it cancels async tasks (including PeriodicReader background tasks)
+        // and then waits indefinitely for blocking tasks. A race in
+        // futures_channel::mpsc::Receiver::drop can cause the PeriodicReader's shutdown
+        // message to be lost, leaving the blocking task's futures_executor::block_on call
+        // stuck forever. By using block_in_place, we shut down providers while the runtime
+        // is still fully alive, so background tasks process shutdown messages normally.
+        #[cfg(test)]
+        {
+            block_in_place(|| {
+                drop(meter_providers);
+                drop(tracer_provider);
+            });
         }
 
-        // Drop tracer provider in blocking task if present
-        if let Some(tracer_provider) = self.new_trace_provider.take() {
-            spawn_blocking(move || drop(tracer_provider));
+        #[cfg(not(test))]
+        {
+            spawn_blocking(|| {
+                drop(meter_providers);
+                drop(tracer_provider);
+            });
         }
     }
 }

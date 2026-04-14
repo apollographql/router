@@ -26,6 +26,8 @@ pub(crate) fn assert_coprocessor_operations_metrics(
         PipelineStep::ExecutionResponse,
         PipelineStep::SubgraphRequest,
         PipelineStep::SubgraphResponse,
+        PipelineStep::ConnectorRequest,
+        PipelineStep::ConnectorResponse,
     ] {
         // Check if this stage is part of the expected stages list
         if let Some((_, expected_value, succeeded)) =
@@ -72,6 +74,7 @@ mod tests {
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
@@ -80,6 +83,8 @@ mod tests {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::BodyConf;
+    use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::RouterRequestConf;
     use crate::plugins::coprocessor::RouterResponseConf;
     use crate::plugins::coprocessor::SubgraphRequestConf;
@@ -90,6 +95,7 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
+    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
@@ -1173,7 +1179,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -1296,7 +1302,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 ..Default::default()
             },
@@ -1398,7 +1404,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
@@ -1548,7 +1554,7 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                body: true,
+                body: BodyConf::All(true),
                 subgraph_request_id: true,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
@@ -1710,7 +1716,7 @@ mod tests {
                     redact: None,
                     default: None,
                 }),
-                body: true,
+                body: BodyConf::All(true),
                 ..Default::default()
             },
         };
@@ -1826,7 +1832,7 @@ mod tests {
                 condition: Default::default(),
                 headers: false,
                 context: ContextConf::Deprecated(false),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -1892,7 +1898,7 @@ mod tests {
                 context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
                 ))),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -1998,7 +2004,7 @@ mod tests {
                 condition: Default::default(),
                 headers: false,
                 context: ContextConf::NewContextConf(NewContextConf::Deprecated),
-                body: true,
+                body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
                 url: None,
@@ -3507,15 +3513,27 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(valid_response), true, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(valid_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return error when validation enabled
         let invalid_response = json!({
             "invalid": "structure"
         });
-        let result = handle_graphql_response(original.clone(), Some(invalid_response), true, true);
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(invalid_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        );
         assert!(result.is_err());
     }
 
@@ -3529,8 +3547,14 @@ mod tests {
         let valid_response = json!({
             "data": {"test": "modified"}
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(valid_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(valid_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         assert_eq!(result.data, Some(json!({"test": "modified"})));
 
         // Invalid GraphQL response should return original when validation disabled
@@ -3538,8 +3562,14 @@ mod tests {
         let invalid_response = json!({
             "errors": "this should be an array not a string"
         });
-        let result =
-            handle_graphql_response(original.clone(), Some(invalid_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(invalid_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
         // With validation disabled, uses permissive serde deserialization instead of strict GraphQL validation
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         assert_eq!(result.data, Some(json!({"test": "original"})));
@@ -3553,8 +3583,14 @@ mod tests {
 
         // Empty response violates GraphQL spec (must have data or errors) but should pass serde deserialization
         let empty_response = json!({});
-        let result =
-            handle_graphql_response(original.clone(), Some(empty_response), false, true).unwrap();
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(empty_response),
+            false,
+            true,
+            &BodyConf::All(true),
+        )
+        .unwrap();
 
         // With validation disabled, empty response deserializes successfully via serde
         // (all fields are optional with defaults), resulting in a response with no data/errors
@@ -3570,7 +3606,13 @@ mod tests {
 
         // Empty response should fail strict GraphQL validation
         let empty_response = json!({});
-        let result = handle_graphql_response(original.clone(), Some(empty_response), true, true);
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(empty_response),
+            true,
+            true,
+            &BodyConf::All(true),
+        );
 
         // With validation enabled, should return error due to invalid GraphQL response structure
         assert!(result.is_err());
@@ -3584,7 +3626,7 @@ mod tests {
                 condition: Condition::True,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
@@ -3655,7 +3697,7 @@ mod tests {
                 condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
@@ -4054,6 +4096,435 @@ mod tests {
         assert_eq!(res.response.body().errors.len(), 0);
     }
 
+    // ===== SUBGRAPH SELECTIVE BODY FILTERING TESTS =====
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_errors_only() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: true,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".into(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify only errors are sent, not data or extensions
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("errors").is_some());
+                assert!(response_body.get("data").is_none());
+                assert!(response_body.get("extensions").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "errors": [{ "message": "modified error" }]
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Errors should be modified by coprocessor
+        assert_eq!(response.response.body().errors[0].message, "modified error");
+        // Original data should be preserved since it wasn't sent to coprocessor
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_data_and_extensions() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: true,
+                    errors: false,
+                    extensions: true,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                use crate::graphql::Error;
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .error(
+                        Error::builder()
+                            .message("test error")
+                            .extension_code("TEST_ERROR")
+                            .build(),
+                    )
+                    .extensions(Object::from_iter(vec![(
+                        "ext_key".into(),
+                        json!("ext_value"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify data and extensions are sent, but not errors
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(response_body.get("data").is_some());
+                assert!(response_body.get("extensions").is_some());
+                assert!(response_body.get("errors").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "data": { "test": 5678 },
+                                "extensions": { "ext_key": "modified_value" }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Data and extensions should be modified by coprocessor
+        assert_eq!(
+            json!({ "test": 5678_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        assert_eq!(
+            json!("modified_value"),
+            *response.response.body().extensions.get("ext_key").unwrap()
+        );
+        // Original errors should be preserved since they weren't sent to coprocessor
+        assert_eq!(response.response.body().errors[0].message, "test error");
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_nothing() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: false,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify no body is sent
+                assert!(body.get("body").is_none());
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_errors_with_empty_errors() {
+        // Test that when errors are configured, empty errors array is sent to coprocessor
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: true,
+                    extensions: false,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Response with data but NO errors
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify errors field is sent even though it's empty
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(
+                    response_body.get("errors").is_some(),
+                    "errors field should be present"
+                );
+                let errors = response_body.get("errors").unwrap();
+                assert!(errors.is_array(), "errors should be an array");
+                assert_eq!(
+                    errors.as_array().unwrap().len(),
+                    0,
+                    "errors array should be empty"
+                );
+                // data and extensions should not be sent since not configured
+                assert!(response_body.get("data").is_none());
+                assert!(response_body.get("extensions").is_none());
+
+                // Don't modify the response - just return it as-is
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse"
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            true,
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved
+        assert_eq!(
+            json!({ "test": 1234_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        // Errors should remain empty
+        assert!(response.response.body().errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_selective_extensions_only() {
+        // Test that when only extensions are configured, only extensions are sent to coprocessor
+        // and data/errors are preserved from original response
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: BodyConf::Selective(BodyFieldsConf {
+                    data: false,
+                    errors: false,
+                    extensions: true,
+                }),
+                ..Default::default()
+            },
+        };
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Response with data and extensions
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 5678_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::from_iter(vec![(
+                        "trace_id".into(),
+                        json!("abc123"),
+                    )]))
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name("test_subgraph".to_string())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                // Verify only extensions are sent, not data or errors
+                assert!(body.get("body").is_some());
+                let response_body = body.get("body").unwrap();
+                assert!(
+                    response_body.get("extensions").is_some(),
+                    "extensions should be present"
+                );
+                assert!(
+                    response_body.get("data").is_none(),
+                    "data should not be sent"
+                );
+                assert!(
+                    response_body.get("errors").is_none(),
+                    "errors should not be sent"
+                );
+
+                // Coprocessor modifies extensions only
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "body": {
+                                "extensions": { "trace_id": "abc123", "processor": "modified" }
+                            }
+                        }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+            false, // Disable response validation since coprocessor returns only extensions
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+        let response = service.oneshot(request).await.unwrap();
+
+        // Original data should be preserved since it wasn't sent to coprocessor
+        assert_eq!(
+            json!({ "test": 5678_u32 }),
+            *response.response.body().data.as_ref().unwrap()
+        );
+        // Extensions should be modified by coprocessor
+        assert_eq!(
+            response.response.body().extensions.get("trace_id"),
+            Some(&json!("abc123"))
+        );
+        assert_eq!(
+            response.response.body().extensions.get("processor"),
+            Some(&json!("modified"))
+        );
+    }
+
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(
         callback: fn(
@@ -4065,7 +4536,19 @@ mod tests {
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(callback);
+                mock_http_client.expect_call().returning(
+                    move |req: crate::services::http::HttpRequest| {
+                        let context = req.context.clone();
+                        let fut = callback(req.http_request);
+                        Box::pin(async move {
+                            let response = fut.await?;
+                            Ok(crate::services::http::HttpResponse {
+                                http_response: response,
+                                context,
+                            })
+                        })
+                    },
+                );
                 mock_http_client
             });
             mock_http_client
@@ -4087,7 +4570,19 @@ mod tests {
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
                     let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client.expect_call().returning(
+                        move |req: crate::services::http::HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(crate::services::http::HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        },
+                    );
                     mock_http_client
                 });
                 mock_http_client
@@ -4143,37 +4638,470 @@ mod tests {
     #[test]
     fn test_was_incoming_payload_valid() {
         // When body is not sent, always return true
-        assert!(was_incoming_payload_valid(&valid_response(), false));
-        assert!(was_incoming_payload_valid(&invalid_response(), false));
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(false)
+        ));
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(false)
+        ));
 
         // When body is sent, check validity
-        assert!(was_incoming_payload_valid(&valid_response(), true));
-        assert!(!was_incoming_payload_valid(&invalid_response(), true));
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::All(true)
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::All(true)
+        ));
+
+        // With selective body config, should check validity when any field is sent
+        assert!(was_incoming_payload_valid(
+            &valid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+        assert!(!was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            })
+        ));
+
+        // When no fields are sent in selective mode, assume valid
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            })
+        ));
+
+        // When only extensions are sent, skip GraphQL spec validation
+        // This is valid even if the response has no data and no errors
+        assert!(was_incoming_payload_valid(
+            &invalid_response(),
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: true,
+            })
+        ));
+    }
+
+    #[test]
+    fn test_filter_graphql_response_body() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+        use crate::plugins::coprocessor::filter_graphql_response_body;
+
+        // Test BodyConf::All(false) returns None
+        let response = valid_response();
+        assert!(filter_graphql_response_body(&response, &BodyConf::All(false)).is_none());
+
+        // Test BodyConf::All(true) returns full body
+        let result = filter_graphql_response_body(&response, &BodyConf::All(true));
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+
+        // Test selective: only errors
+        let response_with_errors = graphql::Response::builder()
+            .data(serde_json_bytes::json!({"test": "data"}))
+            .errors(vec![
+                graphql::Error::builder().message("test error").build(),
+            ])
+            .extensions(serde_json_bytes::Map::from_iter([(
+                "ext_key".into(),
+                serde_json_bytes::json!("ext_value"),
+            )]))
+            .build();
+
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_none(), "data should not be included");
+        assert!(body.get("errors").is_some(), "errors should be included");
+        assert!(
+            body.get("extensions").is_none(),
+            "extensions should not be included"
+        );
+
+        // Test selective: only data
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some(), "data should be included");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
+
+        // Test selective: all fields
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: true,
+                extensions: true,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(body.get("data").is_some());
+        assert!(body.get("errors").is_some());
+        assert!(body.get("extensions").is_some());
+
+        // Test selective: no fields returns None
+        let result = filter_graphql_response_body(
+            &response_with_errors,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_filter_graphql_response_body_includes_empty_fields() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+        use crate::plugins::coprocessor::filter_graphql_response_body;
+
+        // Test that configured fields are always included, even when empty
+        // This ensures coprocessors receive a consistent structure
+
+        // Response with data but no errors or extensions
+        let response_data_only = graphql::Response::builder()
+            .data(serde_json_bytes::json!({"test": "data"}))
+            .build();
+
+        // When errors are configured but not present, should send errors: []
+        let result = filter_graphql_response_body(
+            &response_data_only,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: true,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("errors").is_some(),
+            "errors field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("errors").unwrap().as_array().unwrap().len(),
+            0,
+            "errors should be empty array"
+        );
+        assert!(body.get("data").is_none(), "data should not be included");
+
+        // When extensions are configured but not present, should send extensions: {}
+        let result = filter_graphql_response_body(
+            &response_data_only,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: false,
+                errors: false,
+                extensions: true,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("extensions").is_some(),
+            "extensions field should be included even when empty"
+        );
+        assert_eq!(
+            body.get("extensions").unwrap().as_object().unwrap().len(),
+            0,
+            "extensions should be empty object"
+        );
+
+        // When data is configured but is None, should send data: null
+        let response_no_data = graphql::Response::builder()
+            .errors(vec![
+                graphql::Error::builder().message("test error").build(),
+            ])
+            .build();
+
+        let result = filter_graphql_response_body(
+            &response_no_data,
+            &BodyConf::Selective(BodyFieldsConf {
+                data: true,
+                errors: false,
+                extensions: false,
+            }),
+        );
+        assert!(result.is_some());
+        let body = result.unwrap();
+        assert!(
+            body.get("data").is_some(),
+            "data field should be included even when null"
+        );
+        assert!(body.get("data").unwrap().is_null(), "data should be null");
+        assert!(
+            body.get("errors").is_none(),
+            "errors should not be included"
+        );
+    }
+
+    #[test]
+    fn test_body_conf_should_send_data_or_errors() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Test BodyConf::All
+        assert!(BodyConf::All(true).should_send_data_or_errors());
+        assert!(!BodyConf::All(false).should_send_data_or_errors());
+
+        // Test BodyConf::Selective - only extensions should return false
+        let extensions_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: true,
+        });
+        assert!(!extensions_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - errors only should return true
+        let errors_only = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+        assert!(errors_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - data only should return true
+        let data_only = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: false,
+        });
+        assert!(data_only.should_send_data_or_errors());
+
+        // Test BodyConf::Selective - data with extensions should return true
+        let data_and_extensions = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: true,
+        });
+        assert!(data_and_extensions.should_send_data_or_errors());
     }
 
     #[test]
     fn test_conditional_validation_logic() {
         // Invalid incoming + validation enabled = validation bypassed (succeeds with invalid copro response)
         assert!(
-            handle_graphql_response(invalid_response(), Some(invalid_copro_body()), true, false)
-                .is_ok()
+            handle_graphql_response(
+                invalid_response(),
+                Some(invalid_copro_body()),
+                true,
+                false,
+                &BodyConf::All(true)
+            )
+            .is_ok()
         );
 
         // Valid incoming + validation enabled + invalid copro response = validation applied (fails)
         assert!(
-            handle_graphql_response(valid_response(), Some(invalid_copro_body()), true, true)
-                .is_err()
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_err()
         );
 
         // Valid incoming + validation enabled + valid copro response = validation applied (succeeds)
         assert!(
-            handle_graphql_response(valid_response(), Some(valid_copro_body()), true, true).is_ok()
+            handle_graphql_response(
+                valid_response(),
+                Some(valid_copro_body()),
+                true,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
         );
 
         // Validation disabled = always bypassed (succeeds regardless)
         assert!(
-            handle_graphql_response(valid_response(), Some(invalid_copro_body()), false, true)
-                .is_ok()
+            handle_graphql_response(
+                valid_response(),
+                Some(invalid_copro_body()),
+                false,
+                true,
+                &BodyConf::All(true)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_selective_body_field_merging() {
+        use crate::plugins::coprocessor::BodyFieldsConf;
+
+        // Original response with data, errors, and extensions
+        let original = graphql::Response::builder()
+            .data(json!({"original": "data"}))
+            .error(Error::builder().message("original error").build())
+            .extension("original_ext", json!("original_value"))
+            .build();
+
+        // Test 1: Send only data, coprocessor modifies data
+        // Errors and extensions should be preserved from original
+        let selective_data = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "errors": [], // Coprocessor might return empty errors
+            "extensions": {} // Coprocessor might return empty extensions
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original (not empty from copro)
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be preserved from original (not empty from copro)
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 2: Send only errors, coprocessor modifies errors
+        // Data and extensions should be preserved from original
+        let selective_errors = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: true,
+            extensions: false,
+        });
+
+        let copro_response = json!({
+            "data": null, // Coprocessor might return null data
+            "errors": [{"message": "modified error"}]
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_errors,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be modified from coprocessor
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "modified error");
+        // Extensions should be preserved from original
+        assert_eq!(
+            result.extensions.get("original_ext"),
+            Some(&json!("original_value"))
+        );
+
+        // Test 3: Send only extensions, coprocessor modifies extensions
+        // Data and errors should be preserved from original
+        let selective_extensions = BodyConf::Selective(BodyFieldsConf {
+            data: false,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_extensions,
+        )
+        .unwrap();
+
+        // Data should be preserved from original
+        assert_eq!(result.data, Some(json!({"original": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
+        );
+        assert_eq!(result.extensions.get("original_ext"), None);
+
+        // Test 4: Send data and extensions, but not errors
+        let selective_data_ext = BodyConf::Selective(BodyFieldsConf {
+            data: true,
+            errors: false,
+            extensions: true,
+        });
+
+        let copro_response = json!({
+            "data": {"modified": "data"},
+            "extensions": {"modified_ext": "modified_value"}
+        });
+
+        let result = handle_graphql_response(
+            original.clone(),
+            Some(copro_response),
+            false,
+            true,
+            &selective_data_ext,
+        )
+        .unwrap();
+
+        // Data should be modified from coprocessor
+        assert_eq!(result.data, Some(json!({"modified": "data"})));
+        // Errors should be preserved from original
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].message, "original error");
+        // Extensions should be modified from coprocessor
+        assert_eq!(
+            result.extensions.get("modified_ext"),
+            Some(&json!("modified_value"))
         );
     }
 
@@ -4287,6 +5215,36 @@ mod tests {
         assert_eq!(
             target_context.get_json_value("key_not_sent"),
             Some(serde_json_bytes::json!("preserved_value"))
+        );
+    }
+
+    #[rstest::rstest]
+    fn test_update_context_from_coprocessor_handles_deprecated_key_names(
+        #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
+        #[values(
+            ContextConf::Deprecated(true),
+            ContextConf::NewContextConf(NewContextConf::Deprecated)
+        )]
+        context_conf: ContextConf,
+    ) {
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        let target_context =
+            Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
+        let returned_context =
+            Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+
+        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+
+        assert_eq!(
+            target_context.get_json_value(CLIENT_NAME),
+            Some(json!("v2")),
+        );
+
+        assert!(
+            !target_context.contains_key(DEPRECATED_CLIENT_NAME),
+            "DEPRECATED_CLIENT_NAME should not be present"
         );
     }
 
@@ -4832,5 +5790,1554 @@ mod tests {
         .with_metrics()
         .await;
         // Tests for context key deletion functionality
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_url() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock"
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs are properly handled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with a Unix socket URL
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_http2only() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "http2only"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c http2only configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c http2only configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_enable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "enable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with h2c enable configuration
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + h2c enable configuration
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_plugin_with_unix_socket_and_h2c_disable() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock",
+                "client": {
+                    "experimental_http2": "disable"
+                }
+            }
+        });
+
+        // Build a test harness to ensure Unix socket URLs work with HTTP/2 disabled
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Test passes if the plugin loads successfully with Unix socket + HTTP/2 disabled
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_http_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8081"
+            }
+        });
+
+        // Verify HTTP URLs continue to work as before (same as existing load_plugin test)
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_coprocessor_https_url_configuration() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "https://example.com:8443/coprocessor"
+            }
+        });
+
+        // Verify HTTPS URLs continue to work as before
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn test_url_scheme_detection() {
+        // Test various URL formats that should be supported
+        let test_cases = vec![
+            ("http://localhost:8081", false),
+            ("https://example.com:443/path", false),
+            ("unix:///tmp/socket.sock", true),
+            ("unix:///var/run/app/coprocessor.sock", true),
+            ("ftp://example.com", false), // Invalid but shouldn't panic
+        ];
+
+        for (url, should_be_unix) in test_cases {
+            let is_unix = url.starts_with("unix://");
+            assert_eq!(
+                is_unix, should_be_unix,
+                "URL '{}' unix detection failed",
+                url
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_backwards_compatibility_with_existing_configs() {
+        // Test that existing production configurations continue to work unchanged
+        let legacy_http_configs = vec![
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "https://external-coprocessor.company.com/graphql",
+                    "timeout": "10s"
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://127.0.0.1:3001/webhook",
+                    "router": {
+                        "request": {
+                            "context": true,
+                            "headers": true
+                        }
+                    }
+                }
+            }),
+        ];
+
+        // Verify all legacy configurations can still be loaded
+        for config in legacy_http_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Legacy HTTP configuration should load successfully"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_selective_body_field_configuration() {
+        // Test that new selective body field configurations work
+        let selective_configs = vec![
+            // Boolean body (backwards compatible)
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": true
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": false
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - errors only
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": false,
+                                "errors": true,
+                                "extensions": false
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - all fields
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "supergraph": {
+                        "response": {
+                            "body": {
+                                "data": true,
+                                "errors": true,
+                                "extensions": true
+                            }
+                        }
+                    }
+                }
+            }),
+            // Selective body fields - execution stage
+            serde_json::json!({
+                "coprocessor": {
+                    "url": "http://coprocessor:8080",
+                    "execution": {
+                        "response": {
+                            "body": {
+                                "errors": true
+                            }
+                        }
+                    }
+                }
+            }),
+        ];
+
+        for config in selective_configs {
+            let test_harness = crate::TestHarness::builder()
+                .configuration_json(config.clone())
+                .unwrap()
+                .build_router()
+                .await;
+
+            assert!(
+                test_harness.is_ok(),
+                "Selective body configuration should load successfully: {:?}",
+                config
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Empty Unix socket path should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("must include a path"),
+            "Error should mention missing path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relative_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix://relative/path.sock"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Relative Unix socket path should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("should be absolute"),
+            "Error should mention absolute path requirement: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_url_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "not a valid url"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(result.is_err(), "Invalid HTTP URL should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_stage_specific_empty_unix_socket_path_rejected() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router": {
+                    "request": {
+                        "url": "unix://",
+                        "headers": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Empty Unix socket path in stage config should be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("router.request.url"),
+            "Error should mention the specific config path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unix_socket_with_valid_path_query_accepted() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "unix:///tmp/coprocessor.sock?path=/api/v1"
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Unix socket with ?path= should be accepted, got: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unix_socket_stage_override_with_valid_path_query_accepted() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://localhost:8080",
+                "router": {
+                    "request": {
+                        "url": "unix:///tmp/router.sock?path=/hook",
+                        "headers": true
+                    }
+                }
+            }
+        });
+
+        let result = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Stage-specific Unix socket with ?path= should be accepted, got: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::unix_with_path("unix:///tmp/coprocessor.sock?path=/api/v1")]
+    #[case::unix_without_query("unix:///tmp/coprocessor.sock")]
+    #[case::unix_unknown_query_param_warns("unix:///tmp/coprocessor.sock?foo=bar")]
+    #[case::unix_empty_query_string_warns("unix:///tmp/coprocessor.sock?")]
+    #[case::http_url("http://localhost:8080/path")]
+    fn test_validate_coprocessor_url_accepted(#[case] url: &str) {
+        assert!(
+            crate::plugins::coprocessor::validate_coprocessor_url(url, "coprocessor.url").is_ok(),
+            "URL should be accepted: {url}"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::empty_path("unix://", "must include a path")]
+    #[case::relative_path("unix://relative/path.sock", "should be absolute")]
+    #[case::invalid_http("not a valid url", "invalid URL")]
+    fn test_validate_coprocessor_url_rejected(#[case] url: &str, #[case] expected_err: &str) {
+        let result = crate::plugins::coprocessor::validate_coprocessor_url(url, "coprocessor.url");
+        assert!(result.is_err(), "URL should be rejected: {url}");
+        assert!(
+            result.unwrap_err().to_string().contains(expected_err),
+            "Error for '{url}' should contain '{expected_err}'"
+        );
+    }
+
+    #[cfg(test)]
+    mod connector_tests {
+        use std::str::FromStr;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::Connector;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+        use apollo_federation::connectors::SourceName;
+        use apollo_federation::connectors::StringTemplate;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
+        use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+        use apollo_federation::connectors::runtime::key::ResponseKey;
+        use apollo_federation::connectors::runtime::responses::MappedResponse;
+        use futures::future::BoxFuture;
+        use router::body::RouterBody;
+        use tower::BoxError;
+        use tower::ServiceExt;
+
+        use crate::metrics::FutureMetricsExt;
+        use crate::plugin::test::MockInternalHttpClientService;
+        use crate::plugins::coprocessor::ContextConf;
+        use crate::plugins::coprocessor::NewContextConf;
+        use crate::plugins::coprocessor::connector::ConnectorRequestConf;
+        use crate::plugins::coprocessor::connector::ConnectorResponseConf;
+        use crate::plugins::coprocessor::connector::ConnectorStage;
+        use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
+        use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::services::connector::request_service;
+        use crate::services::external::PipelineStep;
+        use crate::services::http::HttpRequest;
+        use crate::services::http::HttpResponse;
+        use crate::services::router;
+
+        #[allow(clippy::type_complexity)]
+        fn mock_with_callback(
+            callback: fn(
+                http::Request<RouterBody>,
+            )
+                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+        ) -> MockInternalHttpClientService {
+            let mut mock_http_client = MockInternalHttpClientService::new();
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockInternalHttpClientService::new();
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockInternalHttpClientService::new();
+                    mock_http_client
+                        .expect_call()
+                        .returning(move |req: HttpRequest| {
+                            let context = req.context.clone();
+                            let fut = callback(req.http_request);
+                            Box::pin(async move {
+                                let response = fut.await?;
+                                Ok(HttpResponse {
+                                    http_response: response,
+                                    context,
+                                })
+                            })
+                        });
+                    mock_http_client
+                });
+                mock_http_client
+            });
+
+            mock_http_client
+        }
+
+        fn create_test_connector() -> Arc<Connector> {
+            Arc::new(Connector {
+                id: ConnectId::new(
+                    "subgraph".into(),
+                    Some(SourceName::cast("source")),
+                    name!(Query),
+                    name!(users),
+                    None,
+                    0,
+                ),
+                transport: HttpJsonTransport {
+                    source_template: None,
+                    connect_template: StringTemplate::from_str("/test").unwrap(),
+                    ..Default::default()
+                },
+                selection: JSONSelection::empty(),
+                config: None,
+                max_requests: None,
+                entity_resolver: None,
+                spec: ConnectSpec::V0_1,
+                schema_subtypes_map: Default::default(),
+                batch_settings: None,
+                request_headers: Default::default(),
+                response_headers: Default::default(),
+                request_variable_keys: Default::default(),
+                response_variable_keys: Default::default(),
+                error_settings: Default::default(),
+                label: "label".into(),
+            })
+        }
+
+        fn create_test_response_key() -> ResponseKey {
+            ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            }
+        }
+
+        fn create_test_connector_request() -> request_service::Request {
+            let http_request = http::Request::builder()
+                .uri("http://original-connector-uri/api")
+                .method(http::Method::POST)
+                .header("content-type", "application/json")
+                .body(r#"{"query":"test"}"#.to_string())
+                .unwrap();
+
+            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+                inner: http_request,
+                debug: Default::default(),
+            });
+
+            request_service::Request {
+                context: crate::Context::default(),
+                connector: create_test_connector(),
+                transport_request,
+                key: create_test_response_key(),
+                mapping_problems: vec![],
+                supergraph_request: Default::default(),
+                operation: Default::default(),
+            }
+        }
+
+        #[tokio::test]
+        async fn should_apply_modified_body_when_coprocessor_returns_new_body() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    headers: true,
+                    body: true,
+                    uri: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            // MockConnector is configured to match the *modified* body from the coprocessor.
+            // If the body modification wasn't applied, the mock wouldn't match.
+            let mock_connector_service = crate::plugin::test::MockConnector::builder()
+                .with_json(
+                    serde_json::json!(r#"{"modified":"body"}"#),
+                    serde_json::json!("test_result"),
+                )
+                .build();
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue",
+                            "body": "{\"modified\":\"body\"}"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn should_send_json_body_as_parsed_json_to_coprocessor() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                    // The body should be a JSON object, not a JSON string
+                    assert!(
+                        payload["body"].is_object(),
+                        "expected body to be a JSON object, got: {}",
+                        payload["body"]
+                    );
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn should_send_non_json_body_as_string_to_coprocessor() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [("plain text body".to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                    // The body should be a JSON string since the request body is not valid JSON
+                    assert!(
+                        payload["body"].is_string(),
+                        "expected body to be a JSON string, got: {}",
+                        payload["body"]
+                    );
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            // Create a request with a non-JSON body
+            let http_request = http::Request::builder()
+                .uri("http://original-connector-uri/api")
+                .method(http::Method::POST)
+                .header("content-type", "text/plain")
+                .body("plain text body".to_string())
+                .unwrap();
+
+            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+                inner: http_request,
+                debug: Default::default(),
+            });
+
+            let request = request_service::Request {
+                context: crate::Context::default(),
+                connector: create_test_connector(),
+                transport_request,
+                key: create_test_response_key(),
+                mapping_problems: vec![],
+                supergraph_request: Default::default(),
+                operation: Default::default(),
+            };
+
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn should_return_transport_error_when_coprocessor_breaks() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            // This service should never be called because the coprocessor breaks
+            let mock_connector_service =
+                crate::plugin::test::MockConnector::new(Default::default());
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 400 },
+                            "body": "Request blocked by coprocessor"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_err());
+        }
+
+        #[tokio::test]
+        async fn should_apply_modified_headers_and_uri_when_coprocessor_returns_them() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    headers: true,
+                    uri: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            // Capture the request that reaches the inner connector service
+            let captured_uri = Arc::new(Mutex::new(String::new()));
+            let captured_headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+            let captured_uri_clone = captured_uri.clone();
+            let captured_headers_clone = captured_headers.clone();
+
+            let inner_service = tower::service_fn(move |req: request_service::Request| {
+                let captured_uri = captured_uri_clone.clone();
+                let captured_headers = captured_headers_clone.clone();
+                async move {
+                    let TransportRequest::Http(ref http_req) = req.transport_request;
+                    *captured_uri.lock().unwrap() = http_req.inner.uri().to_string();
+                    *captured_headers.lock().unwrap() = http_req
+                        .inner
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+                        .collect();
+
+                    let response = request_service::Response::test_new(
+                        req.context.clone(),
+                        req.key,
+                        Default::default(),
+                        serde_json_bytes::json!("ok"),
+                        None,
+                    );
+                    Ok(response)
+                }
+            });
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue",
+                            "headers": {
+                                "content-type": ["application/json"],
+                                "x-new-header": ["new-value"]
+                            },
+                            "uri": "http://new-connector-uri/api"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                inner_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            service.oneshot(request).await.unwrap();
+
+            assert_eq!(
+                *captured_uri.lock().unwrap(),
+                "http://new-connector-uri/api"
+            );
+            assert!(
+                captured_headers
+                    .lock()
+                    .unwrap()
+                    .contains(&("x-new-header".to_string(), "new-value".to_string()))
+            );
+        }
+
+        #[tokio::test]
+        async fn should_update_context_when_coprocessor_returns_context_entries() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": "continue",
+                            "context": {
+                                "entries": {
+                                    "test-key": "test-value"
+                                }
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let context = request.context.clone();
+            service.oneshot(request).await.unwrap();
+
+            assert_eq!(
+                context.get_json_value("test-key"),
+                Some(serde_json_bytes::Value::String("test-value".into()))
+            );
+        }
+
+        #[tokio::test]
+        async fn should_increment_request_metric_when_condition_is_true() {
+            async {
+                for _ in 0..2 {
+                    let connector_stage = ConnectorStage {
+                        request: ConnectorRequestConf {
+                            body: true,
+                            ..Default::default()
+                        },
+                        response: Default::default(),
+                    };
+
+                    let mock_connector_service = crate::plugin::test::MockConnector::new(
+                        [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+                    );
+
+                    let mock_http_client =
+                        mock_with_callback(move |_req: http::Request<RouterBody>| {
+                            Box::pin(async {
+                                Ok(http::Response::builder()
+                                    .body(router::body::from_bytes(
+                                        r#"{
+                                        "version": 1,
+                                        "stage": "ConnectorRequest",
+                                        "control": "continue"
+                                    }"#,
+                                    ))
+                                    .unwrap())
+                            })
+                        });
+
+                    let service = connector_stage.as_service(
+                        mock_http_client,
+                        mock_connector_service.boxed(),
+                        "http://test".to_string(),
+                        "my_connector_source".to_string(),
+                    );
+
+                    let request = create_test_connector_request();
+                    let _response = service.oneshot(request).await;
+                }
+
+                assert_coprocessor_operations_metrics(&[(
+                    PipelineStep::ConnectorRequest,
+                    2,
+                    Some(true),
+                )]);
+            }
+            .with_metrics()
+            .await;
+        }
+
+        #[tokio::test]
+        async fn should_not_increment_request_metric_when_condition_is_false() {
+            async {
+                for _ in 0..2 {
+                    let connector_stage = ConnectorStage {
+                        request: ConnectorRequestConf {
+                            condition: Condition::False,
+                            body: true,
+                            ..Default::default()
+                        },
+                        response: Default::default(),
+                    };
+
+                    let mock_connector_service = crate::plugin::test::MockConnector::new(
+                        [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+                    );
+
+                    let mock_http_client =
+                        mock_with_callback(move |_req: http::Request<RouterBody>| {
+                            Box::pin(async {
+                                Ok(http::Response::builder()
+                                    .body(router::body::from_bytes(
+                                        r#"{
+                                        "version": 1,
+                                        "stage": "ConnectorRequest",
+                                        "control": "continue"
+                                    }"#,
+                                    ))
+                                    .unwrap())
+                            })
+                        });
+
+                    let service = connector_stage.as_service(
+                        mock_http_client,
+                        mock_connector_service.boxed(),
+                        "http://test".to_string(),
+                        "my_connector_source".to_string(),
+                    );
+
+                    let request = create_test_connector_request();
+                    let _response = service.oneshot(request).await;
+                }
+
+                // This call will validate there are no metrics for all stages
+                assert_coprocessor_operations_metrics(&[]);
+            }
+            .with_metrics()
+            .await;
+        }
+
+        #[tokio::test]
+        async fn should_return_successful_response_when_response_coprocessor_continues() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    headers: true,
+                    status_code: true,
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn should_increment_response_metric_when_condition_is_true() {
+            async {
+                for _ in 0..3 {
+                    let connector_stage = ConnectorStage {
+                        request: Default::default(),
+                        response: ConnectorResponseConf {
+                            body: true,
+                            ..Default::default()
+                        },
+                    };
+
+                    let mock_connector_service = crate::plugin::test::MockConnector::new(
+                        [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+                    );
+
+                    let mock_http_client =
+                        mock_with_callback(move |_req: http::Request<RouterBody>| {
+                            Box::pin(async {
+                                Ok(http::Response::builder()
+                                    .body(router::body::from_bytes(
+                                        r#"{
+                                        "version": 1,
+                                        "stage": "ConnectorResponse"
+                                    }"#,
+                                    ))
+                                    .unwrap())
+                            })
+                        });
+
+                    let service = connector_stage.as_service(
+                        mock_http_client,
+                        mock_connector_service.boxed(),
+                        "http://test".to_string(),
+                        "my_connector_source".to_string(),
+                    );
+
+                    let request = create_test_connector_request();
+                    let _response = service.oneshot(request).await;
+                }
+
+                assert_coprocessor_operations_metrics(&[(
+                    PipelineStep::ConnectorResponse,
+                    3,
+                    Some(true),
+                )]);
+            }
+            .with_metrics()
+            .await;
+        }
+
+        #[tokio::test]
+        async fn should_use_structured_error_when_coprocessor_breaks_with_errors_object() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service =
+                crate::plugin::test::MockConnector::new(Default::default());
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 401 },
+                            "body": {
+                                "errors": [
+                                    {
+                                        "message": "Not authenticated.",
+                                        "extensions": {
+                                            "code": "ERR_UNAUTHENTICATED"
+                                        }
+                                    }
+                                ]
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_err());
+            match &response.mapped_response {
+                MappedResponse::Error { error, .. } => {
+                    assert_eq!(error.message, "Not authenticated.");
+                    assert_eq!(error.code(), "ERR_UNAUTHENTICATED");
+                }
+                _ => panic!("Expected MappedResponse::Error"),
+            }
+        }
+
+        #[tokio::test]
+        async fn should_use_string_error_when_coprocessor_breaks_with_string_body() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service =
+                crate::plugin::test::MockConnector::new(Default::default());
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 400 },
+                            "body": "Request blocked"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_err());
+            match &response.mapped_response {
+                MappedResponse::Error { error, .. } => {
+                    assert_eq!(error.message, "Request blocked");
+                    assert_eq!(error.code(), "ERROR");
+                }
+                _ => panic!("Expected MappedResponse::Error"),
+            }
+        }
+
+        #[tokio::test]
+        async fn should_pass_extra_extensions_from_structured_error() {
+            let connector_stage = ConnectorStage {
+                request: ConnectorRequestConf {
+                    body: true,
+                    ..Default::default()
+                },
+                response: Default::default(),
+            };
+
+            let mock_connector_service =
+                crate::plugin::test::MockConnector::new(Default::default());
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorRequest",
+                            "control": { "break": 429 },
+                            "body": {
+                                "errors": [
+                                    {
+                                        "message": "Rate limited",
+                                        "extensions": {
+                                            "code": "RATE_LIMITED",
+                                            "retryAfter": 30
+                                        }
+                                    }
+                                ]
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_err());
+            match &response.mapped_response {
+                MappedResponse::Error { error, .. } => {
+                    assert_eq!(error.message, "Rate limited");
+                    assert_eq!(error.code(), "RATE_LIMITED");
+                    assert_eq!(
+                        error.extensions.get("retryAfter"),
+                        Some(&serde_json_bytes::Value::Number(30.into()))
+                    );
+                }
+                _ => panic!("Expected MappedResponse::Error"),
+            }
+        }
+
+        #[tokio::test]
+        async fn should_send_context_and_id_in_response_stage() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+                    // Verify the coprocessor receives a non-empty id
+                    assert!(
+                        !payload["id"].as_str().unwrap_or("").is_empty(),
+                        "id should not be empty in response stage"
+                    );
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse"
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            assert!(response.transport_result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn should_update_context_in_response_stage() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "context": {
+                                "entries": {
+                                    "response-key": "response-value"
+                                }
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let context = request.context.clone();
+            service.oneshot(request).await.unwrap();
+
+            assert_eq!(
+                context.get_json_value("response-key"),
+                Some(serde_json_bytes::Value::String("response-value".into()))
+            );
+        }
+
+        #[tokio::test]
+        async fn should_apply_body_modification_for_data_response() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_connector_service = crate::plugin::test::MockConnector::new(
+                [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
+            );
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {"modified": "data"}
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                mock_connector_service.boxed(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            match &response.mapped_response {
+                MappedResponse::Data { data, .. } => {
+                    assert_eq!(data, &serde_json_bytes::json!({"modified": "data"}));
+                }
+                _ => panic!("Expected MappedResponse::Data"),
+            }
+        }
+
+        fn create_error_connector_service()
+        -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
+        {
+            tower::service_fn(|req: request_service::Request| async {
+                Ok(request_service::Response {
+                    context: req.context,
+                    transport_result: Err(
+                        apollo_federation::connectors::runtime::errors::Error::TransportFailure(
+                            "original error".to_string(),
+                        ),
+                    ),
+                    mapped_response: MappedResponse::Error {
+                        error: apollo_federation::connectors::runtime::errors::RuntimeError::new(
+                            "Original error message",
+                            &create_test_response_key(),
+                        ),
+                        key: create_test_response_key(),
+                        problems: Vec::new(),
+                    },
+                })
+            })
+            .boxed()
+        }
+
+        #[tokio::test]
+        async fn should_apply_error_message_modification_for_error_response() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {
+                                "errors": [{"message": "Modified error message"}]
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                create_error_connector_service(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            match &response.mapped_response {
+                MappedResponse::Error { error, .. } => {
+                    assert_eq!(error.message, "Modified error message");
+                }
+                _ => panic!("Expected MappedResponse::Error"),
+            }
+        }
+
+        #[tokio::test]
+        async fn should_apply_error_code_modification_for_error_response() {
+            let connector_stage = ConnectorStage {
+                request: Default::default(),
+                response: ConnectorResponseConf {
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                            "version": 1,
+                            "stage": "ConnectorResponse",
+                            "body": {
+                                "errors": [{
+                                    "message": "Not authorized",
+                                    "extensions": {
+                                        "code": "ERR_UNAUTHORIZED"
+                                    }
+                                }]
+                            }
+                        }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = connector_stage.as_service(
+                mock_http_client,
+                create_error_connector_service(),
+                "http://test".to_string(),
+                "my_connector_source".to_string(),
+            );
+
+            let request = create_test_connector_request();
+            let response = service.oneshot(request).await.unwrap();
+
+            match &response.mapped_response {
+                MappedResponse::Error { error, .. } => {
+                    assert_eq!(error.code(), "ERR_UNAUTHORIZED");
+                }
+                _ => panic!("Expected MappedResponse::Error"),
+            }
+        }
     }
 }

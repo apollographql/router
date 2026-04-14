@@ -82,7 +82,7 @@ error!(exception.type = "MyError", "bad request");
 ## Testing
 Log statements can be captured during a test using by attaching a subscriber by using `assert_snapshot_subscriber!()`.
 
-Under the hood `insta` is used to assert that a yaml version of the log statements is identical. For example here is the output of a test with three log statements:
+Under the hood `insta` is used to assert that a yaml version of the log statements is identical. For example here is the output of a test with two log statements:
 
 Do add tests for logging, it's very low overhead, and the act of seeing log statements in a test can help you think about what you are logging and how to help the user.
 
@@ -91,12 +91,6 @@ Do add tests for logging, it's very low overhead, and the act of seeing log stat
 source: apollo-router/src/plugins/authentication/tests.rs
 expression: yaml
 ---
-- fields:
-    alg: UnknownAlg
-    reason: "unknown variant `UnknownAlg`, expected one of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`"
-    index: 2
-  level: WARN
-  message: "ignoring a key since it is not valid, enable debug logs to full content"
 - fields:
     alg: "<unknown>"
     reason: "invalid value: map, expected map with a single key"

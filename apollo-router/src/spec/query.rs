@@ -24,6 +24,7 @@ use self::subselections::SubSelectionValue;
 use super::Fragment;
 use super::QueryHash;
 use crate::Configuration;
+use crate::configuration::mode::Mode;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -43,8 +44,11 @@ use crate::spec::InvalidValue;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
+use crate::spec::query::metrics::observe_query_lexical_token;
+use crate::spec::query::metrics::observe_query_recursion;
 use crate::spec::schema::ApiSchema;
 
+pub(crate) mod metrics;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -279,7 +283,11 @@ impl Query {
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
+        let token_limit = parser.tokens_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
+
+        observe_query_recursion(recursion_limit);
+        observe_query_lexical_token(token_limit);
 
         let hash = schema.schema_id.operation_hash(query, operation_name);
         ParsedDocumentInner::new(
@@ -752,6 +760,13 @@ impl Query {
                         if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation.  Object-typed inputs are never take()n so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if output.get(field_name.as_str()).is_some_and(Value::is_null) {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
@@ -814,6 +829,10 @@ impl Query {
                     //
                     // Without that information, this is the best we can do without construction a
                     // much more complicated reformatting heuristic.
+                    //
+                    // This formatter processes fragments sequentially rather than pre-merging them
+                    // via CollectFields (as the GraphQL spec prescribes) — root cause of several
+                    // correctness bugs, tracked in ROUTER-740.
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
@@ -930,6 +949,13 @@ impl Query {
                         if input_value.is_null() && output.contains_key(field_name_str) {
                             continue;
                         }
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation.  Object-typed inputs are never take()n so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if output.get(field_name_str).is_some_and(Value::is_null) {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
@@ -1035,6 +1061,7 @@ impl Query {
         &self,
         request: &Request,
         schema: &Schema,
+        strict_variable_validation: Mode,
     ) -> Result<(), Response> {
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = self
@@ -1078,7 +1105,7 @@ impl Query {
                     let path = super::JsonValuePath::Variable {
                         name: name.as_str(),
                     };
-                    ty.validate_input_value(value, schema, &path)
+                    ty.validate_input_value(value, schema, &path, strict_variable_validation)
                         .err()
                         .map(|message| {
                             FetchError::ValidationInvalidTypeVariable {

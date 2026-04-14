@@ -3,11 +3,11 @@ use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use base64::engine::general_purpose::STANDARD as Base64;
+use anyhow::ensure;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";

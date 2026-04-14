@@ -69,6 +69,7 @@ use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAtt
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::utils::extend_attributes;
 use crate::services::router;
 use crate::services::supergraph;
 
@@ -123,6 +124,10 @@ pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.resp
 
 pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
     "apollo.router.operations.fetch.duration";
+
+pub(super) const APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED: &str =
+    "apollo.router.operations.subscriptions.terminated.client";
+
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
@@ -191,7 +196,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -209,7 +214,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -227,7 +232,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP server response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -245,7 +250,7 @@ impl InstrumentsConfig {
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
                         .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -254,6 +259,18 @@ impl InstrumentsConfig {
             self.router.attributes.router_overhead.is_enabled(),
         ) {
             static_instruments.insert(name, instrument);
+        }
+
+        if self.router.attributes.subscriptions_terminated.is_enabled() {
+            static_instruments.insert(
+                APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
+                        .with_description("Count of subscription terminations")
+                        .build(),
+                ),
+            );
         }
 
         for (instrument_name, instrument) in &self.router.custom {
@@ -266,7 +283,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -278,7 +295,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -401,6 +418,8 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
+                            // Compressed sizes are not yet known at the time on_response is called,
+                            // so this will always be the uncompressed size.
                             selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,
@@ -443,12 +462,42 @@ impl InstrumentsConfig {
             &static_instruments,
         );
 
+        let subscriptions_terminated = self
+            .router
+            .attributes
+            .subscriptions_terminated
+            .is_enabled()
+            .then(|| {
+                let attrs = match &self.router.attributes.subscriptions_terminated {
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        attributes.attributes.clone()
+                    }
+                    _ => SubscriptionsTerminatedAttributes::default(),
+                };
+                SubscriptionsTerminatedCounter {
+                    counter: static_instruments
+                        .get(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
+                        .expect(
+                            "cannot get static instrument for subscriptions terminated; this should not happen",
+                        )
+                        .as_counter_f64()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to counter for subscriptions terminated; this should not happen",
+                        ),
+                    reason_enabled: attrs.reason(),
+                    subgraph_name_enabled: attrs.subgraph_name(),
+                    client_name_enabled: attrs.client_name(),
+                }
+            });
+
         RouterInstruments {
             http_server_request_duration,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
             router_overhead,
+            subscriptions_terminated,
             custom: CustomInstruments::new(&self.router.custom, static_instruments),
         }
     }
@@ -467,7 +516,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -479,7 +528,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -521,7 +570,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -539,7 +588,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -557,7 +606,7 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
                         .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -572,7 +621,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -584,7 +633,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -707,10 +756,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
-                                subgraph_response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseBodySize {
+                                subgraph_response_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -761,7 +808,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -773,7 +820,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -807,7 +854,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_histogram(FIELD_LENGTH)
                         .with_description("Length of a selected field in the GraphQL response")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -819,7 +866,7 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(FIELD_EXECUTION)
                         .with_description("Number of times a field is used.")
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -834,7 +881,7 @@ impl InstrumentsConfig {
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -846,7 +893,7 @@ impl InstrumentsConfig {
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
                                 .with_unit(instrument.unit.clone())
-                                .init(),
+                                .build(),
                         ),
                     );
                 }
@@ -952,7 +999,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Entity cache hit/miss operations at the subgraph level (deprecated)",
                         )
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -966,7 +1013,7 @@ impl InstrumentsConfig {
                         .with_description(
                             "Response cache hit/miss operations at the subgraph level",
                         )
-                        .init(),
+                        .build(),
                 ),
             );
         }
@@ -1124,6 +1171,87 @@ impl DefaultForLevel for ActiveRequestsAttributes {
             DefaultAttributeRequirementLevel::Recommended
             | DefaultAttributeRequirementLevel::None => {}
         }
+    }
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubscriptionsTerminatedAttributes {
+    /// The reason the subscription terminated
+    reason: Option<bool>,
+    /// The subgraph name
+    #[serde(rename = "subgraph.name")]
+    subgraph_name: Option<bool>,
+    /// The client name
+    #[serde(rename = "client.name")]
+    client_name: Option<bool>,
+}
+
+impl SubscriptionsTerminatedAttributes {
+    fn reason(&self) -> bool {
+        self.reason.unwrap_or(false)
+    }
+    fn subgraph_name(&self) -> bool {
+        self.subgraph_name.unwrap_or(false)
+    }
+    fn client_name(&self) -> bool {
+        self.client_name.unwrap_or(false)
+    }
+}
+
+impl DefaultForLevel for SubscriptionsTerminatedAttributes {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                self.reason.get_or_insert(true);
+                self.subgraph_name.get_or_insert(true);
+            }
+            DefaultAttributeRequirementLevel::Recommended
+            | DefaultAttributeRequirementLevel::None => {}
+        }
+    }
+}
+
+/// Handle stashed in the request context so that
+/// [`Multipart`](crate::protocols::multipart::Multipart) can record the
+/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time
+/// with only the attributes that are enabled in config.
+#[derive(Clone, Debug)]
+pub(crate) struct SubscriptionsTerminatedCounter {
+    pub(crate) counter: Counter<f64>,
+    pub(crate) reason_enabled: bool,
+    pub(crate) subgraph_name_enabled: bool,
+    pub(crate) client_name_enabled: bool,
+}
+
+impl SubscriptionsTerminatedCounter {
+    pub(crate) fn record(
+        &self,
+        reason: &str,
+        subgraph_name: Option<&str>,
+        client_name: Option<&str>,
+    ) {
+        let mut attrs = Vec::with_capacity(3);
+        if self.reason_enabled {
+            attrs.push(opentelemetry::KeyValue::new("reason", reason.to_string()));
+        }
+        if self.subgraph_name_enabled {
+            attrs.push(opentelemetry::KeyValue::new(
+                "subgraph.name",
+                subgraph_name.unwrap_or_default().to_string(),
+            ));
+        }
+        if self.client_name_enabled {
+            attrs.push(opentelemetry::KeyValue::new(
+                "client.name",
+                client_name.unwrap_or_default().to_string(),
+            ));
+        }
+        self.counter.add(1.0, &attrs);
     }
 }
 
@@ -1692,6 +1820,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
         opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
+        _ => unreachable!("unexpected opentelemetry::Value variant"),
     }
 }
 
@@ -1821,12 +1950,12 @@ where
             return;
         }
 
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
 
         if let Some(selected_value) = inner
             .selector
@@ -1876,12 +2005,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -1933,12 +2057,7 @@ where
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_error(error, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
         }
 
         let increment = match &inner.increment {
@@ -2257,12 +2376,12 @@ where
             }
             return;
         }
-        let attrs: Vec<KeyValue> = inner
+        let attrs = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_response(response).into_iter().collect())
+            .map(|s| s.on_response(response))
             .unwrap_or_default();
-        inner.attributes.extend(attrs);
+        extend_attributes(&mut inner.attributes, attrs);
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -2313,12 +2432,7 @@ where
         // Response event may be called multiple times so we don't extend inner.attributes
         let mut attrs: Vec<KeyValue> = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_event(response, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
+            extend_attributes(&mut attrs, selectors.on_response_event(response, ctx));
         }
 
         if let Some(selected_value) = inner
@@ -2367,12 +2481,10 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_error(error, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.append(&mut inner.attributes);
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            extend_attributes(&mut attrs, selectors.on_error(error, ctx));
+        }
 
         let increment = match &inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
@@ -2561,6 +2673,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
@@ -3023,12 +3136,12 @@ mod tests {
                                         .subgraph_request(http_request)
                                         .build();
 
-                                        let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
-                                        let body_size = body.len();
-                                        request.context.extensions()
-                                            .with_lock(|lock| {
-                                                lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                            });
+                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body_size = body.len();
+                                    request.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                        });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
@@ -3052,6 +3165,14 @@ mod tests {
                                         .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
+
+                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body_size = body.len();
+                                    response.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                        });
+
                                     subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
@@ -3247,6 +3368,7 @@ mod tests {
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
+                                        context: context.clone(),
                                         transport_result: Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,

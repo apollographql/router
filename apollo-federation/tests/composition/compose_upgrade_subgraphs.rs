@@ -83,8 +83,47 @@ fn fed1_preserves_federation_directive_descriptions() {
         .expect("directive definition");
     assert_snapshot!(key_directive, @r#"
         " This is a custom description of the key directive "
-        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+        directive @key(fields: federation__FieldSet!) on OBJECT
     "#);
+}
+
+/// Fed1 schema with @tag on _FieldSet scalar - should upgrade successfully.
+#[test]
+fn fed1_fieldset_with_tag_upgrades_successfully() {
+    let subgraph = Subgraph::parse(
+        "subgraph",
+        "",
+        r#"
+            scalar _FieldSet @tag(name: "a")
+
+            directive @key(fields: _FieldSet!) on OBJECT | INTERFACE
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+            type Query {
+                start(id: ID!): S
+            }
+
+            type S @key(fields: "id") @tag(name: "b") {
+                id: ID!
+                name: String
+            }
+        "#,
+    )
+    .expect("parses schema")
+    .expand_links()
+    .expect("expands schema");
+
+    let [upgraded]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
+        .expect("upgrades schema")
+        .try_into()
+        .expect("Upgrade subgraphs");
+
+    // Verify the upgraded schema has federation__FieldSet, not _FieldSet
+    let schema = upgraded.validated_schema().schema();
+    assert!(
+        schema.types.contains_key("federation__FieldSet"),
+        "Expected federation__FieldSet type in upgraded schema"
+    );
 }
 
 // =============================================================================

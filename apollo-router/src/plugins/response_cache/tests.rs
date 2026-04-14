@@ -1381,7 +1381,8 @@ async fn no_store_from_request() {
 
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_no_store(&cache_control_header));
-    let response = response.next_response().await.unwrap();
+    let mut response = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1446,7 +1447,8 @@ async fn no_store_from_request() {
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_no_store(&cache_control_header));
 
-    let response = response.next_response().await.unwrap();
+    let mut response = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -3845,4 +3847,207 @@ async fn failure_mode_reconnect() {
     }
         .with_metrics()
         .await;
+}
+
+/// When one subgraph returns data with a `Cache-Control: max-age=N, public` header and another
+/// subgraph times out via the traffic shaping layer, the final HTTP response must carry
+/// `Cache-Control: no-store` to prevent intermediate caches from caching a partial/error response.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_store_on_subgraph_timeout() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    // This query spans two subgraphs: `user` (returns data) and `orga` (entity lookup).
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    // `user` returns data with a cacheable header; `orga` is configured to sleep so it times out.
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "max-age=1800, public"},
+        },
+        "orga": {
+            "entities": [],
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+            // Force a 1ms timeout on the `orga` subgraph so it always times out.
+            "traffic_shaping": {
+                "subgraphs": {
+                    "orga": {
+                        "timeout": "1ms"
+                    }
+                }
+            }
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        // Override the `orga` subgraph service to sleep long enough to trigger the timeout.
+        .subgraph_hook(|name, service| {
+            if name == "orga" {
+                tower::service_fn(|_req: subgraph::Request| async move {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    // Unreachable in practice — the traffic shaping timeout fires first.
+                    Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
+                })
+                .boxed()
+            } else {
+                service
+            }
+        })
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    // The response must contain `no-store` because the `orga` subgraph timed out.
+    let cache_control_header =
+        get_cache_control_header(&response).expect("missing cache-control header");
+    assert!(
+        cache_control_contains_no_store(&cache_control_header),
+        "expected Cache-Control: no-store when a subgraph times out, got: {:?}",
+        cache_control_header
+    );
+    assert!(
+        !cache_control_contains_public(&cache_control_header),
+        "Cache-Control must not contain 'public' when a subgraph timed out, got: {:?}",
+        cache_control_header
+    );
+    assert!(
+        !cache_control_contains_max_age(&cache_control_header),
+        "Cache-Control must not contain max-age when a subgraph timed out, got: {:?}",
+        cache_control_header
+    );
+
+    // The response body should contain errors from the timed-out subgraph.
+    let body = response.next_response().await.unwrap();
+    assert!(
+        !body.errors.is_empty(),
+        "expected errors in response body due to subgraph timeout"
+    );
+}
+
+/// When one subgraph returns data with a `Cache-Control: max-age=N, public` header and another
+/// subgraph returns errors (simulating a partial failure), the final HTTP response must carry
+/// `Cache-Control: no-store` to prevent intermediate caches (CDNs, reverse proxies) from caching an
+/// incomplete or error response.
+#[tokio::test]
+async fn no_store_on_partial_subgraph_failure() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    // This query spans two subgraphs: `user` (returns data) and `orga` (entity lookup).
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    // Configure only `user` subgraph — `orga` is intentionally omitted so it returns an error.
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "max-age=1800, public"},
+        },
+        // `orga` is intentionally not configured — the mock plugin will return a GraphQL error.
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+    )
+    .await
+    .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    // The response must contain `no-store` — not `max-age` or `public` — because one subgraph
+    // returned an error. Caching a partial response would be incorrect.
+    let cache_control_header =
+        get_cache_control_header(&response).expect("missing cache-control header");
+    assert!(
+        cache_control_contains_no_store(&cache_control_header),
+        "expected Cache-Control: no-store on partial failure, got: {:?}",
+        cache_control_header
+    );
+    assert!(
+        !cache_control_contains_public(&cache_control_header),
+        "Cache-Control must not contain 'public' when a subgraph failed, got: {:?}",
+        cache_control_header
+    );
+    assert!(
+        !cache_control_contains_max_age(&cache_control_header),
+        "Cache-Control must not contain max-age when a subgraph failed, got: {:?}",
+        cache_control_header
+    );
+
+    // The response body should contain errors from the failing subgraph.
+    let body = response.next_response().await.unwrap();
+    assert!(
+        !body.errors.is_empty(),
+        "expected errors in response body due to failing subgraph"
+    );
 }

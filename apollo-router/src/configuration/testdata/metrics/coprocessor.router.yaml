@@ -41,4 +41,17 @@ coprocessor:
         body: true
         context: true
         service_name: true
-
+  connector:
+    all:
+      request:
+        headers: true
+        body: true
+        context: true
+        method: true
+        uri: true
+        service_name: true
+      response:
+        status_code: true
+        headers: true
+        body: true
+        service_name: true
