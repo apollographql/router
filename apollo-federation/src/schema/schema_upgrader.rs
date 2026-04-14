@@ -2176,12 +2176,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {
@@ -2279,12 +2276,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {

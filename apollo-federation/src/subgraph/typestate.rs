@@ -1033,18 +1033,26 @@ impl FederationSchema {
 
         let is_fed_1_subgraph = self.is_fed_1_subgraph();
 
-        // PORT_NOTE: Fed 1 — JS first **ignores** user `Query._service` / `Query._entities` while
-        //            building types (`buildNamedTypeInner` in buildSchema.ts; Rust:
-        //            `FederationBlueprint::ignore_parsed_field`). Later, JS `addFederationOperations`
-        //            **checks and adds** the canonical `_service` field for **both** Fed 1 and Fed 2.
-        //            This function is that second step: when we return, the root query type must
-        //            expose `_service: _Service!` (plus `_entities` when `_Entity` exists).
-
-        // Add or remove `Query._entities` (if applicable)
         let entity_field_pos = ObjectFieldDefinitionPosition {
             type_name: query_root_type_name.clone(),
             field_name: FEDERATION_ENTITIES_FIELD_NAME,
         };
+        let service_field_pos = ObjectFieldDefinitionPosition {
+            type_name: query_root_type_name.clone(),
+            field_name: FEDERATION_SERVICE_FIELD_NAME,
+        };
+
+        // PORT_NOTE: Fed 1 — JS drops user-defined `Query._service` / `Query._entities` while
+        //            building types (`buildNamedTypeInner` in buildSchema.ts; Rust:
+        //            `FederationBlueprint::ignore_parsed_field`). `addFederationOperations` then
+        //            inserts the canonical fields. Match that by removing any existing definitions
+        //            before the check-and-add step below.
+        if is_fed_1_subgraph {
+            entity_field_pos.remove(self)?;
+            service_field_pos.remove(self)?;
+        }
+
+        // Add or remove `Query._entities` (if applicable)
         if let Some(_entity_type) = self.entity_type()? {
             if entity_field_pos.try_get(self.schema()).is_none() {
                 entity_field_pos
@@ -1059,17 +1067,12 @@ impl FederationSchema {
         }
 
         // Add `Query._service` (if not already present)
-        let service_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name.clone(),
-            field_name: FEDERATION_SERVICE_FIELD_NAME,
-        };
-        // JS does not keep a user-provided nullable `_service` field type; normalize to `_Service!`.
-        if service_field_pos.try_get(self.schema()).is_some() {
-            if !service_field_pos.get_type(self)?.is_non_null() {
-                service_field_pos
-                    .set_type(self, Type::NonNullNamed(self.service_type()?.type_name))?;
-            }
-        } else {
+        // PORT_NOTE: JS `addFederationOperations` replaces an existing `_service` field instead of
+        //            mutating its type when the return type should be non-null `_Service!`.
+        if service_field_pos.try_get(self.schema()).is_none() {
+            service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+        } else if !service_field_pos.get_type(self)?.is_non_null() {
+            service_field_pos.remove(self)?;
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
         }
 
