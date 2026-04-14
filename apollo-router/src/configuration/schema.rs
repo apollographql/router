@@ -1,6 +1,5 @@
 //! Configuration schema generation and validation
 
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -131,8 +130,8 @@ pub(crate) fn validate_yaml_configuration(
 
             let mut errors = String::new();
 
-            for (idx, mut e) in errors_it.enumerate() {
-                if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+            for (idx, e) in errors_it.enumerate() {
+                if let Some(element) = parsed_yaml.get_element(e.instance_path()) {
                     match element {
                         yaml::Value::String(value, marker) => {
                             let start_marker = marker;
@@ -152,7 +151,7 @@ pub(crate) fn validate_yaml_configuration(
 
                             // Replace the value in the error message with the one from the raw config.
                             // This guarantees that if the env variable contained a secret it won't be leaked.
-                            e.instance = Cow::Owned(coerce(value));
+                            let e = e.masked_with(coerce(value).to_string());
 
                             let _ = write!(
                                 &mut errors,
@@ -180,18 +179,15 @@ pub(crate) fn validate_yaml_configuration(
                             );
                         }
                         map_value @ yaml::Value::Mapping(current_label, map, marker) => {
-                            // workaround because ValidationErrorKind is not Clone
-                            let unexpected_opt = match &e.kind {
-                                ValidationErrorKind::AdditionalProperties { unexpected } => {
-                                    Some(unexpected.clone())
-                                }
-                                _ => None,
-                            };
-
-                            if let Some(unexpected) = unexpected_opt {
+                            // Print additional properties errors one at a time, pointing at
+                            // each unexpected property, instead of all at once pointing at
+                            // the first property.
+                            if let ValidationErrorKind::AdditionalProperties { unexpected } =
+                                e.kind()
+                            {
                                 for key in unexpected {
                                     if let Some((label, value)) =
-                                        map.iter().find(|(label, _)| label.name == key)
+                                        map.iter().find(|(label, _)| label.name == key.as_str())
                                     {
                                         let (start_marker, end_marker) = (
                                             label.marker.as_ref().unwrap_or(marker),
@@ -204,9 +200,9 @@ pub(crate) fn validate_yaml_configuration(
                                             end_marker,
                                         );
 
-                                        e.kind = ValidationErrorKind::AdditionalProperties {
-                                            unexpected: vec![key.clone()],
-                                        };
+                                        let e = format!(
+                                            "Additional properties are not allowed ('{key}' was unexpected)"
+                                        );
 
                                         let _ = write!(
                                             &mut errors,

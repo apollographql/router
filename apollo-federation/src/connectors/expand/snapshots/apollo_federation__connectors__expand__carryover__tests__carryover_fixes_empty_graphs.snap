@@ -63,10 +63,26 @@ scalar connect__JSONSelection @join__type(graph: CONNECTOR)
 
 scalar connect__URLTemplate @join__type(graph: CONNECTOR)
 
+input connect__ConnectorErrors @join__type(graph: CONNECTOR) {
+  message: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
+  extensions: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
+}
+
 input connect__HTTPHeaderMapping @join__type(graph: CONNECTOR) {
   name: String! @join__field(graph: CONNECTOR, type: "String!")
   from: String @join__field(graph: CONNECTOR, type: "String")
-  value: [String!] @join__field(graph: CONNECTOR, type: "[String!]")
+  value: String @join__field(graph: CONNECTOR, type: "String")
+}
+
+input connect__ConnectBatch @join__type(graph: CONNECTOR) {
+  maxSize: Int @join__field(graph: CONNECTOR, type: "Int")
+}
+
+input connect__SourceHTTP @join__type(graph: CONNECTOR) {
+  baseURL: String! @join__field(graph: CONNECTOR, type: "String!")
+  headers: [connect__HTTPHeaderMapping!] @join__field(graph: CONNECTOR, type: "[connect__HTTPHeaderMapping!]")
+  path: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
+  queryParams: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
 }
 
 input connect__ConnectHTTP @join__type(graph: CONNECTOR) {
@@ -76,22 +92,6 @@ input connect__ConnectHTTP @join__type(graph: CONNECTOR) {
   PATCH: connect__URLTemplate @join__field(graph: CONNECTOR, type: "connect__URLTemplate")
   DELETE: connect__URLTemplate @join__field(graph: CONNECTOR, type: "connect__URLTemplate")
   body: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
-  headers: [connect__HTTPHeaderMapping!] @join__field(graph: CONNECTOR, type: "[connect__HTTPHeaderMapping!]")
-  path: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
-  queryParams: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
-}
-
-input connect__ConnectBatch @join__type(graph: CONNECTOR) {
-  maxSize: Int @join__field(graph: CONNECTOR, type: "Int")
-}
-
-input connect__ConnectorErrors @join__type(graph: CONNECTOR) {
-  message: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
-  extensions: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
-}
-
-input connect__SourceHTTP @join__type(graph: CONNECTOR) {
-  baseURL: String! @join__field(graph: CONNECTOR, type: "String!")
   headers: [connect__HTTPHeaderMapping!] @join__field(graph: CONNECTOR, type: "[connect__HTTPHeaderMapping!]")
   path: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")
   queryParams: connect__JSONSelection @join__field(graph: CONNECTOR, type: "connect__JSONSelection")

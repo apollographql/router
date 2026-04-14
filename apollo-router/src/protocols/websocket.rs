@@ -438,6 +438,8 @@ where
                 let mut interval =
                     tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                // the error type must match the sink
+                #[allow(clippy::result_large_err)]
                 let mut heartbeat_stream = IntervalStream::new(interval)
                     .map(|_| Ok(ClientMessage::Ping { payload: None }))
                     .take_until(close_sentinel);
