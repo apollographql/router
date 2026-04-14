@@ -1,5 +1,6 @@
 mod compose_auth;
 mod compose_basic;
+mod compose_cache_tag;
 mod compose_directive;
 mod compose_directive_sharing;
 mod compose_fed1_subgraphs;
@@ -22,7 +23,6 @@ mod override_directive;
 mod subscription;
 mod supergraph_reversibility;
 mod validation_errors;
-mod compose_cache_tag;
 
 pub(crate) mod test_helpers {
     use std::iter::zip;

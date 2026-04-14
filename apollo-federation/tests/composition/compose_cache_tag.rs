@@ -1,8 +1,10 @@
-use insta::assert_snapshot;
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
+use insta::assert_snapshot;
 use test_log::test;
-use crate::composition::{compose_as_fed2_subgraphs, ServiceDefinition};
+
+use crate::composition::ServiceDefinition;
+use crate::composition::compose_as_fed2_subgraphs;
 
 #[test]
 fn composes_single_subgraph() {
@@ -18,10 +20,9 @@ fn composes_single_subgraph() {
                 id: ID!
                 name: String!
             }
-        "#
+        "#,
     };
-    let result = compose_as_fed2_subgraphs(&vec![products])
-        .expect("composed successfully");
+    let result = compose_as_fed2_subgraphs(&[products]).expect("composed successfully");
     assert_snapshot!(result.schema().schema());
 }
 
@@ -39,7 +40,7 @@ fn composes_with_multiple_subgraphs() {
                 id: ID!
                 name: String!
             }
-        "#
+        "#,
     };
     let reviews = ServiceDefinition {
         name: "reviews",
@@ -48,10 +49,10 @@ fn composes_with_multiple_subgraphs() {
             id: ID!
             reviews: [String!]!
           }
-        "#
+        "#,
     };
-    let result = compose_as_fed2_subgraphs(&vec![products, reviews])
-        .expect("composed successfully");
+    let result =
+        compose_as_fed2_subgraphs(&[products, reviews]).expect("composed successfully");
     assert_snapshot!(result.schema().schema());
 }
 
@@ -69,10 +70,8 @@ fn cache_tag_can_be_renamed() {
             name: String!
         }
     "#;
-    let products = Subgraph::parse("products", "http://products/graphql", sdl)
-        .expect("parsed subgraph");
-    let result = compose(vec![products])
-        .expect("composed successfully");
+    let products =
+        Subgraph::parse("products", "http://products/graphql", sdl).expect("parsed subgraph");
+    let result = compose(vec![products]).expect("composed successfully");
     assert_snapshot!(result.schema().schema());
 }
-
