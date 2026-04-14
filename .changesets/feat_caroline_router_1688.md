@@ -20,11 +20,8 @@ telemetry:
           description: "Requests completing in under 10 seconds"
           condition:
             lt:
-              - unit: seconds
+              - request_duration: seconds
               - 10
-          attributes:
-            request_duration_ms:
-              unit: milliseconds
 ```
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9187
