@@ -1133,6 +1133,47 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn entity_fetch_cardinality_uses_parent_list_size_from_listsize_directive() {
+        // When the parent list field has @listSize(assumedSize: 5) and global list_size is 100,
+        // the entity fetch for _entities should be estimated with cardinality 5, not 100.
+        let schema = include_str!("./fixtures/federated_ships_listsize_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+        let variables = "{}";
+
+        // Supergraph estimate uses @listSize(assumedSize: 5) from ships field:
+        // ships (5 instances) × Ship (1.0) = 5.0
+        assert_eq!(estimated_cost(schema, query, variables), 5.0);
+
+        // Planned cost: entity fetch _entities should use cardinality 5 (ships list size),
+        // not 100 (global list_size default).
+        // Fetch 1 (vehicles, ships list):       ships[5] × Ship(1.0) = 5.0
+        // Fetch 2 (vehicles, entity fetch):     _entities[5] × Ship(1.0) = 5.0
+        // Total = 10.0
+        //
+        // Before the fix: Fetch 2 would use list_size=100, giving 100.0, total = 105.0
+        assert_eq!(planned_cost_rust(schema, query, variables), 10.0);
+    }
+
+    #[test(tokio::test)]
+    async fn entity_fetch_cardinality_multiplies_for_nested_lists() {
+        // For a two-level nested list (companies[N].employees[M]), the entity fetch
+        // for employees should be estimated with cardinality N × M.
+        // With list_size = 100: cardinality = 100 companies × 100 employees = 10000.
+        //
+        // Before the fix: cardinality would be 100 (just global list_size).
+        let schema = include_str!("./fixtures/federated_nested_list_schema.graphql");
+        let query = include_str!("./fixtures/federated_nested_list_query.graphql");
+        let variables = "{}";
+
+        // Fetch 1 (companies): companies[100] × Company(1.0) + employees[100] × Employee(1.0) = 100 + 10000 = 10100.0
+        // Fetch 2 (employees, entity):  _entities[10000] × Employee(1.0) = 10000.0
+        // Total = 20100.0
+        //
+        // Before the fix: Fetch 2 = _entities[100] × 1.0 = 100.0, total = 10200.0
+        assert_eq!(planned_cost_rust(schema, query, variables), 20100.0);
+    }
+
+    #[test(tokio::test)]
     async fn federated_query_with_fragments() {
         let schema = include_str!("./fixtures/federated_ships_schema.graphql");
         let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
