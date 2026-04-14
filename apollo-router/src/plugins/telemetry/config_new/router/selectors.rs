@@ -177,7 +177,7 @@ pub(crate) enum RouterSelector {
     /// Total request duration from when the request was received
     RequestDuration {
         /// The unit for the duration (milliseconds, seconds, nanoseconds)
-        unit: DurationUnit,
+        request_duration: DurationUnit,
     },
     /// Number of active subgraph requests at the time of overhead calculation
     ActiveSubgraphRequests {
@@ -349,7 +349,9 @@ impl Selector for RouterSelector {
                     let result = tracker.calculate_overhead();
                     opentelemetry::Value::F64(result.overhead.as_secs_f64())
                 }),
-            RouterSelector::RequestDuration { unit } => response
+            RouterSelector::RequestDuration {
+                request_duration: unit,
+            } => response
                 .context
                 .extensions()
                 .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
@@ -1133,7 +1135,7 @@ mod test {
 
         // Milliseconds → I64
         let selector = RouterSelector::RequestDuration {
-            unit: DurationUnit::Milliseconds,
+            request_duration: DurationUnit::Milliseconds,
         };
         assert!(matches!(
             selector.on_response(&response).unwrap(),
@@ -1142,7 +1144,7 @@ mod test {
 
         // Seconds → F64
         let selector = RouterSelector::RequestDuration {
-            unit: DurationUnit::Seconds,
+            request_duration: DurationUnit::Seconds,
         };
         assert!(matches!(
             selector.on_response(&response).unwrap(),
@@ -1151,7 +1153,7 @@ mod test {
 
         // Nanoseconds → I64
         let selector = RouterSelector::RequestDuration {
-            unit: DurationUnit::Nanoseconds,
+            request_duration: DurationUnit::Nanoseconds,
         };
         assert!(matches!(
             selector.on_response(&response).unwrap(),
@@ -1160,7 +1162,7 @@ mod test {
 
         // on_request returns None (response-only selector)
         let selector = RouterSelector::RequestDuration {
-            unit: DurationUnit::Milliseconds,
+            request_duration: DurationUnit::Milliseconds,
         };
         let request = RouterRequest::fake_builder()
             .context(context)
