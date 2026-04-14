@@ -2325,9 +2325,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 // schema. For Connectors (see `should_use_join_directive_for_url`), this is an import name (the
                 // same name imported in the supergraph and the extracted subgraphs). For others, this is
                 // the fully qualified directive name in the subgraph schema (re-assigned below).
-                let mut directive_name_for_join_directive = None;
-
-                if source_link
+                let directive_name_for_join_directive = if source_link
                     .as_ref()
                     .is_some_and(|e| e.link.url.identity == Identity::link_identity())
                 {
@@ -2339,31 +2337,37 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         if SPEC_REGISTRY.get_definition(&link.url).is_some() {
                             links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
                         }
-                        directive_name_for_join_directive = Some(directive.name.clone());
+                        Some(directive.name.clone())
+                    } else {
+                        None
                     }
                 // See if directives from this feature URL should use the @join__directive.
-                } else if !source_link
+                } else if source_link
                     .as_ref()
                     .is_some_and(|e| self.should_use_join_directive_for_url(&e.link.url))
-                    && self
-                        .directives_using_join_directive
-                        .contains(&directive.name)
+                {
+                    Some(directive.name.clone())
+                // See if this directive is one of the directives that should use the @join__directive.
+                } else if self
+                    .directives_using_join_directive
+                    .contains(&directive.name)
                 {
                     if let Some(source_link) = source_link {
                         // Compute the fully qualified directive name in the subgraph schema without using
                         // `import`, so it can be referenced in the extracted subgraph schema via
                         // `@join__directive`.
-                        directive_name_for_join_directive =
-                            Some(Link::directive_name_in_schema_for_core_arguments(
-                                &source_link.link.url,
-                                &source_link.link.url.identity.name,
-                                &[],
-                                &source_link.name_in_spec,
-                            ));
+                        Some(Link::directive_name_in_schema_for_core_arguments(
+                            &source_link.link.url,
+                            &source_link.link.url.identity.name,
+                            &[],
+                            &source_link.name_in_spec,
+                        ))
                     } else {
-                        directive_name_for_join_directive = Some(directive.name.clone());
+                        Some(directive.name.clone())
                     }
-                }
+                } else {
+                    None
+                };
 
                 if let Some(directive_name_for_join_directive) = directive_name_for_join_directive {
                     let existing_joins = joins_by_directive_name
