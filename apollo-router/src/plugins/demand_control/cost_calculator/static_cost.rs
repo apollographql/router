@@ -614,6 +614,72 @@ impl StaticCostCalculator {
         self.score_plan_node(&query_plan.root, variables)
     }
 
+    /// Estimate the total number of entities in an entity fetch by walking the
+    /// FlattenNode's path through the supergraph schema.
+    ///
+    /// Each `Key` path element that resolves to a list field multiplies the
+    /// running cardinality by that field's estimated list size:
+    ///   - `@listSize(assumedSize: N)` if present on the supergraph field
+    ///   - otherwise the global `list_size` default
+    ///
+    /// Returns 1 for paths that contain no list fields (i.e. scalars / single objects).
+    fn estimated_path_cardinality(&self, path: &crate::json_ext::Path) -> i32 {
+        use crate::json_ext::PathElement;
+
+        let schema: &apollo_compiler::Schema = &self.supergraph_schema;
+
+        // Entity fetches are always query operations; start from the Query root type.
+        let Some(root_type_name) = schema.schema_definition.query.as_ref() else {
+            return self.list_size as i32;
+        };
+
+        let mut cardinality: i32 = 1;
+        let mut current_type_name: String = root_type_name.to_string();
+
+        for element in &path.0 {
+            let PathElement::Key(field_name, _) = element else {
+                // Flatten(@) and Index elements don't change the type being traversed.
+                continue;
+            };
+
+            // Look up the field definition in the apollo_compiler schema to determine
+            // whether it returns a list and what its inner named type is.
+            let field_compiler_def = match schema.types.get(current_type_name.as_str()) {
+                Some(ExtendedType::Object(obj)) => obj.fields.get(field_name.as_str()).cloned(),
+                Some(ExtendedType::Interface(iface)) => {
+                    iface.fields.get(field_name.as_str()).cloned()
+                }
+                _ => None,
+            };
+
+            let Some(field_compiler_def) = field_compiler_def else {
+                // Unknown field — stop traversal, return what we have so far.
+                break;
+            };
+
+            if field_compiler_def.ty.is_list() {
+                // Prefer @listSize(assumedSize: N) from our pre-processed schema.
+                let field_list_size = self
+                    .supergraph_schema
+                    .output_field_definition(&current_type_name, field_name)
+                    .and_then(|fd| {
+                        fd.list_size_directive_entries()
+                            .iter()
+                            .filter_map(|e| e.directive.assumed_size)
+                            .max()
+                    })
+                    .unwrap_or(self.list_size as i32);
+
+                cardinality = cardinality.saturating_mul(field_list_size);
+            }
+
+            // Advance to the field's inner named type for the next path segment.
+            current_type_name = field_compiler_def.ty.inner_named_type().to_string();
+        }
+
+        cardinality
+    }
+
     pub(crate) fn actual(
         &self,
         request: &ExecutableDocument,
@@ -1619,5 +1685,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn make_calculator_for_path_test(schema_str: &str, list_size: u32) -> StaticCostCalculator {
+        use apollo_compiler::Schema;
+
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphqls").unwrap();
+        let dc_schema = Arc::new(DemandControlledSchema::new(Arc::new(schema)).unwrap());
+        StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), list_size)
+    }
+
+    #[test]
+    fn path_cardinality_single_list_no_directive() {
+        // ships: [Ship!]! with no @listSize → uses global list_size (10)
+        let schema_str = r#"
+            type Query { ships: [Ship!]! }
+            type Ship { id: ID! }
+        "#;
+        let calc = make_calculator_for_path_test(schema_str, 10);
+        let path = crate::json_ext::Path::from_slice(&["ships", "@"]);
+        assert_eq!(calc.estimated_path_cardinality(&path), 10);
+    }
+
+    #[test]
+    fn path_cardinality_single_list_with_assumed_size() {
+        // ships: [Ship!]! @listSize(assumedSize: 5) → 5 (not global list_size 10)
+        // Uses the full supergraph fixture because @listSize requires proper @link resolution.
+        let schema_str = include_str!("./fixtures/federated_ships_listsize_schema.graphql");
+        let config: Configuration = Default::default();
+        let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+        let dc_schema = Arc::new(
+            DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
+        );
+        let calc =
+            StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), 10);
+        let path = crate::json_ext::Path::from_slice(&["ships", "@"]);
+        assert_eq!(calc.estimated_path_cardinality(&path), 5);
+    }
+
+    #[test]
+    fn path_cardinality_nested_lists_multiply() {
+        // companies: [Company] (size 10) where Company.employees: [Employee] (size 10)
+        // path = companies/@/employees/@ → 10 × 10 = 100
+        let schema_str = r#"
+            type Query { companies: [Company!]! }
+            type Company { employees: [Employee!]! }
+            type Employee { id: ID! }
+        "#;
+        let calc = make_calculator_for_path_test(schema_str, 10);
+        let path = crate::json_ext::Path::from_slice(&["companies", "@", "employees", "@"]);
+        assert_eq!(calc.estimated_path_cardinality(&path), 100);
+    }
+
+    #[test]
+    fn path_cardinality_object_field_does_not_multiply() {
+        // user: User (non-list) then orders: [Order] (size 10)
+        // path = user/orders/@ → 1 × 10 = 10
+        let schema_str = r#"
+            type Query { user: User! }
+            type User { orders: [Order!]! }
+            type Order { id: ID! }
+        "#;
+        let calc = make_calculator_for_path_test(schema_str, 10);
+        let path = crate::json_ext::Path::from_slice(&["user", "orders", "@"]);
+        assert_eq!(calc.estimated_path_cardinality(&path), 10);
     }
 }
