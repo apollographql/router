@@ -688,6 +688,10 @@ mod tests {
     #[case::config_includes_multiple_slashes("/graphql///", "/graphql//")]
     #[case::root("/", "")]
     #[case::root("/", "/")]
+    #[case::wildcard("/graphql/{*rest}", "/graphql/foo/bar")]
+    #[case::wildcard("/graphql/{*rest}", "/graphql/foo/bar/")]
+    #[case::parameter("/graphql/{param}", "/graphql/test")]
+    #[case::parameter("/graphql/{param}", "/graphql/test/")]
     #[tokio::test]
     async fn it_supports_paths_regardless_of_trailing_slashes(
         #[case] config_path: &str,
