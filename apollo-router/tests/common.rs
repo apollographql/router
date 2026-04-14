@@ -1437,11 +1437,20 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_metrics_contains_multiple(
         &self,
-        mut texts: Vec<&str>,
+        texts: Vec<&str>,
         duration: Option<Duration>,
     ) {
+        let patterns: Vec<(String, Regex)> = texts
+            .into_iter()
+            .map(|t| {
+                let escaped = regex::escape(t).replace("<any>", ".+");
+                let re = Regex::new(&format!("(?m)^{escaped}")).expect("Invalid regex");
+                (t.to_string(), re)
+            })
+            .collect();
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let mut remaining: Vec<&(String, Regex)> = patterns.iter().collect();
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -1450,15 +1459,16 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                texts.retain(|text| !metrics.contains(text));
-                if texts.is_empty() {
+                remaining.retain(|(_, re)| !re.is_match(&metrics));
+                if remaining.is_empty() {
                     return;
                 }
                 last_metrics = metrics;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        panic!("'{texts:?}' not detected in metrics\n{last_metrics}");
+        let missing: Vec<&str> = remaining.iter().map(|(t, _)| t.as_str()).collect();
+        panic!("'{missing:?}' not detected in metrics\n{last_metrics}");
     }
 
     #[allow(dead_code)]
