@@ -26,6 +26,7 @@ use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasAppliedDirectives;
+use crate::schema::position::HasDescription;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::subgraph::typestate::Subgraph;
@@ -445,9 +446,18 @@ impl Merger {
         &mut self,
         name: &Name,
     ) -> Result<(), FederationError> {
-        let Some(def) = self
+        // Note that the source here may have a different name than the destination.
+        let Some((subgraph_name, source)) = self
             .compose_directive_manager
-            .get_latest_directive_definition(name)?
+            .get_latest_directive_definition(name, &self.subgraphs, &mut self.error_reporter)?
+        else {
+            return Ok(());
+        };
+        let Some((source_idx, subgraph)) = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .find(|(_, subgraph)| subgraph.name == subgraph_name)
         else {
             return Ok(());
         };
@@ -455,26 +465,21 @@ impl Merger {
         let dest = DirectiveDefinitionPosition {
             directive_name: name.clone(),
         };
+        let subgraph_def = source.get(subgraph.schema().schema())?;
+        dest.set_repeatable(&mut self.merged, subgraph_def.repeatable)?;
+        dest.set_locations(&mut self.merged, subgraph_def.locations.clone())?;
+        dest.set_description(&mut self.merged, subgraph_def.description.clone())?;
 
-        if self.merged.get_directive_definition(name).is_none() {
-            dest.pre_insert(&mut self.merged)?;
-            dest.insert(&mut self.merged, def.clone())?;
-        }
-
-        let sources = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, subgraph.schema().get_directive_definition(name)))
-            .collect();
+        let sources: Sources<DirectiveDefinitionPosition> =
+            std::iter::once((source_idx, Some(source.clone()))).collect();
         let arg_names = self.add_arguments_shallow(&sources, &dest)?;
 
         for arg_name in arg_names {
-            let sources = map_sources(&sources, |source| {
+            let sources_arg = map_sources(&sources, |source| {
                 source.as_ref().map(|s| s.argument(arg_name.clone()))
             });
             let dest_arg = dest.argument(arg_name);
-            self.merge_argument(&sources, &dest_arg)?;
+            self.merge_argument(&sources_arg, &dest_arg)?;
         }
         Ok(())
     }

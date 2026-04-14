@@ -11,7 +11,6 @@ use super::print_sdl;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -36,7 +35,6 @@ fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_handles_fragments_in_requires_using_inaccessible_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -147,11 +145,11 @@ fn misc_handles_fragments_in_requires_using_inaccessible_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_existing_authenticated_directive_with_fed1() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "http://subgraphA",
+        r#"
         directive @authenticated(scope: [String!]) repeatable on FIELD_DEFINITION
 
         extend type Foo @key(fields: "id") {
@@ -159,11 +157,13 @@ fn misc_existing_authenticated_directive_with_fed1() {
           name: String! @authenticated(scope: ["read:foo"])
         }
         "#,
-    };
+    )
+    .expect("valid subgraph");
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "http://subgraphB",
+        r#"
         type Query {
           foo: Foo
         }
@@ -172,17 +172,19 @@ fn misc_existing_authenticated_directive_with_fed1() {
           id: ID!
         }
         "#,
-    };
+    )
+    .expect("valid subgraph");
 
-    // NOTE: This test uses composeServices() in JS (Fed1), not composeAsFed2Subgraphs()
-    // The test validates that existing @authenticated directives in Fed1 are handled properly
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph =
-        result.expect("Expected composition to succeed with existing @authenticated directive");
+    let result = compose(vec![subgraph_a, subgraph_b])
+        .expect("Expected composition to succeed with existing @authenticated directive");
 
-    // NOTE: The JS test validates that the custom @authenticated directive is NOT present in the final schema
-    // (it should be filtered out). For now, we just verify composition succeeds.
-    let _schema = supergraph.schema();
+    assert!(
+        !result
+            .schema()
+            .schema()
+            .directive_definitions
+            .contains_key("@authenticated")
+    );
 }
 
 #[test]

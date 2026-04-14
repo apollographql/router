@@ -5,6 +5,7 @@ use apollo_compiler::schema::ExtendedType;
 use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::error::SubgraphLocation;
+use crate::link::Link;
 use crate::merger::compose_directive_manager::MergeDirectiveItem;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -50,6 +51,19 @@ impl HasLocations for DirectiveDefinition {
 impl HasLocations for MergeDirectiveItem {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
         self.definition.locations(subgraph)
+    }
+}
+
+impl HasLocations for Link {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        self.line_column_range
+            .clone()
+            .into_iter()
+            .map(|range| SubgraphLocation {
+                subgraph: subgraph.name.to_string(),
+                range,
+            })
+            .collect()
     }
 }
 
