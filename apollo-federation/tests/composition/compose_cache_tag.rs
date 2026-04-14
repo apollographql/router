@@ -51,8 +51,7 @@ fn composes_with_multiple_subgraphs() {
           }
         "#,
     };
-    let result =
-        compose_as_fed2_subgraphs(&[products, reviews]).expect("composed successfully");
+    let result = compose_as_fed2_subgraphs(&[products, reviews]).expect("composed successfully");
     assert_snapshot!(result.schema().schema());
 }
 
