@@ -195,8 +195,11 @@ impl<'a> MetricsBuilder<'a> {
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
         let boundaries = self.metrics_common().buckets.clone();
+        let global_cardinality_limit = self.metrics_common().cardinality_limit;
 
-        // Pre-merge user views with default histogram aggregation
+        // Pre-merge user views with default histogram aggregation.
+        // The global cardinality limit is set on the default view so that per-view
+        // limits override it via merge() semantics.
         let merged_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
@@ -204,27 +207,43 @@ impl<'a> MetricsBuilder<'a> {
             .into_iter()
             .map(|v| {
                 let name = v.name.clone();
-                let default_view = MetricView::default_histogram(name.clone(), boundaries.clone());
+                let mut default_view =
+                    MetricView::default_histogram(name.clone(), boundaries.clone());
+                default_view.cardinality_limit = global_cardinality_limit;
                 (name, default_view.merge(v))
             })
             .collect();
 
-        // Single view that handles both user-configured and default histogram views
+        // Single view that handles user-configured, default histogram, and cardinality limit views
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
             merged_views
                 .get(instrument.name())
                 .cloned()
                 .map(|view| view.into_stream())
                 .or_else(|| {
-                    (instrument.kind() == InstrumentKind::Histogram).then(|| {
-                        Stream::builder()
-                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                    if instrument.kind() == InstrumentKind::Histogram {
+                        let mut builder = Stream::builder().with_aggregation(
+                            Aggregation::ExplicitBucketHistogram {
                                 boundaries: boundaries.clone(),
                                 record_min_max: true,
-                            })
-                            .build()
-                            .expect("Failed to create stream for default histogram bucket view")
-                    })
+                            },
+                        );
+                        if let Some(limit) = global_cardinality_limit {
+                            builder = builder.with_cardinality_limit(limit as usize);
+                        }
+                        Some(
+                            builder.build().expect(
+                                "Failed to create stream for default histogram bucket view",
+                            ),
+                        )
+                    } else {
+                        global_cardinality_limit.map(|limit| {
+                            Stream::builder()
+                                .with_cardinality_limit(limit as usize)
+                                .build()
+                                .expect("Failed to create stream for cardinality limit view")
+                        })
+                    }
                 })
         });
     }
