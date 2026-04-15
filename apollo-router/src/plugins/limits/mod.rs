@@ -216,7 +216,7 @@ impl Config {
             .subgraphs
             .get(subgraph_name)
             .and_then(|s| s.http_max_response_size);
-        let limit = subgraph_limit.or_else(|| self.subgraph.all.http_max_response_size)?;
+        let limit = subgraph_limit.or(self.subgraph.all.http_max_response_size)?;
 
         // convert to usize (needed for limits plugin)
         Some(SubgraphResponseSizeLimit(limit.as_u64().try_into().ok()?))
@@ -232,7 +232,7 @@ impl Config {
             .sources
             .get(source_name)
             .and_then(|s| s.http_max_response_size);
-        let limit = source_limit.or_else(|| self.connector.all.http_max_response_size)?;
+        let limit = source_limit.or(self.connector.all.http_max_response_size)?;
 
         // convert to usize (needed for limits plugin)
         Some(ConnectorResponseSizeLimit(limit.as_u64().try_into().ok()?))
