@@ -1555,7 +1555,7 @@ async fn no_cache_from_request() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut response = response.next_response().await.unwrap();
+    let response = response.next_response().await.unwrap();
 
     // Sanity-check: normal request returns entity data
     insta::assert_json_snapshot!(response, @r#"
@@ -1600,7 +1600,7 @@ async fn no_cache_from_request() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut response = response.next_response().await.unwrap();
+    let response = response.next_response().await.unwrap();
 
     // Entity fields must NOT be null — this was the regression
     insta::assert_json_snapshot!(response, @r#"
