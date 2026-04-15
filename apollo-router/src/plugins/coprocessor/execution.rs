@@ -644,6 +644,10 @@ mod tests {
         let mut mock_execution_service = MockExecutionService::new();
 
         mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
+
+        mock_execution_service
             .expect_call()
             .returning(|req: execution::Request| {
                 // Let's assert that the subgraph request has been transformed as it should have.
@@ -777,7 +781,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_execution_service = MockExecutionService::new();
+        let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -850,6 +858,10 @@ mod tests {
         };
 
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         mock_execution_service
             .expect_call()
@@ -989,6 +1001,10 @@ mod tests {
         let mut mock_execution_service = MockExecutionService::new();
 
         mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
+
+        mock_execution_service
             .expect_call()
             .returning(|req: execution::Request| {
                 Ok(execution::Response::fake_stream_builder()
@@ -1101,6 +1117,11 @@ mod tests {
     // Helper function to create mock execution service
     fn create_mock_execution_service() -> MockExecutionService {
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
+
         mock_execution_service
             .expect_call()
             .returning(|req: execution::Request| {
