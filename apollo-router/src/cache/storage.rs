@@ -88,13 +88,18 @@ where
                     // the error log, connect to redis--maybe it doesn't exist, maybe it's
                     // unreachable, who knows; but, this will prevent future commands from reaching
                     // redis
+                    tracing::error!(
+                        cache = caller,
+                        e,
+                        "terminal failure reached and all commands to Redis will fail",
+                    );
                     None
                 }
             };
 
             // NOTE: this populates the inner client pool, but failure doesn't represent a terminal
             // state unless the router is configred to require connections to start
-            if let Some(storage) = storage.clone()
+            if let Some(storage) = storage.as_ref()
                 && let Err(e) = storage.create_client_pool().await
             {
                 tracing::error!(

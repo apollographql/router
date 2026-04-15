@@ -253,6 +253,11 @@ impl PluginPrivate for EntityCache {
                     }
                     // WARN: this is a terminal error; without a RedisCacheStorage, we won't be
                     // able to connect or reconnect to redis
+                    tracing::error!(
+                        cache = "entity",
+                        e,
+                        "terminal failure reached and all commands to Redis will fail",
+                    );
                     None
                 }
             };
