@@ -713,6 +713,10 @@ impl StaticCostCalculator {
                     .supergraph_schema
                     .output_field_definition(&current_type_name, field_name)
                     .and_then(|fd| {
+                        // Takes the max of all @listSize directives on this field.
+                        // This is an over-approximation. It could be narrowed down to the exact
+                        // subgraph that the entities are originally fetched from. But, that will
+                        // be more complex to implement.
                         fd.list_size_directive_entries()
                             .iter()
                             .filter_map(|e| e.directive.assumed_size)
