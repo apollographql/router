@@ -4,6 +4,6 @@ A new `apollo.router.operations.rhai.duration` histogram metric (unit: `s`, valu
 
 Attributes on each datapoint:
 - `rhai.stage` — the pipeline stage (e.g. `RouterRequest`, `SubgraphResponse`)
-- `rhai.succeeded` — `true` if the callback returned without throwing
+- `rhai.succeeded` — `true` if the callback returned without throwing an error
 
 By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/9072
