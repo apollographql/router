@@ -1,5 +1,6 @@
 mod compose_auth;
 mod compose_basic;
+mod compose_cache_tag;
 mod compose_directive;
 mod compose_directive_sharing;
 mod compose_fed1_subgraphs;
