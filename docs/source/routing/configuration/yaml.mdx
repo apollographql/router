@@ -473,7 +473,7 @@ A path can contain parameters and wildcards:
 
 </Note>
 
-Trailing slashes are normalized automatically. For example, if the configured path is `/graphql`, the router accepts requests to both `/graphql` and `/graphql/`. This applies regardless of whether the configured path itself includes a trailing slash.
+The router normalizes trailing slashes automatically. For example, if you configure the path as `/graphql`, the router accepts requests to both `/graphql` and `/graphql/`. This applies regardless of whether your configured path includes a trailing slash.
 
 #### Introspection
 
