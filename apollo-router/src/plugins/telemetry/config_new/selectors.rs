@@ -123,9 +123,13 @@ pub(crate) enum DurationUnit {
 impl DurationUnit {
     pub(crate) fn to_otel_value(&self, duration: Duration) -> opentelemetry::Value {
         match self {
-            Self::Milliseconds => opentelemetry::Value::I64(duration.as_millis() as i64),
+            Self::Milliseconds => {
+                opentelemetry::Value::I64(duration.as_millis().try_into().unwrap_or(i64::MAX))
+            }
             Self::Seconds => opentelemetry::Value::F64(duration.as_secs_f64()),
-            Self::Nanoseconds => opentelemetry::Value::I64(duration.as_nanos() as i64),
+            Self::Nanoseconds => {
+                opentelemetry::Value::I64(duration.as_nanos().try_into().unwrap_or(i64::MAX))
+            }
         }
     }
 }
