@@ -1,0 +1,25 @@
+---
+source: apollo-router/tests/integration/response_size_limits.rs
+expression: response_json
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "The server returned data in an unexpected format.",
+      "path": [
+        "posts"
+      ],
+      "extensions": {
+        "code": "CONNECTOR_RESPONSE_INVALID",
+        "service": "connectors",
+        "connector": {
+          "coordinate": "connectors:Query.posts[0]"
+        },
+        "http": {
+          "status": 200
+        }
+      }
+    }
+  ]
+}
