@@ -12,6 +12,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 use serde_json_bytes::Value;
 
 use super::CostBySubgraph;
@@ -239,7 +240,7 @@ impl StaticCostCalculator {
         } else if let Some(value) = list_size_from_upstream {
             // Sized field: length defined by @listSize on the parent field
             value
-        } else if field.name == "_entities" {
+        } else if field.name == ENTITIES_QUERY {
             if let Some(hint) = ctx.entity_count_hint {
                 // Use cardinality derived from the FlattenNode path in the query plan.
                 // This is more accurate than the static list_size default for entity fetches.
@@ -701,7 +702,8 @@ impl StaticCostCalculator {
             };
 
             let Some(field_compiler_def) = field_compiler_def else {
-                // Unknown field — stop traversal, return what we have so far.
+                // Unknown field — ensure the cardinality is at least list_size, then stop.
+                cardinality = cardinality.max(self.list_size as i32);
                 break;
             };
 
@@ -768,7 +770,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
 
         // We need to have a field definition for later processing, unless the query is an
         // `_entities` query. If the field should be there and isn't, return now.
-        let is_entities_query = parent_ty == "Query" && field.name == "_entities";
+        let is_entities_query = parent_ty == "Query" && field.name == ENTITIES_QUERY;
         if definition.is_none() && !is_entities_query {
             tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
