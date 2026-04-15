@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
+assertion_line: 832
 expression: report
 ---
 header:
@@ -603,7 +604,7 @@ traces_per_query:
         limits:
           result: COST_OK
           strategy: static_estimated
-          cost_estimated: 230
+          cost_estimated: 320
           cost_actual: 18
           depth: 4
           height: 7
