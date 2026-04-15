@@ -7003,6 +7003,15 @@ expression: "&schema"
           ],
           "uniqueItems": true
         },
+        "cardinality_limit": {
+          "description": "Maximum number of distinct attribute combinations (cardinality) for this instrument.\n\nOverrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.\nIf neither this nor the global limit is set, the OTel SDK default of 2000 applies.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "description": {
           "description": "New description to set to the instrument",
           "type": [
@@ -7117,6 +7126,16 @@ expression: "&schema"
             "type": "number"
           },
           "type": "array"
+        },
+        "cardinality_limit": {
+          "default": null,
+          "description": "Global maximum number of distinct attribute combinations (cardinality) for all\ncustomer-facing metrics.\n\nIndividual views can override this via their own `cardinality_limit`.\nIf not set, the OTel SDK default of 2000 applies.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "resource": {
           "additionalProperties": {
