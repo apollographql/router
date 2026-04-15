@@ -512,16 +512,16 @@ impl StaticCostCalculator {
                 // Check if the inner node is directly an entity fetch (non-empty requires).
                 // If so, supply the cardinality derived from the flatten path so that
                 // _entities is scored with the correct instance count.
-                if let PlanNode::Fetch(fetch_node) = flatten_node.node.as_ref() {
-                    if !fetch_node.requires.is_empty() {
-                        let cardinality = self.estimated_path_cardinality(&flatten_node.path);
-                        return self.estimated_cost_of_operation(
-                            &fetch_node.service_name,
-                            &fetch_node.operation,
-                            variables,
-                            Some(cardinality),
-                        );
-                    }
+                if let PlanNode::Fetch(fetch_node) = flatten_node.node.as_ref()
+                    && !fetch_node.requires.is_empty()
+                {
+                    let cardinality = self.estimated_path_cardinality(&flatten_node.path);
+                    return self.estimated_cost_of_operation(
+                        &fetch_node.service_name,
+                        &fetch_node.operation,
+                        variables,
+                        Some(cardinality),
+                    );
                 }
                 // Non-entity flatten or nested structure: recurse normally.
                 self.score_plan_node(&flatten_node.node, variables)
@@ -567,8 +567,14 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let cost =
-            self.estimated(operation, schema, variables, false, subgraph, entity_count_hint)?;
+        let cost = self.estimated(
+            operation,
+            schema,
+            variables,
+            false,
+            subgraph,
+            entity_count_hint,
+        )?;
         Ok(CostBySubgraph::new(subgraph, cost))
     }
 
@@ -942,7 +948,14 @@ mod tests {
         );
 
         calculator
-            .estimated(&query, &calculator.supergraph_schema, &variables, true, "", None)
+            .estimated(
+                &query,
+                &calculator.supergraph_schema,
+                &variables,
+                true,
+                "",
+                None,
+            )
             .unwrap()
     }
 
@@ -1762,8 +1775,7 @@ mod tests {
         let dc_schema = Arc::new(
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap(),
         );
-        let calc =
-            StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), 10);
+        let calc = StaticCostCalculator::new(dc_schema, Default::default(), Default::default(), 10);
         let path = crate::json_ext::Path::from_slice(&["ships", "@"]);
         assert_eq!(calc.estimated_path_cardinality(&path), 5);
     }
