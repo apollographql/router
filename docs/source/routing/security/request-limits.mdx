@@ -370,10 +370,10 @@ You can set a global default that applies to all subgraphs, and optionally overr
 limits:
   subgraph:
     all:
-      http_max_response_size: 10485760 # 10 MB for all subgraphs
+      http_max_response_size: 10mb # 10 MB for all subgraphs
     subgraphs:
       products:
-        http_max_response_size: 20971520 # 20 MB override for 'products'
+        http_max_response_size: 20mb # 20 MB override for 'products'
 ```
 
 The per-subgraph entry under `subgraphs` takes precedence over `all`. If only `all` is set, it applies to every subgraph. If only a named entry is set, only that subgraph is limited.
@@ -417,10 +417,10 @@ Identify sources by `subgraph_name.source_name` (matching the key format used in
 limits:
   connector:
     all:
-      http_max_response_size: 5242880 # 5 MB for all connector sources
+      http_max_response_size: 5mb # 5 MB for all connector sources
     sources:
       products.rest:
-        http_max_response_size: 10485760 # 10 MB override for 'products.rest'
+        http_max_response_size: 10mb # 10 MB override for 'products.rest'
 ```
 
 The per-source entry under `sources` takes precedence over `all`.
