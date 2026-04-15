@@ -988,7 +988,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -2725,7 +2728,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timeout": {
           "default": null,
@@ -4878,6 +4884,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.operations.subscriptions.terminated.client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Counter of subscriptions terminated"
+        },
         "apollo.router.overhead": {
           "allOf": [
             {
@@ -5114,6 +5128,38 @@ expression: "&schema"
             }
           ],
           "description": "Histogram of client response body size"
+        }
+      },
+      "type": "object"
+    },
+    "ExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "properties": {
+        "client.name": {
+          "default": null,
+          "description": "The client name",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "description": "The reason the subscription terminated",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "subgraph.name": {
+          "default": null,
+          "description": "The subgraph name",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9415,6 +9461,28 @@ expression: "&schema"
         }
       ]
     },
+    "StandardInstrumentExtendedSubscriptionsTerminatedAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedSubscriptionsTerminatedAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardInstrumentExtendedSupergraphAttributesWithSupergraphSelector": {
       "anyOf": [
         {
@@ -10827,7 +10895,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timeout": {
           "default": null,
@@ -12382,6 +12453,11 @@ expression: "&schema"
                     }
                   ],
                   "description": "Include the trace id (if any) with the log event. (default: true)"
+                },
+                "expand_json_string_values": {
+                  "default": false,
+                  "description": "Output string attribute values that contain valid JSON objects or arrays\nas native JSON rather than quoted strings. Useful for log aggregators\n(e.g. Splunk) that can index nested JSON fields. (default: false)",
+                  "type": "boolean"
                 },
                 "span_attributes": {
                   "default": [],
