@@ -911,7 +911,6 @@ fn new_federation_subgraph_schema(
 }
 
 // PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
-#[allow(unused)]
 pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchema, FederationError>
 {
     let mut schema = new_federation_subgraph_schema(Schema::new())?;
