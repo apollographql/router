@@ -249,10 +249,7 @@ impl Variables {
                     }
                 }
             } else {
-                variables.insert(
-                    "representations",
-                    Value::Array(representations),
-                );
+                variables.insert("representations", Value::Array(representations));
             }
             Some(Variables {
                 variables,
@@ -518,10 +515,7 @@ impl FetchNode {
                             }
                         }
                     } else {
-                        match aliased_error_handling(
-                            path,
-                            context_to_path.as_ref(),
-                        ) {
+                        match aliased_error_handling(path, context_to_path.as_ref()) {
                             AliasedErrorHandling::Remap(values_path) => {
                                 errors.push(remap_entity_error(&error, &values_path, path))
                             }
