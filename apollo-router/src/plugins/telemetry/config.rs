@@ -1020,6 +1020,7 @@ mod tests {
             })
         );
         assert_eq!(view.allowed_attribute_keys, None);
+        assert_eq!(view.cardinality_limit, None);
     }
 
     #[test]
@@ -1035,6 +1036,7 @@ mod tests {
                 buckets: vec![1.0, 5.0, 10.0],
             }),
             allowed_attribute_keys: Some(HashSet::from(["key1".to_string()])),
+            cardinality_limit: Some(5000),
         };
 
         let merged = default.merge(user);
@@ -1052,6 +1054,7 @@ mod tests {
             merged.allowed_attribute_keys,
             Some(HashSet::from(["key1".to_string()]))
         );
+        assert_eq!(merged.cardinality_limit, Some(5000));
     }
 
     #[test]
@@ -1066,6 +1069,7 @@ mod tests {
             unit: None,
             aggregation: None,
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1081,6 +1085,7 @@ mod tests {
             "default histogram aggregation should be preserved when user specifies none"
         );
         assert_eq!(merged.allowed_attribute_keys, None);
+        assert_eq!(merged.cardinality_limit, None);
     }
 
     #[test]
@@ -1100,6 +1105,7 @@ mod tests {
                 "http.method".to_string(),
                 "http.status_code".to_string(),
             ])),
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1131,6 +1137,7 @@ mod tests {
             unit: None,
             aggregation: Some(MetricAggregation::Drop),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1191,6 +1198,7 @@ mod tests {
                 buckets: custom_buckets.clone(),
             }),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let meter_provider = MeterProviderBuilder::default()
@@ -1230,6 +1238,7 @@ mod tests {
             unit: None,
             aggregation: None, // No aggregation specified - should inherit defaults
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         // Merge views - user view should inherit default buckets
@@ -1266,6 +1275,7 @@ mod tests {
             unit: None,
             aggregation: Some(MetricAggregation::Drop),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let meter_provider = MeterProviderBuilder::default()
@@ -1305,6 +1315,7 @@ mod tests {
                 buckets: user_buckets.clone(),
             }),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         // Merge views - user aggregation should take precedence
@@ -1326,6 +1337,70 @@ mod tests {
         assert_eq!(
             bounds, user_buckets,
             "user-specified buckets should override default buckets in merged view"
+        );
+    }
+
+    #[test]
+    fn test_metric_view_cardinality_limit_deserialization() {
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "cardinality_limit": 5000
+        });
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.cardinality_limit, Some(5000));
+    }
+
+    #[test]
+    fn test_metrics_common_cardinality_limit_deserialization() {
+        let json_config = json!({
+            "cardinality_limit": 10000
+        });
+        let common: MetricsCommon =
+            serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(common.cardinality_limit, Some(10000));
+    }
+
+    #[test]
+    fn test_merge_cardinality_limit_user_overrides_global() {
+        let mut default =
+            MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        default.cardinality_limit = Some(3000); // simulates global limit
+        let user = MetricView {
+            name: "my.metric".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: None,
+            cardinality_limit: Some(10000),
+        };
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.cardinality_limit,
+            Some(10000),
+            "per-view cardinality limit should override global"
+        );
+    }
+
+    #[test]
+    fn test_merge_cardinality_limit_inherits_global() {
+        let mut default =
+            MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        default.cardinality_limit = Some(5000); // simulates global limit
+        let user = MetricView {
+            name: "my.metric".to_string(),
+            rename: None,
+            description: None,
+            unit: None,
+            aggregation: None,
+            allowed_attribute_keys: None,
+            cardinality_limit: None,
+        };
+        let merged = default.merge(user);
+        assert_eq!(
+            merged.cardinality_limit,
+            Some(5000),
+            "global cardinality limit should be preserved when per-view is not set"
         );
     }
 }
