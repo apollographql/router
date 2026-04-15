@@ -1504,41 +1504,39 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
             cache_keys
-                .into_iter()
+                .iter()
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
     );
 
-    if cache_control.is_some_and(|c| c.is_no_cache()) {
-        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
-        // just performing the query, so there's no benefit to hitting the cache
-        return Ok(ControlFlow::Continue((
-            request,
-            ResponseCacheResults::default(),
-        )));
-    }
+    // When no-cache is set, skip using any cached values: treat every entity as a cache miss
+    // so that all representations are fetched fresh from the subgraph. We still build the
+    // IntermediateResult list (all with cache_entry = None) so that insert_entities_in_result
+    // can properly assemble the response in the correct order.
+    let cache_result: Vec<Option<CacheEntry>> = if cache_control.is_some_and(|c| c.is_no_cache()) {
+        std::iter::repeat_n(None, keys_len).collect()
+    } else {
+        match cache.fetch_multiple(&cache_keys, &name).await {
+            Ok(res) => res
+                .into_iter()
+                .map(|v| match v {
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
+                })
+                .collect(),
+            Err(err) => {
+                if !err.is_row_not_found() {
+                    let span = Span::current();
+                    span.mark_as_error(format!("cannot get cache entry: {err}"));
+                }
 
-    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
-        Ok(res) => res
-            .into_iter()
-            .map(|v| match v {
-                Some(v) if v.control.can_use() => Some(v),
-                _ => None,
-            })
-            .collect(),
-        Err(err) => {
-            if !err.is_row_not_found() {
-                let span = Span::current();
-                span.mark_as_error(format!("cannot get cache entry: {err}"));
+                std::iter::repeat_n(None, keys_len).collect()
             }
-
-            std::iter::repeat_n(None, keys_len).collect()
         }
     };
     let body = request.subgraph_request.body_mut();
