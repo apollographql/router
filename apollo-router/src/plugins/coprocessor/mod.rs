@@ -965,6 +965,22 @@ where
     let duration = start.elapsed();
     record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
+    // let co_processor_result = {
+    //     // Elapsed time is recorded when _timer goes out of scope (i.e., when it gets dropped)
+    //     let _timer = f64_histogram_timer_with_unit!(
+    //         "apollo.router.operations.coprocessor.duration",
+    //         "Time spent waiting for the coprocessor to answer",
+    //         "coprocessor.stage" = PipelineStep::RouterRequest.to_string()
+    //     );
+    //     payload
+    //         .call(http_client, &coprocessor_url, Context::new())
+    //         .await
+    //     // _timer is dropped here — elapsed time is recorded
+    //     // NOTE TO SELF: I could also explicitly drop the timer here
+    //     // like this: drop(_timer)
+    // };
+    // *executed = true;
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
 

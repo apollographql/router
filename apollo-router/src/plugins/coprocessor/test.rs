@@ -3813,6 +3813,27 @@ mod tests {
         mock
     }
 
+    /// Creates a mock HTTP client that sleeps for `delay` before returning an error.
+    /// Useful for testing timeout behavior: wrap the returned mock with
+    /// `tower::timeout::TimeoutLayer` using a shorter deadline to trigger a real
+    /// `tower::timeout` error before the sleep completes.
+    fn create_mock_http_client_with_delay(
+        delay: std::time::Duration,
+    ) -> MockInternalHttpClientService {
+        let mut mock = MockInternalHttpClientService::new();
+        mock.expect_clone()
+            .returning(move || create_mock_http_client_with_delay(delay));
+        mock.expect_call().returning(move |_| {
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Err::<crate::services::http::HttpResponse, tower::BoxError>(
+                    "mock: simulated slow coprocessor".into(),
+                )
+            })
+        });
+        mock
+    }
+
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
         let service = create_subgraph_stage_for_validation_test().as_service(
@@ -4890,6 +4911,158 @@ mod tests {
         .with_metrics()
         .await;
         // Tests for context key deletion functionality
+    }
+
+    // ── Duration histogram tests ────────────────────────────────────────────
+
+    /// `apollo.router.operations.coprocessor.duration` must be recorded when
+    /// the coprocessor call succeeds normally.
+    #[tokio::test]
+    async fn router_request_duration_histogram_recorded_on_success() {
+        // NOTE to self: this is only testing that the histogram is being recorded, which is a good base test
+        async {
+            let router_stage = create_router_stage_for_request_validation_test();
+            let mock_http_client = create_mock_http_client_router_request_valid_response();
+            let mock_router_service = create_mock_router_service();
+
+            let service_stack = router_stage
+                .as_service(
+                    mock_http_client,
+                    mock_router_service.boxed(),
+                    "http://test".to_string(),
+                    Arc::new("".to_string()),
+                    false,
+                )
+                .boxed();
+
+            let request = router::Request::fake_builder().build().unwrap();
+            let _ = service_stack.oneshot(request).await;
+
+            assert_histogram_count!(
+                "apollo.router.operations.coprocessor.duration",
+                1u64,
+                "coprocessor.stage" = "RouterRequest"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `apollo.router.operations.coprocessor.duration` must be recorded even
+    /// when the coprocessor HTTP call exceeds the configured timeout.
+    ///
+    /// The mock sleeps for much longer than the `TimeoutLayer` deadline so the
+    /// timeout always fires first.  The production code records the elapsed
+    /// duration *before* propagating the error, so the histogram must still
+    /// contain one observation.
+    #[tokio::test]
+    async fn router_request_duration_histogram_recorded_on_timeout() {
+        async {
+            // A mock that never returns within a reasonable window (5 s).
+            let slow_mock =
+                create_mock_http_client_with_delay(std::time::Duration::from_secs_f64(5.0));
+
+            // Wrap with a very short timeout so it always fires before the sleep.
+            let timeout_client = tower::ServiceBuilder::new()
+                .layer(tower::timeout::TimeoutLayer::new(
+                    std::time::Duration::from_secs_f64(1.0),
+                ))
+                .service(slow_mock);
+
+            let router_stage = create_router_stage_for_request_validation_test();
+            let mock_router_service = create_mock_router_service();
+
+            let service_stack = router_stage
+                .as_service(
+                    timeout_client,
+                    mock_router_service.boxed(),
+                    "http://test".to_string(),
+                    Arc::new("".to_string()),
+                    false,
+                )
+                .boxed();
+
+            let request = router::Request::fake_builder().build().unwrap();
+            // The call is expected to fail due to the timeout.
+            let coprocessor_result = service_stack.oneshot(request).await;
+            // I added this:
+            tracing::trace!("coprocessor_result: {:?}, msg: {}", coprocessor_result, "coprocessor returned");
+
+            // Despite the timeout error the histogram must have been recorded
+            // (duration is captured before the result is propagated).
+            assert_histogram_count!(
+                "apollo.router.operations.coprocessor.duration",
+                1u64,
+                "coprocessor.stage" = "RouterRequest"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `apollo.router.operations.coprocessor.duration` must be recorded for
+    /// the subgraph request stage when the call succeeds normally.
+    #[tokio::test]
+    async fn subgraph_request_duration_histogram_recorded_on_success() {
+        async {
+            let stage = create_subgraph_stage_for_request_validation_test();
+
+            let service = stage.as_service(
+                create_mock_http_client_subgraph_request_valid_response(),
+                create_mock_subgraph_service().boxed(),
+                "http://test".to_string(),
+                "my_service".to_string(),
+                false,
+            );
+
+            let request = subgraph::Request::fake_builder().build();
+            let _ = service.oneshot(request).await;
+
+            assert_histogram_count!(
+                "apollo.router.operations.coprocessor.duration",
+                1u64,
+                "coprocessor.stage" = "SubgraphRequest"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// `apollo.router.operations.coprocessor.duration` must be recorded for
+    /// the subgraph request stage even when the coprocessor times out.
+    #[tokio::test]
+    async fn subgraph_request_duration_histogram_recorded_on_timeout() {
+        async {
+            let slow_mock =
+                create_mock_http_client_with_delay(std::time::Duration::from_secs(10));
+
+            let timeout_client = tower::ServiceBuilder::new()
+                .layer(tower::timeout::TimeoutLayer::new(
+                    std::time::Duration::from_millis(1),
+                ))
+                .service(slow_mock);
+
+            let stage = create_subgraph_stage_for_request_validation_test();
+
+            let service = stage.as_service(
+                timeout_client,
+                create_mock_subgraph_service().boxed(),
+                "http://test".to_string(),
+                "my_service".to_string(),
+                false,
+            );
+
+            let request = subgraph::Request::fake_builder().build();
+            let _ = service.oneshot(request).await;
+
+            assert_histogram_count!(
+                "apollo.router.operations.coprocessor.duration",
+                1u64,
+                "coprocessor.stage" = "SubgraphRequest"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[cfg(unix)]
