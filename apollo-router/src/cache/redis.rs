@@ -627,7 +627,7 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                let _guard = if let Ok(lock) = self.pool_recreation_lock.try_lock() {
+                let guard = if let Ok(lock) = self.pool_recreation_lock.clone().try_lock_owned() {
                     lock
                 } else {
                     let error = RedisError::new(
@@ -648,6 +648,8 @@ impl RedisCacheStorage {
 
                 let cloned_self = self.clone();
                 tokio::task::spawn(async move {
+                    // make sure we only spawn one background task at a time for pool recreation
+                    let _guard = guard;
                     // this will attempt to recreate the client pool on the next command, so we
                     // don't do any special retry logic here; we just record failures
                     if let Err(e) = cloned_self.create_client_pool().await {
@@ -1523,6 +1525,38 @@ mod test {
             }
             wait_for_recreation(&storage).await;
             assert!(storage.client().await.is_ok());
+            Ok(())
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        #[rstest::rstest]
+        async fn recreation_lock_held_during_spawned_task(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let _guard = lock_for_static().lock().await;
+            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            storage.create_client_pool().await?;
+            storage.inner.write().take();
+
+            let _ = storage.client().await;
+            assert!(
+                storage
+                    .pool_recreation_lock
+                    .clone()
+                    .try_lock_owned()
+                    .is_err(),
+                "lock should be held by the spawned recreation task"
+            );
+
+            wait_for_recreation(&storage).await;
+            assert!(
+                storage
+                    .pool_recreation_lock
+                    .clone()
+                    .try_lock_owned()
+                    .is_ok(),
+                "lock should be released after recreation completes"
+            );
             Ok(())
         }
 

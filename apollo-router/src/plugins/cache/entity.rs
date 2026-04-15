@@ -295,7 +295,7 @@ impl PluginPrivate for EntityCache {
                 if let Some(storage) = storage {
                     // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
                     // for wrapped client
-                    if let Err(e) = storage.clone().create_client_pool().await {
+                    if let Err(e) = storage.create_client_pool().await {
                         tracing::error!(
                             cache = "entity",
                             e,
