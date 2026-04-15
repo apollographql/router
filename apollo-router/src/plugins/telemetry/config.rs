@@ -117,6 +117,12 @@ pub(crate) struct MetricsCommon {
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
+    /// Global maximum number of distinct attribute combinations (cardinality) for all
+    /// customer-facing metrics.
+    ///
+    /// Individual views can override this via their own `cardinality_limit`.
+    /// If not set, the OTel SDK default of 2000 applies.
+    pub(crate) cardinality_limit: Option<u32>,
 }
 
 impl Default for MetricsCommon {
@@ -129,6 +135,7 @@ impl Default for MetricsCommon {
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
+            cardinality_limit: None,
         }
     }
 }
@@ -156,6 +163,11 @@ pub(crate) struct MetricView {
     /// dropped. If the set is empty, all attributes will be dropped, if `None` all
     /// attributes will be kept.
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
+    /// Maximum number of distinct attribute combinations (cardinality) for this instrument.
+    ///
+    /// Overrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.
+    /// If neither this nor the global limit is set, the OTel SDK default of 2000 applies.
+    pub(crate) cardinality_limit: Option<u32>,
 }
 
 impl MetricView {
@@ -170,6 +182,7 @@ impl MetricView {
                 buckets: boundaries,
             }),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         }
     }
 
@@ -184,6 +197,7 @@ impl MetricView {
             unit: user.unit.or(self.unit),
             aggregation: user.aggregation.or(self.aggregation),
             allowed_attribute_keys: user.allowed_attribute_keys.or(self.allowed_attribute_keys),
+            cardinality_limit: user.cardinality_limit.or(self.cardinality_limit),
         }
     }
 
@@ -212,6 +226,9 @@ impl MetricView {
         }
         if let Some(keys) = self.allowed_attribute_keys {
             stream = stream.with_allowed_attribute_keys(keys.into_iter().map(Key::new));
+        }
+        if let Some(limit) = self.cardinality_limit {
+            stream = stream.with_cardinality_limit(limit as usize);
         }
         stream.build().expect("Failed to build metric view")
     }
