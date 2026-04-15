@@ -46,7 +46,6 @@ use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
-use crate::schema::position::HasType;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -1067,34 +1066,8 @@ impl FederationSchema {
         }
 
         // Add `Query._service` (if not already present)
-        // PORT_NOTE: JS `addFederationOperations` replaces an existing `_service` field instead of
-        //            mutating its type when the return type should be non-null `_Service!`.
         if service_field_pos.try_get(self.schema()).is_none() {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
-        } else if !service_field_pos.get_type(self)?.is_non_null() {
-            service_field_pos.remove(self)?;
-            service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
-        }
-
-        // Fed 1 parse often strips federation fields from `Query` before injection; any empty root
-        // query object is invalid GraphQL — recover with `_service` if still missing.
-        let query_object_pos = ObjectTypeDefinitionPosition {
-            type_name: query_root_type_name,
-        };
-        if let Some(query_obj) = query_object_pos.try_get(self.schema())
-            && query_obj.fields.is_empty()
-        {
-            trace!(
-                is_fed_1_subgraph = is_fed_1_subgraph,
-                "add_federation_operations: recovering empty root query type"
-            );
-            let recovery_pos = ObjectFieldDefinitionPosition {
-                type_name: query_object_pos.type_name.clone(),
-                field_name: FEDERATION_SERVICE_FIELD_NAME,
-            };
-            if recovery_pos.try_get(self.schema()).is_none() {
-                recovery_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
-            }
         }
 
         Ok(())
