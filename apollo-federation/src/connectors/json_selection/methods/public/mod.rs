@@ -59,6 +59,8 @@ mod keys_to_camel_case_deep;
 pub(crate) use keys_to_camel_case_deep::KeysToCamelCaseDeepMethod;
 mod contains;
 pub(crate) use contains::ContainsMethod;
+mod split;
+pub(crate) use split::SplitMethod;
 mod arithmetic;
 pub(crate) use arithmetic::AddMethod;
 pub(crate) use arithmetic::DivMethod;
