@@ -989,7 +989,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -2726,7 +2729,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timeout": {
           "default": null,
@@ -10895,7 +10901,10 @@ expression: "&schema"
             "secs": 15
           },
           "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timeout": {
           "default": null,
