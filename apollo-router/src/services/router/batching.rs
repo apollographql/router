@@ -208,7 +208,7 @@ where
             bytes.put_u8(b'[');
             bytes.extend_from_slice(&router::body::into_bytes(body).await?);
             for result in results_it {
-                bytes.put(&b", "[..]);
+                bytes.put_u8(b',');
                 bytes.extend_from_slice(
                     &router::body::into_bytes(result.response.into_body()).await?,
                 );
