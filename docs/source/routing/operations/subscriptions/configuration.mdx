@@ -375,7 +375,7 @@ subscription:
 
 <Caution>
 
-With `ignore_auth_context: true`, a user may receive subscription events from a connection that was originally opened by a different user.  Only enable this option when your subgraph's subscription data is truly non-personalized (e.g., product price updates, stock price feeds).
+With `ignore_auth_context: true`, a user may receive subscription events from a connection that was originally opened by a different user.  Only enable this option when your subgraph's subscription data is truly non-personalized (e.g., product price updates, stock price feeds).  If your subgraph later adds user-personalized data to this subscription type, you must update this configuration at the same time.
 
 </Caution>
 
