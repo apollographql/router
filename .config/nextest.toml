@@ -163,8 +163,6 @@ or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::i
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_redacts_all_subgraphs_implicit_redact) )
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_returns_valid_response) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::instruments::tests::test_instruments) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::router_overhead::tracker::tests::test_sequential_subgraph_requests) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::tests::it_test_prometheus_metrics) )
 or ( binary_id(=apollo-router) & test(=protocols::websocket::tests::test_ws_connection_new_proto_with_heartbeat) )
 or ( binary_id(=apollo-router) & test(=router::tests::basic_event_stream_test) )
 or ( binary_id(=apollo-router) & test(=router::tests::schema_update_test) )
