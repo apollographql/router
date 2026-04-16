@@ -14,10 +14,9 @@ subscription:
   deduplication:
     all:
       enabled: true
-      ignore_auth_context: true
     subgraphs:
-      article:
-        enabled: false
+      stocks:
+        ignore_auth_context: true
 ```
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9078
