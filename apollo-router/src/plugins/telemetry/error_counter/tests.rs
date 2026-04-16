@@ -342,6 +342,49 @@ async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
 }
 
 #[tokio::test]
+async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+    let config = ErrorsConfiguration {
+        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        ..Default::default()
+    };
+
+    let context = Context::default();
+    let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+    let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+    let _ = context.insert(OPERATION_KIND, "query".to_string());
+    let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+    let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+    let error_id = Uuid::new_v4();
+    count_subgraph_errors(
+        SubgraphResponse::fake_builder()
+            .context(context)
+            .status_code(StatusCode::BAD_REQUEST)
+            .errors(vec![
+                graphql::Error::builder()
+                    .message("subgraph went boom")
+                    .extension_code("SUBGRAPH_HTTP_ERROR")
+                    .apollo_id(error_id)
+                    .build(),
+            ])
+            .build(),
+        &config,
+    )
+    .await;
+
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("graphql.error.extensions.code"),
+        "expected a span event carrying `graphql.error.extensions.code`"
+    );
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("SUBGRAPH_HTTP_ERROR"),
+        "expected the extension code on the emitted event"
+    );
+}
+
+#[tokio::test]
 async fn test_count_execution_errors() {
     async {
         let config = ErrorsConfiguration {
