@@ -16,6 +16,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ComponentOrigin;
@@ -29,6 +30,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
+use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::HasLocations;
@@ -2305,7 +2307,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             Name,
             IndexMap<Vec<Node<Argument>>, IndexSet<Name>>,
         > = IndexMap::default();
-        let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
+        // JS PORT NOTE: This was a Set in JS. We are using Vec instead of IndexSet as Hash trait is not dyn compatible
+        let mut links_to_persist: Vec<&dyn SpecDefinition> = Default::default();
 
         for (idx, source) in sources.iter() {
             let Some(source) = source else {
@@ -2334,8 +2337,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     {
                         // Persist link when the spec uses @join__directive and the feature
                         // identity is one of the known join-directive feature definitions.
-                        if SPEC_REGISTRY.get_definition(&link.url).is_some() {
-                            links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
+                        if let Some(definition) = SPEC_REGISTRY.get_definition(&link.url) {
+                            links_to_persist.push(*definition);
                         }
                         Some(directive.name.clone())
                     } else {
@@ -2397,31 +2400,57 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // change the output supergraph schema. Here, when we encounter a link directive, we
         // preserve the version the subgraph used in a `@join__directive` so the query planner can
         // extract the subgraph schemas with correct links.
-        let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
-            HashMap::new();
-        for (url, link_directive) in links_to_persist {
-            if let Some((existing_url, existing_directive)) =
-                latest_or_highest_link_by_identity.get_mut(&url.identity)
-            {
-                if url.version > existing_url.version {
-                    *existing_url = url;
-                    *existing_directive = link_directive;
-                }
-            } else {
-                latest_or_highest_link_by_identity
-                    .insert(url.identity.clone(), (url, link_directive));
-            }
-        }
+        let latest_or_highest_link_by_identity: IndexMap<Identity, &dyn SpecDefinition> =
+            links_to_persist
+                .iter()
+                .fold(IndexMap::default(), |mut acc, spec_definition| {
+                    // auto upgrade connectors spec to latest non_preview
+                    //
+                    // PORT NOTE: JavaScript logic auto upgrade logic was generic allowing any spec to be auto upgraded,
+                    //   keeping it simple for now as auto-upgrade logic is connectors only
+                    let latest_spec: &dyn SpecDefinition = if *spec_definition.identity()
+                        == Identity::connect_identity()
+                        && CONNECT_VERSIONS.latest_non_preview().version()
+                            > spec_definition.version()
+                    {
+                        CONNECT_VERSIONS.latest_non_preview()
+                    } else {
+                        *spec_definition
+                    };
+
+                    acc.entry(latest_spec.identity().clone())
+                        .and_modify(|existing| {
+                            if existing.version() < latest_spec.version() {
+                                *existing = latest_spec
+                            }
+                        })
+                        .or_insert(latest_spec);
+                    acc
+                });
 
         let dest: DirectiveTargetPosition = dest.clone().try_into()?;
-        for (_, directive) in latest_or_highest_link_by_identity.into_values() {
-            // We insert the directive as it was in the subgraph, but with the name of `@link` in
-            // the supergraph, in case it was renamed in the subgraph.
+        for spec in latest_or_highest_link_by_identity.into_values() {
+            // we need to manually apply `@link` for the target spec
+            // we cannot use `apply_feature_to_schema` as @connect spec defines subgraph specification
+            // we use the same link import in the supergraph but we don't bring in any of the types
+            let mut arguments = vec![];
+            arguments.push(Node::new(Argument {
+                name: name!("url"),
+                value: Node::new(Value::String(spec.to_string())),
+            }));
+            if let Some(purpose) = spec.purpose() {
+                arguments.push(Node::new(Argument {
+                    name: name!("for"),
+                    value: Node::new(Value::Enum(Name::new_unchecked(
+                        purpose.to_string().as_str(),
+                    ))),
+                }));
+            }
             dest.insert_directive(
                 &mut self.merged,
                 Directive {
                     name: link_directive_name.clone(),
-                    arguments: directive.arguments,
+                    arguments,
                 },
             )?;
         }
