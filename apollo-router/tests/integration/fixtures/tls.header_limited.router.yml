@@ -1,5 +1,13 @@
 supergraph:
   listen: 127.0.0.1:0
+  # Shorten the per-connection drain timeout so `assert_shutdown` (3 s)
+  # cannot race against the default 60 s. When a hyper HTTP/2 client
+  # keeps its pooled TCP connection open after receiving a 431 response
+  # (which the `test_http2_max_header_list_size_*` tests trigger on
+  # purpose), the router's shutdown path waits up to
+  # `connection_shutdown_timeout` for the connection to actually close.
+  # See `handle_connection!` in src/axum_factory/listeners.rs.
+  connection_shutdown_timeout: 1s
 
 limits:
   http1_max_request_headers: 100
