@@ -815,7 +815,7 @@ pub(crate) async fn call_single_http(
         .operation_name
         .as_deref()
         .unwrap_or_default()
-        .to_owned();
+        .clone();
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
