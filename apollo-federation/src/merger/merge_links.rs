@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -54,10 +53,10 @@ impl Merger {
         trace!("Collecting core directives used in subgraphs");
         // Groups directives by their feature and major version (we use negative numbers for
         // pre-1.0 version numbers on the minor, since all minors are incompatible).
-        let mut directives_per_feature_and_version: HashMap<
+        let mut directives_per_feature_and_version: IndexMap<
             String,
-            HashMap<i32, CoreDirectiveInSubgraphs>,
-        > = HashMap::new();
+            IndexMap<i32, CoreDirectiveInSubgraphs>,
+        > = IndexMap::default();
 
         for subgraph in &self.subgraphs {
             let Some(features) = subgraph.schema().metadata() else {
@@ -149,8 +148,8 @@ impl Merger {
         &mut self,
         directives_merge_info: &[CoreDirectiveInSubgraphs],
     ) -> Result<(), FederationError> {
-        let mut supergraph_info_by_identity: HashMap<Identity, Vec<CoreDirectiveInSupergraph>> =
-            HashMap::new();
+        let mut supergraph_info_by_identity: IndexMap<Identity, Vec<CoreDirectiveInSupergraph>> =
+            IndexMap::default();
 
         trace!("Determining supergraph names for directives used in subgraphs");
         for subgraph_core_directive in directives_merge_info {

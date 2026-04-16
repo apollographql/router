@@ -33,7 +33,6 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::buffer::Buffer;
 use tracing::Instrument;
 use tracing::instrument;
 
@@ -57,6 +56,8 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
+use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -1129,7 +1130,10 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<
-        HashMap<String, Buffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>>,
+        HashMap<
+            String,
+            UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>,
+        >,
     >,
 }
 
@@ -1152,12 +1156,14 @@ impl SubgraphServiceFactory {
                 ))
                 .service(maker.make())
                 .boxed();
-            let service = ServiceBuilder::new().buffer(DEFAULT_BUFFER_SIZE).service(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
-            );
+            let service = ServiceBuilder::new()
+                .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
+                .service(
+                    plugins
+                        .iter()
+                        .rev()
+                        .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
+                );
             map.insert(name, service);
         }
 
@@ -1227,6 +1233,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::subscription::CallbackMode;
     use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
@@ -1820,6 +1827,64 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// WebSocket server that sends one event then completes the subscription,
+    /// causing the subgraph to naturally close the stream.
+    async fn emulate_websocket_server_that_completes(listener: TcpListener) {
+        async fn ws_handler(
+            ws: WebSocketUpgrade,
+            ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
+                let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
+
+                socket
+                    .send(Message::text(
+                        serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+                let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
+                    assert_eq!(
+                        payload,
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build()
+                    );
+                    id
+                } else {
+                    panic!("subscribe message should be sent");
+                };
+
+                socket
+                    .send(Message::text(
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+
+                socket
+                    .send(Message::text(
+                        serde_json::to_string(&ServerMessage::Complete { id: client_id }).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+            });
+
+            Ok(res)
+        }
+
+        let app = Router::new().route("/ws", get(ws_handler));
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
         HeaderValue::from_static("application/json;callbackSpec=1.0");
 
@@ -2250,45 +2315,128 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_websocket_with_error() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(emulate_incorrect_websocket_server(listener));
-        let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "test",
-                true,
-                HttpClientServiceFactory::from_config(
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            tokio::task::spawn(emulate_incorrect_websocket_server(listener));
+            let subgraph_service = with_subscription_layer(
+                SubgraphService::new(
                     "test",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                ),
-            )
-            .expect("can create a SubgraphService"),
-        );
-        let (tx, _rx) = mpsc::channel(2);
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+            );
+            let (tx, _rx) = mpsc::channel(2);
 
-        let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
-        let err = subgraph_service
-            .oneshot(
-                SubgraphRequest::builder()
-                    .supergraph_request(supergraph_request(
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .subgraph_request(subgraph_http_request(
-                        url,
-                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
-                    ))
-                    .operation_kind(OperationKind::Subscription)
-                    .subscription_stream(tx)
-                    .subgraph_name(String::from("test"))
-                    .context(Context::new())
-                    .build(),
-            )
-            .await
-            .unwrap_err();
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+            let err = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap_err();
 
-        let err_str = err.to_string();
-        assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
+            let err_str = err.to_string();
+            assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.rejected",
+                1,
+                "reason" = "subgraph",
+                "subgraph.name" = "test"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_websocket_ended_increments_counter() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_that_completes(listener));
+            let subgraph_service = with_subscription_layer(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+            );
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+            let message = gql_stream.next().await.unwrap();
+            assert_eq!(
+                message,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // Drain remaining messages until the stream ends (server sent Complete)
+            while gql_stream.next().await.is_some() {}
+
+            // The ended counter is incremented in a spawned task after gql_stream
+            // completes forwarding; yield briefly to let it run.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

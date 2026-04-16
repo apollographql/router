@@ -9,6 +9,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
@@ -1422,18 +1423,15 @@ pub(crate) trait SchemaElement {
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let extensions = self.extensions();
-        // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // Note: No defined ordering between origins.
-        let first_extension = extensions.first();
-        if let Some(first_extension) = first_extension {
-            // If there is an extension, use the first extension.
-            ComponentOrigin::Extension((*first_extension).clone())
-        } else {
-            // Use the existing definition if exists, or maybe a new definition if no definition
-            // nor extensions exist.
-            ComponentOrigin::Definition
+        let (has_definition, extensions) = self.definition_and_extensions();
+        // Use extension origin only when extensions exist but no definition does
+        // (i.e., only extension elements are populated). Otherwise, use definition.
+        // For more details, see the comments in the `add_to_schema` method.
+        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
+        if !has_definition && let Some(first_extension) = extensions.first() {
+            return ComponentOrigin::Extension((*first_extension).clone());
         }
+        ComponentOrigin::Definition
     }
 }
 
@@ -1446,5 +1444,15 @@ impl SchemaElement for SchemaDefinition {
 impl SchemaElement for ExtendedType {
     fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
         self.iter_origins()
+    }
+}
+
+pub(crate) fn same_type(t1: &Type, t2: &Type) -> bool {
+    match (t1, t2) {
+        (Type::Named(n1), Type::Named(n2)) => n1 == n2,
+        (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
+        (Type::List(inner1), Type::List(inner2)) => same_type(inner1, inner2),
+        (Type::NonNullList(inner1), Type::NonNullList(inner2)) => same_type(inner1, inner2),
+        _ => false,
     }
 }

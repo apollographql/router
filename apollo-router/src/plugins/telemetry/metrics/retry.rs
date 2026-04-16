@@ -13,7 +13,7 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use rand::Rng;
+use rand::RngExt as _;
 
 const DEFAULT_MAX_RETRIES: usize = 3;
 const BASE_BACKOFF: Duration = Duration::from_millis(100);

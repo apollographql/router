@@ -31,6 +31,7 @@ use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
 use tokio::task::block_in_place;
+#[cfg(not(test))]
 use tokio::task::spawn_blocking;
 use tracing_subscriber::Layer;
 
@@ -247,14 +248,31 @@ impl Activation {
 /// 2. **If preparation fails**: Drops the new providers that were never activated
 impl Drop for Activation {
     fn drop(&mut self) {
-        // Drop all meter providers in blocking tasks to avoid runtime deadlocks
-        for meter_provider in std::mem::take(&mut self.new_meter_providers).into_values() {
-            spawn_blocking(move || drop(meter_provider));
+        let meter_providers = std::mem::take(&mut self.new_meter_providers);
+        let tracer_provider = self.new_trace_provider.take();
+
+        // In tests, drop providers synchronously via block_in_place. This avoids a race
+        // condition between spawn_blocking and Runtime::drop: when the tokio test runtime
+        // shuts down, it cancels async tasks (including PeriodicReader background tasks)
+        // and then waits indefinitely for blocking tasks. A race in
+        // futures_channel::mpsc::Receiver::drop can cause the PeriodicReader's shutdown
+        // message to be lost, leaving the blocking task's futures_executor::block_on call
+        // stuck forever. By using block_in_place, we shut down providers while the runtime
+        // is still fully alive, so background tasks process shutdown messages normally.
+        #[cfg(test)]
+        {
+            block_in_place(|| {
+                drop(meter_providers);
+                drop(tracer_provider);
+            });
         }
 
-        // Drop tracer provider in blocking task if present
-        if let Some(tracer_provider) = self.new_trace_provider.take() {
-            spawn_blocking(move || drop(tracer_provider));
+        #[cfg(not(test))]
+        {
+            spawn_blocking(|| {
+                drop(meter_providers);
+                drop(tracer_provider);
+            });
         }
     }
 }

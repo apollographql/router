@@ -229,6 +229,8 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::KeyValue;
+
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
@@ -325,8 +327,20 @@ mod tests {
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
-            // Pause to ensure that queue length is zero & metrics have been exported
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // Poll until command queue length is zero (fixed sleeps are flaky under CI load).
+            let queue_attrs = &[KeyValue::new("kind", "test")];
+            for _ in 0..50 {
+                if crate::metrics::collect_metrics().assert(
+                    "apollo.router.cache.redis.command_queue_length",
+                    MetricType::Gauge,
+                    0.0,
+                    false,
+                    queue_attrs,
+                ) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
 
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so

@@ -54,4 +54,4 @@ jobs:
           echo "Documentation instructions copied to .github/instructions/docs.instructions.md"
 
       - name: Install dev environment
-        uses: jdx/mise-action@v3
+        uses: jdx/mise-action@v4

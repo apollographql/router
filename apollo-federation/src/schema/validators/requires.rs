@@ -2,7 +2,6 @@ use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::executable::Field;
 use apollo_compiler::validation::DiagnosticList;
-use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::error::FederationError;
@@ -51,23 +50,12 @@ pub(crate) fn validate_requires_directives(
                 );
                 match requires.parse_fields(schema.schema()) {
                     Ok(fields) => {
-                        let existing_error_count = errors.errors.len();
                         for rule in fieldset_rules.iter() {
                             rule.visit(requires.target.type_name(), &fields, &requires, errors);
                         }
-
-                        // We apply federation-specific validation rules without validating first to maintain compatibility with existing messaging,
-                        // but if we get to this point without errors, we want to make sure it's still a valid selection.
-                        let did_not_find_errors = existing_error_count == errors.errors.len();
-                        if did_not_find_errors
-                            && let Err(validation_error) =
-                                fields.validate(Valid::assume_valid_ref(schema.schema()))
-                        {
-                            errors.push(invalid_fields_error_from_diagnostics(
-                                &requires,
-                                validation_error,
-                            ));
-                        }
+                        // Note: we intentionally do NOT run `fields.validate()` against the
+                        // subgraph schema here. Full validation is performed post-merge against
+                        // the supergraph schema in `validate_merged_schema`.
                     }
                     Err(e) => {
                         errors.push(invalid_fields_error_from_diagnostics(&requires, e.errors))

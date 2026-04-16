@@ -74,7 +74,7 @@ impl Subgraph {
             .get_all(&default_link_name);
 
         for directive in link_directives {
-            let link_directive = Link::from_directive_application(directive)?;
+            let link_directive = Link::from_directive_application(directive, &schema)?;
             if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
                     let msg = "invalid graphql schema - multiple @link imports for the federation specification are not supported";
@@ -443,9 +443,8 @@ impl SubgraphError {
 
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let subgraph = &self.subgraph;
         for (code, message) in self.format_errors() {
-            writeln!(f, "{code} [{subgraph}] {message}")?;
+            writeln!(f, "{code} {message}")?;
         }
         Ok(())
     }
