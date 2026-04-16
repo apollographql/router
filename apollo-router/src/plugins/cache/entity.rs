@@ -230,7 +230,7 @@ impl PluginPrivate for EntityCache {
                 Ok(storage) => {
                     // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
                     // created with create_client_pool()
-                    if let Err(e) = storage.clone().create_client_pool().await {
+                    if let Err(e) = storage.create_client_pool().await {
                         tracing::error!(
                             cache = "entity",
                             e,
