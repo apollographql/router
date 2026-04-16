@@ -180,7 +180,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let service_name = (*self.service).to_owned();
 
         let client_factory = self.client_factory.clone();
@@ -191,13 +191,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
             // It will normally not be super expensive? but it still does not seem great or
             // necessary.
-
-            let SubgraphRequest {
-                subgraph_request,
-                context,
-                ..
-            } = request.clone();
-            let body = subgraph_request.into_body();
+            let body = std::mem::take(request.subgraph_request.body_mut());
+            let context = request.context.clone();
 
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
@@ -216,27 +211,19 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // Else, if APQ is enabled,
             // Calculate the query hash and try the request with
             // a persistedQuery instead of the whole query.
-            let graphql::Request {
-                query,
-                operation_name,
-                variables,
-                extensions,
-            } = body.clone();
-
-            let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
-
+            let hash_value = apq::calculate_hash_for_query(body.query.as_deref().unwrap_or_default());
             let persisted_query = serde_json_bytes::json!({
                 HASH_VERSION_KEY: HASH_VERSION_VALUE,
                 HASH_KEY: hash_value
             });
 
-            let mut extensions_with_apq = extensions.clone();
+            let mut extensions_with_apq = body.extensions.clone();
             extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
 
             let mut apq_body = graphql::Request {
                 query: None,
-                operation_name,
-                variables,
+                operation_name: body.operation_name.clone(),
+                variables: body.variables.clone(),
                 extensions: extensions_with_apq,
             };
 
@@ -267,7 +254,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     .await
                 }
                 APQError::PersistedQueryNotFound => {
-                    apq_body.query = query;
+                    apq_body.query = body.query;
                     call_http(
                         request,
                         apq_body,
@@ -797,12 +784,14 @@ async fn call_http(
 
 /// call_single_http makes http calls with modified graphql::Request (body)
 pub(crate) async fn call_single_http(
-    request: SubgraphRequest,
-    body: graphql::Request,
+    mut request: SubgraphRequest,
+    mut body: graphql::Request,
     context: Context,
     client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
+    // Swap the body back into the request so that telemetry see the body from request.
+    std::mem::swap(request.subgraph_request.body_mut(), &mut body);
     let subgraph_request_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
@@ -813,6 +802,8 @@ pub(crate) async fn call_single_http(
             None
         }
     });
+    // Swap back
+    std::mem::swap(request.subgraph_request.body_mut(), &mut body);
 
     let SubgraphRequest {
         subgraph_request,
@@ -820,11 +811,11 @@ pub(crate) async fn call_single_http(
         ..
     } = request;
 
-    let operation_name = subgraph_request
-        .body()
+    let operation_name = body
         .operation_name
-        .clone()
-        .unwrap_or_default();
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
 
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
