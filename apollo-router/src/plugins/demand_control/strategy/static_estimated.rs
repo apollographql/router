@@ -26,35 +26,34 @@ impl StaticEstimated {
 
 impl StrategyImpl for StaticEstimated {
     fn on_execution_request(&self, request: &execution::Request) -> Result<(), DemandControlError> {
-        self.cost_calculator
-            .planned(
-                &request.query_plan,
-                &request.supergraph_request.body().variables,
-            )
-            .and_then(|cost_by_subgraph| {
-                let cost = cost_by_subgraph.total();
-                request
-                    .context
-                    .insert_cost_strategy("static_estimated".to_string())?;
-                request.context.insert_estimated_cost(cost)?;
-                request
-                    .context
-                    .insert_estimated_cost_by_subgraph(cost_by_subgraph)?;
+        let variables = &request.supergraph_request.body().variables;
+        let plan_result = self
+            .cost_calculator
+            .planned(&request.query_plan, variables)?;
+        let by_subgraph = plan_result.by_subgraph();
+        let cost = by_subgraph.total();
 
-                if cost > self.max {
-                    let error = DemandControlError::EstimatedCostTooExpensive {
-                        estimated_cost: cost,
-                        max_cost: self.max,
-                    };
-                    request
-                        .context
-                        .insert_cost_result(error.code().to_string())?;
-                    Err(error)
-                } else {
-                    request.context.insert_cost_result("COST_OK".to_string())?;
-                    Ok(())
-                }
-            })
+        request
+            .context
+            .insert_cost_strategy("static_estimated".to_string())?;
+        request.context.insert_estimated_cost(cost)?;
+        request
+            .context
+            .insert_estimated_cost_by_subgraph(by_subgraph)?;
+
+        if cost > self.max {
+            let error = DemandControlError::EstimatedCostTooExpensive {
+                estimated_cost: cost,
+                max_cost: self.max,
+            };
+            request
+                .context
+                .insert_cost_result(error.code().to_string())?;
+            Err(error)
+        } else {
+            request.context.insert_cost_result("COST_OK".to_string())?;
+            Ok(())
+        }
     }
 
     fn on_subgraph_request(&self, request: &subgraph::Request) -> Result<(), DemandControlError> {

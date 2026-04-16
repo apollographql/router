@@ -15,8 +15,9 @@ use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 use serde_json_bytes::Value;
 
-use super::CostBySubgraph;
 use super::DemandControlError;
+use super::FetchCostEntry;
+use super::PlanCostResult;
 use super::directives::IncludeDirective;
 use super::directives::SkipDirective;
 use super::schema::DemandControlledSchema;
@@ -26,9 +27,7 @@ use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
-use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
-use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
 use crate::spec::TYPENAME;
 
@@ -501,14 +500,18 @@ impl StaticCostCalculator {
         false
     }
 
-    fn score_plan_node(
+    fn collect_plan_costs<'a>(
         &self,
-        plan_node: &PlanNode,
+        plan_node: &'a PlanNode,
         variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
+        entries: &mut Vec<FetchCostEntry<'a>>,
+    ) -> Result<(), DemandControlError> {
         match plan_node {
-            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
-            PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
+            PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                for node in nodes {
+                    self.collect_plan_costs(node, variables, entries)?;
+                }
+            }
             PlanNode::Flatten(flatten_node) => {
                 // Check if the inner node is directly an entity fetch (non-empty requires).
                 // If so, supply the cardinality derived from the flatten path so that
@@ -517,46 +520,87 @@ impl StaticCostCalculator {
                     && !fetch_node.requires.is_empty()
                 {
                     let cardinality = self.estimated_path_cardinality(&flatten_node.path);
-                    return self.estimated_cost_of_operation(
+                    let cost = self.compute_fetch_cost(
                         &fetch_node.service_name,
                         &fetch_node.operation,
                         variables,
                         Some(cardinality),
-                    );
+                    )?;
+                    entries.push(FetchCostEntry {
+                        subgraph: &fetch_node.service_name,
+                        cost,
+                    });
+                } else {
+                    self.collect_plan_costs(&flatten_node.node, variables, entries)?;
                 }
-                // Non-entity flatten or nested structure: recurse normally.
-                self.score_plan_node(&flatten_node.node, variables)
             }
             PlanNode::Condition {
-                condition: _,
                 if_clause,
                 else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause, variables),
-            PlanNode::Defer { primary, deferred } => {
-                self.summed_score_of_deferred_nodes(primary, deferred, variables)
+                ..
+            } => {
+                // Collect both branches, keep the one with higher total cost.
+                let mut if_entries = Vec::new();
+                if let Some(node) = if_clause {
+                    self.collect_plan_costs(node, variables, &mut if_entries)?;
+                }
+                let mut else_entries = Vec::new();
+                if let Some(node) = else_clause {
+                    self.collect_plan_costs(node, variables, &mut else_entries)?;
+                }
+                let if_total: f64 = if_entries.iter().map(|e| e.cost).sum();
+                let else_total: f64 = else_entries.iter().map(|e| e.cost).sum();
+                if if_total >= else_total {
+                    entries.extend(if_entries);
+                } else {
+                    entries.extend(else_entries);
+                }
             }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.operation,
-                variables,
-                None,
-            ),
-            PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
-                &primary.service_name,
-                &primary.operation,
-                variables,
-                None,
-            ),
+            PlanNode::Defer { primary, deferred } => {
+                if let Some(node) = &primary.node {
+                    self.collect_plan_costs(node, variables, entries)?;
+                }
+                for d in deferred {
+                    if let Some(node) = &d.node {
+                        self.collect_plan_costs(node, variables, entries)?;
+                    }
+                }
+            }
+            PlanNode::Fetch(fetch_node) => {
+                let cost = self.compute_fetch_cost(
+                    &fetch_node.service_name,
+                    &fetch_node.operation,
+                    variables,
+                    None,
+                )?;
+                entries.push(FetchCostEntry {
+                    subgraph: &fetch_node.service_name,
+                    cost,
+                });
+            }
+            PlanNode::Subscription { primary, rest: _ } => {
+                let cost = self.compute_fetch_cost(
+                    &primary.service_name,
+                    &primary.operation,
+                    variables,
+                    None,
+                )?;
+                entries.push(FetchCostEntry {
+                    subgraph: &primary.service_name,
+                    cost,
+                });
+            }
         }
+        Ok(())
     }
 
-    fn estimated_cost_of_operation(
+    fn compute_fetch_cost(
         &self,
         subgraph: &str,
         operation: &SerializableDocument,
         variables: &Object,
         entity_count_hint: Option<i32>,
-    ) -> Result<CostBySubgraph, DemandControlError> {
+    ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
         let schema = self.subgraph_schemas.get(subgraph).ok_or_else(|| {
@@ -568,63 +612,14 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        let cost = self.estimated(
+        self.estimated(
             operation,
             schema,
             variables,
             false,
             subgraph,
             entity_count_hint,
-        )?;
-        Ok(CostBySubgraph::new(subgraph, cost))
-    }
-
-    fn max_score_of_nodes(
-        &self,
-        left: &Option<Box<PlanNode>>,
-        right: &Option<Box<PlanNode>>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        match (left, right) {
-            (None, None) => Ok(CostBySubgraph::default()),
-            (None, Some(right)) => self.score_plan_node(right, variables),
-            (Some(left), None) => self.score_plan_node(left, variables),
-            (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left, variables)?;
-                let right_score = self.score_plan_node(right, variables)?;
-                Ok(CostBySubgraph::maximum(left_score, right_score))
-            }
-        }
-    }
-
-    fn summed_score_of_deferred_nodes(
-        &self,
-        primary: &Primary,
-        deferred: &Vec<DeferredNode>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut score = CostBySubgraph::default();
-        if let Some(node) = &primary.node {
-            score += self.score_plan_node(node, variables)?;
-        }
-        for d in deferred {
-            if let Some(node) = &d.node {
-                score += self.score_plan_node(node, variables)?;
-            }
-        }
-        Ok(score)
-    }
-
-    fn summed_score_of_nodes(
-        &self,
-        nodes: &Vec<PlanNode>,
-        variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        let mut sum = CostBySubgraph::default();
-        for node in nodes {
-            sum += self.score_plan_node(node, variables)?;
-        }
-        Ok(sum)
+        )
     }
 
     /// Determine cost for a single-subgraph operation.
@@ -655,12 +650,14 @@ impl StaticCostCalculator {
     }
 
     /// Determine cost for an operation which may span multiple subgraphs.
-    pub(crate) fn planned(
+    pub(crate) fn planned<'a>(
         &self,
-        query_plan: &QueryPlan,
+        query_plan: &'a QueryPlan,
         variables: &Object,
-    ) -> Result<CostBySubgraph, DemandControlError> {
-        self.score_plan_node(&query_plan.root, variables)
+    ) -> Result<PlanCostResult<'a>, DemandControlError> {
+        let mut entries = Vec::new();
+        self.collect_plan_costs(&query_plan.root, variables, &mut entries)?;
+        Ok(PlanCostResult::new(entries))
     }
 
     /// Estimate the total number of entities in an entity fetch by walking the
@@ -880,7 +877,10 @@ mod tests {
             variables: &Object,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
-            Ok(self.score_plan_node(&js_planner_node, variables)?.total())
+            let mut entries = Vec::new();
+            self.collect_plan_costs(&js_planner_node, variables, &mut entries)?;
+            let result = PlanCostResult::new(entries);
+            Ok(result.by_subgraph().total())
         }
     }
 
@@ -1016,7 +1016,11 @@ mod tests {
             100,
         );
 
-        calculator.planned(&query_plan, &variables).unwrap().total()
+        calculator
+            .planned(&query_plan, &variables)
+            .unwrap()
+            .by_subgraph()
+            .total()
     }
 
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
