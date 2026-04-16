@@ -121,7 +121,6 @@ impl RouterService {
             .layer(APQCachingLayer::new(apq_layer))
             .layer(ParseQueryLayer::new(query_analysis_layer))
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
-            .buffered() // Makes the supergraph service cloneable
             .service(supergraph_service)
             .boxed_clone();
 
