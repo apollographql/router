@@ -129,6 +129,10 @@ impl SubgraphMetadata {
         self.interface_object_types.contains(type_name)
     }
 
+    pub(crate) fn interface_object_types(&self) -> &IndexSet<apollo_compiler::Name> {
+        &self.interface_object_types
+    }
+
     pub(crate) fn remove_external_field(&mut self, field: &FieldDefinitionPosition) {
         self.external_metadata.external_fields.shift_remove(field);
     }

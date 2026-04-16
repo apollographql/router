@@ -1816,6 +1816,9 @@ pub(crate) const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecificatio
 pub(crate) const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: FEDERATION_SERVICE_TYPE_NAME,
     fields: |_schema| {
+        // Federation docs describe `_Service { sdl: String! }`, but the JS implementation uses
+        // nullable `sdl: String`. This Rust spec matches JS for compatibility; move the field to
+        // `Type::NonNullNamed(GRAPHQL_STRING_TYPE_NAME)` when we can align behavior safely.
         [FieldSpecification {
             name: FEDERATION_SDL_FIELD_NAME,
             ty: Type::Named(GRAPHQL_STRING_TYPE_NAME),

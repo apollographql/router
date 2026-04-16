@@ -26,7 +26,6 @@ use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::register_private_plugin;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::router::body::RouterBody;

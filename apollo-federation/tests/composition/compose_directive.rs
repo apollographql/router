@@ -436,25 +436,16 @@ mod inconsistent_feature_versions {
 mod inconsistent_imports {
     use super::*;
 
-    #[rstest]
-    #[case(
-        r#"
-        directive @foo(name: String!) on FIELD_DEFINITION
-        directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
-    "#
-    )]
-    #[case(
-        r#"
-        directive @foo(name: String!) on FIELD_DEFINITION
-        directive @foo_bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
-    "#
-    )]
-    fn composes_mismatched_imports_with_unqualified_name(#[case] directive_text: &str) {
+    #[test]
+    fn composes_exported_directive_with_default_definition_in_later_spec_subgraph() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
             r#"@composeDirective(name: "@foo")"#,
-            directive_text,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
             r#"@foo(name: "a")"#,
         );
         let subgraph_b = generate_subgraph(
@@ -479,6 +470,70 @@ mod inconsistent_imports {
         );
 
         let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
+    }
+
+    #[test]
+    fn composes_exported_directive_with_unqualified_definition_in_later_spec_subgraph() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @foo__bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
+            r#"@bar(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+        );
+
+        let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
 
         let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_directive = subgraph_a_field
@@ -501,7 +556,7 @@ mod inconsistent_imports {
     fn hints_when_imported_with_mismatched_name_but_not_exported() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo", { name: "@bar", as: "@baz" }])"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", { name: "@bar", as: "@baz" }])"#,
             r#"@composeDirective(name: "@foo")"#,
             r#"
             directive @foo(name: String!) on FIELD_DEFINITION
@@ -511,7 +566,7 @@ mod inconsistent_imports {
         );
         let subgraph_b = generate_subgraph(
             "subgraphB",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@bar"])"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
             r#"@composeDirective(name: "@bar")"#,
             r#"
             directive @foo(name: String!) on FIELD_DEFINITION
@@ -540,6 +595,12 @@ mod inconsistent_imports {
         );
 
         let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
 
         let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_directive = subgraph_a_field
@@ -558,12 +619,151 @@ mod inconsistent_imports {
         assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
     }
 
-    // PORT NOTE: This is an improvement in behavior over the JS version, which errors in this
-    // case. There isn't a strong reason to force all subgraphs to define a directive if they do
-    // not use it. This was effectively forcing customers to define a new spec for every custom
-    // directive they wanted to compose, even if only one subgraph used it.
     #[test]
-    fn allows_importing_different_directives_from_the_same_spec_in_different_subgraphs() {
+    fn errors_when_exported_directive_missing_definition_in_later_spec_subgraph() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
+            r#"@bar(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        assert_eq!(result.len(), 1);
+        let error = result.first().unwrap();
+        assert_eq!(
+            error.code().definition().code().to_string(),
+            "DIRECTIVE_COMPOSITION_ERROR"
+        );
+        assert_eq!(
+            error.to_string(),
+            r#"Core feature "https://specs.custom.dev/foo/v1.1" in subgraph "subgraphA" does not have a directive definition for "@bar""#
+        );
+    }
+
+    #[test]
+    fn composes_exported_directive_with_imported_definition_in_later_spec_subgraph() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+            r#"@bar(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+        );
+
+        let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
+    }
+
+    #[test]
+    fn composes_exported_directive_with_missing_definition_in_one_subgraph() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
+            r#"@composeDirective(name: "@bar")"#,
+            r#"
+            directive @foo(name: String!) on FIELD_DEFINITION
+            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
+            "#,
+            r#"@bar(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+        );
+
+        let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar", "@foo"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@bar(name: "a")"#);
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@foo(name: "b")"#);
+    }
+
+    #[test]
+    fn composes_exported_directive_with_split_definitions_across_subgraphs() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
@@ -573,22 +773,99 @@ mod inconsistent_imports {
         );
         let subgraph_b = generate_subgraph(
             "subgraphB",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.1", import: ["@bar"])"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@bar"])"#,
             r#"@composeDirective(name: "@bar")"#,
-            r#"
-            directive @foo(name: String!) on FIELD_DEFINITION
-            directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
-           "#,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).expect("Composition should succeed");
-        assert_eq!(result.hints().len(), 0);
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+        assert_has_directive_definition(
+            &result,
+            "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
+        );
 
-        // We're primarily looking for the combined link for the custom spec to combine both
-        // directives with the latest version. It should look like:
-        // @link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])
-        insta::assert_snapshot!(result.schema().schema());
+        let schema = result.schema().schema();
+        assert!(
+            schema.to_string().contains(
+                r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo", "@bar"])"#
+            ),
+            "Schema does not contain expected @link directive"
+        );
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
+    }
+
+    // This isn't something that users should be allowed to do, and can sometimes result in an
+    // error. But we don't explicitly validate against it today, and it may sometimes succeed. So we
+    // test the current behavior, which is to pick the last definition.
+    #[test]
+    fn composes_exported_directive_with_different_definitions_across_subgraphs() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
+            r#"@composeDirective(name: "@foo")"#,
+            "directive @foo(name: String!, address: String) on FIELD_DEFINITION",
+            r#"@foo(name: "b", address: "c")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!, address: String) on FIELD_DEFINITION",
+        );
+
+        let schema = result.schema().schema();
+        assert!(
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#),
+            "Schema does not contain expected @link directive"
+        );
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphB");
+        assert_eq!(
+            bar_directive.to_string(),
+            r#"@foo(name: "b", address: "c")"#
+        );
     }
 
     #[test]
@@ -639,15 +916,9 @@ mod inconsistent_imports {
             error.code().definition().code().to_string(),
             "DIRECTIVE_COMPOSITION_ERROR"
         );
-
-        // There's some non-determinism in the serialization order here. We'll need to figure that
-        // out, but for now we just check both orders.
-        assert!(
-            &[
-                r#"Composed directive is not named consistently in all subgraphs but "@foo" in subgraph "subgraphA" and "@bar" in subgraph "subgraphB""#.to_string(),
-                r#"Composed directive is not named consistently in all subgraphs but "@bar" in subgraph "subgraphB" and "@foo" in subgraph "subgraphA""#.to_string(),
-            ].contains(&error.to_string()),
-            "Unexpected error message: {error}",
+        assert_eq!(
+            error.to_string(),
+            r#"Composed directive is not named consistently in all subgraphs but "@foo" in subgraph "subgraphA" and "@bar" in subgraph "subgraphB""#,
         );
     }
 
@@ -756,12 +1027,6 @@ mod inconsistent_imports {
         );
     }
 
-    /*
-    * We need to understand why this test was set up this way in the original source. It explicitly
-    * adds a definition for the `@join__x` directive that it's defining (as an alias for `@foo`).
-    * So, the error saying it isn't part of a core feature, when it's clearly linked, seems wrong.
-    * Maybe JS silently ignores definitions starting with `@join__`?
-    *
     #[rstest]
     #[case("@join__field")]
     #[case("@join__graph")]
@@ -793,7 +1058,6 @@ mod inconsistent_imports {
             )
         );
     }
-    */
 }
 
 mod validation {
@@ -824,7 +1088,7 @@ mod validation {
     fn errors_when_name_argument_is_missing_at_symbol() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
-            "",
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
             r#"@composeDirective(name: "foo")"#,
             "directive @foo(name: String!) on FIELD_DEFINITION",
             r#"@foo(name: "a")"#,
@@ -847,33 +1111,17 @@ mod validation {
     #[rstest]
     #[case(
         r#""@foo""#,
-        "@foo",
         "@fooz",
-        r#"[subgraphA] Error: cannot find directive `@fooz` in this document
-    ╭─[ subgraphA:14:31 ]
-    │
- 14 │             subgraphA: String @fooz(name: "a")
-    │                               ────────┬───────  
-    │                                       ╰───────── directive not defined
-────╯
-Did you mean "@foo"?
-"#
+        "@foo",
+        r#"Could not find matching directive definition for argument to @composeDirective "@fooz" in subgraph "subgraphA". Did you mean "@foo" or "@cost"?"#
     )]
     #[case(
         r#"{ name: "@foo", as: "@bar" }"#,
-        "@bar",
         "@barz",
-        r#"[subgraphA] Error: cannot find directive `@barz` in this document
-    ╭─[ subgraphA:14:31 ]
-    │
- 14 │             subgraphA: String @barz(name: "a")
-    │                               ────────┬───────  
-    │                                       ╰───────── directive not defined
-────╯
-Did you mean "@bar"?
-"#
+        "@bar",
+        r#"Could not find matching directive definition for argument to @composeDirective "@barz" in subgraph "subgraphA". Did you mean "@bar" or "@tag"?"#
     )]
-    fn errors_when_directive_does_not_exist(
+    fn errors_when_compose_directive_target_does_not_exist(
         #[case] import: &str,
         #[case] name: &str,
         #[case] usage: &str,
@@ -884,7 +1132,7 @@ Did you mean "@bar"?
             &r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [<IMPORT>])"#
                 .replace("<IMPORT>", import),
             &r#"@composeDirective(name: "<NAME>")"#.replace("<NAME>", name),
-            &r#"directive <NAME>(name: String!) on FIELD_DEFINITION"#.replace("<NAME>", name),
+            &r#"directive <NAME>(name: String!) on FIELD_DEFINITION"#.replace("<NAME>", usage),
             &r#"<NAME>(name: "a")"#.replace("<NAME>", usage),
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
@@ -894,7 +1142,7 @@ Did you mean "@bar"?
         let error = result.first().unwrap();
         assert_eq!(
             error.code().definition().code().to_string(),
-            "INVALID_GRAPHQL"
+            "DIRECTIVE_COMPOSITION_ERROR"
         );
         assert_eq!(error.to_string(), expected_message);
     }
@@ -1034,6 +1282,11 @@ mod composition {
             schema
                 .to_string()
                 .contains(r#"@link(url: "https://custom.dev/myspec/v1.0", import: ["@tag"])"#)
+        );
+        assert!(
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.apollo.dev/tag/v0.3", import: [{name: "@tag", as: "@mytag"}])"#)
         );
     }
 

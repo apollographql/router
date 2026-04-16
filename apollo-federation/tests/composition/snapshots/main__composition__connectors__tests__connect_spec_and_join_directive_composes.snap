@@ -2,7 +2,7 @@
 source: apollo-federation/tests/composition/connectors.rs
 expression: schema_string
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]) @join__directive(name: "link", graphs: [WITH_CONNECTORS], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS], args: {name: "v1", http: {baseURL: "http://v1"}}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.3", for: EXECUTION) @join__directive(name: "link", graphs: [WITH_CONNECTORS], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS], args: {name: "v1", http: {baseURL: "http://v1"}}) {
   query: Query
 }
 

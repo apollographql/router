@@ -27,6 +27,11 @@ pub use crate::supergraph::Supergraph;
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    // explicitly sort subgraphs by their names
+    // this was done automatically in JS as Subgraphs class stored subgraphs in OrderedMap (by name)
+    let mut subgraphs = subgraphs;
+    subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
+
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
     tracing::debug!("Upgrading subgraphs...");
