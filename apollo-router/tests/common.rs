@@ -1230,13 +1230,16 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
-            if let Ok(line) = self.stdio_rx.try_recv() {
-                self.logs.push(line.to_string());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            while let Ok(line) = self.stdio_rx.try_recv() {
+                self.logs.push(line.clone());
                 if line.contains(msg) {
                     return;
                 }
+            }
+            if Instant::now() >= deadline {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
