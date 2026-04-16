@@ -1384,6 +1384,25 @@ impl IntegrationTest {
         }
     }
 
+    /// Reads metrics from the live endpoint via `IntegrationTest::get_metrics_response` and prints
+    /// them out line by line.
+    ///
+    /// Useful for debugging.
+    #[allow(unused)]
+    pub async fn print_metrics(&self) {
+        if let Ok(metrics) = self
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+        {
+            for line in metrics.split("\n") {
+                println!("{line}");
+            }
+        }
+    }
+
     #[allow(dead_code)]
     /// Checks the metrics contain the supplied string in prometheus format.
     /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
