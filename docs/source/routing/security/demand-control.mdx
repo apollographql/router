@@ -212,7 +212,7 @@ When requesting 7 books:
 
 #### List-type arguments in `slicingArguments`
 
-When a `slicingArguments` entry references a list-type argument, the router uses the **length** of that list as the list size. This is useful when a field resolves one result per input ID or tag, rather than using a numeric paging argument.
+When a `slicingArguments` entry references a list-type argument, the router uses the length of that list as the list size. This is useful when your resolver returns one result per input ID or tag, instead of using a numeric paging argument.
 
 ```graphql
 type Query {
@@ -227,7 +227,7 @@ type Query {
 }
 ```
 
-With this schema, the router uses the length of the `ids` argument as the list size:
+With your schema, the router uses the length of the `ids` argument as the list size:
 
 ```graphql
 query BooksByIds {
@@ -248,7 +248,7 @@ query BooksByIds {
 
 </ExpansionPanel>
 
-This also works when the list is passed via a query variable. For example, the following query with `{"ids": ["abc", "def", "ghi", "jkl", "mno"]}` would have a cost of 10:
+This also works when the list is passed via a query variable. For example, the following query with `{"ids": ["abc", "def", "ghi", "jkl", "mno"]}` would have a cost of ten:
 
 ```graphql
 query BooksByIds($ids: [ID!]!) {
