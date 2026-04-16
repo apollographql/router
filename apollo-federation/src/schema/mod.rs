@@ -1423,18 +1423,15 @@ pub(crate) trait SchemaElement {
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let extensions = self.extensions();
-        // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // Note: No defined ordering between origins.
-        let first_extension = extensions.first();
-        if let Some(first_extension) = first_extension {
-            // If there is an extension, use the first extension.
-            ComponentOrigin::Extension((*first_extension).clone())
-        } else {
-            // Use the existing definition if exists, or maybe a new definition if no definition
-            // nor extensions exist.
-            ComponentOrigin::Definition
+        let (has_definition, extensions) = self.definition_and_extensions();
+        // Use extension origin only when extensions exist but no definition does
+        // (i.e., only extension elements are populated). Otherwise, use definition.
+        // For more details, see the comments in the `add_to_schema` method.
+        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
+        if !has_definition && let Some(first_extension) = extensions.first() {
+            return ComponentOrigin::Extension((*first_extension).clone());
         }
+        ComponentOrigin::Definition
     }
 }
 

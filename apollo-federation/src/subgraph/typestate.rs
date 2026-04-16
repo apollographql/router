@@ -1996,4 +1996,50 @@ mod tests {
         );
         assert!(subgraph.schema().schema().get_scalar("Mutation").is_some());
     }
+
+    /// When a schema has both an explicit `schema { ... }` definition and an
+    /// `extend schema @link(...) { ... }` extension, the link-to-link `@link` directive
+    /// should be added to the definition (not the extension), because a definition exists.
+    /// This tests the `origin_to_use()` fix.
+    #[test]
+    fn link_to_link_goes_on_definition_when_both_definition_and_extension_exist() {
+        let subgraph = build_and_validate(
+            r#"
+            schema {
+                mutation: Mutation
+            }
+
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.12") {
+                subscription: Subscription
+            }
+
+            type Mutation {
+                update(id: ID!, value: String!): String
+            }
+
+            type Subscription {
+                news: String!
+            }
+            "#,
+        );
+
+        // Take only the first few lines (schema definition + extension blocks)
+        // to verify the @link placement without snapshotting all the directives.
+        let schema_str = subgraph.schema_string();
+        let first_lines: String = schema_str.lines().take(9).collect::<Vec<_>>().join("\n");
+        // The link-to-link @link should be on the schema definition (first block),
+        // NOT on the extension block. Before the fix, origin_to_use() would return
+        // Extension whenever any extensions existed, causing the @link to end up on
+        // the extend schema block instead of the definition.
+        insta::assert_snapshot!(first_lines, @r#"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+          query: Query
+          mutation: Mutation
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12") {
+          subscription: Subscription
+        }
+        "#);
+    }
 }
