@@ -1,16 +1,16 @@
 use std::str::FromStr;
 
-use anyhow::anyhow;
 use anyhow::Error;
 use anyhow::Result;
+use anyhow::anyhow;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
 use walkdir::WalkDir;
 use xtask::*;
 
-use crate::commands::changeset::slurp_and_remove_changesets;
 use crate::commands::Compliance;
 use crate::commands::Licenses;
+use crate::commands::changeset::slurp_and_remove_changesets;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -148,29 +148,41 @@ impl Prepare {
             if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
             {
                 if which::which("helm").is_err() {
-                    return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+                    return Err(anyhow!(
+                        "the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."
+                    ));
                 }
 
                 if which::which("helm-docs").is_err() {
-                    return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+                    return Err(anyhow!(
+                        "the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."
+                    ));
                 }
             }
         } else {
             if which::which("helm").is_err() {
-                return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+                return Err(anyhow!(
+                    "the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."
+                ));
             }
 
             if which::which("helm-docs").is_err() {
-                return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+                return Err(anyhow!(
+                    "the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."
+                ));
             }
         }
 
         if which::which("cargo-about").is_err() {
-            return Err(anyhow!("the 'cargo-about' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-about"));
+            return Err(anyhow!(
+                "the 'cargo-about' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-about"
+            ));
         }
 
         if which::which("cargo-deny").is_err() {
-            return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
+            return Err(anyhow!(
+                "the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"
+            ));
         }
         Ok(())
     }

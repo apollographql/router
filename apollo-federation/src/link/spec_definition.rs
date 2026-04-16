@@ -7,8 +7,10 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
+use itertools::Itertools;
 
 use crate::AUTHENTICATED_VERSIONS;
 use crate::CACHE_TAG_VERSIONS;
@@ -202,6 +204,7 @@ pub(crate) trait SpecDefinition {
 pub(crate) struct SpecDefinitions<T: SpecDefinition> {
     identity: Identity,
     definitions: BTreeMap<Version, T>,
+    preview_versions: HashSet<Version>,
 }
 
 impl<T: SpecDefinition> SpecDefinitions<T> {
@@ -209,6 +212,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         Self {
             identity,
             definitions: BTreeMap::new(),
+            preview_versions: Default::default(),
         }
     }
 
@@ -227,6 +231,12 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
             .insert(definition.version().clone(), definition);
     }
 
+    pub(crate) fn add_preview(&mut self, definition: T) {
+        let preview_version = definition.version().clone();
+        self.add(definition);
+        self.preview_versions.insert(preview_version);
+    }
+
     pub(crate) fn find(&self, requested: &Version) -> Option<&T> {
         self.definitions.get(requested)
     }
@@ -239,6 +249,20 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions
             .last_key_value()
             .expect("There should always be at least one version defined")
+            .1
+    }
+
+    /// Like [`SpecDefinitions::latest`], but skips versions marked as preview. Used by
+    /// [`Merger::add_join_directive_directives`] in the composition merger to avoid
+    /// stamping a preview spec version (e.g. connect/v0.4) into the
+    /// supergraph `@link` when no subgraph explicitly uses it. Falls back
+    /// to latest if all versions are preview.
+    pub(crate) fn latest_non_preview(&self) -> &T {
+        self.definitions
+            .iter()
+            .rev()
+            .find_or_first(|(v, _)| !self.preview_versions.contains(v))
+            .expect("There should always be at least one non-preview version defined")
             .1
     }
 
@@ -280,17 +304,14 @@ pub(crate) struct SpecRegistry {
 }
 
 impl SpecRegistry {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             definitions_by_url: HashMap::new(),
             available_versions_by_identity: HashMap::new(),
         }
     }
 
-    pub(crate) fn extend<T: SpecDefinition + Sync>(
-        &mut self,
-        definitions: &'static SpecDefinitions<T>,
-    ) {
+    fn extend<T: SpecDefinition + Sync>(&mut self, definitions: &'static SpecDefinitions<T>) {
         for (v, spec) in definitions.iter() {
             self.definitions_by_url.insert(spec.url().clone(), spec);
             self.available_versions_by_identity

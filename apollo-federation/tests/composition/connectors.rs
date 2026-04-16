@@ -225,22 +225,22 @@ mod tests {
             .expect("Expected API schema generation to succeed");
         let api_schema_string = api_schema.schema().to_string();
 
-        assert_snapshot!(api_schema_string, @r###"
+        assert_snapshot!(api_schema_string, @"
         type Query {
-          resources: [Resource!]!
           widgets: [Widget!]!
-        }
-
-        type Resource {
-          id: ID!
-          name: String!
+          resources: [Resource!]!
         }
 
         type Widget {
           id: ID!
           name: String!
         }
-        "###);
+
+        type Resource {
+          id: ID!
+          name: String!
+        }
+        ");
     }
 
     #[test]

@@ -79,10 +79,11 @@ impl JwksManager {
 
         let downloads = list
             .iter()
-            .cloned()
             .map(|JwksConfig { url, headers, .. }| {
+                let url = url.clone();
+                let headers = headers.clone();
                 let span = tracing::info_span!("fetch jwks", url = %url);
-                get_jwks(url.clone(), headers.clone())
+                get_jwks(url.clone(), headers)
                     .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
                     .instrument(span)
             })

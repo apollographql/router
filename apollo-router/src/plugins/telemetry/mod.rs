@@ -130,7 +130,6 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
-use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;

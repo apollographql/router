@@ -33,7 +33,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
-use crate::register_plugin;
 
 mod engine;
 

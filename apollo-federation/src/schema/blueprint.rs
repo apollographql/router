@@ -313,6 +313,7 @@ impl FederationBlueprint {
             imports: fed1_link_imports(),
             spec_alias: None,
             purpose: None,
+            line_column_range: None,
         });
         for type_spec in &FED_1.type_specs() {
             if let Err(err) = type_spec.check_or_add(schema, Some(&fed_1_link)) {
