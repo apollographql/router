@@ -1918,9 +1918,7 @@ fn merge_overrides(
             if !supergraph_conf.contains_key("connection_shutdown_timeout") {
                 supergraph_conf.insert(
                     "connection_shutdown_timeout".to_string(),
-                    serde_json::Value::String(
-                        HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string(),
-                    ),
+                    serde_json::Value::String(HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string()),
                 );
             }
         }
