@@ -1566,9 +1566,26 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
+        // Budget must cover:
+        //   1. The harness's injected `connection_shutdown_timeout` default
+        //      (currently 5 s, set in `merge_overrides`), which bounds how
+        //      long the router's per-connection tasks wait before forcibly
+        //      closing a straggler connection.
+        //   2. The longest intentionally-in-flight subgraph delay any
+        //      integration test induces before calling `graceful_shutdown()`.
+        //      `integration::lifecycle::test_graceful_shutdown` is the
+        //      binding case at 2 s.
+        //   3. CI scheduling slack between the router process draining its
+        //      connections and the OS actually reaping the process.
+        //
+        // Previously 3 s. Raised to 10 s when the harness began injecting
+        // a `connection_shutdown_timeout` default to prevent the 60 s
+        // production default from hanging tests that hold HTTP/2 client
+        // connections open past the response (see `merge_overrides` and
+        // flaky-test-phases/blog-details.md Arc 2a for the full story).
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(3) {
+        while now.elapsed() < Duration::from_secs(10) {
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
@@ -1823,6 +1840,45 @@ fn merge_overrides(
 
     // Override the listening address always since we spawn the router on a
     // random port. However, don't override Unix socket paths.
+    //
+    // Also inject a bounded `connection_shutdown_timeout` default for every
+    // integration test. The production default is 60 s (see
+    // `default_connection_shutdown_timeout` in src/configuration/mod.rs),
+    // which is safe for long-lived production connections but dangerous for
+    // tests: `assert_shutdown` in this harness only allows a bounded
+    // wall-clock window for the router process to exit after SIGTERM. If a
+    // hyper HTTP/2 client keeps its pooled TCP connection open at the moment
+    // `graceful_shutdown()` is called, the per-connection task in
+    // `handle_connection!` (src/axum_factory/listeners.rs) flips into the
+    // `connection_shutdown.cancelled()` branch and waits up to
+    // `connection_shutdown_timeout` for the connection to actually terminate.
+    // 60 s >> `assert_shutdown`'s budget -> assertion panics with
+    // "unable to shutdown router, this probably means a hang".
+    //
+    // This race is latent in any test that makes an HTTP request and then
+    // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
+    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6 and
+    // flaky-test-phases/blog-details.md Arc 2a for the full story). Rather
+    // than patch each vulnerable fixture individually, inject a 5 s default
+    // at the harness layer, paired with a widened `assert_shutdown` budget
+    // (see that helper for the matching constant).
+    //
+    // The 5 s value is a trade-off:
+    // - Must be long enough that intentionally-in-flight requests finish
+    //   gracefully. `integration::lifecycle::test_graceful_shutdown` is the
+    //   binding constraint: it issues a request with a 2 s subgraph delay
+    //   and expects the response to arrive intact before the router exits.
+    //   5 s covers that 2 s delay plus generous CI scheduling slack.
+    // - Must be short enough to beat `assert_shutdown`'s budget with enough
+    //   headroom that CI stall between "connection task exits" and
+    //   "process exits" doesn't trigger a false positive. With
+    //   `assert_shutdown` at 10 s and this at 5 s, there's 5 s of slack.
+    //
+    // Tests that explicitly set `supergraph.connection_shutdown_timeout` in
+    // their YAML fixture (eg. integration::lifecycle's
+    // small_connection_shutdown_timeout tests that exercise the feature
+    // itself) keep their configured value.
+    const HARNESS_CONNECTION_SHUTDOWN_TIMEOUT: &str = "5s";
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("supergraph"))
@@ -1834,6 +1890,7 @@ fn merge_overrides(
                     "supergraph".to_string(),
                     serde_json::json!({
                         "listen": bind_addr.to_string(),
+                        "connection_shutdown_timeout": HARNESS_CONNECTION_SHUTDOWN_TIMEOUT,
                     }),
                 );
             }
@@ -1851,6 +1908,19 @@ fn merge_overrides(
                 supergraph_conf.insert(
                     "listen".to_string(),
                     serde_json::Value::String(bind_addr.to_string()),
+                );
+            }
+
+            // Only inject the shutdown timeout if the fixture hasn't set one.
+            // Tests in integration::lifecycle deliberately configure this
+            // setting to exercise its behavior and must not have their value
+            // clobbered.
+            if !supergraph_conf.contains_key("connection_shutdown_timeout") {
+                supergraph_conf.insert(
+                    "connection_shutdown_timeout".to_string(),
+                    serde_json::Value::String(
+                        HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string(),
+                    ),
                 );
             }
         }
