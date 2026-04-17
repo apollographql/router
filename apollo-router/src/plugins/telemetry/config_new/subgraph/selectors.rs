@@ -1238,7 +1238,10 @@ mod test {
             )
             .context(context)
             .build();
-        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -1266,7 +1269,10 @@ mod test {
             )
             .context(context)
             .build();
-        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
     }
 
     #[test]
@@ -1294,7 +1300,10 @@ mod test {
             ))
             .context(context)
             .build();
-        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -1318,7 +1327,10 @@ mod test {
             .context(context)
             .build()
             .unwrap();
-        assert_eq!(selector.on_response(&response).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -1342,7 +1354,10 @@ mod test {
             .context(context)
             .build()
             .unwrap();
-        assert_eq!(selector.on_response(&response).unwrap(), "session=abc123".into());
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "session=abc123".into()
+        );
     }
 
     #[test]

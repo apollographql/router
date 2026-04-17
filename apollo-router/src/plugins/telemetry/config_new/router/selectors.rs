@@ -847,7 +847,10 @@ mod test {
             .context(context)
             .build()
             .unwrap();
-        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -871,7 +874,10 @@ mod test {
             .context(context)
             .build()
             .unwrap();
-        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
     }
 
     #[test]
@@ -885,7 +891,10 @@ mod test {
             .header("x-custom", "some-value")
             .build()
             .unwrap();
-        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -900,7 +909,10 @@ mod test {
             .build()
             .unwrap();
         // No rules in context → header passes through unmasked
-        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
     }
 
     #[test]
@@ -925,7 +937,10 @@ mod test {
             .data(serde_json_bytes::json!({}))
             .build()
             .unwrap();
-        assert_eq!(selector.on_response(&response).unwrap(), "***MASKED***".into());
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "***MASKED***".into()
+        );
     }
 
     #[test]
@@ -950,7 +965,10 @@ mod test {
             .data(serde_json_bytes::json!({}))
             .build()
             .unwrap();
-        assert_eq!(selector.on_response(&response).unwrap(), "session=abc123".into());
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "session=abc123".into()
+        );
     }
 
     #[test]

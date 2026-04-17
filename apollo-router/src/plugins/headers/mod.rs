@@ -254,8 +254,10 @@ struct Headers {
     global_response_masking: Arc<crate::services::header_masking::HeaderMaskingRules>,
 
     // Per-subgraph masking rules (from headers.subgraphs.{name})
-    subgraph_request_masking: HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
-    subgraph_response_masking: HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
+    subgraph_request_masking:
+        HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
+    subgraph_response_masking:
+        HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
 }
 
 #[async_trait::async_trait]
@@ -340,7 +342,10 @@ impl PluginPrivate for Headers {
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())
                     .map(|masking_config| {
-                        (name.clone(), Arc::new(HeaderMaskingRules::from_config(masking_config)))
+                        (
+                            name.clone(),
+                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
+                        )
                     })
             })
             .collect();
@@ -356,7 +361,10 @@ impl PluginPrivate for Headers {
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())
                     .map(|masking_config| {
-                        (name.clone(), Arc::new(HeaderMaskingRules::from_config(masking_config)))
+                        (
+                            name.clone(),
+                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
+                        )
                     })
             })
             .collect();
@@ -375,25 +383,32 @@ impl PluginPrivate for Headers {
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Get operations for this subgraph (fallback to global)
-        let operations = self.subgraph_operations
+        let operations = self
+            .subgraph_operations
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.all_operations.clone());
 
         // Get request masking rules for this subgraph (fallback to global)
-        let request_masking = self.subgraph_request_masking
+        let request_masking = self
+            .subgraph_request_masking
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.global_request_masking.clone());
 
         // Get response masking rules for this subgraph (fallback to global)
-        let response_masking = self.subgraph_response_masking
+        let response_masking = self
+            .subgraph_response_masking
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.global_response_masking.clone());
 
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations, request_masking, response_masking))
+            .layer(HeadersLayer::new(
+                operations,
+                request_masking,
+                response_masking,
+            ))
             .service(service)
             .boxed()
     }
@@ -407,25 +422,32 @@ impl PluginPrivate for Headers {
         let subgraph_name = source_name.split('.').next().unwrap_or("");
 
         // Get operations for this connector (fallback to global connector operations)
-        let operations = self.connector_source_operations
+        let operations = self
+            .connector_source_operations
             .get(&source_name)
             .cloned()
             .unwrap_or_else(|| self.all_connector_operations.clone());
 
         // Get request masking rules: inherit from parent subgraph, fallback to global
-        let request_masking = self.subgraph_request_masking
+        let request_masking = self
+            .subgraph_request_masking
             .get(subgraph_name)
             .cloned()
             .unwrap_or_else(|| self.global_request_masking.clone());
 
         // Get response masking rules: inherit from parent subgraph, fallback to global
-        let response_masking = self.subgraph_response_masking
+        let response_masking = self
+            .subgraph_response_masking
             .get(subgraph_name)
             .cloned()
             .unwrap_or_else(|| self.global_response_masking.clone());
 
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations, request_masking, response_masking))
+            .layer(HeadersLayer::new(
+                operations,
+                request_masking,
+                response_masking,
+            ))
             .service(service)
             .boxed()
     }
@@ -1026,12 +1048,14 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
-            InsertStatic {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1053,12 +1077,14 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
-            InsertStatic {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1084,12 +1110,16 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
-            Insert::FromContext(InsertFromContext {
-                name: "header_from_context".try_into()?,
-                from_context: "my_key".to_string(),
-            }),
-        )]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromContext(
+                InsertFromContext {
+                    name: "header_from_context".try_into()?,
+                    from_context: "my_key".to_string(),
+                },
+            ))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1111,12 +1141,16 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
-            Insert::FromContext(InsertFromContext {
-                name: "header_from_context".try_into()?,
-                from_context: "my_key".to_string(),
-            }),
-        )]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromContext(
+                InsertFromContext {
+                    name: "header_from_context".try_into()?,
+                    from_context: "my_key".to_string(),
+                },
+            ))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1142,13 +1176,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
-            InsertFromBody {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str("$.operationName").unwrap(),
                 default: None,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1170,13 +1206,15 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
-            InsertFromBody {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str("$.myCoolField").unwrap(),
                 default: None,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1202,13 +1240,15 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
-            InsertFromBody {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str(".operationName").unwrap(),
                 default: None,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1231,13 +1271,15 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
-            InsertFromBody {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str(".myCoolField").unwrap(),
                 default: None,
-            },
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+            }))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1256,9 +1298,11 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
-            "aa".try_into()?,
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1273,9 +1317,11 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
-            "aa".try_into()?,
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         let ctx = Context::new();
@@ -1333,9 +1379,11 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
-            "aa".try_into()?,
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1354,9 +1402,13 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
-            Regex::from_str("a[ab]")?,
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
+                "a[ab]",
+            )?))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1371,9 +1423,13 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
-            Regex::from_str("a[ab]")?,
-        ))]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
+                "a[ab]",
+            )?))]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1401,11 +1457,14 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1428,11 +1487,14 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service
             .ready()
@@ -1457,13 +1519,16 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1484,13 +1549,16 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service
             .ready()
@@ -1515,13 +1583,16 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1542,13 +1613,16 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service
             .ready()
@@ -1574,24 +1648,28 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![
-            Operation::Propagate(Propagate::Named {
-                named: "da".try_into()?,
-                rename: Some("ra".try_into()?),
-                default: None,
-            }),
-            Operation::Propagate(Propagate::Named {
-                named: "da".try_into()?,
-                rename: Some("rb".try_into()?),
-                default: None,
-            }),
-            // This should not take effect as the header is already propagated
-            Operation::Propagate(Propagate::Named {
-                named: "db".try_into()?,
-                rename: Some("ra".try_into()?),
-                default: None,
-            }),
-        ]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("rb".try_into()?),
+                    default: None,
+                }),
+                // This should not take effect as the header is already propagated
+                Operation::Propagate(Propagate::Named {
+                    named: "db".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+            ]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1614,24 +1692,28 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(Arc::new(vec![
-            Operation::Propagate(Propagate::Named {
-                named: "da".try_into()?,
-                rename: Some("ra".try_into()?),
-                default: None,
-            }),
-            Operation::Propagate(Propagate::Named {
-                named: "da".try_into()?,
-                rename: Some("rb".try_into()?),
-                default: None,
-            }),
-            // This should not take effect as the header is already propagated
-            Operation::Propagate(Propagate::Named {
-                named: "db".try_into()?,
-                rename: Some("ra".try_into()?),
-                default: None,
-            }),
-        ]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("rb".try_into()?),
+                    default: None,
+                }),
+                // This should not take effect as the header is already propagated
+                Operation::Propagate(Propagate::Named {
+                    named: "db".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+            ]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
         .layer(mock);
 
         service
@@ -1657,13 +1739,16 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1684,13 +1769,16 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service =
-            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()), Arc::new(crate::services::header_masking::HeaderMaskingRules::default()))
-            .layer(mock);
+            })]),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+        )
+        .layer(mock);
 
         service
             .ready()
@@ -1707,8 +1795,12 @@ mod test {
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
-            request_masking_rules: Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            response_masking_rules: Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            request_masking_rules: Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::default(),
+            ),
+            response_masking_rules: Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::default(),
+            ),
         };
 
         let mut request = SubgraphRequest {
@@ -1791,8 +1883,12 @@ mod test {
                     matching: Regex::from_str("dc")?,
                 }),
             ]),
-            request_masking_rules: Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            response_masking_rules: Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
+            request_masking_rules: Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::default(),
+            ),
+            response_masking_rules: Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::default(),
+            ),
         };
 
         let mut request = SubgraphRequest {

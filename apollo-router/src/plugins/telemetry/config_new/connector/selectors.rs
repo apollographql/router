@@ -819,7 +819,10 @@ mod tests {
         let context = Context::new();
         context.extensions().with_lock(|lock| lock.insert(rules));
         let request = connector_request(http_request_with_header(), Some(context), None);
-        assert_eq!(Some(TEST_HEADER_VALUE.into()), selector.on_request(&request));
+        assert_eq!(
+            Some(TEST_HEADER_VALUE.into()),
+            selector.on_request(&request)
+        );
     }
 
     #[test]
@@ -837,7 +840,10 @@ mod tests {
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
         let response = connector_response_with_header();
-        response.context.extensions().with_lock(|lock| lock.insert(rules));
+        response
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(rules));
         assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
     }
 
@@ -856,8 +862,14 @@ mod tests {
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
         let response = connector_response_with_header();
-        response.context.extensions().with_lock(|lock| lock.insert(rules));
-        assert_eq!(Some(TEST_HEADER_VALUE.into()), selector.on_response(&response));
+        response
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(rules));
+        assert_eq!(
+            Some(TEST_HEADER_VALUE.into()),
+            selector.on_response(&response)
+        );
     }
 
     #[test]
