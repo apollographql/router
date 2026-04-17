@@ -16,8 +16,7 @@ use serde_json_bytes::Value;
 
 use super::CostBySubgraph;
 use super::DemandControlError;
-use super::directives::IncludeDirective;
-use super::directives::SkipDirective;
+use super::directives::is_skipped_by_directives;
 use super::schema::DemandControlledSchema;
 use super::schema::InputDefinition;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -197,10 +196,6 @@ impl StaticCostCalculator {
         if field.name == TYPENAME {
             return Ok(0.0);
         }
-        if StaticCostCalculator::skipped_by_directives(field) {
-            return Ok(0.0);
-        }
-
         let definition = ctx
             .schema
             .output_field_definition(parent_type, &field.name)
@@ -394,6 +389,18 @@ impl StaticCostCalculator {
         inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
+        // `@skip(if: ...)` and `@include(if: ...)` apply to fields, fragment spreads, and
+        // inline fragments alike. Short-circuit excluded selections before scoring so the
+        // estimate reflects only what will actually execute.
+        let selection_directives = match selection {
+            Selection::Field(f) => &f.directives,
+            Selection::FragmentSpread(s) => &s.directives,
+            Selection::InlineFragment(i) => &i.directives,
+        };
+        if is_skipped_by_directives(selection_directives, ctx.variables) {
+            return Ok(0.0);
+        }
+
         match selection {
             Selection::Field(f) => {
                 // We need two things for scoring this field: (1) the list size to use for
@@ -455,6 +462,8 @@ impl StaticCostCalculator {
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
+            // TODO: Spreads with mutually exclusive type conditions should not be added together.
+            //       Current estimate may exaggerate cost of spreads across many implementation types.
             cost += self.score_selection(
                 ctx,
                 selection,
@@ -467,20 +476,6 @@ impl StaticCostCalculator {
         Ok(cost)
     }
 
-    fn skipped_by_directives(field: &Field) -> bool {
-        let include_directive = IncludeDirective::from_field(field);
-        if let Ok(Some(IncludeDirective { is_included: false })) = include_directive {
-            return true;
-        }
-
-        let skip_directive = SkipDirective::from_field(field);
-        if let Ok(Some(SkipDirective { is_skipped: true })) = skip_directive {
-            return true;
-        }
-
-        false
-    }
-
     fn score_plan_node(
         &self,
         plan_node: &PlanNode,
@@ -491,10 +486,10 @@ impl StaticCostCalculator {
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes, variables),
             PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node, variables),
             PlanNode::Condition {
-                condition: _,
+                condition,
                 if_clause,
                 else_clause,
-            } => self.max_score_of_nodes(if_clause, else_clause, variables),
+            } => self.score_conditional_nodes(condition, if_clause, else_clause, variables),
             PlanNode::Defer { primary, deferred } => {
                 self.summed_score_of_deferred_nodes(primary, deferred, variables)
             }
@@ -532,21 +527,23 @@ impl StaticCostCalculator {
         Ok(CostBySubgraph::new(subgraph, cost))
     }
 
-    fn max_score_of_nodes(
+    fn score_conditional_nodes(
         &self,
-        left: &Option<Box<PlanNode>>,
-        right: &Option<Box<PlanNode>>,
+        condition: &str,
+        if_clause: &Option<Box<PlanNode>>,
+        else_clause: &Option<Box<PlanNode>>,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
-        match (left, right) {
-            (None, None) => Ok(CostBySubgraph::default()),
-            (None, Some(right)) => self.score_plan_node(right, variables),
-            (Some(left), None) => self.score_plan_node(left, variables),
-            (Some(left), Some(right)) => {
-                let left_score = self.score_plan_node(left, variables)?;
-                let right_score = self.score_plan_node(right, variables)?;
-                Ok(CostBySubgraph::maximum(left_score, right_score))
-            }
+        // Evaluate the condition variable. If the variable is missing, default to `true`
+        // to match the runtime behavior in `PlanNode::is_deferred`.
+        let branch = variables
+            .get(condition)
+            .map(|v| v.as_bool().unwrap_or(false))
+            .unwrap_or(true);
+        let selected = if branch { if_clause } else { else_clause };
+        match selected {
+            Some(node) => self.score_plan_node(node, variables),
+            None => Ok(CostBySubgraph::default()),
         }
     }
 
@@ -1095,6 +1092,73 @@ mod tests {
         let variables = "{}";
 
         assert_eq!(basic_estimated_cost(schema, query, variables), 0.0)
+    }
+
+    #[test]
+    fn skip_directive_resolves_variables() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = "query Test($shouldSkip: Boolean!) {
+            someObjects @skip(if: $shouldSkip) { field1 }
+        }";
+        let baseline = "{ someObjects { field1 } }";
+
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldSkip": true}"#),
+            0.0
+        );
+        let expected = basic_estimated_cost(schema, baseline, r#"{"shouldSkip": false}"#);
+        assert!(expected > 0.0);
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldSkip": false}"#),
+            expected
+        );
+    }
+
+    #[test]
+    fn skip_directive_on_inline_fragment_excludes_cost() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = "{ ... @skip(if: true) { someObjects { field1 } } }";
+
+        assert_eq!(basic_estimated_cost(schema, query, "{}"), 0.0);
+    }
+
+    #[test]
+    fn skip_directive_on_fragment_spread_resolves_variables() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = "fragment ObjectFields on Query { someObjects { field1 } }
+            query Test($shouldSkip: Boolean!) { ...ObjectFields @skip(if: $shouldSkip) }";
+        let baseline = "{ someObjects { field1 } }";
+
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldSkip": true}"#),
+            0.0
+        );
+        let expected = basic_estimated_cost(schema, baseline, r#"{"shouldSkip": false}"#);
+        assert!(expected > 0.0);
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldSkip": false}"#),
+            expected
+        );
+    }
+
+    #[test]
+    fn include_directive_resolves_variables() {
+        let schema = include_str!("./fixtures/basic_schema.graphql");
+        let query = "query Test($shouldInclude: Boolean!) {
+            someObjects @include(if: $shouldInclude) { field1 }
+        }";
+        let baseline = "{ someObjects { field1 } }";
+
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldInclude": false}"#),
+            0.0
+        );
+        let expected = basic_estimated_cost(schema, baseline, r#"{"shouldInclude": true}"#);
+        assert!(expected > 0.0);
+        assert_eq!(
+            basic_estimated_cost(schema, query, r#"{"shouldInclude": true}"#),
+            expected
+        );
     }
 
     #[test(tokio::test)]

@@ -14,7 +14,6 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
 use indexmap::IndexSet;
 use serde_json_bytes::Value as JsonValue;
-use tower::BoxError;
 
 use crate::json_ext::Object;
 use crate::json_ext::ValueExt;
@@ -120,23 +119,34 @@ fn collect_slicing_sizes<'a>(
         .collect()
 }
 
-pub(in crate::plugins::demand_control) struct IncludeDirective {
-    pub(in crate::plugins::demand_control) is_included: bool,
+// Resolves a boolean AST value, following variable references into the provided variables map.
+// Returns `None` for null, missing, or unsupported value types.
+fn resolve_bool_argument(value: &AstValue, variables: &Object) -> Option<bool> {
+    match value {
+        AstValue::Boolean(b) => Some(*b),
+        AstValue::Variable(var_name) => variables.get(var_name.as_str()).and_then(|v| v.as_bool()),
+        _ => None,
+    }
 }
 
-impl IncludeDirective {
-    pub(in crate::plugins::demand_control) fn from_field(
-        field: &Field,
-    ) -> Result<Option<Self>, BoxError> {
-        let directive = field
-            .directives
-            .get("include")
-            .and_then(|skip| skip.specified_argument_by_name("if"))
-            .and_then(|arg| arg.to_bool())
-            .map(|cond| Self { is_included: cond });
-
-        Ok(directive)
-    }
+// Returns whether a selection is excluded by `@skip(if: ...)` or `@include(if: ...)`
+// directives, resolving variable references against the provided variables map.
+//
+// - `@skip(if: true)` excludes the selection.
+// - `@include(if: false)` excludes the selection.
+// - Any directive whose `if` argument cannot be resolved to a boolean is ignored,
+//   matching the runtime behavior where the selection is kept.
+pub(in crate::plugins::demand_control) fn is_skipped_by_directives(
+    directives: &apollo_compiler::ast::DirectiveList,
+    variables: &Object,
+) -> bool {
+    let resolved_if = |name: &str| {
+        directives
+            .get(name)
+            .and_then(|d| d.specified_argument_by_name("if"))
+            .and_then(|arg| resolve_bool_argument(arg, variables))
+    };
+    matches!(resolved_if("skip"), Some(true)) || matches!(resolved_if("include"), Some(false))
 }
 
 #[derive(Clone, Debug)]
@@ -380,25 +390,6 @@ impl RequiresDirective {
         } else {
             Ok(None)
         }
-    }
-}
-
-pub(in crate::plugins::demand_control) struct SkipDirective {
-    pub(in crate::plugins::demand_control) is_skipped: bool,
-}
-
-impl SkipDirective {
-    pub(in crate::plugins::demand_control) fn from_field(
-        field: &Field,
-    ) -> Result<Option<Self>, BoxError> {
-        let directive = field
-            .directives
-            .get("skip")
-            .and_then(|skip| skip.specified_argument_by_name("if"))
-            .and_then(|arg| arg.to_bool())
-            .map(|cond| Self { is_skipped: cond });
-
-        Ok(directive)
     }
 }
 
