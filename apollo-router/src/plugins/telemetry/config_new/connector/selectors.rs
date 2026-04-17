@@ -194,14 +194,34 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
                 default,
-                ..
+                redact,
             } => {
                 let TransportRequest::Http(ref http_request) = request.transport_request;
-                http_request
+                let header_value = http_request
                     .inner
                     .headers()
                     .get(connector_request_header)
-                    .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = match (redact.as_deref(), &header_value) {
+                    (Some("allow"), _) => header_value,
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    (None, Some(_)) => {
+                        let should_mask = request.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(connector_request_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    _ => header_value,
+                };
+
+                value
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
             }
@@ -760,6 +780,84 @@ mod tests {
             Some(TEST_HEADER_VALUE.into()),
             selector.on_response(&connector_response_with_header())
         );
+    }
+
+    #[test]
+    fn connector_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = ConnectorSelector::HttpRequestHeader {
+            connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+        }));
+        let context = Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = connector_request(http_request_with_header(), Some(context), None);
+        assert_eq!(Some("***MASKED***".into()), selector.on_request(&request));
+    }
+
+    #[test]
+    fn connector_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = ConnectorSelector::HttpRequestHeader {
+            connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+        }));
+        let context = Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = connector_request(http_request_with_header(), Some(context), None);
+        assert_eq!(Some(TEST_HEADER_VALUE.into()), selector.on_request(&request));
+    }
+
+    #[test]
+    fn connector_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+        }));
+        let response = connector_response_with_header();
+        response.context.extensions().with_lock(|lock| lock.insert(rules));
+        assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
+    }
+
+    #[test]
+    fn connector_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+        }));
+        let response = connector_response_with_header();
+        response.context.extensions().with_lock(|lock| lock.insert(rules));
+        assert_eq!(Some(TEST_HEADER_VALUE.into()), selector.on_response(&response));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::configuration::header_masking_config::HeaderMaskingConfig;
 const MASKED_VALUE: &str = "***MASKED***";
 
 /// Compiled header masking rules for efficient lookup
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct HeaderMaskingRules {
     /// Set of sensitive header names (lowercase) that should be masked
     sensitive_headers: HashSet<String>,

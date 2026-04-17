@@ -7,5 +7,6 @@ include_subgraph_errors:
 headers:
   all:
     request:
-      - propagate:
-          named: fibonacci-iterations
+      operations:
+        - propagate:
+            named: fibonacci-iterations

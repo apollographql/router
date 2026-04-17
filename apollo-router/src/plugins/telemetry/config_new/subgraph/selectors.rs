@@ -1214,6 +1214,138 @@ mod test {
     }
 
     #[test]
+    fn subgraph_subgraph_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = SubgraphSelector::SubgraphRequestHeader {
+            subgraph_request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::fake_builder().build())
+                    .unwrap(),
+            )
+            .context(context)
+            .build();
+        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn subgraph_subgraph_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = SubgraphSelector::SubgraphRequestHeader {
+            subgraph_request_header: "authorization".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::fake_builder().build())
+                    .unwrap(),
+            )
+            .context(context)
+            .build();
+        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+    }
+
+    #[test]
+    fn subgraph_supergraph_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = SubgraphSelector::SupergraphRequestHeader {
+            supergraph_request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .context(context)
+            .build();
+        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = SubgraphSelector::SubgraphResponseHeader {
+            subgraph_response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let response = crate::services::SubgraphResponse::fake2_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = SubgraphSelector::SubgraphResponseHeader {
+            subgraph_response_header: "set-cookie".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let response = crate::services::SubgraphResponse::fake2_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), "session=abc123".into());
+    }
+
+    #[test]
     fn subgraph_request_context() {
         let selector = SubgraphSelector::RequestContext {
             request_context: "context_key".to_string(),

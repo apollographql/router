@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2220,11 +2221,12 @@ expression: "&schema"
     },
     "ConnectorHeadersConfiguration": {
       "additionalProperties": false,
+      "description": "Configuration for connectors (no masking - inherits from parent subgraph)",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/ConnectorHeadersLocation"
             },
             {
               "type": "null"
@@ -2234,10 +2236,24 @@ expression: "&schema"
         },
         "sources": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/ConnectorHeadersLocation"
           },
           "description": "Map of subgraph_name.connector_source_name to configuration",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Configuration for connector headers at a specific location\nConnectors only have request operations - masking is inherited from parent subgraph",
+      "properties": {
+        "request": {
+          "description": "Propagate/Insert/Remove operations for requests",
+          "items": {
+            "$ref": "#/definitions/Operation"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -5596,6 +5612,35 @@ expression: "&schema"
         }
       ]
     },
+    "GlobalHeadersConfiguration": {
+      "additionalProperties": false,
+      "description": "Global configuration with request and response sections",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request configuration (operations and masking)"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Response configuration (operations and masking)"
+        }
+      },
+      "type": "object"
+    },
     "GraphQLSelector": {
       "anyOf": [
         {
@@ -5821,18 +5866,18 @@ expression: "&schema"
     },
     "HeadersConfig": {
       "additionalProperties": false,
-      "description": "Configuration for header propagation",
+      "description": "Configuration for header propagation and masking",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/GlobalHeadersConfiguration"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Rules to apply to all subgraphs"
+          "description": "Rules to apply to all subgraphs (global defaults)"
         },
         "connector": {
           "allOf": [
@@ -5844,9 +5889,9 @@ expression: "&schema"
         },
         "subgraphs": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/GlobalHeadersConfiguration"
           },
-          "description": "Rules to specific subgraphs",
+          "description": "Rules for specific subgraphs",
           "type": "object"
         }
       },
@@ -5854,18 +5899,28 @@ expression: "&schema"
     },
     "HeadersLocation": {
       "additionalProperties": false,
+      "description": "Configuration for headers at a specific location (request or response)\nUsed for subgraphs - includes both operations and masking",
       "properties": {
-        "request": {
-          "description": "Propagate/Insert/Remove headers from request",
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration"
+        },
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
           "items": {
             "$ref": "#/definitions/Operation"
           },
           "type": "array"
         }
       },
-      "required": [
-        "request"
-      ],
       "type": "object"
     },
     "HealthCheckConfig": {
@@ -12857,31 +12912,6 @@ expression: "&schema"
     },
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig"
-    },
-    "header_masking": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/HeaderMaskingConfig"
-        }
-      ],
-      "default": {
-        "enabled": true,
-        "sensitive_headers": [
-          "authorization",
-          "proxy-authorization",
-          "proxy-authenticate",
-          "cookie",
-          "set-cookie",
-          "x-api-key",
-          "api-key",
-          "x-auth-token",
-          "x-session-id",
-          "x-session-token",
-          "x-csrf-token",
-          "x-xsrf-token"
-        ]
-      },
-      "description": "Header masking configuration"
     },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"

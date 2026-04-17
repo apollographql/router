@@ -345,13 +345,36 @@ impl Selector for RouterSelector {
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = match (redact.as_deref(), &header_value) {
+                    (Some("allow"), _) => header_value,
+                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    (None, Some(_)) => {
+                        let should_mask = response.context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
+                                .map(|rules| rules.should_mask(response_header))
+                                .unwrap_or(false)
+                        });
+                        if should_mask {
+                            Some("***MASKED***".to_string())
+                        } else {
+                            header_value
+                        }
+                    }
+                    _ => header_value,
+                };
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::ResponseStatus { response_status } => match response_status {
                 ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
@@ -562,6 +585,8 @@ impl Selector for RouterSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use http::StatusCode;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
@@ -799,6 +824,133 @@ mod test {
             ),
             None
         );
+    }
+
+    #[test]
+    fn router_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn router_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+    }
+
+    #[test]
+    fn router_request_header_redact_explicit_mask() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "x-custom".to_string(),
+            redact: Some("mask".to_string()),
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("x-custom", "some-value")
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn router_request_header_no_masking_without_rules() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .build()
+            .unwrap();
+        // No rules in context → header passes through unmasked
+        assert_eq!(selector.on_request(&request).unwrap(), "Bearer secret".into()); // gitleaks:allow
+    }
+
+    #[test]
+    fn router_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), "***MASKED***".into());
+    }
+
+    #[test]
+    fn router_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: Some("allow".to_string()),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(rules));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), "session=abc123".into());
     }
 
     #[test]

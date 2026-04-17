@@ -943,12 +943,14 @@ headers:
   subgraphs:
     products:
       request:
-        - insert: &insert_custom_header
-            name: "custom-header"
-            value: "something"
+        operations:
+          - insert: &insert_custom_header
+              name: "custom-header"
+              value: "something"
     reviews:
       request:
-        - insert: *insert_custom_header
+        operations:
+          - insert: *insert_custom_header
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.

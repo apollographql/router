@@ -162,10 +162,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
 
-    /// Header masking configuration
-    #[serde(default)]
-    pub(crate) header_masking: header_masking_config::HeaderMaskingConfig,
-
     /// Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
@@ -257,7 +253,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         #[serde(default)]
         struct AdHocConfiguration {
             health_check: HealthCheck,
-            header_masking: header_masking_config::HeaderMaskingConfig,
             sandbox: Sandbox,
             homepage: Homepage,
             server: Server,
@@ -294,7 +289,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
             health_check: ad_hoc.health_check,
-            header_masking: ad_hoc.header_masking,
             sandbox: ad_hoc.sandbox,
             homepage: ad_hoc.homepage,
             server: ad_hoc.server,
@@ -359,7 +353,6 @@ impl Configuration {
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
-            header_masking: Default::default(),
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
@@ -505,7 +498,6 @@ impl Configuration {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
-            header_masking: Default::default(),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),

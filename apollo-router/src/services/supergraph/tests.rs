@@ -1091,7 +1091,7 @@ async fn subscription_callback_schema_reload() {
         "include_subgraph_errors": { "all": true },
         "headers": {
             "all": {
-                "request": [{"propagate": {"named": "x-test"}}]
+                "request": {"operations": [{"propagate": {"named": "x-test"}}]}
             }
         },
         "subscription": {
