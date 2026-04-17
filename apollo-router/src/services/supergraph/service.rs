@@ -62,7 +62,6 @@ use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMu
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
-use crate::services::new_service::ServiceFactory;
 use crate::services::query_planner;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
@@ -663,13 +662,6 @@ pub(crate) trait HasSchema {
 impl HasSchema for SupergraphCreator {
     fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
-    }
-}
-
-impl ServiceFactory<supergraph::Request> for SupergraphCreator {
-    type Service = supergraph::BoxCloneService;
-    fn create(&self) -> Self::Service {
-        self.make()
     }
 }
 

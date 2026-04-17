@@ -15,7 +15,6 @@ use super::FetchRequest;
 use super::SubgraphRequest;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
-use super::new_service::ServiceFactory;
 use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;

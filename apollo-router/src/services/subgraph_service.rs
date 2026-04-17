@@ -1154,7 +1154,7 @@ impl SubgraphServiceFactory {
                     subscription_config.clone(),
                     Arc::from(name.clone()),
                 ))
-                .service(service.clone().boxed_clone())
+                .service(service.clone())
                 .boxed_clone();
             // One buffer per named subgraph provides per-subgraph backpressure and is
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
