@@ -20,6 +20,18 @@ expression: parse_result_for_snapshot(response).await
         "extensions": {
           "code": "COST_ESTIMATED_TOO_EXPENSIVE",
           "cost.estimated": 10400.0,
+          "cost.estimated.breakdown": {
+            "__cost": 0.0,
+            "ships": {
+              "__cost": 200.0,
+              "owner": {
+                "__cost": 200.0,
+                "addresses": {
+                  "__cost": 10000.0
+                }
+              }
+            }
+          },
           "cost.max": 1.0
         },
         "message": "query estimated cost 10400 exceeded configured maximum 1"

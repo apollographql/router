@@ -37,6 +37,7 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::cost_calculator::CostBreakdownNode;
 use crate::plugins::demand_control::cost_calculator::CostBySubgraph;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
@@ -200,6 +201,8 @@ pub(crate) enum DemandControlError {
         estimated_cost: f64,
         /// The maximum cost of the query
         max_cost: f64,
+        /// Per-field cost breakdown (present when cost exceeds limit)
+        breakdown: Option<CostBreakdownNode>,
     },
     /// query estimated cost {estimated_cost} exceeded configured maximum {max_cost} for subgraph {subgraph}
     EstimatedSubgraphCostTooExpensive {
@@ -234,10 +237,16 @@ impl IntoGraphQLErrors for DemandControlError {
             DemandControlError::EstimatedCostTooExpensive {
                 estimated_cost,
                 max_cost,
+                ref breakdown,
             } => {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
+                if let Some(breakdown) = breakdown
+                    && let Ok(value) = serde_json_bytes::to_value(breakdown)
+                {
+                    extensions.insert("cost.estimated.breakdown", value);
+                }
                 Ok(vec![
                     graphql::Error::builder()
                         .extension_code(self.code())
@@ -948,6 +957,7 @@ mod test {
                     DemandControlError::EstimatedCostTooExpensive {
                         max_cost: 1.0,
                         estimated_cost: 2.0,
+                        breakdown: None,
                     }
                 }
 

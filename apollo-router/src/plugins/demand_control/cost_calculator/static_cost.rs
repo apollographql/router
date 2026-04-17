@@ -15,6 +15,7 @@ use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 use serde_json_bytes::Value;
 
+use super::CostBreakdownNode;
 use super::DemandControlError;
 use super::FetchCostEntry;
 use super::PlanCostResult;
@@ -504,15 +505,22 @@ impl StaticCostCalculator {
         &self,
         plan_node: &'a PlanNode,
         variables: &Object,
+        response_path: Vec<String>,
         entries: &mut Vec<FetchCostEntry<'a>>,
     ) -> Result<(), DemandControlError> {
         match plan_node {
             PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    self.collect_plan_costs(node, variables, entries)?;
+                    self.collect_plan_costs(node, variables, response_path.clone(), entries)?;
                 }
             }
             PlanNode::Flatten(flatten_node) => {
+                let mut response_path = Vec::new();
+                for elem in &flatten_node.path.0 {
+                    if let crate::json_ext::PathElement::Key(name, _) = elem {
+                        response_path.push(name.to_string());
+                    }
+                }
                 // Check if the inner node is directly an entity fetch (non-empty requires).
                 // If so, supply the cardinality derived from the flatten path so that
                 // _entities is scored with the correct instance count.
@@ -529,9 +537,11 @@ impl StaticCostCalculator {
                     entries.push(FetchCostEntry {
                         subgraph: &fetch_node.service_name,
                         cost,
+                        response_path,
+                        operation: &fetch_node.operation,
                     });
                 } else {
-                    self.collect_plan_costs(&flatten_node.node, variables, entries)?;
+                    self.collect_plan_costs(&flatten_node.node, variables, response_path, entries)?;
                 }
             }
             PlanNode::Condition {
@@ -542,11 +552,16 @@ impl StaticCostCalculator {
                 // Collect both branches, keep the one with higher total cost.
                 let mut if_entries = Vec::new();
                 if let Some(node) = if_clause {
-                    self.collect_plan_costs(node, variables, &mut if_entries)?;
+                    self.collect_plan_costs(
+                        node,
+                        variables,
+                        response_path.clone(),
+                        &mut if_entries,
+                    )?;
                 }
                 let mut else_entries = Vec::new();
                 if let Some(node) = else_clause {
-                    self.collect_plan_costs(node, variables, &mut else_entries)?;
+                    self.collect_plan_costs(node, variables, response_path, &mut else_entries)?;
                 }
                 let if_total: f64 = if_entries.iter().map(|e| e.cost).sum();
                 let else_total: f64 = else_entries.iter().map(|e| e.cost).sum();
@@ -558,11 +573,11 @@ impl StaticCostCalculator {
             }
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = &primary.node {
-                    self.collect_plan_costs(node, variables, entries)?;
+                    self.collect_plan_costs(node, variables, response_path.clone(), entries)?;
                 }
                 for d in deferred {
                     if let Some(node) = &d.node {
-                        self.collect_plan_costs(node, variables, entries)?;
+                        self.collect_plan_costs(node, variables, response_path.clone(), entries)?;
                     }
                 }
             }
@@ -576,6 +591,8 @@ impl StaticCostCalculator {
                 entries.push(FetchCostEntry {
                     subgraph: &fetch_node.service_name,
                     cost,
+                    response_path,
+                    operation: &fetch_node.operation,
                 });
             }
             PlanNode::Subscription { primary, rest: _ } => {
@@ -588,6 +605,8 @@ impl StaticCostCalculator {
                 entries.push(FetchCostEntry {
                     subgraph: &primary.service_name,
                     cost,
+                    response_path,
+                    operation: &primary.operation,
                 });
             }
         }
@@ -656,7 +675,7 @@ impl StaticCostCalculator {
         variables: &Object,
     ) -> Result<PlanCostResult<'a>, DemandControlError> {
         let mut entries = Vec::new();
-        self.collect_plan_costs(&query_plan.root, variables, &mut entries)?;
+        self.collect_plan_costs(&query_plan.root, variables, vec![], &mut entries)?;
         Ok(PlanCostResult::new(entries))
     }
 
@@ -729,6 +748,374 @@ impl StaticCostCalculator {
         }
 
         cardinality
+    }
+
+    /// Build a cost breakdown tree from collected fetch entries.
+    pub(crate) fn build_breakdown(
+        &self,
+        entries: &[FetchCostEntry],
+        variables: &Object,
+    ) -> Result<CostBreakdownNode, DemandControlError> {
+        let mut root = CostBreakdownNode::default();
+        for entry in entries {
+            let fetch_breakdown = self.build_fetch_breakdown(entry, variables)?;
+            root.merge_at_path(&entry.response_path, fetch_breakdown);
+        }
+        Ok(root)
+    }
+
+    /// Build a breakdown tree for a single fetch operation.
+    fn build_fetch_breakdown(
+        &self,
+        entry: &FetchCostEntry,
+        variables: &Object,
+    ) -> Result<CostBreakdownNode, DemandControlError> {
+        let schema = self.subgraph_schemas.get(entry.subgraph).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
+                "Query planner did not provide a schema for service {}",
+                entry.subgraph
+            ))
+        })?;
+        let doc = entry
+            .operation
+            .as_parsed()
+            .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
+
+        let ctx = ScoringContext {
+            schema,
+            query: doc,
+            variables,
+            should_estimate_requires: false,
+            entity_count_hint: None,
+        };
+
+        let mut field_costs: Vec<(Vec<String>, f64)> = Vec::new();
+
+        // Walk each operation
+        if let Some(op) = &doc.operations.anonymous {
+            let mutation_cost = if op.is_mutation() { 10.0 } else { 0.0 };
+            if mutation_cost > 0.0 {
+                field_costs.push((vec![], mutation_cost));
+            }
+            let Some(root_type_name) = ctx.schema.root_operation(op.operation_type) else {
+                return Err(DemandControlError::QueryParseFailure(format!(
+                    "Cannot cost {} operation because the schema does not support this root type",
+                    op.operation_type
+                )));
+            };
+            self.collect_breakdown_selection_set(
+                &ctx,
+                &op.selection_set,
+                root_type_name,
+                &[],
+                &[],
+                entry.subgraph,
+                1.0,
+                &mut vec![],
+                &mut field_costs,
+            )?;
+        }
+        for (_name, op) in doc.operations.named.iter() {
+            let mutation_cost = if op.is_mutation() { 10.0 } else { 0.0 };
+            if mutation_cost > 0.0 {
+                field_costs.push((vec![], mutation_cost));
+            }
+            let Some(root_type_name) = ctx.schema.root_operation(op.operation_type) else {
+                return Err(DemandControlError::QueryParseFailure(format!(
+                    "Cannot cost {} operation because the schema does not support this root type",
+                    op.operation_type
+                )));
+            };
+            self.collect_breakdown_selection_set(
+                &ctx,
+                &op.selection_set,
+                root_type_name,
+                &[],
+                &[],
+                entry.subgraph,
+                1.0,
+                &mut vec![],
+                &mut field_costs,
+            )?;
+        }
+
+        // Build tree from collected (path, cost) entries
+        let mut root = CostBreakdownNode::default();
+        for (path, cost) in field_costs {
+            if path.is_empty() {
+                root.own_cost += cost;
+            } else {
+                let path_strs: Vec<String> = path;
+                root.merge_at_path(
+                    &path_strs,
+                    CostBreakdownNode {
+                        own_cost: cost,
+                        children: Default::default(),
+                    },
+                );
+            }
+        }
+        Ok(root)
+    }
+
+    /// Collect per-field costs for breakdown building, mirroring score_selection_set.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_breakdown_selection_set(
+        &self,
+        ctx: &ScoringContext,
+        selection_set: &SelectionSet,
+        parent_type_name: &NamedType,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
+        cumulative_multiplier: f64,
+        current_path: &mut Vec<String>,
+        field_costs: &mut Vec<(Vec<String>, f64)>,
+    ) -> Result<(), DemandControlError> {
+        for selection in selection_set.selections.iter() {
+            self.collect_breakdown_selection(
+                ctx,
+                selection,
+                parent_type_name,
+                list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+                cumulative_multiplier,
+                current_path,
+                field_costs,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Collect per-field costs for a single selection.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_breakdown_selection(
+        &self,
+        ctx: &ScoringContext,
+        selection: &Selection,
+        parent_type: &NamedType,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
+        cumulative_multiplier: f64,
+        current_path: &mut Vec<String>,
+        field_costs: &mut Vec<(Vec<String>, f64)>,
+    ) -> Result<(), DemandControlError> {
+        match selection {
+            Selection::Field(f) => {
+                let size_from_parent = list_size_directives
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
+                let size_from_inherited = inherited_list_sizes
+                    .iter()
+                    .filter_map(|dir| dir.size_of(f))
+                    .max();
+                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
+
+                let descended: Vec<ListSizeDirective> = list_size_directives
+                    .iter()
+                    .chain(inherited_list_sizes.iter())
+                    .filter_map(|dir| dir.descend(f.name.as_str()))
+                    .collect();
+
+                self.collect_breakdown_field(
+                    ctx,
+                    f,
+                    parent_type,
+                    list_size_from_upstream,
+                    &descended,
+                    subgraph,
+                    cumulative_multiplier,
+                    current_path,
+                    field_costs,
+                )
+            }
+            Selection::FragmentSpread(s) => {
+                let fragment = s.fragment_def(ctx.query).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Parsed operation did not have a definition for fragment {}",
+                        s.fragment_name
+                    ))
+                })?;
+                self.collect_breakdown_selection_set(
+                    ctx,
+                    &fragment.selection_set,
+                    fragment.type_condition(),
+                    list_size_directives,
+                    inherited_list_sizes,
+                    subgraph,
+                    cumulative_multiplier,
+                    current_path,
+                    field_costs,
+                )
+            }
+            Selection::InlineFragment(i) => self.collect_breakdown_selection_set(
+                ctx,
+                &i.selection_set,
+                i.type_condition.as_ref().unwrap_or(parent_type),
+                list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+                cumulative_multiplier,
+                current_path,
+                field_costs,
+            ),
+        }
+    }
+
+    /// Collect per-field cost for a single field, mirroring score_field.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_breakdown_field(
+        &self,
+        ctx: &ScoringContext,
+        field: &Field,
+        parent_type: &NamedType,
+        list_size_from_upstream: Option<i32>,
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
+        cumulative_multiplier: f64,
+        current_path: &mut Vec<String>,
+        field_costs: &mut Vec<(Vec<String>, f64)>,
+    ) -> Result<(), DemandControlError> {
+        if field.name == TYPENAME {
+            return Ok(());
+        }
+        if StaticCostCalculator::skipped_by_directives(field) {
+            return Ok(());
+        }
+
+        let definition = ctx
+            .schema
+            .output_field_definition(parent_type, &field.name)
+            .ok_or_else(|| {
+                DemandControlError::QueryParseFailure(format!(
+                    "Field {} was found in query, but its type is missing from the schema.",
+                    field.name
+                ))
+            })?;
+
+        let own_list_size_directives: Vec<ListSizeDirective> = definition
+            .list_size_directive_entries()
+            .iter()
+            .map(|entry| {
+                ListSizeDirective::new(
+                    &entry.directive,
+                    field,
+                    ctx.variables,
+                    entry.parsed_sized_fields.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let effective_expected_size = own_list_size_directives
+            .iter()
+            .chain(inherited_list_sizes)
+            .filter_map(|dir| dir.expected_size)
+            .max();
+
+        let instance_count = if !field.ty().is_list() {
+            1
+        } else if let Some(value) = list_size_from_upstream {
+            value
+        } else if let Some(expected_size) = effective_expected_size {
+            expected_size
+        } else if let Some(subgraph_list_size) = self.subgraph_list_size(subgraph) {
+            subgraph_list_size as i32
+        } else {
+            self.list_size as i32
+        };
+
+        // Compute the field's own weight (not including children)
+        let own_weight = if let Some(cost_directive) = definition.cost_directive() {
+            cost_directive.weight()
+        } else if definition.ty().is_interface()
+            || definition.ty().is_object()
+            || definition.ty().is_union()
+        {
+            1.0
+        } else {
+            0.0
+        };
+
+        let mut arguments_cost = 0.0;
+        for argument in &field.arguments {
+            let argument_definition =
+                definition.argument_by_name(&argument.name).ok_or_else(|| {
+                    DemandControlError::QueryParseFailure(format!(
+                        "Argument {} of field {} is missing a definition in the schema",
+                        argument.name, field.name
+                    ))
+                })?;
+            arguments_cost += score_argument(
+                &argument.value,
+                argument_definition,
+                ctx.schema,
+                ctx.variables,
+            )?;
+        }
+
+        let mut requirements_cost = 0.0;
+        if ctx.should_estimate_requires {
+            let requirements = definition.requires_directive().map(|d| &d.fields);
+            if let Some(selection_set) = requirements {
+                requirements_cost = self.score_selection_set(
+                    ctx,
+                    selection_set,
+                    parent_type,
+                    &own_list_size_directives,
+                    &[],
+                    subgraph,
+                )?;
+            }
+        }
+
+        // The effective own cost for this field at this level
+        let effective_own = cumulative_multiplier
+            * ((instance_count as f64) * own_weight + arguments_cost + requirements_cost);
+
+        // Skip _entities in the breakdown path — attribute its cost to the fetch root
+        let is_entities = parent_type == "Query" && field.name == "_entities";
+
+        if is_entities {
+            // Don't push to path; attribute own cost to current path level
+            if effective_own > 0.0 {
+                field_costs.push((current_path.clone(), effective_own));
+            }
+            // Recurse into children without changing path
+            self.collect_breakdown_selection_set(
+                ctx,
+                &field.selection_set,
+                field.ty().inner_named_type(),
+                &own_list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+                cumulative_multiplier * (instance_count as f64),
+                current_path,
+                field_costs,
+            )?;
+        } else {
+            current_path.push(field.alias.as_ref().unwrap_or(&field.name).to_string());
+            if effective_own > 0.0 {
+                field_costs.push((current_path.clone(), effective_own));
+            }
+            // Recurse into children
+            self.collect_breakdown_selection_set(
+                ctx,
+                &field.selection_set,
+                field.ty().inner_named_type(),
+                &own_list_size_directives,
+                inherited_list_sizes,
+                subgraph,
+                cumulative_multiplier * (instance_count as f64),
+                current_path,
+                field_costs,
+            )?;
+            current_path.pop();
+        }
+
+        Ok(())
     }
 
     pub(crate) fn actual(
@@ -878,7 +1265,7 @@ mod tests {
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
             let mut entries = Vec::new();
-            self.collect_plan_costs(&js_planner_node, variables, &mut entries)?;
+            self.collect_plan_costs(&js_planner_node, variables, vec![], &mut entries)?;
             let result = PlanCostResult::new(entries);
             Ok(result.by_subgraph().total())
         }
@@ -1816,5 +2203,179 @@ mod tests {
         let calc = make_calculator_for_path_test(schema_str, 10);
         let path = crate::json_ext::Path::from_slice(&["user", "orders", "@"]);
         assert_eq!(calc.estimated_path_cardinality(&path), 10);
+    }
+
+    /// Tests for the cost breakdown feature.
+    mod breakdown_tests {
+        use std::sync::Arc;
+
+        use ahash::HashMap;
+        use ahash::HashMapExt;
+        use apollo_federation::query_plan::query_planner::QueryPlanner;
+        use serde_json_bytes::Value;
+
+        use super::parse_schema_and_operation;
+        use crate::Configuration;
+        use crate::plugins::demand_control::cost_calculator::PlanCostResult;
+        use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+        use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
+        use crate::query_planner::PlanNode;
+
+        fn build_breakdown_rust(
+            schema_str: &str,
+            query_str: &str,
+            variables_str: &str,
+        ) -> (
+            f64,
+            crate::plugins::demand_control::cost_calculator::CostBreakdownNode,
+        ) {
+            let config: Arc<Configuration> = Arc::new(Default::default());
+            let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
+            let variables = serde_json::from_str::<Value>(variables_str)
+                .unwrap()
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+
+            let planner =
+                QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
+            let query_plan = planner
+                .build_query_plan(&query.executable, None, Default::default())
+                .unwrap();
+
+            let schema =
+                DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
+            let mut demand_controlled_subgraph_schemas = HashMap::new();
+            for (subgraph_name, subgraph_schema) in planner.subgraph_schemas().iter() {
+                let demand_controlled_subgraph_schema =
+                    DemandControlledSchema::new(Arc::new(subgraph_schema.schema().clone()))
+                        .unwrap();
+                demand_controlled_subgraph_schemas
+                    .insert(subgraph_name.to_string(), demand_controlled_subgraph_schema);
+            }
+
+            let calculator = StaticCostCalculator::new(
+                Arc::new(schema),
+                Arc::new(demand_controlled_subgraph_schemas),
+                Default::default(),
+                100,
+            );
+
+            let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
+            let mut entries = Vec::new();
+            calculator
+                .collect_plan_costs(&js_planner_node, &variables, vec![], &mut entries)
+                .unwrap();
+            let plan_result = PlanCostResult::new(entries);
+            let cost = plan_result.by_subgraph().total();
+            let breakdown = calculator
+                .build_breakdown(&plan_result.entries, &variables)
+                .unwrap();
+            (cost, breakdown)
+        }
+
+        #[test]
+        fn breakdown_subtotal_matches_estimated_cost() {
+            let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+            let query = include_str!("./fixtures/federated_ships_named_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(
+                breakdown.subtotal(),
+                cost,
+                "Breakdown subtotal should match estimated cost"
+            );
+        }
+
+        #[test]
+        fn breakdown_structure_for_federated_query_with_requires() {
+            let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+            let query = include_str!("./fixtures/federated_ships_required_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(
+                breakdown.subtotal(),
+                cost,
+                "Breakdown subtotal should match estimated cost"
+            );
+            // Verify the breakdown serializes to valid JSON
+            let json = serde_json::to_value(&breakdown).unwrap();
+            assert!(json.get("__cost").is_some(), "Root must have __cost");
+        }
+
+        #[test]
+        fn breakdown_structure_for_federated_query_with_fragments() {
+            let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+            let query = include_str!("./fixtures/federated_ships_fragment_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(
+                breakdown.subtotal(),
+                cost,
+                "Breakdown subtotal should match estimated cost"
+            );
+        }
+
+        /// Recursively sum every `__cost` entry in a serialized breakdown.
+        /// Under the "own cost only" semantics, the sum should equal the total cost.
+        fn sum_json_costs(value: &serde_json::Value) -> f64 {
+            let mut total = 0.0;
+            if let Some(obj) = value.as_object() {
+                for (key, child) in obj {
+                    if key == "__cost" {
+                        total += child.as_f64().unwrap_or(0.0);
+                    } else {
+                        total += sum_json_costs(child);
+                    }
+                }
+            }
+            total
+        }
+
+        #[test]
+        fn breakdown_structure_for_custom_cost_query() {
+            let schema = include_str!("./fixtures/custom_cost_schema.graphql");
+            let query = include_str!("./fixtures/custom_cost_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(
+                breakdown.subtotal(),
+                cost,
+                "Breakdown subtotal should match estimated cost"
+            );
+            let json = serde_json::to_value(&breakdown).unwrap();
+            assert_eq!(
+                sum_json_costs(&json),
+                cost,
+                "Sum of all __cost entries in JSON should equal total cost",
+            );
+        }
+
+        #[test]
+        fn breakdown_serialization_format() {
+            let schema = include_str!("./fixtures/basic_supergraph_schema.graphql");
+            let query = include_str!("./fixtures/basic_fragments_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(breakdown.subtotal(), cost);
+
+            let json = serde_json::to_value(&breakdown).unwrap();
+            // Sum of all per-node __cost entries should equal total cost
+            // (each __cost is own cost only; consumer sums to get subtree totals).
+            assert_eq!(sum_json_costs(&json), cost);
+        }
+
+        #[test]
+        fn breakdown_with_defer() {
+            let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+            let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
+            let (cost, breakdown) = build_breakdown_rust(schema, query, "{}");
+
+            assert_eq!(
+                breakdown.subtotal(),
+                cost,
+                "Breakdown subtotal should match estimated cost even with defer"
+            );
+        }
     }
 }

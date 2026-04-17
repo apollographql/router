@@ -3349,6 +3349,7 @@ mod tests {
                     DemandControlError::EstimatedCostTooExpensive {
                         estimated_cost: cost_details.estimated,
                         max_cost: (cost_details.estimated - 5.0).max(0.0),
+                        breakdown: None,
                     }
                     .into_graphql_errors()
                     .unwrap()

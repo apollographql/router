@@ -42,9 +42,14 @@ impl StrategyImpl for StaticEstimated {
             .insert_estimated_cost_by_subgraph(by_subgraph)?;
 
         if cost > self.max {
+            let breakdown = self
+                .cost_calculator
+                .build_breakdown(&plan_result.entries, variables)
+                .ok();
             let error = DemandControlError::EstimatedCostTooExpensive {
                 estimated_cost: cost,
                 max_cost: self.max,
+                breakdown,
             };
             request
                 .context

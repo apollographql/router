@@ -20,6 +20,33 @@ expression: parse_result_for_snapshot(response).await
         "extensions": {
           "code": "COST_ESTIMATED_TOO_EXPENSIVE",
           "cost.estimated": 127.0,
+          "cost.estimated.breakdown": {
+            "__cost": 0.0,
+            "argWithCost": {
+              "__cost": 10.0
+            },
+            "enumWithCost": {
+              "__cost": 15.0
+            },
+            "fieldWithCost": {
+              "__cost": 5.0
+            },
+            "fieldWithDynamicListSize": {
+              "__cost": 1.0,
+              "items": {
+                "__cost": 5.0
+              }
+            },
+            "inputWithCost": {
+              "__cost": 21.0
+            },
+            "objectWithCost": {
+              "__cost": 40.0
+            },
+            "scalarWithCost": {
+              "__cost": 30.0
+            }
+          },
           "cost.max": 1.0
         },
         "message": "query estimated cost 127 exceeded configured maximum 1"
