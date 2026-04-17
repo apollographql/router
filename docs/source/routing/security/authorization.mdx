@@ -607,9 +607,9 @@ GraphOS's composition strategy for authorization directives is intentionally acc
 
 ### Authorization on root operation types
 
-Root operation types (`Query`, `Mutation`, and `Subscription`) are **shared merged types** in a federated graph: every subgraph that contributes fields to them shares the same composed type in the supergraph. This has an important consequence for authorization directives.
+Root operation types (`Query`, `Mutation`, and `Subscription`) are shared merged types in a federated graph: every subgraph that contributes fields to them shares the same composed type in the supergraph. This has an important consequence for authorization directives.
 
-When you apply `@authenticated`, `@requiresScopes`, or `@policy` to a root operation type itself in a subgraph:
+When you apply `@authenticated`, `@requiresScopes`, or `@policy` to a root operation type in a subgraph:
 
 ```graphql
 type Mutation @authenticated {
@@ -617,17 +617,13 @@ type Mutation @authenticated {
 }
 ```
 
-the directive composes into the shared supergraph root type and applies to **every field** on that type, including fields contributed by other subgraphs. Composition does not reject this pattern since the directive's schema location allows `OBJECT`, but the result is cross-subgraph enforcement that is rarely intended.
+the directive composes into the shared supergraph root type and applies to every field on that type, including fields contributed by other subgraphs. Composition does not reject this pattern since the directive's schema location allows `OBJECT`, but the result is cross-subgraph enforcement that is rarely intended.
 
-To scope authorization on root operation types reliably, apply the directive at the **field** level rather than the type level:
+#### Apply authorization directives to specific fields
+
+To scope authorization on root operation types reliably, apply the directive to each field rather than to the root type:
 
 ```graphql
-# Instead of this:
-type Mutation @authenticated {
-  bookHotel: BookedHotel
-}
-
-# Use this:
 type Mutation {
   bookHotel: BookedHotel @authenticated
 }
