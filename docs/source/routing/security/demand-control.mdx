@@ -248,7 +248,7 @@ query BooksByIds {
 
 </ExpansionPanel>
 
-This also works when the list is passed via a query variable. For example, the following query with `{"ids": ["abc", "def", "ghi", "jkl", "mno"]}` would have a cost of ten:
+This also works when the list is passed using query variables.
 
 ```graphql
 query BooksByIds($ids: [ID!]!) {
@@ -260,6 +260,20 @@ query BooksByIds($ids: [ID!]!) {
   }
 }
 ```
+
+```json title="Query variables"
+{
+  "ids": ["abc", "def", "ghi", "jkl", "mno"]
+}
+```
+
+<ExpansionPanel title="Cost of booksByIds query">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0) + 5 book objects (5 * (1 book object (1) + 1 author object (1))) = 10 total cost
+```
+
+</ExpansionPanel>
 
 #### Nested paths in `slicingArguments`
 
