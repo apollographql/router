@@ -5,8 +5,6 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
-use apollo_compiler::executable::FragmentSpread;
-use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -307,52 +305,6 @@ impl StaticCostCalculator {
         Ok(cost)
     }
 
-    fn score_fragment_spread(
-        &self,
-        ctx: &ScoringContext,
-        fragment_spread: &FragmentSpread,
-        list_size_directives: &[ListSizeDirective],
-        inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
-    ) -> Result<f64, DemandControlError> {
-        let fragment = fragment_spread.fragment_def(ctx.query).ok_or_else(|| {
-            DemandControlError::QueryParseFailure(format!(
-                "Parsed operation did not have a definition for fragment {}",
-                fragment_spread.fragment_name
-            ))
-        })?;
-        self.score_selection_set(
-            ctx,
-            &fragment.selection_set,
-            fragment.type_condition(),
-            list_size_directives,
-            inherited_list_sizes,
-            subgraph,
-        )
-    }
-
-    fn score_inline_fragment(
-        &self,
-        ctx: &ScoringContext,
-        inline_fragment: &InlineFragment,
-        parent_type: &NamedType,
-        list_size_directives: &[ListSizeDirective],
-        inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
-    ) -> Result<f64, DemandControlError> {
-        self.score_selection_set(
-            ctx,
-            &inline_fragment.selection_set,
-            inline_fragment
-                .type_condition
-                .as_ref()
-                .unwrap_or(parent_type),
-            list_size_directives,
-            inherited_list_sizes,
-            subgraph,
-        )
-    }
-
     fn score_operation(
         &self,
         operation: &Operation,
@@ -380,77 +332,6 @@ impl StaticCostCalculator {
         Ok(cost)
     }
 
-    fn score_selection(
-        &self,
-        ctx: &ScoringContext,
-        selection: &Selection,
-        parent_type: &NamedType,
-        list_size_directives: &[ListSizeDirective],
-        inherited_list_sizes: &[ListSizeDirective],
-        subgraph: &str,
-    ) -> Result<f64, DemandControlError> {
-        // `@skip(if: ...)` and `@include(if: ...)` apply to fields, fragment spreads, and
-        // inline fragments alike. Short-circuit excluded selections before scoring so the
-        // estimate reflects only what will actually execute.
-        let selection_directives = match selection {
-            Selection::Field(f) => &f.directives,
-            Selection::FragmentSpread(s) => &s.directives,
-            Selection::InlineFragment(i) => &i.directives,
-        };
-        if is_skipped_by_directives(selection_directives, ctx.variables) {
-            return Ok(0.0);
-        }
-
-        match selection {
-            Selection::Field(f) => {
-                // We need two things for scoring this field: (1) the list size to use for
-                // instance_count if this field is a list (list_size_from_upstream), and (2) the
-                // directive(s) to pass to this field's selection set so nested lists (e.g. "page"
-                // under "results") get the right sizing (descended). With repeatable @listSize,
-                // multiple directives can descend to the same field, so we collect all of them.
-                let size_from_parent = list_size_directives
-                    .iter()
-                    .filter_map(|dir| dir.size_of(f))
-                    .max();
-                let size_from_inherited = inherited_list_sizes
-                    .iter()
-                    .filter_map(|dir| dir.size_of(f))
-                    .max();
-                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
-
-                let descended: Vec<ListSizeDirective> = list_size_directives
-                    .iter()
-                    .chain(inherited_list_sizes.iter())
-                    .filter_map(|dir| dir.descend(f.name.as_str()))
-                    .collect();
-
-                self.score_field(
-                    ctx,
-                    f,
-                    parent_type,
-                    list_size_from_upstream,
-                    &descended,
-                    subgraph,
-                )
-            }
-            Selection::FragmentSpread(s) => self.score_fragment_spread(
-                ctx,
-                s,
-                list_size_directives,
-                inherited_list_sizes,
-                subgraph,
-            ),
-            Selection::InlineFragment(i) => self.score_inline_fragment(
-                ctx,
-                i,
-                parent_type,
-                list_size_directives,
-                inherited_list_sizes,
-                subgraph,
-            ),
-        }
-    }
-
     fn score_selection_set(
         &self,
         ctx: &ScoringContext,
@@ -460,18 +341,79 @@ impl StaticCostCalculator {
         inherited_list_sizes: &[ListSizeDirective],
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
-        let mut cost = 0.0;
-        for selection in selection_set.selections.iter() {
-            // TODO: Spreads with mutually exclusive type conditions should not be added together.
-            //       Current estimate may exaggerate cost of spreads across many implementation types.
-            cost += self.score_selection(
+        // Expand fragment spreads / inline fragments and partition field occurrences into buckets:
+        // one "abstract" bucket for selections under any abstract type conditions, plus one bucket
+        // per concrete object type condition observed. The abstract bucket's cost is always
+        // incurred; among the concrete buckets only one applies at runtime, so we take their MAX.
+        // Within each bucket we take MAX per response key to honor field merging.
+        let mut buckets: HashMap<selection::BucketKey, selection::Bucket> = HashMap::default();
+        // Note: selection_set.ty is expected to be the same as parent_type_name.
+        assert_eq!(selection_set.ty, *parent_type_name);
+        selection::collect_occurrences(ctx, selection_set, parent_type_name, &mut buckets)?;
+
+        let mut abstract_cost = 0.0;
+        let mut concrete_max: f64 = 0.0;
+        for (bucket_key, bucket) in &buckets {
+            let bucket_cost = self.score_bucket(
                 ctx,
-                selection,
-                parent_type_name,
+                bucket,
                 list_size_directives,
                 inherited_list_sizes,
                 subgraph,
             )?;
+            if bucket_key.is_none() {
+                abstract_cost = bucket_cost;
+            } else {
+                concrete_max = concrete_max.max(bucket_cost);
+            }
+        }
+        Ok(abstract_cost + concrete_max)
+    }
+
+    fn score_bucket(
+        &self,
+        ctx: &ScoringContext,
+        bucket: &selection::Bucket,
+        list_size_directives: &[ListSizeDirective],
+        inherited_list_sizes: &[ListSizeDirective],
+        subgraph: &str,
+    ) -> Result<f64, DemandControlError> {
+        let mut cost = 0.0;
+        for occurrences in bucket.values() {
+            let mut max_cost: f64 = 0.0;
+            for occ in occurrences {
+                // We need two things for scoring this field: (1) the list size to use for
+                // instance_count if this field is a list (list_size_from_upstream), and (2) the
+                // directive(s) to pass to this field's selection set so nested lists (e.g. "page"
+                // under "results") get the right sizing (descended). With repeatable @listSize,
+                // multiple directives can descend to the same field, so we collect all of them.
+                let size_from_parent = list_size_directives
+                    .iter()
+                    .filter_map(|dir| dir.size_of(occ.field))
+                    .max();
+                let size_from_inherited = inherited_list_sizes
+                    .iter()
+                    .filter_map(|dir| dir.size_of(occ.field))
+                    .max();
+                let list_size_from_upstream = size_from_parent.or(size_from_inherited);
+
+                let descended: Vec<ListSizeDirective> = list_size_directives
+                    .iter()
+                    .chain(inherited_list_sizes.iter())
+                    .filter_map(|dir| dir.descend(occ.field.name.as_str()))
+                    .collect();
+
+                let occ_cost = self.score_field(
+                    ctx,
+                    occ.field,
+                    occ.parent_type,
+                    list_size_from_upstream,
+                    &descended,
+                    subgraph,
+                )?;
+                max_cost = max_cost.max(occ_cost);
+            }
+            cost += max_cost;
         }
         Ok(cost)
     }
@@ -620,6 +562,103 @@ impl StaticCostCalculator {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response, variables);
         Ok(visitor.cost)
+    }
+}
+
+mod selection {
+    use super::*;
+
+    /// A single field occurrence produced by expanding a selection set's fragment spreads and
+    /// inline fragments. `parent_type` is the type condition that was in effect where the field was
+    /// written, which may differ across occurrences with the same response key (e.g. `...on A { f }`
+    /// vs `...on B { f }`).
+    pub(super) struct Occurrence<'a> {
+        pub(super) field: &'a Field,
+        pub(super) parent_type: &'a NamedType,
+    }
+
+    /// Bucket grouping field occurrences by response key. Within a bucket we take the MAX cost per
+    /// response key (GraphQL field-merging collapses selections that share a response key).
+    pub(super) type Bucket<'a> = HashMap<&'a str, Vec<Occurrence<'a>>>;
+
+    /// Which runtime type the bucket is conditional on. `None` means the selections apply to every
+    /// runtime type (no enclosing object type condition); `Some(name)` means they only apply when
+    /// the runtime type is exactly `name` (an object type).
+    pub(super) type BucketKey<'a> = Option<&'a str>;
+
+    /// Narrow `current` by the nested `candidate` type. `narrowed_parent_type` is an
+    /// over-approximation of the runtime type for the current selection position: once we've
+    /// entered a concrete object type condition, inner spreads can only be compatible with that
+    /// same concrete type (by GraphQL validation), so we hold it. Otherwise we take the candidate,
+    /// which is at least as specific as the current abstract type.
+    fn narrow<'a>(
+        schema: &'a DemandControlledSchema,
+        current: &'a NamedType,
+        candidate: &'a NamedType,
+    ) -> &'a NamedType {
+        if matches!(schema.types.get(current), Some(ExtendedType::Object(_))) {
+            current
+        } else {
+            candidate
+        }
+    }
+
+    pub(super) fn collect_occurrences<'a>(
+        ctx: &'a ScoringContext,
+        selection_set: &'a SelectionSet,
+        narrowed_parent_type: &'a NamedType,
+        buckets: &mut HashMap<BucketKey<'a>, Bucket<'a>>,
+    ) -> Result<(), DemandControlError> {
+        // Selections here are gated on runtime type ⊆ narrowed_parent_type. When that's an object
+        // type, all selections only apply to that specific runtime type — they go into the
+        // per-object concrete bucket. Otherwise the runtime type is any implementation of an
+        // abstract type, and the selections go into the shared "abstract" bucket.
+        let bucket_key: BucketKey = match ctx.schema.types.get(narrowed_parent_type) {
+            Some(ExtendedType::Object(_)) => Some(narrowed_parent_type.as_str()),
+            _ => None,
+        };
+
+        for selection in selection_set.selections.iter() {
+            // `@skip(if: ...)` and `@include(if: ...)` apply to fields, fragment spreads, and
+            // inline fragments alike. Short-circuit excluded selections so the estimate reflects
+            // only what will actually execute.
+            let directives = match selection {
+                Selection::Field(f) => &f.directives,
+                Selection::FragmentSpread(s) => &s.directives,
+                Selection::InlineFragment(i) => &i.directives,
+            };
+            if is_skipped_by_directives(directives, ctx.variables) {
+                continue;
+            }
+            match selection {
+                Selection::Field(f) => {
+                    buckets
+                        .entry(bucket_key)
+                        .or_default()
+                        .entry(f.response_key().as_str())
+                        .or_default()
+                        .push(Occurrence {
+                            field: f,
+                            parent_type: narrowed_parent_type,
+                        });
+                }
+                Selection::FragmentSpread(spread) => {
+                    let fragment = spread.fragment_def(ctx.query).ok_or_else(|| {
+                        DemandControlError::QueryParseFailure(format!(
+                            "Parsed operation did not have a definition for fragment {}",
+                            spread.fragment_name
+                        ))
+                    })?;
+                    let next = narrow(ctx.schema, narrowed_parent_type, &fragment.selection_set.ty);
+                    collect_occurrences(ctx, &fragment.selection_set, next, buckets)?;
+                }
+                Selection::InlineFragment(inline) => {
+                    let next = narrow(ctx.schema, narrowed_parent_type, &inline.selection_set.ty);
+                    collect_occurrences(ctx, &inline.selection_set, next, buckets)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1159,6 +1198,66 @@ mod tests {
             basic_estimated_cost(schema, query, r#"{"shouldInclude": true}"#),
             expected
         );
+    }
+
+    #[test]
+    fn mutually_exclusive_fragments_dedupe_by_response_key() {
+        // `pet` is `Pet` (an interface), and fragments on `Cat` / `Dog` both select a field named
+        // `buddies`. At runtime only one branch applies, and GraphQL field merging means the
+        // field is fetched once. The estimator should take the MAX cost per response key rather
+        // than summing both occurrences.
+        let schema = r#"
+            type Query { pet: Pet }
+            interface Pet { id: ID }
+            type Cat implements Pet { id: ID, buddies: [Pet] }
+            type Dog implements Pet { id: ID, buddies: [Pet] }
+        "#;
+        let query = r#"
+            {
+                pet {
+                    ... on Cat { buddies { id } }
+                    ... on Dog { buddies { id } }
+                }
+            }
+        "#;
+        // pet (interface object) = 1, buddies = MAX(100 * 1, 100 * 1) = 100.
+        // Before the dedup fix, this would have been 1 + 100 + 100 = 201.
+        assert_eq!(basic_estimated_cost(schema, query, "{}"), 101.0);
+    }
+
+    #[test]
+    fn mutually_exclusive_fragments_with_distinct_selections_take_max_across_types() {
+        // The estimator partitions selections into an "abstract" bucket (selections that apply
+        // to every runtime type) and one bucket per observed concrete object type condition.
+        // The abstract bucket's cost is added unconditionally; among the concrete buckets, only
+        // one applies at runtime, so we take their MAX. This keeps distinct mutually-exclusive
+        // spreads from inflating the estimate, even when they pick different response keys.
+        //
+        // The `... on Pet` spread overlaps with both object types — fields selected through the
+        // interface apply regardless of the runtime type, so they stay in the abstract bucket
+        // and correctly add into the total.
+        let schema = r#"
+            type Query { pet: Pet }
+            interface Pet { id: ID, owner: Person }
+            type Person { id: ID }
+            type Cat implements Pet { id: ID, owner: Person, kittens: [Cat] }
+            type Dog implements Pet { id: ID, owner: Person, puppies: [Dog] }
+        "#;
+        let query = r#"
+            {
+                pet {
+                    ... on Pet { owner { id } }
+                    ... on Cat { kittens { id } }
+                    ... on Dog { puppies { id } }
+                }
+            }
+        "#;
+        // pet (interface object) = 1,
+        // abstract bucket: owner = 1,
+        // Cat bucket: kittens = 100 * 1 = 100,
+        // Dog bucket: puppies = 100 * 1 = 100,
+        // total = 1 + 1 + MAX(100, 100) = 102.
+        assert_eq!(basic_estimated_cost(schema, query, "{}"), 102.0);
     }
 
     #[test(tokio::test)]
