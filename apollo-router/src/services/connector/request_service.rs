@@ -160,6 +160,19 @@ impl ConnectorRequestServiceFactory {
         plugins: Arc<Plugins>,
         connector_sources: Arc<HashSet<String>>,
     ) -> Self {
+        // Pre-build the HTTP client services for each source so that
+        // ConnectorRequestService can clone them per-request instead of
+        // re-folding plugins every time.
+        let mut http_clients = IndexMap::with_capacity(http_client_service_factory.len());
+        for (source_key, factory) in http_client_service_factory.iter() {
+            // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
+            // the subgraph name is the first dot-separated component.
+            let subgraph_name = source_key
+                .split('.')
+                .next()
+                .unwrap_or(source_key);
+            http_clients.insert(source_key.clone(), factory.create(subgraph_name));
+        }
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
             // One buffer per connector source provides per-source backpressure and is
@@ -171,7 +184,7 @@ impl ConnectorRequestServiceFactory {
                     .rev()
                     .fold(
                         ConnectorRequestService {
-                            http_client_service_factory: http_client_service_factory.clone(),
+                            http_clients: http_clients.clone(),
                         }
                         .boxed_clone(),
                         |acc, (_, e)| e.connector_request_service(acc, source.clone()),
@@ -183,7 +196,7 @@ impl ConnectorRequestServiceFactory {
         }
 
         Self {
-            services: Arc::new(map), //connector_sources,
+            services: Arc::new(map),
         }
     }
 
@@ -199,7 +212,10 @@ impl ConnectorRequestServiceFactory {
 /// A service for executing individual requests to Apollo Connectors
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestService {
-    pub(crate) http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
+    /// Pre-built HTTP client services keyed by source config key, with all
+    /// plugin layers already folded in. Owned (not `Arc`-wrapped) because
+    /// `BoxCloneService` is `Clone + Send` but not `Sync`.
+    pub(crate) http_clients: IndexMap<String, crate::services::http::BoxCloneService>,
 }
 
 impl tower::Service<Request> for ConnectorRequestService {
@@ -213,7 +229,8 @@ impl tower::Service<Request> for ConnectorRequestService {
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        let http_client_service_factory = self.http_client_service_factory.clone();
+        let source_name = request.connector.source_config_key();
+        let http_client = self.http_clients.get(&source_name).cloned();
 
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
@@ -255,17 +272,12 @@ impl tower::Service<Request> for ConnectorRequestService {
                             request.connector.label.as_ref(),
                         );
 
-                        let source_name = request.connector.source_config_key();
-
-                        if let Some(http_client_service_factory) =
-                            http_client_service_factory.get(&source_name).cloned()
-                        {
+                        if let Some(http_client) = http_client {
                             let (parts, body) = http_request.inner.into_parts();
                             let http_request =
                                 http::Request::from_parts(parts, router::body::from_bytes(body));
 
-                            http_client_service_factory
-                                .create(&original_subgraph_name)
+                            http_client
                                 .oneshot(crate::services::http::HttpRequest {
                                     http_request,
                                     context: request.context.clone(),
