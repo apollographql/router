@@ -167,10 +167,7 @@ impl ConnectorRequestServiceFactory {
         for (source_key, factory) in http_client_service_factory.iter() {
             // source_config_key() format is "{subgraph_name}.{source_or_synthetic}";
             // the subgraph name is the first dot-separated component.
-            let subgraph_name = source_key
-                .split('.')
-                .next()
-                .unwrap_or(source_key);
+            let subgraph_name = source_key.split('.').next().unwrap_or(source_key);
             http_clients.insert(source_key.clone(), factory.create(subgraph_name));
         }
         let mut map = HashMap::with_capacity(connector_sources.len());
@@ -179,17 +176,13 @@ impl ConnectorRequestServiceFactory {
             // required for correct LoadShed / RateLimit behaviour from traffic-shaping
             // plugins (mirrors the per-subgraph buffer in SubgraphServiceFactory).
             let service = UnconstrainedBuffer::new(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(
-                        ConnectorRequestService {
-                            http_clients: http_clients.clone(),
-                        }
-                        .boxed_clone(),
-                        |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-                    )
+                plugins.iter().rev().fold(
+                    ConnectorRequestService {
+                        http_clients: http_clients.clone(),
+                    }
                     .boxed_clone(),
+                    |acc, (_, e)| e.connector_request_service(acc, source.clone()),
+                ),
                 DEFAULT_BUFFER_SIZE,
             );
             map.insert(source.clone(), service);
