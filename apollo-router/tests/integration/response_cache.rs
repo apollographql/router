@@ -97,13 +97,13 @@ fn base_config() -> Value {
         },
         "headers": {
             "all": {
-                "request": [
+                "request": { "operations": [
                     {
                         "propagate": {
                             "named": "private_id"
                         }
                     }
-                ]
+                ]}
             }
         },
         "response_cache": {

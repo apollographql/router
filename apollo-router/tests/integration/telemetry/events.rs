@@ -291,7 +291,7 @@ impl EventTest {
         let config = json!({
             "headers": {
               "all": {
-                "request": [{ "propagate": { "matching": "x-log-.*" } }]
+                "request": { "operations": [{ "propagate": { "matching": "x-log-.*" } }] }
               }
             },
             "telemetry": {

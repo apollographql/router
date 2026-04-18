@@ -1353,11 +1353,11 @@ async fn no_store_from_request() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
             "all": {
-                "request": [{
+                "request": { "operations": [{
                     "propagate": {
                         "named": "cache-control"
                     }
-                }]
+                }]}
             }
         } }))
         .unwrap()
@@ -1418,11 +1418,11 @@ async fn no_store_from_request() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
             "all": {
-                "request": [{
+                "request": { "operations": [{
                     "propagate": {
                         "named": "cache-control"
                     }
-                }]
+                }]}
             }
         } }))
         .unwrap()
