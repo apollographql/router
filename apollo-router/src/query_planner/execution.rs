@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::executable;
 use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
-use indexmap::IndexSet;
+use indexmap::IndexMap;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -50,6 +52,7 @@ use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::spec::Fragment;
 use crate::spec::Fragments;
+use crate::spec::IncludeSkip;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -303,11 +306,12 @@ impl PlanNode {
                             &fetch_node.context_rewrites,
                         );
 
-                        // Generate errors for any entities whose required fields were missing.
-                        let mut skipped_errors = Vec::new();
+                        // Generate errors for skipped entities due to missing requirements.
+                        let mut skipped_entity_errors = Vec::new();
                         for unsatisfied_path in &unsatisfied_paths {
-                            skipped_errors.extend(errors_for_skipped_fetch(
+                            skipped_entity_errors.extend(errors_for_skipped_entity::generate(
                                 parameters,
+                                fetch_node,
                                 unsatisfied_path,
                                 parent_value,
                             ));
@@ -360,7 +364,7 @@ impl PlanNode {
 
                                     errors.push(err);
                                 }
-                                errors.extend(skipped_errors);
+                                errors.extend(skipped_entity_errors);
 
                                 FetchNode::deferred_fetches(
                                     current_dir,
@@ -372,7 +376,7 @@ impl PlanNode {
                             }
                             None => {
                                 value = Value::Object(Object::default());
-                                errors = skipped_errors;
+                                errors = skipped_entity_errors;
                             }
                         };
                     }
@@ -680,329 +684,583 @@ impl DeferredNode {
     }
 }
 
-/// Generate errors for fields that could not be fetched because the entity
-/// fetch was skipped (a non-nullable `@requires` input field was missing).
-///
-/// Uses the supergraph query's selection set to find which fields are expected
-/// at `current_dir`, then checks which of those are absent from `parent_value`.
-/// Each missing field gets an error with its path.
-/// Navigate a JSON value by following key segments in a path, returning
-/// the nested value (or `Value::Null` if any segment is missing or
-/// non-object).
-fn errors_for_skipped_fetch(
-    parameters: &ExecutionParameters<'_>,
-    current_dir: &Path,
-    parent_value: &Value,
-) -> Vec<Error> {
-    // Navigate parent_value to the object at current_dir
-    let entity_data = get_value_at_path(parent_value, current_dir);
+mod errors_for_skipped_entity {
+    use super::*;
 
-    let variables = &parameters.supergraph_request.body().variables;
-    let expected_fields = collect_field_names_at_path(
-        &parameters.query.operation.selection_set,
-        &current_dir.0,
-        parent_value,
-        parameters.schema,
-        variables,
-        &parameters.query.fragments,
-    );
+    /// Generate errors for all leaf selections from the given entity fetch because the entity was
+    /// skipped (for example, a non-nullable `@requires` input field was missing).
+    ///
+    /// Reports leaf-path errors for fields that are both (a) fetched by the subgraph query and (b)
+    /// selected in the original input query at `current_dir`.
+    /// Note: Reporting at leaves (rather than top-level response keys) matters for `@shareable`
+    /// composite fields: if a parallel subgraph also resolves the shared parent, only the leaves
+    /// the skipped fetch alone would have supplied should be flagged.
+    pub(super) fn generate(
+        parameters: &ExecutionParameters<'_>,
+        fetch_node: &FetchNode,
+        current_dir: &Path,
+        parent_value: &Value,
+    ) -> Vec<Error> {
+        let entity_data = get_value_at_path(parent_value, current_dir);
+        let entity_type = typename_of(entity_data);
+        let ctx = FilterContext {
+            schema: parameters.schema,
+            variables: &parameters.supergraph_request.body().variables,
+            fragments: &parameters.query.fragments,
+        };
 
-    expected_fields
-        .into_iter()
-        .filter(|field_name| {
-            // Only generate errors for fields NOT already present in parent_value
-            match entity_data {
-                Value::Object(obj) => !obj.contains_key(*field_name),
-                _ => true,
-            }
-        })
-        .map(|field_name| {
-            let mut path = current_dir.clone();
-            path.push(PathElement::Key(field_name.to_string(), None));
-            Error::builder()
-                .message("Could not fetch field")
-                .path(path)
-                .extension_code("UNSATISFIED_FETCH_CONDITION")
-                .build()
-        })
-        .collect()
-}
+        // Step 1: build a tree of response keys the skipped fetch would have
+        // produced for this entity. Recursing into composite fields preserves
+        // depth so we can report at the leaf level.
+        let Some(fetched_tree) =
+            entity_response_key_tree(fetch_node, entity_type, ctx.schema, ctx.variables)
+        else {
+            return Vec::new();
+        };
 
-fn get_value_at_path<'a>(value: &'a Value, path: &Path) -> &'a Value {
-    let mut current = value;
-    for segment in &path.0 {
-        match segment {
-            PathElement::Key(k, _) => match current {
-                Value::Object(obj) => {
-                    current = match obj.get(k.as_str()) {
-                        Some(v) => v,
-                        None => &Value::Null,
-                    };
-                }
-                _ => {
-                    return &Value::Null;
-                }
-            },
-            PathElement::Index(i) => match current {
-                Value::Array(arr) => {
-                    current = match arr.get(*i) {
-                        Some(v) => v,
-                        None => &Value::Null,
-                    };
-                }
-                _ => {
-                    return &Value::Null;
-                }
-            },
-            _ => {
-                return &Value::Null;
-            }
-        }
-    }
-    current
-}
-
-/// Extract `__typename` from a JSON value, returning `None` if not present.
-fn typename_of(value: &Value) -> Option<&str> {
-    match value {
-        Value::Object(obj) => obj.get(TYPENAME).and_then(|v| v.as_str()),
-        _ => None,
-    }
-}
-
-/// Collect field names from a query selection set at the given path, handling inline fragments,
-/// named fragment spreads, and @skip/@include conditions.
-///
-/// When `remaining_dir` is non-empty, navigates through selections (including fragments) to reach
-/// the target depth. Once there, collects unique field names (excluding `__typename`), recursing
-/// into fragments whose `type_condition` matches the runtime type at each level (read from
-/// `current_value`'s `__typename`).
-fn collect_field_names_at_path<'sel>(
-    selection_set: &'sel [Selection],
-    remaining_dir: &[PathElement],
-    current_value: &Value,
-    schema: &Schema,
-    variables: &Object,
-    fragments: &'sel Fragments,
-) -> IndexSet<&'sel str> {
-    let current_type = typename_of(current_value);
-    if let Some((segment, rest)) = remaining_dir.split_first() {
-        match segment {
-            PathElement::Key(k, _) => {
-                let key = k.as_str();
-                // Look up the child value for the next navigation level
-                let child_value = match current_value {
-                    Value::Object(obj) => obj.get(key).unwrap_or(&Value::Null),
-                    _ => &Value::Null,
-                };
-                let mut field_names = IndexSet::new();
-                collect_field_names_at_path_inner(
-                    selection_set,
-                    key,
-                    rest,
-                    child_value,
-                    current_type,
-                    schema,
-                    variables,
-                    fragments,
-                    &mut field_names,
-                );
-                field_names
-            }
-            PathElement::Index(i) => {
-                // Array index doesn't correspond to a selection set field — navigate
-                // into the array element value and continue with the same selection set.
-                let child_value = match current_value {
-                    Value::Array(arr) => arr.get(*i).unwrap_or(&Value::Null),
-                    _ => &Value::Null,
-                };
-                collect_field_names_at_path(
-                    selection_set,
-                    rest,
-                    child_value,
-                    schema,
-                    variables,
-                    fragments,
-                )
-            }
-            _ => IndexSet::default(),
-        }
-    } else {
-        let mut field_names = IndexSet::new();
-        collect_fields_from_selections(
-            selection_set,
-            current_type,
-            schema,
-            variables,
-            fragments,
-            &mut field_names,
+        // Step 2: intersect that tree with the input query at `current_dir`,
+        // preserving structure so composite branches survive only when both
+        // sides have matching sub-selections.
+        let filtered_tree = filter_response_key_tree_at_path(
+            &ctx,
+            &fetched_tree,
+            &parameters.query.operation.selection_set,
+            &current_dir.0,
+            parent_value,
         );
-        field_names
-    }
-}
 
-/// Navigate into a selection set looking for fields matching `key`, digging into inline fragments
-/// and named fragment spreads. `child_value` is the JSON value at the child level. `current_type`
-/// is the runtime type at this level for fragment type-condition checks. Collects field names
-/// from all matching fields across all matching fragments (does not short-circuit on the first
-/// match, since multiple fragments may contain the same key and contribute different sub-fields).
-#[allow(clippy::too_many_arguments)]
-fn collect_field_names_at_path_inner<'sel>(
-    selection_set: &'sel [Selection],
-    key: &str,
-    remaining_dir: &[PathElement],
-    child_value: &Value,
-    current_type: Option<&str>,
-    schema: &Schema,
-    variables: &Object,
-    fragments: &'sel Fragments,
-    field_names: &mut IndexSet<&'sel str>,
-) {
-    for sel in selection_set {
-        match sel {
-            Selection::Field {
-                name,
-                alias,
-                selection_set: Some(inner),
-                include_skip,
-                ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
+        // Step 3: walk the intersected tree alongside `entity_data`, emitting an
+        // error for each leaf whose value isn't already populated on the entity.
+        enumerate_leaf_paths(&filtered_tree, entity_data)
+            .into_iter()
+            .map(|segments| {
+                let mut path = current_dir.clone();
+                for segment in segments {
+                    path.push(PathElement::Key(segment, None));
                 }
-                let field_name = alias.as_ref().unwrap_or(name);
-                if field_name.as_str() == key {
-                    field_names.extend(collect_field_names_at_path(
-                        inner,
-                        remaining_dir,
-                        child_value,
-                        schema,
-                        variables,
-                        fragments,
-                    ));
-                }
-            }
-            Selection::InlineFragment {
-                type_condition,
-                selection_set,
-                include_skip,
-                ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
-                }
-                if type_condition_matches(schema, current_type, type_condition) {
-                    collect_field_names_at_path_inner(
-                        selection_set,
-                        key,
-                        remaining_dir,
-                        child_value,
-                        current_type,
-                        schema,
-                        variables,
-                        fragments,
-                        field_names,
-                    );
-                }
-            }
-            Selection::FragmentSpread {
-                name, include_skip, ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
-                }
-                if let Some(Fragment {
-                    type_condition,
-                    selection_set,
-                }) = fragments.get(name)
-                    && type_condition_matches(schema, current_type, type_condition)
-                {
-                    collect_field_names_at_path_inner(
-                        selection_set,
-                        key,
-                        remaining_dir,
-                        child_value,
-                        current_type,
-                        schema,
-                        variables,
-                        fragments,
-                        field_names,
-                    );
-                }
-            }
-            _ => {}
+                Error::builder()
+                    .message("Could not fetch field")
+                    .path(path)
+                    .extension_code("UNSATISFIED_FETCH_CONDITION")
+                    .build()
+            })
+            .collect()
+    }
+
+    /// Context shared by the helpers that walk the input query to intersect it
+    /// with a fetched-response-key tree.
+    struct FilterContext<'a> {
+        schema: &'a Schema,
+        variables: &'a Object,
+        fragments: &'a Fragments,
+    }
+
+    /// Tree of response keys produced by a subgraph fetch. An entry with an
+    /// empty `children` map is a leaf (scalar/enum field, or a composite pruned
+    /// to empty during intersection); a non-empty map is a composite branch.
+    /// `is_list_stop` marks leaves where we stopped descent because the field is
+    /// a list — such leaves must emit an error even if another fetch has
+    /// populated the array, since we can't report per-item.
+    #[derive(Default, Debug)]
+    struct ResponseKeyTree {
+        is_list_stop: bool,
+        children: IndexMap<Name, ResponseKeyTree>,
+    }
+
+    impl ResponseKeyTree {
+        fn is_empty(&self) -> bool {
+            self.children.is_empty() && !self.is_list_stop
         }
     }
-}
 
-/// Recursively collect field names from a selection set, expanding inline fragments and named
-/// fragment spreads whose type_condition matches `entity_type`.
-fn collect_fields_from_selections<'sel>(
-    selection_set: &'sel [Selection],
-    entity_type: Option<&str>,
-    schema: &Schema,
-    variables: &Object,
-    fragments: &'sel Fragments,
-    field_names: &mut IndexSet<&'sel str>,
-) {
-    for sel in selection_set {
-        match sel {
-            Selection::Field {
-                name,
-                alias,
-                include_skip,
-                ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
-                }
-                if name.as_str() == TYPENAME {
-                    continue;
-                }
-                field_names.insert(alias.as_ref().unwrap_or(name).as_str());
+    /// Build a tree of response keys for a subgraph `_entities` fetch, filtered
+    /// to fragments matching `entity_type` and not excluded by `@skip`/`@include`.
+    ///
+    /// Returns `None` when the operation isn't an `_entities` fetch or yields no
+    /// matching fields — callers treat that as "nothing to report".
+    fn entity_response_key_tree(
+        fetch_node: &FetchNode,
+        entity_type: Option<&str>,
+        schema: &Schema,
+        variables: &Object,
+    ) -> Option<ResponseKeyTree> {
+        let parsed = fetch_node.operation.as_parsed().ok()?;
+        let operation = parsed
+            .operations
+            .anonymous
+            .as_ref()
+            .or_else(|| parsed.operations.named.values().next())?;
+
+        let mut tree = ResponseKeyTree::default();
+        for sel in &operation.selection_set.selections {
+            if let executable::Selection::Field(f) = sel
+                && f.name.as_str() == "_entities"
+            {
+                collect_response_key_tree(
+                    &f.selection_set,
+                    parsed,
+                    entity_type,
+                    schema,
+                    variables,
+                    &mut tree,
+                );
             }
-            Selection::InlineFragment {
-                type_condition,
-                selection_set,
-                include_skip,
-                ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
+        }
+        if tree.is_empty() { None } else { Some(tree) }
+    }
+
+    /// Recursively populate `tree` from a subgraph selection set. Descends through
+    /// inline fragments and resolves named fragment spreads from `document`,
+    /// filtering by `entity_type` against each fragment's type condition. When
+    /// recursing into a composite field, `entity_type` resets to `None` since we
+    /// don't track field return types here — any fragment nested below that point
+    /// with an explicit type condition is then rejected. Skips `__typename`.
+    fn collect_response_key_tree(
+        selection_set: &executable::SelectionSet,
+        document: &executable::ExecutableDocument,
+        entity_type: Option<&str>,
+        schema: &Schema,
+        variables: &Object,
+        tree: &mut ResponseKeyTree,
+    ) {
+        for sel in &selection_set.selections {
+            match sel {
+                executable::Selection::Field(f) => {
+                    if IncludeSkip::parse(&f.directives).should_skip(variables) {
+                        continue;
+                    }
+                    let key = f.response_key();
+                    if key.as_str() == TYPENAME {
+                        continue;
+                    }
+                    let entry = tree.children.entry(key.clone()).or_default();
+                    // Stop at list-typed fields: the tree has no array
+                    // indices, so we can't address per-item leaves and must
+                    // report at the list field itself. Mark the leaf so
+                    // Step 3 emits unconditionally.
+                    if f.ty().is_list() {
+                        entry.is_list_stop = true;
+                    } else if !f.selection_set.selections.is_empty() {
+                        collect_response_key_tree(
+                            &f.selection_set,
+                            document,
+                            None,
+                            schema,
+                            variables,
+                            entry,
+                        );
+                    }
                 }
-                if type_condition_matches(schema, entity_type, type_condition) {
-                    collect_fields_from_selections(
+                executable::Selection::InlineFragment(frag) => {
+                    if IncludeSkip::parse(&frag.directives).should_skip(variables) {
+                        continue;
+                    }
+                    // Inline fragment without a type condition inherits the
+                    // parent type — always accept.
+                    let matches = match &frag.type_condition {
+                        None => true,
+                        Some(cond) => type_condition_matches(schema, entity_type, cond.as_str()),
+                    };
+                    if matches {
+                        collect_response_key_tree(
+                            &frag.selection_set,
+                            document,
+                            entity_type,
+                            schema,
+                            variables,
+                            tree,
+                        );
+                    }
+                }
+                executable::Selection::FragmentSpread(spread) => {
+                    if IncludeSkip::parse(&spread.directives).should_skip(variables) {
+                        continue;
+                    }
+                    if let Some(fragment) = document.fragments.get(&spread.fragment_name)
+                        && type_condition_matches(
+                            schema,
+                            entity_type,
+                            fragment.type_condition().as_str(),
+                        )
+                    {
+                        collect_response_key_tree(
+                            &fragment.selection_set,
+                            document,
+                            entity_type,
+                            schema,
+                            variables,
+                            tree,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_value_at_path<'a>(value: &'a Value, path: &Path) -> &'a Value {
+        let mut current = value;
+        for segment in &path.0 {
+            match segment {
+                PathElement::Key(k, _) => match current {
+                    Value::Object(obj) => {
+                        current = match obj.get(k.as_str()) {
+                            Some(v) => v,
+                            None => &Value::Null,
+                        };
+                    }
+                    _ => {
+                        return &Value::Null;
+                    }
+                },
+                PathElement::Index(i) => match current {
+                    Value::Array(arr) => {
+                        current = match arr.get(*i) {
+                            Some(v) => v,
+                            None => &Value::Null,
+                        };
+                    }
+                    _ => {
+                        return &Value::Null;
+                    }
+                },
+                _ => {
+                    return &Value::Null;
+                }
+            }
+        }
+        current
+    }
+
+    /// Extract `__typename` from a JSON value, returning `None` if not present.
+    fn typename_of(value: &Value) -> Option<&str> {
+        match value {
+            Value::Object(obj) => obj.get(TYPENAME).and_then(|v| v.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Walk the input query once and return the subtree of `fetched_tree` whose
+    /// fields are also selected in the input query at `remaining_dir`. The result
+    /// preserves `fetched_tree`'s shape, pruned to the intersection. Handles path
+    /// navigation, inline fragments, named fragment spreads, and
+    /// `@skip`/`@include`.
+    fn filter_response_key_tree_at_path(
+        ctx: &FilterContext<'_>,
+        fetched_tree: &ResponseKeyTree,
+        selection_set: &[Selection],
+        remaining_dir: &[PathElement],
+        current_value: &Value,
+    ) -> ResponseKeyTree {
+        let mut result = ResponseKeyTree::default();
+        if fetched_tree.is_empty() {
+            return result;
+        }
+        descend_tree_to_selection_set(
+            ctx,
+            fetched_tree,
+            selection_set,
+            remaining_dir,
+            current_value,
+            &mut result,
+        );
+        result
+    }
+
+    /// Navigate `remaining_dir` through the input query to reach the selection set
+    /// at the target path, then intersect fetched_tree against selections at that
+    /// level.
+    fn descend_tree_to_selection_set(
+        ctx: &FilterContext<'_>,
+        fetched_tree: &ResponseKeyTree,
+        selection_set: &[Selection],
+        remaining_dir: &[PathElement],
+        current_value: &Value,
+        result: &mut ResponseKeyTree,
+    ) {
+        let current_type = typename_of(current_value);
+        if let Some((segment, rest)) = remaining_dir.split_first() {
+            match segment {
+                PathElement::Key(k, _) => {
+                    let key = k.as_str();
+                    let child_value = match current_value {
+                        Value::Object(obj) => obj.get(key).unwrap_or(&Value::Null),
+                        _ => &Value::Null,
+                    };
+                    descend_tree_into_key(
+                        ctx,
+                        fetched_tree,
                         selection_set,
-                        entity_type,
-                        schema,
-                        variables,
-                        fragments,
-                        field_names,
+                        key,
+                        rest,
+                        child_value,
+                        current_type,
+                        result,
                     );
                 }
-            }
-            Selection::FragmentSpread {
-                name, include_skip, ..
-            } => {
-                if include_skip.should_skip(variables) {
-                    continue;
+                PathElement::Index(i) => {
+                    // Array index doesn't correspond to a selection set field —
+                    // navigate into the array element and keep the selection set.
+                    let child_value = match current_value {
+                        Value::Array(arr) => arr.get(*i).unwrap_or(&Value::Null),
+                        _ => &Value::Null,
+                    };
+                    descend_tree_to_selection_set(
+                        ctx,
+                        fetched_tree,
+                        selection_set,
+                        rest,
+                        child_value,
+                        result,
+                    );
                 }
-                if let Some(Fragment {
+                _ => {}
+            }
+        } else {
+            intersect_tree_with_selections(ctx, fetched_tree, selection_set, current_type, result);
+        }
+    }
+
+    /// Recurse into `selection_set` to find a field whose response key is `key`,
+    /// then continue navigating `remaining_dir` inside its sub-selection. Descends
+    /// through inline fragments and named fragment spreads whose type condition
+    /// matches `current_type`.
+    #[allow(clippy::too_many_arguments)]
+    fn descend_tree_into_key(
+        ctx: &FilterContext<'_>,
+        fetched_tree: &ResponseKeyTree,
+        selection_set: &[Selection],
+        key: &str,
+        remaining_dir: &[PathElement],
+        child_value: &Value,
+        current_type: Option<&str>,
+        result: &mut ResponseKeyTree,
+    ) {
+        for sel in selection_set {
+            match sel {
+                Selection::Field {
+                    name,
+                    alias,
+                    selection_set: Some(inner),
+                    include_skip,
+                    ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    let field_name = alias.as_ref().unwrap_or(name);
+                    if field_name.as_str() == key {
+                        descend_tree_to_selection_set(
+                            ctx,
+                            fetched_tree,
+                            inner,
+                            remaining_dir,
+                            child_value,
+                            result,
+                        );
+                    }
+                }
+                Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                }) = fragments.get(name)
-                    && type_condition_matches(schema, entity_type, type_condition)
-                {
-                    collect_fields_from_selections(
+                    include_skip,
+                    ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    if type_condition_matches(ctx.schema, current_type, type_condition) {
+                        descend_tree_into_key(
+                            ctx,
+                            fetched_tree,
+                            selection_set,
+                            key,
+                            remaining_dir,
+                            child_value,
+                            current_type,
+                            result,
+                        );
+                    }
+                }
+                Selection::FragmentSpread {
+                    name, include_skip, ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    if let Some(Fragment {
+                        type_condition,
                         selection_set,
-                        entity_type,
-                        schema,
-                        variables,
-                        fragments,
-                        field_names,
-                    );
+                    }) = ctx.fragments.get(name)
+                        && type_condition_matches(ctx.schema, current_type, type_condition)
+                    {
+                        descend_tree_into_key(
+                            ctx,
+                            fetched_tree,
+                            selection_set,
+                            key,
+                            remaining_dir,
+                            child_value,
+                            current_type,
+                            result,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Walk `selection_set` and build `result` as the intersection against
+    /// `fetched_tree`. For each field whose response key is in `fetched_tree`:
+    /// if fetched is a leaf, add a leaf; if fetched is composite and the input
+    /// has a sub-selection, recurse and attach the non-empty subtree. Descends
+    /// through inline fragments and named fragment spreads whose type condition
+    /// matches `entity_type`; when recursing into a composite field, `entity_type`
+    /// resets to `None` since we don't track field return types here.
+    fn intersect_tree_with_selections(
+        ctx: &FilterContext<'_>,
+        fetched_tree: &ResponseKeyTree,
+        selection_set: &[Selection],
+        entity_type: Option<&str>,
+        result: &mut ResponseKeyTree,
+    ) {
+        for sel in selection_set {
+            match sel {
+                Selection::Field {
+                    name,
+                    alias,
+                    selection_set: sub,
+                    include_skip,
+                    ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    if name.as_str() == TYPENAME {
+                        continue;
+                    }
+                    let response_key = Name::new_unchecked(alias.as_ref().unwrap_or(name).as_str());
+                    let Some(fetched_sub) = fetched_tree.children.get(&response_key) else {
+                        continue;
+                    };
+                    if fetched_sub.children.is_empty() {
+                        // Leaf on the fetched side → leaf in result. Carry
+                        // `is_list_stop` over so unconditional emission is
+                        // preserved.
+                        let entry = result.children.entry(response_key).or_default();
+                        if fetched_sub.is_list_stop {
+                            entry.is_list_stop = true;
+                        }
+                    } else if let Some(input_sub) = sub {
+                        // Composite on both sides → recurse; only keep non-empty.
+                        let mut subresult = ResponseKeyTree::default();
+                        intersect_tree_with_selections(
+                            ctx,
+                            fetched_sub,
+                            input_sub,
+                            None,
+                            &mut subresult,
+                        );
+                        if !subresult.is_empty() {
+                            result.children.insert(response_key, subresult);
+                        }
+                    }
+                }
+                Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    include_skip,
+                    ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    if type_condition_matches(ctx.schema, entity_type, type_condition) {
+                        intersect_tree_with_selections(
+                            ctx,
+                            fetched_tree,
+                            selection_set,
+                            entity_type,
+                            result,
+                        );
+                    }
+                }
+                Selection::FragmentSpread {
+                    name, include_skip, ..
+                } => {
+                    if include_skip.should_skip(ctx.variables) {
+                        continue;
+                    }
+                    if let Some(Fragment {
+                        type_condition,
+                        selection_set,
+                    }) = ctx.fragments.get(name)
+                        && type_condition_matches(ctx.schema, entity_type, type_condition)
+                    {
+                        intersect_tree_with_selections(
+                            ctx,
+                            fetched_tree,
+                            selection_set,
+                            entity_type,
+                            result,
+                        );
+                    }
                 }
             }
+        }
+    }
+
+    /// Enumerate root-to-leaf paths in `tree`, traversing `entity_data` in step
+    /// so a leaf is emitted only when its value isn't already populated on the
+    /// entity. A leaf is considered populated when its key is present on the
+    /// corresponding object (including when the value is null) — that key has
+    /// been written by some other (successful) fetch. List-stop leaves are the
+    /// exception: they emit unconditionally, since another fetch may have
+    /// written the array but can't have filled in the per-item fields this
+    /// fetch would have contributed.
+    fn enumerate_leaf_paths(tree: &ResponseKeyTree, entity_data: &Value) -> Vec<Vec<String>> {
+        let mut paths = Vec::new();
+        let mut current = Vec::new();
+        collect_leaf_paths(tree, entity_data, &mut current, &mut paths);
+        paths
+    }
+
+    fn collect_leaf_paths(
+        tree: &ResponseKeyTree,
+        data: &Value,
+        current: &mut Vec<String>,
+        paths: &mut Vec<Vec<String>>,
+    ) {
+        for (key, subtree) in &tree.children {
+            current.push(key.as_str().to_owned());
+            if subtree.children.is_empty() {
+                // List-stop leaves emit unconditionally: another fetch may
+                // have populated the array, but we can't address per-item
+                // leaves, so the miss must be reported at the list field.
+                // This only arises with shareable list fields that are
+                // partially fetched across subgraphs — a rare case where we
+                // can't pinpoint per-item paths, so we report at the list
+                // field itself as a best effort.
+                let should_emit = if subtree.is_list_stop {
+                    true
+                } else {
+                    let populated = match data {
+                        Value::Object(obj) => obj.contains_key(key.as_str()),
+                        _ => false,
+                    };
+                    !populated
+                };
+                if should_emit {
+                    paths.push(current.clone());
+                }
+            } else {
+                let child_data = match data {
+                    Value::Object(obj) => obj.get(key.as_str()).unwrap_or(&Value::Null),
+                    _ => &Value::Null,
+                };
+                collect_leaf_paths(subtree, child_data, current, paths);
+            }
+            current.pop();
         }
     }
 }

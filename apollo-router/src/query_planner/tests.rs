@@ -2176,3 +2176,667 @@ async fn batched_entity_partial_requires_failure() {
         );
     }
 }
+
+// Regression test: when two @requires fetches execute in parallel at the same
+// entity path, skipping one must not produce errors for the sibling fetch's
+// fields. Before the fix, `errors_for_skipped_fetch` reported every input-query
+// field absent from `parent_value` — which swept in fields the other parallel
+// fetch was about to provide.
+#[tokio::test]
+async fn parallel_sibling_skipped_fetch_does_not_over_report() {
+    run_parallel_sibling_skipped_fetch(false).await;
+}
+
+// Same scenario, but with `generate_query_fragments: true`. The skipped fetch's
+// operation may contain named fragment spreads; verifying the fix still intersects
+// correctly against the fetch's response shape when fragments are present.
+#[tokio::test]
+async fn parallel_sibling_skipped_fetch_does_not_over_report_generate_fragments() {
+    run_parallel_sibling_skipped_fetch(true).await;
+}
+
+async fn run_parallel_sibling_skipped_fetch(generate_query_fragments: bool) {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/sub2")
+    SUB3 @join__graph(name: "sub3", url: "http://localhost:4002/sub3")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+    @join__type(graph: SUB3)
+  {
+    entity: Entity @join__field(graph: SUB1)
+  }
+
+  type Entity
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+    @join__type(graph: SUB3, key: "id", extension: true)
+  {
+    id: ID!
+    code1: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    code2: String! @join__field(graph: SUB1) @join__field(graph: SUB3, external: true)
+    a: String @join__field(graph: SUB1)
+    b: String @join__field(graph: SUB2, requires: "code1")
+    c: String @join__field(graph: SUB3, requires: "code2")
+  }"#;
+
+    let query = "query {
+        entity {
+          a
+          b
+          c
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id a code1 code2}}"}},
+                        // code1 is missing — sub2 (which requires code1) will be skipped.
+                        // code2 is present — sub3 (which requires code2) will succeed.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                                "__typename": "Entity",
+                                "id": "1",
+                                "a": "a-value",
+                                "code2": "c2"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+            (
+                "sub3",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Entity{c}}}",
+                            "variables": {
+                                "representations": [
+                                    {"__typename": "Entity", "id": "1", "code2": "c2"}
+                                ]
+                            }
+                        }},
+                        serde_json::json! {{"data": {
+                            "_entities": [
+                                {"c": "c-value"}
+                            ]
+                        } }},
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                "generate_query_fragments": generate_query_fragments,
+            }
+        }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    let entity = &value["data"]["entity"];
+    // sub1 and sub3 succeeded — `a` and `c` should be populated, `b` is null.
+    assert_eq!(entity["a"], serde_json::json!("a-value"));
+    assert_eq!(entity["c"], serde_json::json!("c-value"));
+    assert_eq!(entity["b"], serde_json::Value::Null);
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Only `entity.b` should be reported — NOT `entity.c`, even though `c`
+    // was absent from parent_value at the time sub2 was skipped.
+    assert_eq!(
+        errors.len(),
+        1,
+        "should only report the skipped sibling's field, got: {:?}",
+        errors
+    );
+    assert_eq!(errors[0]["path"], serde_json::json!(["entity", "b"]));
+    assert_eq!(
+        errors[0]["extensions"]["code"].as_str(),
+        Some("UNSATISFIED_FETCH_CONDITION"),
+    );
+}
+
+// Regression test: when two subgraph fetches share a composite field via
+// @shareable, and one is skipped by a missing @requires input, the sibling
+// fetch still provides its subfields. Error reporting should cover the fields
+// that only the skipped fetch would have supplied, not the shared parent.
+//
+// Scenario:
+//   query { me { profile { firstName address } } }
+//   subA: me -> User { id, fullName }   (fullName missing from response)
+//   subB: User.profile @requires(fullName) -> { firstName }   (skipped)
+//   subC: User.profile -> { address }                         (succeeds)
+#[tokio::test]
+async fn skipped_fetch_with_overlapping_shareable_composite_field() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUBA @join__graph(name: "suba", url: "http://localhost:4001/suba")
+    SUBB @join__graph(name: "subb", url: "http://localhost:4002/subb")
+    SUBC @join__graph(name: "subc", url: "http://localhost:4003/subc")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUBA)
+    @join__type(graph: SUBB)
+    @join__type(graph: SUBC)
+  {
+    me: User @join__field(graph: SUBA)
+  }
+
+  type User
+    @join__type(graph: SUBA, key: "id")
+    @join__type(graph: SUBB, key: "id", extension: true)
+    @join__type(graph: SUBC, key: "id", extension: true)
+  {
+    id: ID!
+    fullName: String! @join__field(graph: SUBA) @join__field(graph: SUBB, external: true)
+    profile: Profile
+      @join__field(graph: SUBB, requires: "fullName")
+      @join__field(graph: SUBC)
+  }
+
+  type Profile
+    @join__type(graph: SUBB)
+    @join__type(graph: SUBC)
+  {
+    firstName: String @join__field(graph: SUBB)
+    address: String @join__field(graph: SUBC)
+  }"#;
+
+    let query = "query {
+        me {
+          profile {
+            firstName
+            address
+          }
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "suba",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{me{__typename id fullName}}"}},
+                        // fullName missing — subB (which requires fullName) will be skipped.
+                        serde_json::json! {{"data": {
+                            "me": {
+                                "__typename": "User",
+                                "id": "1"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            // subB is skipped — it should never be called.
+            ("subb", MockSubgraph::builder().build()),
+            (
+                "subc",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{profile{address}}}}",
+                            "variables": {
+                                "representations": [
+                                    {"__typename": "User", "id": "1"}
+                                ]
+                            }
+                        }},
+                        serde_json::json! {{"data": {
+                            "_entities": [
+                                {"profile": {"address": "123 Main St"}}
+                            ]
+                        } }},
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    // subC succeeded — address should be present; firstName was not fetched.
+    let profile = &value["data"]["me"]["profile"];
+    assert_eq!(profile["address"], serde_json::json!("123 Main St"));
+    assert_eq!(profile["firstName"], serde_json::Value::Null);
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Only firstName (uniquely provided by the skipped subB) should be reported.
+    // `profile` itself should NOT be flagged — subC successfully provided it.
+    assert_eq!(
+        errors.len(),
+        1,
+        "should only report the field uniquely provided by the skipped fetch, got: {:?}",
+        errors
+    );
+    assert_eq!(
+        errors[0]["path"],
+        serde_json::json!(["me", "profile", "firstName"])
+    );
+    assert_eq!(
+        errors[0]["extensions"]["code"].as_str(),
+        Some("UNSATISFIED_FETCH_CONDITION"),
+    );
+}
+
+// When the skipped fetch would have populated a list-typed field with per-item
+// sub-selections, the error must stop at the list field itself. The
+// response-key tree has no array indices, so we can't enumerate per-item
+// leaves like `[..., addresses, 0, street]`.
+//
+// Scenario:
+//   query { me { addresses { street city } } }
+//   subA: me -> User { id, fullName }   (fullName missing from response)
+//   subB: User.addresses @requires(fullName) -> [Address { street, city }] (skipped)
+#[tokio::test]
+async fn skipped_fetch_with_list_field_reports_at_list_level() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUBA @join__graph(name: "suba", url: "http://localhost:4001/suba")
+    SUBB @join__graph(name: "subb", url: "http://localhost:4002/subb")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUBA)
+    @join__type(graph: SUBB)
+  {
+    me: User @join__field(graph: SUBA)
+  }
+
+  type User
+    @join__type(graph: SUBA, key: "id")
+    @join__type(graph: SUBB, key: "id", extension: true)
+  {
+    id: ID!
+    fullName: String! @join__field(graph: SUBA) @join__field(graph: SUBB, external: true)
+    addresses: [Address]
+      @join__field(graph: SUBB, requires: "fullName")
+  }
+
+  type Address
+    @join__type(graph: SUBB)
+  {
+    street: String @join__field(graph: SUBB)
+    city: String @join__field(graph: SUBB)
+  }"#;
+
+    let query = "query {
+        me {
+          addresses {
+            street
+            city
+          }
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "suba",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{me{__typename id fullName}}"}},
+                        // fullName missing — subB (which requires fullName) will be skipped.
+                        serde_json::json! {{"data": {
+                            "me": {
+                                "__typename": "User",
+                                "id": "1"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            // subB is skipped — it should never be called.
+            ("subb", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Exactly one error, at the list field itself — not descending with fake
+    // indices or enumerating per-item leaves under `addresses`.
+    assert_eq!(
+        errors.len(),
+        1,
+        "should emit one error at the list field, got: {:?}",
+        errors
+    );
+    assert_eq!(errors[0]["path"], serde_json::json!(["me", "addresses"]));
+    assert_eq!(
+        errors[0]["extensions"]["code"].as_str(),
+        Some("UNSATISFIED_FETCH_CONDITION"),
+    );
+}
+
+// When a shareable list-typed field is partially fetched — one subgraph
+// populates the array while another's fetch is skipped for @requires — we
+// still emit an error at the list field. The tree has no array indices, so we
+// can't enumerate per-item leaves for the skipped subgraph's contributions,
+// and the list-level emission must not be suppressed just because another
+// fetch already wrote a value at that path.
+//
+// Scenario:
+//   query { person { friends { name hobby job } } }
+//   subA: person -> Person { id, friends: [Friend{name, hobby}] }   (fullName missing)
+//   subB: Person.friends @requires(fullName) -> [Friend{job}]       (skipped)
+#[tokio::test]
+async fn skipped_fetch_with_shareable_list_field_reports_error_and_value() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUBA @join__graph(name: "suba", url: "http://localhost:4001/suba")
+    SUBB @join__graph(name: "subb", url: "http://localhost:4002/subb")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUBA)
+    @join__type(graph: SUBB)
+  {
+    person: Person @join__field(graph: SUBA)
+  }
+
+  type Person
+    @join__type(graph: SUBA, key: "id")
+    @join__type(graph: SUBB, key: "id", extension: true)
+  {
+    id: ID!
+    fullName: String! @join__field(graph: SUBA) @join__field(graph: SUBB, external: true)
+    friends: [Friend]
+      @join__field(graph: SUBA)
+      @join__field(graph: SUBB, requires: "fullName")
+  }
+
+  type Friend
+    @join__type(graph: SUBA)
+    @join__type(graph: SUBB)
+  {
+    name: String @join__field(graph: SUBA) @join__field(graph: SUBB)
+    hobby: String @join__field(graph: SUBA)
+    job: String @join__field(graph: SUBB)
+  }"#;
+
+    let query = "query {
+        person {
+          friends {
+            name
+            hobby
+            job
+          }
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "suba",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{person{__typename id friends{name hobby} fullName}}"}},
+                        // fullName missing — subB (which requires fullName) is skipped.
+                        serde_json::json! {{"data": {
+                            "person": {
+                                "__typename": "Person",
+                                "id": "1",
+                                "friends": [
+                                    { "name": "Alice", "hobby": "chess" }
+                                ]
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            // subB is skipped — it should never be called.
+            ("subb", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // One UNSATISFIED_FETCH_CONDITION error at the list field itself — even
+    // though subA populated `friends` with a value.
+    let unsatisfied: Vec<_> = errors
+        .iter()
+        .filter(|e| e["extensions"]["code"].as_str() == Some("UNSATISFIED_FETCH_CONDITION"))
+        .collect();
+    assert_eq!(
+        unsatisfied.len(),
+        1,
+        "should emit exactly one UNSATISFIED_FETCH_CONDITION at the list field, got: {:?}",
+        errors
+    );
+    assert_eq!(
+        unsatisfied[0]["path"],
+        serde_json::json!(["person", "friends"])
+    );
+
+    // The response still carries the array populated by subA.
+    let friends = &value["data"]["person"]["friends"];
+    assert!(
+        friends.is_array(),
+        "friends should be populated by subA, got: {:?}",
+        value["data"]
+    );
+    assert_eq!(friends[0]["name"].as_str(), Some("Alice"));
+    assert_eq!(friends[0]["hobby"].as_str(), Some("chess"));
+}
