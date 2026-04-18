@@ -16,6 +16,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ComponentOrigin;
@@ -29,6 +30,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
+use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::HasLocations;
@@ -847,6 +849,15 @@ impl Merger {
             .should_compose_directive(subgraph_name, &directive.name)
         {
             return true;
+        }
+
+        if self
+            .directives_using_join_directive
+            .contains(&directive.name)
+        {
+            // This directive will be added as `@join__directive` by the `add_join_directive_directives`
+            // method. So, we skip the normal merging logic.
+            return false;
         }
 
         self.merged_federation_directive_names
@@ -2296,7 +2307,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             Name,
             IndexMap<Vec<Node<Argument>>, IndexSet<Name>>,
         > = IndexMap::default();
-        let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
+        // JS PORT NOTE: This was a Set in JS. We are using Vec instead of IndexSet as Hash trait is not dyn compatible
+        let mut links_to_persist: Vec<&dyn SpecDefinition> = Default::default();
 
         for (idx, source) in sources.iter() {
             let Some(source) = source else {
@@ -2307,47 +2319,62 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             let Some(link_import_identity_url_map) = schema.metadata() else {
                 continue;
             };
-            let Ok(Some(link_directive_name)) = self
-                .link_spec_definition
-                .directive_name_in_schema(schema, &DEFAULT_LINK_NAME)
-            else {
-                continue;
-            };
 
             let source: DirectiveTargetPosition = source.clone().try_into()?;
             for directive in source.get_all_applied_directives(schema).iter() {
-                let mut should_include_as_join_directive = false;
-
-                if directive.name == link_directive_name {
-                    if let Ok(link) = Link::from_directive_application(directive, schema.schema()) {
-                        should_include_as_join_directive =
-                            self.should_use_join_directive_for_url(&link.url);
-
+                let source_link =
+                    link_import_identity_url_map.source_link_of_directive(&directive.name);
+                // `directive_name_for_join_directive`: The directive name to use in the extracted subgraph
+                // schema. For Connectors (see `should_use_join_directive_for_url`), this is an import name (the
+                // same name imported in the supergraph and the extracted subgraphs). For others, this is
+                // the fully qualified directive name in the subgraph schema (re-assigned below).
+                let directive_name_for_join_directive = if source_link
+                    .as_ref()
+                    .is_some_and(|e| e.link.url.identity == Identity::link_identity())
+                {
+                    if let Ok(link) = Link::from_directive_application(directive, schema.schema())
+                        && self.should_use_join_directive_for_url(&link.url)
+                    {
                         // Persist link when the spec uses @join__directive and the feature
                         // identity is one of the known join-directive feature definitions.
-                        if should_include_as_join_directive
-                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
-                        {
-                            links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
+                        if let Some(definition) = SPEC_REGISTRY.get_definition(&link.url) {
+                            links_to_persist.push(*definition);
                         }
+                        Some(directive.name.clone())
+                    } else {
+                        None
                     }
-                } else if let Some(url_for_directive) =
-                    link_import_identity_url_map.source_link_of_directive(&directive.name)
+                // See if directives from this feature URL should use the @join__directive.
+                } else if source_link
+                    .as_ref()
+                    .is_some_and(|e| self.should_use_join_directive_for_url(&e.link.url))
                 {
-                    should_include_as_join_directive =
-                        self.should_use_join_directive_for_url(&url_for_directive.link.url);
-                    if !should_include_as_join_directive
-                        && self
-                            .directives_using_join_directive
-                            .contains(&directive.name)
-                    {
-                        should_include_as_join_directive = true;
+                    Some(directive.name.clone())
+                // See if this directive is one of the directives that should use the @join__directive.
+                } else if self
+                    .directives_using_join_directive
+                    .contains(&directive.name)
+                {
+                    if let Some(source_link) = source_link {
+                        // Compute the fully qualified directive name in the subgraph schema without using
+                        // `import`, so it can be referenced in the extracted subgraph schema via
+                        // `@join__directive`.
+                        Some(Link::directive_name_in_schema_for_core_arguments(
+                            &source_link.link.url,
+                            &source_link.link.url.identity.name,
+                            &[],
+                            &source_link.name_in_spec,
+                        ))
+                    } else {
+                        Some(directive.name.clone())
                     }
-                }
+                } else {
+                    None
+                };
 
-                if should_include_as_join_directive {
+                if let Some(directive_name_for_join_directive) = directive_name_for_join_directive {
                     let existing_joins = joins_by_directive_name
-                        .entry(directive.name.clone())
+                        .entry(directive_name_for_join_directive)
                         .or_default();
                     let existing_graphs_with_these_arguments = existing_joins
                         .entry(directive.arguments.clone())
@@ -2373,31 +2400,57 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // change the output supergraph schema. Here, when we encounter a link directive, we
         // preserve the version the subgraph used in a `@join__directive` so the query planner can
         // extract the subgraph schemas with correct links.
-        let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
-            HashMap::new();
-        for (url, link_directive) in links_to_persist {
-            if let Some((existing_url, existing_directive)) =
-                latest_or_highest_link_by_identity.get_mut(&url.identity)
-            {
-                if url.version > existing_url.version {
-                    *existing_url = url;
-                    *existing_directive = link_directive;
-                }
-            } else {
-                latest_or_highest_link_by_identity
-                    .insert(url.identity.clone(), (url, link_directive));
-            }
-        }
+        let latest_or_highest_link_by_identity: IndexMap<Identity, &dyn SpecDefinition> =
+            links_to_persist
+                .iter()
+                .fold(IndexMap::default(), |mut acc, spec_definition| {
+                    // auto upgrade connectors spec to latest non_preview
+                    //
+                    // PORT NOTE: JavaScript logic auto upgrade logic was generic allowing any spec to be auto upgraded,
+                    //   keeping it simple for now as auto-upgrade logic is connectors only
+                    let latest_spec: &dyn SpecDefinition = if *spec_definition.identity()
+                        == Identity::connect_identity()
+                        && CONNECT_VERSIONS.latest_non_preview().version()
+                            > spec_definition.version()
+                    {
+                        CONNECT_VERSIONS.latest_non_preview()
+                    } else {
+                        *spec_definition
+                    };
+
+                    acc.entry(latest_spec.identity().clone())
+                        .and_modify(|existing| {
+                            if existing.version() < latest_spec.version() {
+                                *existing = latest_spec
+                            }
+                        })
+                        .or_insert(latest_spec);
+                    acc
+                });
 
         let dest: DirectiveTargetPosition = dest.clone().try_into()?;
-        for (_, directive) in latest_or_highest_link_by_identity.into_values() {
-            // We insert the directive as it was in the subgraph, but with the name of `@link` in
-            // the supergraph, in case it was renamed in the subgraph.
+        for spec in latest_or_highest_link_by_identity.into_values() {
+            // we need to manually apply `@link` for the target spec
+            // we cannot use `apply_feature_to_schema` as @connect spec defines subgraph specification
+            // we use the same link import in the supergraph but we don't bring in any of the types
+            let mut arguments = vec![];
+            arguments.push(Node::new(Argument {
+                name: name!("url"),
+                value: Node::new(Value::String(spec.to_string())),
+            }));
+            if let Some(purpose) = spec.purpose() {
+                arguments.push(Node::new(Argument {
+                    name: name!("for"),
+                    value: Node::new(Value::Enum(Name::new_unchecked(
+                        purpose.to_string().as_str(),
+                    ))),
+                }));
+            }
             dest.insert_directive(
                 &mut self.merged,
                 Directive {
                     name: link_directive_name.clone(),
-                    arguments: directive.arguments,
+                    arguments,
                 },
             )?;
         }

@@ -3351,6 +3351,25 @@ expression: "&schema"
         }
       ]
     },
+    "DurationUnit": {
+      "oneOf": [
+        {
+          "const": "milliseconds",
+          "description": "Duration in milliseconds (integer)",
+          "type": "string"
+        },
+        {
+          "const": "seconds",
+          "description": "Duration in seconds (floating point)",
+          "type": "string"
+        },
+        {
+          "const": "nanoseconds",
+          "description": "Duration in nanoseconds (integer)",
+          "type": "string"
+        }
+      ]
+    },
     "Enabled": {
       "enum": [
         "enabled"
@@ -8768,6 +8787,24 @@ expression: "&schema"
           },
           "required": [
             "router_overhead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Total request duration from when the request was received",
+          "properties": {
+            "request_duration": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DurationUnit"
+                }
+              ],
+              "description": "The unit for the duration (milliseconds, seconds, nanoseconds)"
+            }
+          },
+          "required": [
+            "request_duration"
           ],
           "type": "object"
         },

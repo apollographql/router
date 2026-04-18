@@ -2,7 +2,7 @@
 source: apollo-federation/tests/composition/connectors.rs
 expression: schema_string
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"]) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_4_], args: {url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "", queryParams: ""}, errors: {message: "", extensions: ""}, isSuccess: ""}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_4_], args: {name: "v4", http: {baseURL: "http://v4"}}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_4_], args: {url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "", queryParams: ""}, errors: {message: "", extensions: ""}, isSuccess: ""}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_4_], args: {name: "v4", http: {baseURL: "http://v4"}}) {
   query: Query
 }
 
