@@ -28,6 +28,7 @@ use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::router_factory::RouterFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
@@ -395,7 +396,9 @@ impl<'a> TestHarness<'a> {
         .unwrap();
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = ServiceBuilder::new().service(router_creator.make()).boxed();
+            let router = ServiceBuilder::new()
+                .service(router_creator.create())
+                .boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
                 span_mode: span_mode(&config),
@@ -410,7 +413,6 @@ impl<'a> TestHarness<'a> {
     pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
-        use crate::router_factory::RouterFactory;
 
         let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(

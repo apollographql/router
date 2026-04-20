@@ -684,6 +684,7 @@ mod test {
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
+    use crate::router_factory::RouterFactory;
     use crate::router_factory::create_plugins;
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
@@ -827,8 +828,7 @@ mod test {
         )
         .await
         .unwrap()
-        .make()
-        .boxed_clone()
+        .create()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

@@ -181,7 +181,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     )
     .await
     .unwrap()
-    .make()
+    .create()
 }
 
 #[cfg(test)]
@@ -232,7 +232,7 @@ pub(crate) async fn empty() -> impl Service<
     )
     .await
     .unwrap()
-    .make()
+    .create()
 }
 
 /// If the `DisplayRouterRequest(true)` marker value is in context,
@@ -661,7 +661,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    service: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -669,7 +669,7 @@ pub(crate) struct RouterCreator {
 
 impl RouterFactory for RouterCreator {
     fn create(&self) -> router::BoxCloneService {
-        self.make()
+        self.service.clone().boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -736,7 +736,7 @@ impl RouterCreator {
         // before those layers (potentially introduced by traffic-shaping or license-
         // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
         // return Pending spuriously and trigger Overloaded responses.
-        let sb = UnconstrainedBuffer::new(
+        let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
                 .service(
@@ -754,14 +754,10 @@ impl RouterCreator {
 
         Ok(Self {
             supergraph_creator,
-            sb,
+            service,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
         })
-    }
-
-    pub(crate) fn make(&self) -> router::BoxCloneService {
-        self.sb.clone().boxed_clone()
     }
 }
 
