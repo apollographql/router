@@ -1082,10 +1082,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(
-            config.max_lifetime,
-            Some(Duration::from_secs(600))
-        );
+        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600)));
 
         let config_no_lifetime: SubscriptionConfig = serde_json::from_value(serde_json::json!({
             "enabled": true,
