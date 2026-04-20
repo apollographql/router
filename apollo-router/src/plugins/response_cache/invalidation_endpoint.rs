@@ -1,9 +1,12 @@
 use std::sync::Arc;
-use std::task::Poll;
 
+use axum::Extension;
+use axum::Router;
+use axum::body::Body;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use axum::routing::any;
 use bytes::Buf;
-use futures::future::BoxFuture;
-use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::AUTHORIZATION;
@@ -12,8 +15,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
-use tower::BoxError;
-use tower::Service;
 use tracing::Span;
 use tracing_futures::Instrument;
 
@@ -21,7 +22,6 @@ use super::invalidation::Invalidation;
 use super::plugin::Subgraph;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
-use crate::graphql;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -49,189 +49,138 @@ pub(crate) struct InvalidationEndpointConfig {
 }
 
 #[derive(Clone)]
-pub(crate) struct InvalidationService {
+pub(crate) struct InvalidationState {
     config: Arc<SubgraphConfiguration<Subgraph>>,
     invalidation: Invalidation,
 }
 
-impl InvalidationService {
-    pub(crate) fn new(
-        config: Arc<SubgraphConfiguration<Subgraph>>,
-        invalidation: Invalidation,
-    ) -> Self {
-        Self {
-            config,
-            invalidation,
+pub(crate) fn invalidation_router(
+    config: Arc<SubgraphConfiguration<Subgraph>>,
+    invalidation: Invalidation,
+) -> Router {
+    let state = InvalidationState {
+        config,
+        invalidation,
+    };
+    Router::new()
+        .route("/", any(handle_invalidation))
+        .layer(Extension(state))
+}
+
+async fn handle_invalidation(
+    Extension(state): Extension<InvalidationState>,
+    req: http::Request<Body>,
+) -> Response {
+    handle_invalidation_inner(state, req)
+        .instrument(tracing::info_span!(
+            INVALIDATION_ENDPOINT_SPAN_NAME,
+            "invalidation.request.kinds" = ::tracing::field::Empty,
+            "otel.status_code" = OTEL_STATUS_CODE_OK,
+        ))
+        .await
+}
+
+const APPLICATION_JSON: &str = "application/json";
+
+async fn handle_invalidation_inner(state: InvalidationState, req: http::Request<Body>) -> Response {
+    let (parts, body) = req.into_parts();
+    if !parts.headers.contains_key(AUTHORIZATION) {
+        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+        return json_error_response(StatusCode::UNAUTHORIZED, "Missing authorization header");
+    }
+    match parts.method {
+        Method::POST => {
+            let body = router::body::into_bytes(body)
+                .instrument(tracing::info_span!("into_bytes"))
+                .await
+                .map_err(|e| format!("failed to get the request body: {e}"))
+                .and_then(|bytes| {
+                    serde_json::from_reader::<_, Vec<InvalidationRequest>>(bytes.reader()).map_err(
+                        |err| format!("failed to deserialize the request body into JSON: {err}"),
+                    )
+                });
+            let shared_key = match parts
+                .headers
+                .get(AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+            {
+                Some(key) => key.to_owned(),
+                None => {
+                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                    return json_error_response(
+                        StatusCode::UNAUTHORIZED,
+                        "Invalid authorization header encoding",
+                    );
+                }
+            };
+            match body {
+                Ok(body) => {
+                    Span::current().record(
+                        "invalidation.request.kinds",
+                        body.iter()
+                            .map(|i| i.kind())
+                            .collect::<Vec<&'static str>>()
+                            .join(", "),
+                    );
+                    let shared_key_is_valid =
+                        body.iter()
+                            .flat_map(|b| b.subgraph_names())
+                            .all(|subgraph_name| {
+                                validate_shared_key(&state.config, &shared_key, &subgraph_name)
+                            });
+                    if !shared_key_is_valid {
+                        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                        return json_error_response(
+                            StatusCode::UNAUTHORIZED,
+                            "Invalid authorization header",
+                        );
+                    }
+                    match state
+                        .invalidation
+                        .invalidate(body)
+                        .instrument(tracing::info_span!("invalidate"))
+                        .await
+                    {
+                        Ok(count) => {
+                            let body =
+                                serde_json::to_string(&json!({"count": count})).unwrap_or_default();
+                            (
+                                StatusCode::ACCEPTED,
+                                [(CONTENT_TYPE, APPLICATION_JSON)],
+                                body,
+                            )
+                                .into_response()
+                        }
+                        Err(err) => {
+                            Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            json_error_response(StatusCode::BAD_REQUEST, &err.to_string())
+                        }
+                    }
+                }
+                Err(err) => {
+                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                    json_error_response(StatusCode::BAD_REQUEST, &err)
+                }
+            }
+        }
+        _ => {
+            Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            json_error_response(StatusCode::METHOD_NOT_ALLOWED, "")
         }
     }
 }
 
-impl Service<router::Request> for InvalidationService {
-    type Response = router::Response;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Ok(()).into()
-    }
-
-    fn call(&mut self, req: router::Request) -> Self::Future {
-        const APPLICATION_JSON_HEADER_VALUE: HeaderValue =
-            HeaderValue::from_static("application/json");
-        let invalidation = self.invalidation.clone();
-        let config = self.config.clone();
-        Box::pin(
-            async move {
-                let (parts, body) = req.router_request.into_parts();
-                if !parts.headers.contains_key(AUTHORIZATION) {
-                    Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                    return router::Response::error_builder()
-                        .status_code(StatusCode::UNAUTHORIZED)
-                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                        .error(
-                            graphql::Error::builder()
-                                .message(String::from("Missing authorization header"))
-                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
-                                .build(),
-                        )
-                        .context(req.context)
-                        .build();
-                }
-                match parts.method {
-                    Method::POST => {
-                        let body = router::body::into_bytes(body)
-                            .instrument(tracing::info_span!("into_bytes"))
-                            .await
-                            .map_err(|e| format!("failed to get the request body: {e}"))
-                            .and_then(|bytes| {
-                                serde_json::from_reader::<_, Vec<InvalidationRequest>>(
-                                    bytes.reader(),
-                                )
-                                .map_err(|err| {
-                                    format!(
-                                        "failed to deserialize the request body into JSON: {err}"
-                                    )
-                                })
-                            });
-                        let shared_key = parts
-                            .headers
-                            .get(AUTHORIZATION)
-                            .ok_or("cannot find authorization header")?
-                            .to_str()
-                            .inspect_err(|_err| {
-                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            })?;
-                        match body {
-                            Ok(body) => {
-                                Span::current().record(
-                                    "invalidation.request.kinds",
-                                    body.iter()
-                                        .map(|i| i.kind())
-                                        .collect::<Vec<&'static str>>()
-                                        .join(", "),
-                                );
-                                let shared_key_is_valid = body
-                                    .iter()
-                                    .flat_map(|b| b.subgraph_names())
-                                    .all(|subgraph_name| {
-                                        validate_shared_key(&config, shared_key, &subgraph_name)
-                                    });
-                                if !shared_key_is_valid {
-                                    Span::current()
-                                        .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                    return router::Response::error_builder()
-                                        .status_code(StatusCode::UNAUTHORIZED)
-                                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                                        .error(
-                                            graphql::Error::builder()
-                                                .message(String::from(
-                                                    "Invalid authorization header",
-                                                ))
-                                                .extension_code(
-                                                    StatusCode::UNAUTHORIZED.to_string(),
-                                                )
-                                                .build(),
-                                        )
-                                        .context(req.context)
-                                        .build();
-                                }
-                                match invalidation
-                                    .invalidate(body)
-                                    .instrument(tracing::info_span!("invalidate"))
-                                    .await
-                                {
-                                    Ok(count) => router::Response::http_response_builder()
-                                        .response(
-                                            http::Response::builder()
-                                                .status(StatusCode::ACCEPTED)
-                                                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                                                .body(router::body::from_bytes(
-                                                    serde_json::to_string(&json!({
-                                                        "count": count
-                                                    }))?,
-                                                ))
-                                                .map_err(BoxError::from)?,
-                                        )
-                                        .context(req.context)
-                                        .build(),
-                                    Err(err) => {
-                                        Span::current()
-                                            .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                        router::Response::error_builder()
-                                            .status_code(StatusCode::BAD_REQUEST)
-                                            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                                            .error(
-                                                graphql::Error::builder()
-                                                    .message(err.to_string())
-                                                    .extension_code(
-                                                        StatusCode::BAD_REQUEST.to_string(),
-                                                    )
-                                                    .build(),
-                                            )
-                                            .context(req.context)
-                                            .build()
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                router::Response::error_builder()
-                                    .status_code(StatusCode::BAD_REQUEST)
-                                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                                    .error(
-                                        graphql::Error::builder()
-                                            .message(err)
-                                            .extension_code(StatusCode::BAD_REQUEST.to_string())
-                                            .build(),
-                                    )
-                                    .context(req.context)
-                                    .build()
-                            }
-                        }
-                    }
-                    _ => {
-                        Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                        router::Response::error_builder()
-                            .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                            .error(
-                                graphql::Error::builder()
-                                    .message("".to_string())
-                                    .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
-                                    .build(),
-                            )
-                            .context(req.context)
-                            .build()
-                    }
-                }
+fn json_error_response(status: StatusCode, message: &str) -> Response {
+    let body = serde_json::to_string(&serde_json::json!({
+        "errors": [{
+            "message": message,
+            "extensions": {
+                "code": status.to_string()
             }
-            .instrument(tracing::info_span!(
-                INVALIDATION_ENDPOINT_SPAN_NAME,
-                "invalidation.request.kinds" = ::tracing::field::Empty,
-                "otel.status_code" = OTEL_STATUS_CODE_OK,
-            )),
-        )
-    }
+        }]
+    }))
+    .unwrap_or_default();
+    (status, [(CONTENT_TYPE, APPLICATION_JSON)], body).into_response()
 }
 
 fn validate_shared_key(
@@ -260,14 +209,26 @@ fn validate_shared_key(
 mod tests {
     use std::collections::HashMap;
 
+    use axum::body::Body;
+    use http::HeaderValue;
+    use http::StatusCode;
+    use http::header::AUTHORIZATION;
+    use http::header::CONTENT_TYPE;
     use tokio::sync::broadcast;
+    use tower::Service;
     use tower::ServiceExt;
 
     use super::*;
     use crate::plugins::response_cache::plugin::StorageInterface;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
-    use crate::services::router::body;
+
+    async fn read_body(response: http::Response<Body>) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
@@ -294,11 +255,12 @@ mod tests {
             },
             subgraphs: HashMap::new(),
         });
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
+        let mut router = invalidation_router(config, invalidation);
+        let req = http::Request::builder()
             .method(http::Method::POST)
+            .uri("/")
             .header(AUTHORIZATION, "testttt")
-            .body(
+            .body(Body::from(
                 serde_json::to_vec(&[
                     InvalidationRequest::Subgraph {
                         subgraph: String::from("test"),
@@ -309,15 +271,21 @@ mod tests {
                     },
                 ])
                 .unwrap(),
-            )
-            .build()
+            ))
             .unwrap();
-        let res = service.oneshot(req).await.unwrap();
+        let res = router
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
         assert_eq!(
-            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            res.headers().get(&CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
-        assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -359,25 +327,31 @@ mod tests {
             .into_iter()
             .collect(),
         });
-        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
+        let mut router = invalidation_router(config, invalidation);
+        let req = http::Request::builder()
             .method(http::Method::POST)
+            .uri("/")
             .header(AUTHORIZATION, "test_test")
-            .body(
+            .body(Body::from(
                 serde_json::to_vec(&[InvalidationRequest::Subgraph {
                     subgraph: String::from("foo"),
                 }])
                 .unwrap(),
-            )
-            .build()
+            ))
             .unwrap();
-        let res = service.oneshot(req).await.unwrap();
+        let res = router
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
         assert_eq!(
-            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            res.headers().get(&CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
-        assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -434,12 +408,12 @@ mod tests {
             .into_iter()
             .collect(),
         });
-        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
+        let mut router = invalidation_router(config, invalidation);
+        let req = http::Request::builder()
             .method(http::Method::POST)
+            .uri("/")
             .header(AUTHORIZATION, "test_test")
-            .body(
+            .body(Body::from(
                 serde_json::to_vec(&[
                     InvalidationRequest::Subgraph {
                         subgraph: String::from("foo"),
@@ -449,15 +423,21 @@ mod tests {
                     },
                 ])
                 .unwrap(),
-            )
-            .build()
+            ))
             .unwrap();
-        let res = service.oneshot(req).await.unwrap();
+        let res = router
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
         assert_eq!(
-            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            res.headers().get(&CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
-        assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -514,12 +494,12 @@ mod tests {
             .into_iter()
             .collect(),
         });
-        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
+        let mut router = invalidation_router(config, invalidation);
+        let req = http::Request::builder()
             .method(http::Method::POST)
+            .uri("/")
             .header(AUTHORIZATION, "test")
-            .body(
+            .body(Body::from(
                 serde_json::to_vec(&[
                     InvalidationRequest::Subgraph {
                         subgraph: String::from("foo"),
@@ -529,15 +509,21 @@ mod tests {
                     },
                 ])
                 .unwrap(),
-            )
-            .build()
+            ))
             .unwrap();
-        let res = service.oneshot(req).await.unwrap();
+        let res = router
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
         assert_eq!(
-            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            res.headers().get(&CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
-        assert!(res.response.status() != StatusCode::UNAUTHORIZED);
+        assert!(res.status() != StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -565,12 +551,12 @@ mod tests {
             },
             subgraphs: HashMap::new(),
         });
-        // Trying to invalidation with shared_key on subgraph test for a subgraph foo
-        let service = InvalidationService::new(config, invalidation);
-        let req = router::Request::fake_builder()
+        let mut router = invalidation_router(config, invalidation);
+        let req = http::Request::builder()
             .method(http::Method::POST)
+            .uri("/")
             .header(AUTHORIZATION, "test")
-            .body(
+            .body(Body::from(
                 serde_json::to_vec(&[serde_json::json!({
                     "kind": "type",
                     "subgraph": "foo",
@@ -580,17 +566,23 @@ mod tests {
                     }
                 })])
                 .unwrap(),
-            )
-            .build()
+            ))
             .unwrap();
-        let res = service.oneshot(req).await.unwrap();
+        let res = router
+            .as_service()
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .unwrap();
         assert_eq!(
-            res.response.headers().get(&CONTENT_TYPE).unwrap(),
+            res.headers().get(&CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
-        assert!(res.response.status() != StatusCode::UNAUTHORIZED);
-        assert_eq!(res.response.status(), StatusCode::BAD_REQUEST);
-        let response_body_str = body::into_string(res.response.into_body()).await.unwrap();
+        assert!(res.status() != StatusCode::UNAUTHORIZED);
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let response_body_str = read_body(res).await;
         assert!(
             response_body_str
                 .contains("failed to deserialize the request body into JSON: unknown field")

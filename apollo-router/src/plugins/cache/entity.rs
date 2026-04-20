@@ -31,8 +31,8 @@ use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
-use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
+use super::invalidation_endpoint::invalidation_router;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
 use crate::Context;
@@ -496,11 +496,9 @@ impl PluginPrivate for EntityCache {
         {
             match &self.endpoint_config {
                 Some(endpoint_config) => {
-                    let endpoint = Endpoint::from_router_service(
-                        endpoint_config.path.clone(),
-                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed_clone(),
-                    );
+                    let router =
+                        invalidation_router(self.subgraphs.clone(), self.invalidation.clone());
+                    let endpoint = Endpoint::from_router(endpoint_config.path.clone(), router);
                     tracing::info!(
                         "Entity caching invalidation endpoint listening on: {}{}",
                         endpoint_config.listen,

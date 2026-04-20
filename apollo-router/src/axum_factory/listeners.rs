@@ -563,13 +563,13 @@ mod tests {
     use std::sync::Arc;
 
     use axum::BoxError;
+    use axum::response::IntoResponse;
+    use axum::routing::any;
     use http::HeaderMap;
     use http::HeaderValue;
     use mime::APPLICATION_JSON;
     use reqwest::header::CONTENT_TYPE;
     use serde_json::json;
-    use tower::ServiceExt;
-    use tower::service_fn;
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
@@ -578,7 +578,6 @@ mod tests {
     use crate::graphql;
     use crate::services::SupergraphResponse;
     use crate::services::router;
-    use crate::services::router::body;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -605,25 +604,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let endpoint = service_fn(|req: router::Request| async move {
-            Ok::<_, BoxError>(
-                router::Response::http_response_builder()
-                    .response(
-                        http::Response::builder().body::<crate::services::router::Body>(
-                            body::from_bytes("this is a test".to_string()),
-                        )?,
-                    )
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            )
-        })
-        .boxed_clone();
+        let router =
+            axum::Router::new().route("/", any(|| async { "this is a test".into_response() }));
 
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
             SocketAddr::from_str("0.0.0.0:4010").unwrap().into(),
-            Endpoint::from_router_service("/".to_string(), endpoint),
+            Endpoint::from_router("/".to_string(), router),
         );
 
         let error = init_with_config(
@@ -649,22 +636,14 @@ mod tests {
             )
             .build()
             .unwrap();
-        let endpoint = service_fn(|req: router::Request| async move {
-            router::Response::http_response_builder()
-                .response(
-                    http::Response::builder().body::<crate::services::router::Body>(
-                        body::from_bytes("this is a test".to_string()),
-                    )?,
-                )
-                .context(req.context)
-                .build()
-        })
-        .boxed_clone();
+
+        let router =
+            axum::Router::new().route("/", any(|| async { "this is a test".into_response() }));
 
         let mut mm = MultiMap::new();
         mm.insert(
             SocketAddr::from_str("127.0.0.1:4010").unwrap().into(),
-            Endpoint::from_router_service("/".to_string(), endpoint),
+            Endpoint::from_router("/".to_string(), router),
         );
 
         let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)

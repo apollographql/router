@@ -57,7 +57,6 @@ use tokio_util::io::StreamReader;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
-use tower::service_fn;
 
 use super::*;
 use crate::ApolloRouterError;
@@ -1473,28 +1472,24 @@ async fn it_doesnt_display_disabled_homepage() {
 
 #[test(tokio::test)]
 async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
-    let endpoint = service_fn(|req: router::Request| async move {
-        Ok::<_, BoxError>(
-            http::Response::builder()
-                .status(StatusCode::OK)
-                .body(format!(
-                    "{} + {}",
-                    req.router_request.method(),
-                    req.router_request.uri().path()
-                ))
-                .unwrap()
-                .into(),
-        )
-    })
-    .boxed_clone();
+    async fn echo_handler(method: http::Method, uri: axum::extract::OriginalUri) -> String {
+        format!("{} + {}", method, uri.path())
+    }
+
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
+        Endpoint::from_router(
+            "/a-custom-path".to_string(),
+            axum::Router::new().route("/", axum::routing::any(echo_handler)),
+        ),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/an-other-custom-path".to_string(), endpoint.boxed_clone()),
+        Endpoint::from_router(
+            "/an-other-custom-path".to_string(),
+            axum::Router::new().route("/", axum::routing::any(echo_handler)),
+        ),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -1580,29 +1575,20 @@ async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
 
 #[test(tokio::test)]
 async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
-    let endpoint = service_fn(|req: router::Request| async move {
-        Ok::<_, BoxError>(
-            http::Response::builder()
-                .status(StatusCode::OK)
-                .body(format!(
-                    "{} + {}",
-                    req.router_request.method(),
-                    req.router_request.uri().path()
-                ))
-                .unwrap()
-                .into(),
-        )
-    })
-    .boxed_clone();
-
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.clone().boxed_clone()),
+        Endpoint::from_router(
+            "/a-custom-path".to_string(),
+            axum::Router::new().route("/", axum::routing::any(|| async { "test" })),
+        ),
     );
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/a-custom-path".to_string(), endpoint.boxed_clone()),
+        Endpoint::from_router(
+            "/a-custom-path".to_string(),
+            axum::Router::new().route("/", axum::routing::any(|| async { "test" })),
+        ),
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
@@ -2491,24 +2477,13 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
 
     // Manually add the endpoints, since they are only created if the health-check plugin is
     // enabled and that won't happen in init_with_config()
-    let endpoint = service_fn(|req: router::Request| async move {
-        Ok::<_, BoxError>(
-            http::Response::builder()
-                .status(StatusCode::OK)
-                .body(format!(
-                    "{} + {}",
-                    req.router_request.method(),
-                    req.router_request.uri().path()
-                ))
-                .unwrap()
-                .into(),
-        )
-    })
-    .boxed_clone();
     let mut web_endpoints = MultiMap::new();
     web_endpoints.insert(
         ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
-        Endpoint::from_router_service("/health".to_string(), endpoint.boxed_clone()),
+        Endpoint::from_router(
+            "/health".to_string(),
+            axum::Router::new().route("/", axum::routing::any(|| async { "ok" })),
+        ),
     );
 
     let error = init_with_config(

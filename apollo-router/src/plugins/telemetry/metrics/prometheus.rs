@@ -1,7 +1,6 @@
-use std::task::Context;
-use std::task::Poll;
-
-use futures::future::BoxFuture;
+use axum::Extension;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use http::StatusCode;
 use opentelemetry_prometheus::ResourceSelector;
 use prometheus::Encoder;
@@ -10,7 +9,6 @@ use prometheus::TextEncoder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
@@ -18,7 +16,6 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
-use crate::services::router;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
@@ -92,40 +89,25 @@ impl MetricsConfigurator for Config {
 }
 
 #[derive(Clone)]
-pub(crate) struct PrometheusService {
+pub(crate) struct PrometheusState {
     pub(crate) registry: Registry,
 }
 
-impl Service<router::Request> for PrometheusService {
-    type Response = router::Response;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Ok(()).into()
+pub(crate) async fn handle_prometheus(Extension(state): Extension<PrometheusState>) -> Response {
+    let metric_families = state.registry.gather();
+    let encoder = TextEncoder::new();
+    let mut result = Vec::new();
+    if let Err(e) = encoder.encode(&metric_families, &mut result) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+    // otel 0.19.0 started adding "_total" onto various statistics.
+    let stats = String::from_utf8_lossy(&result);
+    let modified_stats = stats.replace("_total_total", "_total");
 
-    fn call(&mut self, req: router::Request) -> Self::Future {
-        let metric_families = self.registry.gather();
-        Box::pin(async move {
-            let encoder = TextEncoder::new();
-            let mut result = Vec::new();
-            encoder.encode(&metric_families, &mut result)?;
-            // otel 0.19.0 started adding "_total" onto various statistics.
-            // Let's remove any problems they may have created for us.
-            let stats = String::from_utf8_lossy(&result);
-            let modified_stats = stats.replace("_total_total", "_total");
-
-            router::Response::http_response_builder()
-                .response(
-                    http::Response::builder()
-                        .status(StatusCode::OK)
-                        .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                        .body(router::body::from_bytes(modified_stats))
-                        .map_err(BoxError::from)?,
-                )
-                .context(req.context)
-                .build()
-        })
-    }
+    (
+        StatusCode::OK,
+        [(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        modified_stats,
+    )
+        .into_response()
 }

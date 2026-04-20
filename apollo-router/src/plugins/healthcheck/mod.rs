@@ -14,6 +14,12 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use axum::Extension;
+use axum::Router;
+use axum::extract::Request;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use axum::routing::any;
 use http::StatusCode;
 use multimap::MultiMap;
 use schemars::JsonSchema;
@@ -22,7 +28,6 @@ use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::service_fn;
 
 use crate::Endpoint;
 use crate::configuration::ListenAddr;
@@ -159,6 +164,50 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone)]
+struct HealthState {
+    ready: Arc<AtomicBool>,
+    live: Arc<AtomicBool>,
+}
+
+async fn handle_health_check(Extension(state): Extension<HealthState>, req: Request) -> Response {
+    let mut status_code = StatusCode::OK;
+    let health = if let Some(query) = req.uri().query() {
+        let query_upper = query.to_ascii_uppercase();
+        if query_upper.starts_with("READY") {
+            let status = if state.ready.load(Ordering::SeqCst) {
+                HealthStatus::Up
+            } else {
+                // k8s will interpret non-200 as probe fail
+                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                HealthStatus::Down
+            };
+            Health { status }
+        } else if query_upper.starts_with("LIVE") {
+            let status = if state.live.load(Ordering::SeqCst) {
+                HealthStatus::Up
+            } else {
+                // k8s will interpret non-200 as probe fail
+                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                HealthStatus::Down
+            };
+            Health { status }
+        } else {
+            Health {
+                status: HealthStatus::Up,
+            }
+        }
+    } else {
+        Health {
+            status: HealthStatus::Up,
+        }
+    };
+    tracing::trace!(?health, request = ?req, "health check");
+
+    let body = serde_json::to_vec(&health).unwrap_or_default();
+    (status_code, body).into_response()
+}
+
 struct HealthCheck {
     config: Config,
     live: Arc<AtomicBool>,
@@ -246,62 +295,16 @@ impl PluginPrivate for HealthCheck {
         let mut map = MultiMap::new();
 
         if self.config.enabled {
-            let my_ready = self.ready.clone();
-            let my_live = self.live.clone();
+            let state = HealthState {
+                ready: self.ready.clone(),
+                live: self.live.clone(),
+            };
 
-            let endpoint = Endpoint::from_router_service(
-                self.config.path.clone(),
-                service_fn(move |req: router::Request| {
-                    let mut status_code = StatusCode::OK;
-                    let health = if let Some(query) = req.router_request.uri().query() {
-                        let query_upper = query.to_ascii_uppercase();
-                        // Could be more precise, but sloppy match is fine for this use case
-                        if query_upper.starts_with("READY") {
-                            let status = if my_ready.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else if query_upper.starts_with("LIVE") {
-                            let status = if my_live.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else {
-                            Health {
-                                status: HealthStatus::Up,
-                            }
-                        }
-                    } else {
-                        Health {
-                            status: HealthStatus::Up,
-                        }
-                    };
-                    tracing::trace!(?health, request = ?req.router_request, "health check");
-                    async move {
-                        router::Response::http_response_builder()
-                            .response(http::Response::builder().status(status_code).body(
-                                router::body::from_bytes(
-                                    serde_json::to_vec(&health).map_err(BoxError::from)?,
-                                ),
-                            )?)
-                            .context(req.context)
-                            .build()
-                    }
-                })
-                .boxed_clone(),
-            );
+            let router = Router::new()
+                .route("/", any(handle_health_check))
+                .layer(Extension(state));
+
+            let endpoint = Endpoint::from_router(self.config.path.clone(), router);
 
             map.insert(self.config.listen.clone(), endpoint);
         }

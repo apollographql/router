@@ -25,10 +25,12 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use axum::Extension;
+use axum::Router;
+use axum::routing::any;
 use multimap::MultiMap;
 use tokio::task::block_in_place;
 use tower::BoxError;
-use tower::ServiceExt;
 
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -40,7 +42,8 @@ use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config_new::cache::CACHE_METRIC;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
-use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusState;
+use crate::plugins::telemetry::metrics::prometheus::handle_prometheus;
 use crate::plugins::telemetry::otlp;
 use crate::plugins::telemetry::reload::activation::Activation;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
@@ -118,16 +121,14 @@ impl<'a> Builder<'a> {
             let listen = self.config.exporters.metrics.prometheus.listen.clone();
             let path = self.config.exporters.metrics.prometheus.path.clone();
             tracing::info!("Prometheus endpoint exposed at {}{}", &listen, &path);
-            self.endpoints.insert(
-                listen,
-                Endpoint::from_router_service(
-                    path,
-                    PrometheusService {
-                        registry: prometheus_registry.clone(),
-                    }
-                    .boxed_clone(),
-                ),
-            );
+            let state = PrometheusState {
+                registry: prometheus_registry.clone(),
+            };
+            let router = Router::new()
+                .route("/", any(handle_prometheus))
+                .layer(Extension(state));
+            self.endpoints
+                .insert(listen, Endpoint::from_router(path, router));
         }
         Ok(())
     }

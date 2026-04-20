@@ -12,7 +12,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use self::callback::CallbackService;
+use self::callback::callback_router;
 use self::notification::Notify;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -335,11 +335,8 @@ impl Plugin for Subscription {
                 .callback_hmac_key
                 .clone()
                 .expect("cannot run subscription in callback mode without a hmac key");
-            let endpoint = Endpoint::from_router_service(
-                format!("{path}/{{callback}}"),
-                CallbackService::new(self.notify.clone(), path.to_string(), callback_hmac_key)
-                    .boxed_clone(),
-            );
+            let router = callback_router(self.notify.clone(), path.to_string(), callback_hmac_key);
+            let endpoint = Endpoint::from_router(path.to_string(), router);
             map.insert(listen.clone().unwrap_or_else(default_listen_addr), endpoint);
         }
 

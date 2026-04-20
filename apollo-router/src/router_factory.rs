@@ -4,8 +4,6 @@ use std::io;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use axum::response::IntoResponse;
-use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
@@ -14,7 +12,6 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower::service_fn;
 use tracing::Instrument;
 
 use crate::AllowedFeature;
@@ -54,17 +51,7 @@ pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 /// A path and a handler to be exposed as a web_endpoint for plugins
 pub struct Endpoint {
     pub(crate) path: String,
-    // Plugins need to be Send + Sync
-    // BoxCloneService isn't enough
-    handler: EndpointHandler,
-}
-
-#[derive(Clone)]
-enum EndpointHandler {
-    /// Legacy handler wrapping a router service
-    Service(Handler),
-    /// Direct axum router (bypasses service conversion)
-    Router(axum::Router),
+    router: axum::Router,
 }
 
 impl std::fmt::Debug for Endpoint {
@@ -77,18 +64,35 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
+    ///
+    /// **Deprecated:** Use [`Endpoint::from_router`] instead, which avoids the
+    /// `Handler`/`oneshot` indirection layer and directly uses an axum Router.
+    #[deprecated(note = "Use Endpoint::from_router with a native axum Router instead")]
+    #[allow(deprecated)]
     pub fn from_router_service(path: String, handler: router::BoxCloneService) -> Self {
-        Self {
-            path,
-            handler: EndpointHandler::Service(Handler::new(handler)),
-        }
+        use axum::response::IntoResponse;
+        use http::StatusCode;
+        use tower::service_fn;
+
+        let handler = Handler::new(handler);
+        let handler_clone = handler.clone();
+        let axum_handler = move |req: http::Request<axum::body::Body>| {
+            let endpoint = handler_clone.clone();
+            async move {
+                Ok::<_, std::convert::Infallible>(match endpoint.oneshot(req.into()).await {
+                    Ok(res) => res.response.into_response(),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                })
+            }
+        };
+
+        let router = axum::Router::new().route_service("/", service_fn(axum_handler));
+        Self { path, router }
     }
 
     /// Creates an Endpoint given a path and an axum Router
     ///
-    /// This is the preferred method for plugins that use axum internally,
-    /// as it avoids unnecessary service wrapping and path manipulation.
-    ///
+    /// This is the preferred method for plugins to expose web endpoints.
     /// The router will be automatically nested at the specified path, allowing
     /// it to handle all sub-routes. For example, a router registered at `/diagnostics`
     /// will handle `/diagnostics/`, `/diagnostics/memory/status`, etc.
@@ -107,35 +111,12 @@ impl Endpoint {
     /// // - /diagnostics/
     /// // - /diagnostics/status
     /// ```
-    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
-        Self {
-            path,
-            handler: EndpointHandler::Router(router),
-        }
+    pub fn from_router(path: String, router: axum::Router) -> Self {
+        Self { path, router }
     }
 
     pub(crate) fn into_router(self) -> axum::Router {
-        match self.handler {
-            // If we already have a router, just nest it at the path
-            EndpointHandler::Router(router) => axum::Router::new().nest(&self.path, router),
-            // Legacy service handling with path-based routing
-            EndpointHandler::Service(handler) => {
-                let handler_clone = handler.clone();
-                let handler = move |req: http::Request<axum::body::Body>| {
-                    let endpoint = handler_clone.clone();
-                    async move {
-                        Ok(endpoint
-                            .oneshot(req.into())
-                            .await
-                            .map(|res| res.response)
-                            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-                            .into_response())
-                    }
-                };
-
-                axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
-            }
-        }
+        axum::Router::new().nest(&self.path, self.router)
     }
 }
 /// Factory for creating a router service instance.
