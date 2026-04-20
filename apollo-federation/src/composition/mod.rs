@@ -6,6 +6,59 @@ use std::vec;
 use tracing::instrument;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum HintLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+#[allow(dead_code)]
+impl HintLevel {
+    pub fn name(&self) -> &'static str {
+        match self {
+            HintLevel::Warn => "WARN",
+            HintLevel::Info => "INFO",
+            HintLevel::Debug => "DEBUG",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct HintCodeDefinition {
+    code: String,
+    level: HintLevel,
+    description: String,
+}
+
+#[allow(dead_code)]
+impl HintCodeDefinition {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        level: HintLevel,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            level,
+            description: description.into(),
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        &self.level
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
 use crate::connectors::Connector;
 use crate::connectors::expand::Connectors;
 use crate::connectors::expand::ExpansionResult;

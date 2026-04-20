@@ -219,18 +219,26 @@ pub struct SupergraphMetadata {
     abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
+pub use crate::composition::HintCodeDefinition;
+pub use crate::composition::HintLevel;
+pub use crate::merger::hints::HintCode;
+
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
 pub struct CompositionHint {
+    pub definition: &'static HintCodeDefinition,
     pub message: String,
-    pub code: String,
     pub locations: Locations,
 }
 
 impl CompositionHint {
     pub fn code(&self) -> &str {
-        &self.code
+        self.definition.code()
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        self.definition.level()
     }
 
     pub fn message(&self) -> &str {

@@ -1,62 +1,12 @@
 #[allow(dead_code)]
 use std::sync::LazyLock;
 
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) enum HintLevel {
-    Warn,
-    Info,
-    Debug,
-}
-
-#[allow(dead_code)]
-impl HintLevel {
-    pub(crate) fn name(&self) -> &'static str {
-        match self {
-            HintLevel::Warn => "WARN",
-            HintLevel::Info => "INFO",
-            HintLevel::Debug => "DEBUG",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct HintCodeDefinition {
-    code: String,
-    level: HintLevel,
-    description: String,
-}
-
-#[allow(dead_code)]
-impl HintCodeDefinition {
-    pub(crate) fn new(
-        code: impl Into<String>,
-        level: HintLevel,
-        description: impl Into<String>,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            level,
-            description: description.into(),
-        }
-    }
-
-    pub(crate) fn code(&self) -> &str {
-        &self.code
-    }
-
-    pub(crate) fn level(&self) -> &HintLevel {
-        &self.level
-    }
-
-    pub(crate) fn description(&self) -> &str {
-        &self.description
-    }
-}
+use crate::composition::HintCodeDefinition;
+use crate::composition::HintLevel;
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
-pub(crate) enum HintCode {
+pub enum HintCode {
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
     InconsistentDefaultValuePresence,
@@ -92,7 +42,7 @@ pub(crate) enum HintCode {
 
 #[allow(dead_code)]
 impl HintCode {
-    pub(crate) fn definition(&self) -> &'static HintCodeDefinition {
+    pub fn definition(&self) -> &'static HintCodeDefinition {
         match self {
             HintCode::InconsistentButCompatibleFieldType => &INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE,
             HintCode::InconsistentButCompatibleArgumentType => {
@@ -158,7 +108,7 @@ impl HintCode {
         }
     }
 
-    pub(crate) fn code(&self) -> &str {
+    pub fn code(&self) -> &str {
         self.definition().code()
     }
 }
@@ -168,7 +118,7 @@ pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefin
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE",
-            HintLevel::Warn,
+            HintLevel::Info,
             "Field has inconsistent but compatible type across subgraphs",
         )
     });
@@ -178,7 +128,7 @@ pub(crate) static INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE: LazyLock<HintCodeDe
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE",
-            HintLevel::Warn,
+            HintLevel::Info,
             "Argument has inconsistent but compatible type across subgraphs",
         )
     });
@@ -197,7 +147,7 @@ pub(crate) static INCONSISTENT_DEFAULT_VALUE_PRESENCE: LazyLock<HintCodeDefiniti
 pub(crate) static INCONSISTENT_ENTITY: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "INCONSISTENT_ENTITY",
-        HintLevel::Warn,
+        HintLevel::Info,
         "Entity definition is inconsistent across subgraphs",
     )
 });
@@ -207,7 +157,7 @@ pub(crate) static INCONSISTENT_OBJECT_VALUE_TYPE_FIELD: LazyLock<HintCodeDefinit
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
-            HintLevel::Warn,
+            HintLevel::Debug,
             "Object value type field is inconsistent across subgraphs",
         )
     });
@@ -217,7 +167,7 @@ pub(crate) static INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD: LazyLock<HintCodeDefi
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD",
-            HintLevel::Warn,
+            HintLevel::Debug,
             "Interface value type field is inconsistent across subgraphs",
         )
     });
@@ -236,7 +186,7 @@ pub(crate) static INCONSISTENT_INPUT_OBJECT_FIELD: LazyLock<HintCodeDefinition> 
 pub(crate) static INCONSISTENT_UNION_MEMBER: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "INCONSISTENT_UNION_MEMBER",
-        HintLevel::Warn,
+        HintLevel::Debug,
         "Union member is inconsistent across subgraphs",
     )
 });
@@ -256,7 +206,7 @@ pub(crate) static INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM: LazyLock<HintCodeDefi
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
-            HintLevel::Warn,
+            HintLevel::Debug,
             "Enum value for output enum is inconsistent across subgraphs",
         )
     });
@@ -266,7 +216,7 @@ pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_REPEATABLE: LazyLock<HintCo
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_REPEATABLE",
-            HintLevel::Warn,
+            HintLevel::Debug,
             "Type system directive repeatable property is inconsistent across subgraphs",
         )
     });
@@ -276,7 +226,7 @@ pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_LOCATIONS: LazyLock<HintCod
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_LOCATIONS",
-            HintLevel::Warn,
+            HintLevel::Debug,
             "Type system directive locations are inconsistent across subgraphs",
         )
     });
@@ -382,7 +332,7 @@ pub(crate) static OVERRIDE_MIGRATION_IN_PROGRESS: LazyLock<HintCodeDefinition> =
 
 #[allow(dead_code)]
 pub(crate) static UNUSED_ENUM_TYPE: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
-    HintCodeDefinition::new("UNUSED_ENUM_TYPE", HintLevel::Warn, "Enum type is unused")
+    HintCodeDefinition::new("UNUSED_ENUM_TYPE", HintLevel::Debug, "Enum type is unused")
 });
 
 #[allow(dead_code)]
@@ -449,7 +399,7 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
 > = LazyLock::new(|| {
     HintCodeDefinition::new(
         "CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS",
-        HintLevel::Warn,
+        HintLevel::Info,
         "Contextual argument is not contextual in all subgraphs",
     )
 });
