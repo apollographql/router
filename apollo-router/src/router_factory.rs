@@ -21,7 +21,6 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
 use crate::plugin::DynPlugin;
-use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::notification::Notify;
@@ -63,33 +62,6 @@ impl std::fmt::Debug for Endpoint {
 }
 
 impl Endpoint {
-    /// Creates an Endpoint given a path and a Boxed Service
-    ///
-    /// **Deprecated:** Use [`Endpoint::from_router`] instead, which avoids the
-    /// `Handler`/`oneshot` indirection layer and directly uses an axum Router.
-    #[deprecated(note = "Use Endpoint::from_router with a native axum Router instead")]
-    #[allow(deprecated)]
-    pub fn from_router_service(path: String, handler: router::BoxCloneService) -> Self {
-        use axum::response::IntoResponse;
-        use http::StatusCode;
-        use tower::service_fn;
-
-        let handler = Handler::new(handler);
-        let handler_clone = handler.clone();
-        let axum_handler = move |req: http::Request<axum::body::Body>| {
-            let endpoint = handler_clone.clone();
-            async move {
-                Ok::<_, std::convert::Infallible>(match endpoint.oneshot(req.into()).await {
-                    Ok(res) => res.response.into_response(),
-                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-                })
-            }
-        };
-
-        let router = axum::Router::new().route_service("/", service_fn(axum_handler));
-        Self { path, router }
-    }
-
     /// Creates an Endpoint given a path and an axum Router
     ///
     /// This is the preferred method for plugins to expose web endpoints.

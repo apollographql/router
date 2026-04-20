@@ -11,7 +11,7 @@
 //! stages.
 //!
 //! A plugin can choose to interact with the flow of requests at any or all of these stages of
-//! processing. At each stage a [`Service`] is provided which provides an appropriate
+//! processing. At each stage a [`tower::Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
 pub mod serde;
@@ -24,8 +24,6 @@ use std::fmt;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::task::Context;
-use std::task::Poll;
 
 use ::serde::Deserialize;
 use ::serde::de::DeserializeOwned;
@@ -39,14 +37,9 @@ use schemars::JsonSchema;
 use schemars::SchemaGenerator;
 use serde_json::Value;
 use tower::BoxError;
-use tower::Service;
-use tower::ServiceBuilder;
-use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
 use crate::graphql;
-use crate::layers::ServiceBuilderExt;
-use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -930,43 +923,4 @@ macro_rules! register_private_plugin {
             });
         };
     };
-}
-
-/// Handler represents a [`Plugin`] endpoint.
-#[derive(Clone)]
-pub(crate) struct Handler {
-    // BoxCloneService is Send but not Sync. The buffer's handle (Arc + Sender) is Sync,
-    // which is required for axum's route_service handler to be usable across threads.
-    service: UnconstrainedBuffer<
-        router::Request,
-        <router::BoxCloneService as Service<router::Request>>::Future,
-    >,
-}
-
-impl Handler {
-    pub(crate) fn new(service: router::BoxCloneService) -> Self {
-        Self {
-            service: ServiceBuilder::new().buffered().service(service),
-        }
-    }
-}
-
-impl Service<router::Request> for Handler {
-    type Response = router::Response;
-    type Error = BoxError;
-    type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: router::Request) -> Self::Future {
-        self.service.call(req)
-    }
-}
-
-impl From<router::BoxCloneService> for Handler {
-    fn from(original: router::BoxCloneService) -> Self {
-        Self::new(original)
-    }
 }
