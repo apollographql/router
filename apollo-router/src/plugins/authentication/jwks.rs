@@ -578,103 +578,108 @@ pub(super) type DecodedClaims = TokenData<serde_json::Value>;
 
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<SearchResult>,
+    search_results: Vec<SearchResult>,
     criteria: JWTCriteria,
 ) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for SearchResult {
-        issuers,
-        audiences,
-        jwk,
-        allow_missing_exp,
-    } in keys.into_iter()
-    {
-        let decoding_key = match DecodingKey::from_jwk(&jwk) {
-            Ok(k) => k,
-            Err(e) => {
-                error = Some((
-                    AuthenticationError::CannotCreateDecodingKey(e),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
-            }
-        };
-
-        let key_algorithm = match jwk.common.key_algorithm {
-            Some(a) => a,
-            None => {
-                error = Some((
-                    AuthenticationError::JWKHasNoAlgorithm,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
-            }
-        };
-
-        let algorithm = match convert_key_algorithm(key_algorithm) {
-            Some(a) => a,
-            None => {
-                error = Some((
-                    AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
-            }
-        };
-
-        let mut validation = Validation::new(algorithm);
-        validation.validate_nbf = true;
-        // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
-        // we don't validate audience yet, so this is deactivated
-        validation.validate_aud = false;
-        if allow_missing_exp {
-            validation.required_spec_claims.remove("exp");
-        }
-
-        let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::trace!("JWT decoding failed with error `{e}`");
-                error = Some((
-                    AuthenticationError::CannotDecodeJWT(e),
-                    StatusCode::UNAUTHORIZED,
-                ));
-                continue;
-            }
-        };
-
-        if let Some(configured_issuers) = issuers {
-            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
-            if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
-                error = Some((err, StatusCode::INTERNAL_SERVER_ERROR));
-                continue;
+    for search_result in search_results.into_iter() {
+        match validate_jwk_against_jwt(jwt, search_result) {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                error = Some(err);
             }
         }
-
-        if let Some(configured_audiences) = audiences {
-            let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
-            if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
-                error = Some((err, StatusCode::UNAUTHORIZED));
-                continue;
-            }
-        }
-
-        return Ok(token_data);
     }
 
     match error {
         Some(e) => Err(e),
         None => {
             // We can't find a key to process this JWT.
-            Err((
-                criteria.kid.map_or_else(
-                    || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
-                    AuthenticationError::CannotFindKID,
-                ),
-                StatusCode::UNAUTHORIZED,
-            ))
+            let err = match criteria.kid {
+                Some(kid) => AuthenticationError::CannotFindKID(kid),
+                None => AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
+            };
+            Err((err, StatusCode::UNAUTHORIZED))
         }
     }
+}
+
+fn validate_jwk_against_jwt(
+    jwt: &str,
+    search_result: SearchResult,
+) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
+    let SearchResult {
+        issuers,
+        audiences,
+        jwk,
+        allow_missing_exp,
+    } = search_result;
+
+    let decoding_key = match DecodingKey::from_jwk(&jwk) {
+        Ok(k) => k,
+        Err(e) => {
+            return Err((
+                AuthenticationError::CannotCreateDecodingKey(e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let key_algorithm = match jwk.common.key_algorithm {
+        Some(a) => a,
+        None => {
+            return Err((
+                AuthenticationError::JWKHasNoAlgorithm,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let algorithm = match convert_key_algorithm(key_algorithm) {
+        Some(a) => a,
+        None => {
+            return Err((
+                AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let mut validation = Validation::new(algorithm);
+    validation.validate_nbf = true;
+    // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
+    // we don't validate audience yet, so this is deactivated
+    validation.validate_aud = false;
+    if allow_missing_exp {
+        validation.required_spec_claims.remove("exp");
+    }
+
+    let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::trace!("JWT decoding failed with error `{e}`");
+            return Err((
+                AuthenticationError::CannotDecodeJWT(e),
+                StatusCode::UNAUTHORIZED,
+            ));
+        }
+    };
+
+    if let Some(configured_issuers) = issuers {
+        let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
+        if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
+            return Err((err, StatusCode::INTERNAL_SERVER_ERROR));
+        }
+    }
+
+    if let Some(configured_audiences) = audiences {
+        let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
+        if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
+            return Err((err, StatusCode::UNAUTHORIZED));
+        }
+    }
+
+    Ok(token_data)
 }
 
 fn validate_issuers(
