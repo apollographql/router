@@ -8,14 +8,12 @@ use tracing::instrument;
 pub use crate::composition::satisfiability::validate_satisfiability;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum HintLevel {
     Warn,
     Info,
     Debug,
 }
 
-#[allow(dead_code)]
 impl HintLevel {
     pub fn name(&self) -> &'static str {
         match self {
@@ -33,7 +31,6 @@ pub struct HintCodeDefinition {
     description: String,
 }
 
-#[allow(dead_code)]
 impl HintCodeDefinition {
     pub(crate) fn new(
         code: impl Into<String>,

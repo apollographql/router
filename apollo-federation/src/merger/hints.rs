@@ -1,11 +1,9 @@
-#[allow(dead_code)]
 use std::sync::LazyLock;
 
 use crate::composition::HintCodeDefinition;
 use crate::composition::HintLevel;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum HintCode {
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
@@ -40,7 +38,6 @@ pub enum HintCode {
     InterfaceKeyMissingImplementationType,
 }
 
-#[allow(dead_code)]
 impl HintCode {
     pub fn definition(&self) -> &'static HintCodeDefinition {
         match self {
@@ -113,7 +110,6 @@ impl HintCode {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -123,7 +119,6 @@ pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefin
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -133,7 +128,6 @@ pub(crate) static INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE: LazyLock<HintCodeDe
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_DEFAULT_VALUE_PRESENCE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -143,7 +137,6 @@ pub(crate) static INCONSISTENT_DEFAULT_VALUE_PRESENCE: LazyLock<HintCodeDefiniti
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_ENTITY: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "INCONSISTENT_ENTITY",
@@ -152,7 +145,6 @@ pub(crate) static INCONSISTENT_ENTITY: LazyLock<HintCodeDefinition> = LazyLock::
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_OBJECT_VALUE_TYPE_FIELD: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -162,7 +154,6 @@ pub(crate) static INCONSISTENT_OBJECT_VALUE_TYPE_FIELD: LazyLock<HintCodeDefinit
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -172,7 +163,6 @@ pub(crate) static INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD: LazyLock<HintCodeDefi
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_INPUT_OBJECT_FIELD: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -182,7 +172,6 @@ pub(crate) static INCONSISTENT_INPUT_OBJECT_FIELD: LazyLock<HintCodeDefinition> 
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_UNION_MEMBER: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "INCONSISTENT_UNION_MEMBER",
@@ -191,7 +180,6 @@ pub(crate) static INCONSISTENT_UNION_MEMBER: LazyLock<HintCodeDefinition> = Lazy
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_ENUM_VALUE_FOR_INPUT_ENUM: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -201,7 +189,6 @@ pub(crate) static INCONSISTENT_ENUM_VALUE_FOR_INPUT_ENUM: LazyLock<HintCodeDefin
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -211,7 +198,6 @@ pub(crate) static INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM: LazyLock<HintCodeDefi
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_REPEATABLE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -221,7 +207,6 @@ pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_REPEATABLE: LazyLock<HintCo
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_LOCATIONS: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -231,7 +216,6 @@ pub(crate) static INCONSISTENT_TYPE_SYSTEM_DIRECTIVE_LOCATIONS: LazyLock<HintCod
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -241,7 +225,6 @@ pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE: LazyLock<HintCodeD
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -251,7 +234,6 @@ pub(crate) static NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION: LazyLock<HintC
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -261,7 +243,6 @@ pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE: LazyLock<HintCod
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -271,7 +252,6 @@ pub(crate) static INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS: LazyLock<HintCode
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_DESCRIPTION: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "INCONSISTENT_DESCRIPTION",
@@ -280,7 +260,6 @@ pub(crate) static INCONSISTENT_DESCRIPTION: LazyLock<HintCodeDefinition> = LazyL
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_ARGUMENT_PRESENCE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -290,7 +269,6 @@ pub(crate) static INCONSISTENT_ARGUMENT_PRESENCE: LazyLock<HintCodeDefinition> =
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static FROM_SUBGRAPH_DOES_NOT_EXIST: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -300,7 +278,6 @@ pub(crate) static FROM_SUBGRAPH_DOES_NOT_EXIST: LazyLock<HintCodeDefinition> =
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static OVERRIDDEN_FIELD_CAN_BE_REMOVED: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -310,7 +287,6 @@ pub(crate) static OVERRIDDEN_FIELD_CAN_BE_REMOVED: LazyLock<HintCodeDefinition> 
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static OVERRIDE_DIRECTIVE_CAN_BE_REMOVED: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -320,7 +296,6 @@ pub(crate) static OVERRIDE_DIRECTIVE_CAN_BE_REMOVED: LazyLock<HintCodeDefinition
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static OVERRIDE_MIGRATION_IN_PROGRESS: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -330,12 +305,10 @@ pub(crate) static OVERRIDE_MIGRATION_IN_PROGRESS: LazyLock<HintCodeDefinition> =
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static UNUSED_ENUM_TYPE: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new("UNUSED_ENUM_TYPE", HintLevel::Debug, "Enum type is unused")
 });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -345,7 +318,6 @@ pub(crate) static INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS: LazyLock<Hint
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -355,7 +327,6 @@ pub(crate) static MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS: LazyLock<HintCodeDe
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static DIRECTIVE_COMPOSITION_INFO: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "DIRECTIVE_COMPOSITION_INFO",
@@ -364,7 +335,6 @@ pub(crate) static DIRECTIVE_COMPOSITION_INFO: LazyLock<HintCodeDefinition> = Laz
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static DIRECTIVE_COMPOSITION_WARN: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
     HintCodeDefinition::new(
         "DIRECTIVE_COMPOSITION_WARN",
@@ -373,7 +343,6 @@ pub(crate) static DIRECTIVE_COMPOSITION_WARN: LazyLock<HintCodeDefinition> = Laz
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -383,7 +352,6 @@ pub(crate) static INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN: LazyLock<Hint
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static IMPLICITLY_UPGRADED_FEDERATION_VERSION: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
@@ -393,7 +361,6 @@ pub(crate) static IMPLICITLY_UPGRADED_FEDERATION_VERSION: LazyLock<HintCodeDefin
         )
     });
 
-#[allow(dead_code)]
 pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
     HintCodeDefinition,
 > = LazyLock::new(|| {
@@ -404,7 +371,6 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
     )
 });
 
-#[allow(dead_code)]
 pub(crate) static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
