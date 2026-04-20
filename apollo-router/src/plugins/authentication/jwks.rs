@@ -29,6 +29,7 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use parking_lot::RwLock;
+use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -657,6 +658,102 @@ pub(super) fn decode_jwt(
                 ),
                 StatusCode::UNAUTHORIZED,
             ))
+        }
+    }
+}
+
+pub(crate) fn validate_issuers(
+    configured_issuers: &Issuers,
+    token_issuer: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let issuer_error = |actual: String| {
+        // Standardize issuer - sort it and join the elements with a comma
+        let mut issuers: Vec<String> = configured_issuers.iter().cloned().collect();
+        issuers.sort();
+
+        let expected = issuers.join(", ");
+        Err(AuthenticationError::InvalidIssuer {
+            expected,
+            token: actual,
+        })
+    };
+
+    if configured_issuers.is_empty() {
+        // No issuers to compare against
+        return Ok(());
+    }
+
+    match token_issuer {
+        None | Some(Value::Null) => {
+            // No issuer in token; allow this as well
+            Ok(())
+        }
+
+        Some(Value::String(token_issuer)) => {
+            // Check if this issuer is in our list
+            if configured_issuers.contains(token_issuer) {
+                Ok(())
+            } else {
+                issuer_error(token_issuer.to_string())
+            }
+        }
+
+        Some(unexpected_value) => {
+            // If the token has an incorrectly configured issuer, we cannot validate it against
+            // the configured issuers.
+            issuer_error(unexpected_value.to_string())
+        }
+    }
+}
+
+pub(crate) fn validate_audiences(
+    configured_audiences: &Audiences,
+    token_audiences: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let audience_error = |actual: String| {
+        // Standardize audience - sort it and join the elements with a comma
+        let mut audiences: Vec<String> = configured_audiences.iter().cloned().collect();
+        audiences.sort();
+
+        let expected = audiences.join(", ");
+        Err(AuthenticationError::InvalidAudience { expected, actual })
+    };
+
+    if configured_audiences.is_empty() {
+        // No audiences to compare against
+        return Ok(());
+    }
+
+    let Some(token_audiences) = token_audiences else {
+        return audience_error("<none>".to_string());
+    };
+
+    match token_audiences {
+        Value::String(token_audience) => {
+            // Check if this audience exists in our list
+            if configured_audiences.contains(token_audience) {
+                Ok(())
+            } else {
+                audience_error(token_audience.to_string())
+            }
+        }
+
+        Value::Array(token_audiences_arr) => {
+            // Check if any of these audiences is in our list
+            for token_audience in token_audiences_arr.iter().filter_map(|aud| aud.as_str()) {
+                if configured_audiences.contains(token_audience) {
+                    return Ok(());
+                }
+            }
+
+            // No matches, so return an error
+            audience_error(token_audiences.to_string())
+        }
+
+        unexpected_value => {
+            // If the token has incorrectly configured audiences, we cannot validate it against
+            // the configured audiences.
+            audience_error(unexpected_value.to_string())
         }
     }
 }
