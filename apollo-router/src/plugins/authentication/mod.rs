@@ -19,7 +19,6 @@ use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -588,7 +587,7 @@ fn authenticate(
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
     if let Some(keys) = jwks::search_jwks(jwks_manager, &criteria) {
-        let (issuers, audiences, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
+        let token_data = match jwks::decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
                 return failure_message(
@@ -600,33 +599,6 @@ fn authenticate(
                 );
             }
         };
-
-        if let Some(configured_issuers) = issuers {
-            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
-            if let Err(err) = jwks::validate_issuers(&configured_issuers, maybe_token_issuers) {
-                return failure_message(
-                    request,
-                    config,
-                    err,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    source_of_extracted_jwt,
-                );
-            }
-        }
-
-        if let Some(configured_audiences) = audiences {
-            let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
-            if let Err(err) = jwks::validate_audiences(&configured_audiences, maybe_token_audiences)
-            {
-                return failure_message(
-                    request,
-                    config,
-                    err,
-                    StatusCode::UNAUTHORIZED,
-                    source_of_extracted_jwt,
-                );
-            }
-        }
 
         if let Err(e) = request
             .context

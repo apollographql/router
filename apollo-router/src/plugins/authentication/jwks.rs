@@ -574,11 +574,7 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
     }
 }
 
-pub(super) type DecodedClaims = (
-    Option<Issuers>,
-    Option<Audiences>,
-    TokenData<serde_json::Value>,
-);
+pub(super) type DecodedClaims = TokenData<serde_json::Value>;
 
 pub(super) fn decode_jwt(
     jwt: &str,
@@ -635,16 +631,35 @@ pub(super) fn decode_jwt(
             validation.required_spec_claims.remove("exp");
         }
 
-        match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuers, audiences, v)),
+        let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+            Ok(v) => v,
             Err(e) => {
                 tracing::trace!("JWT decoding failed with error `{e}`");
                 error = Some((
                     AuthenticationError::CannotDecodeJWT(e),
                     StatusCode::UNAUTHORIZED,
                 ));
+                continue;
             }
         };
+
+        if let Some(configured_issuers) = issuers {
+            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
+            if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
+                error = Some((err, StatusCode::INTERNAL_SERVER_ERROR));
+                continue;
+            }
+        }
+
+        if let Some(configured_audiences) = audiences {
+            let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
+            if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
+                error = Some((err, StatusCode::UNAUTHORIZED));
+                continue;
+            }
+        }
+
+        return Ok(token_data);
     }
 
     match error {
