@@ -1963,6 +1963,7 @@ mod tests {
             deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
+            max_lifetime: None,
         }
     }
 
