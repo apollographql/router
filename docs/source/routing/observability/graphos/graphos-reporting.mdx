@@ -158,9 +158,11 @@ telemetry:
 
 Provide this field to configure which request header names and values are included in trace data that's sent to GraphOS. By default, _no_ header information is sent to GraphOS as a security measure.
 
-:::note
+<Note>
+
 `send_headers` applies only to incoming client request headers. Subgraph response headers are not captured by this option, even if they are forwarded to the client response.
-:::
+
+</Note>
 
 ```yaml title="router.yaml"
 telemetry:
