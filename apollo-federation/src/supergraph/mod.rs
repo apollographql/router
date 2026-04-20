@@ -244,7 +244,6 @@ impl CompositionHint {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub enum HintLevel {
     Warn,
