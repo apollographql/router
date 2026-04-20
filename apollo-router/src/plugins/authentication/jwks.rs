@@ -677,7 +677,7 @@ pub(super) fn decode_jwt(
     }
 }
 
-pub(crate) fn validate_issuers(
+fn validate_issuers(
     configured_issuers: &Issuers,
     token_issuer: Option<&serde_json::Value>,
 ) -> Result<(), AuthenticationError> {
@@ -721,7 +721,7 @@ pub(crate) fn validate_issuers(
     }
 }
 
-pub(crate) fn validate_audiences(
+fn validate_audiences(
     configured_audiences: &Audiences,
     token_audiences: Option<&serde_json::Value>,
 ) -> Result<(), AuthenticationError> {
