@@ -143,7 +143,7 @@ mod federation_directives {
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         assert_eq!(result.hints().len(), 1);
         let hint = result.hints().first().unwrap();
-        assert_eq!(hint.code, "DIRECTIVE_COMPOSITION_INFO");
+        assert_eq!(hint.code(), "DIRECTIVE_COMPOSITION_INFO");
         assert_eq!(
             hint.message,
             format!(
@@ -181,7 +181,7 @@ mod federation_directives {
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         assert_eq!(result.hints().len(), 1);
         let hint = result.hints().first().unwrap();
-        assert_eq!(hint.code, "DIRECTIVE_COMPOSITION_INFO");
+        assert_eq!(hint.code(), "DIRECTIVE_COMPOSITION_INFO");
         assert_eq!(
             hint.message,
             format!(
@@ -355,7 +355,7 @@ mod inconsistent_feature_versions {
         let result = compose(vec![subgraph_a, subgraph_b, subgraph_c, subgraph_d]).unwrap();
         assert_eq!(result.hints().len(), 1);
         let hint = result.hints().first().unwrap();
-        assert_eq!(hint.code, "DIRECTIVE_COMPOSITION_INFO");
+        assert_eq!(hint.code(), "DIRECTIVE_COMPOSITION_INFO");
         assert_eq!(
             hint.message,
             r#"Non-composed core feature "https://specs.custom.dev/foo" has major version mismatch across subgraphs"#
@@ -579,7 +579,7 @@ mod inconsistent_imports {
 
         assert_eq!(result.hints().len(), 1);
         let hint = result.hints().first().unwrap();
-        assert_eq!(hint.code, "DIRECTIVE_COMPOSITION_WARN");
+        assert_eq!(hint.code(), "DIRECTIVE_COMPOSITION_WARN");
         assert_eq!(
             hint.message,
             r#"Composed directive "@bar" is named differently in a subgraph that doesn't export it. Consistent naming will be required to export it."#
