@@ -15,4 +15,6 @@ telemetry:
             cardinality_limit: 20000
 ```
 
+Per-view configuration (`cardinality_limit`, `rename`, `description`, `unit`, `allowed_attribute_keys`) now works correctly on non-histogram instruments. Previously, any `views[]` entry without an explicit `aggregation` silently converted counters and gauges to histograms.
+
 By [@rossregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/PULL_NUMBER

@@ -172,6 +172,7 @@ pub(crate) struct MetricView {
 
 impl MetricView {
     /// Creates a default view for a named instrument with histogram aggregation.
+    #[cfg(test)]
     pub(crate) fn default_histogram(name: String, boundaries: Vec<f64>) -> Self {
         Self {
             name,
@@ -189,6 +190,7 @@ impl MetricView {
     /// Merges user-provided overrides into this view configuration.
     /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
     /// retain the values from `self`.
+    #[cfg(test)]
     pub(crate) fn merge(self, user: Self) -> Self {
         Self {
             name: self.name,
