@@ -2315,8 +2315,8 @@ mod duplicate_key_retry {
     use std::time::Duration;
 
     use http::StatusCode;
-    use jsonwebtoken::jwk::JwkSet;
     use jsonwebtoken::get_current_timestamp;
+    use jsonwebtoken::jwk::JwkSet;
     use p256::ecdsa::SigningKey;
     use p256::ecdsa::signature::rand_core::OsRng;
     use url::Url;
@@ -2335,7 +2335,9 @@ mod duplicate_key_retry {
         // first. A token with issuer "tenant-a" fails entry B's issuer check; the retry loop
         // must continue to entry A and succeed.
         let signing_key = SigningKey::random(&mut OsRng);
-        let shared_jwk = jwk(&signing_key);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
 
         let url_a = Url::from_str("file:///jwks-a.json").unwrap();
         let url_b = Url::from_str("file:///jwks-b.json").unwrap();
@@ -2360,10 +2362,8 @@ mod duplicate_key_retry {
                 headers: Vec::new(),
             },
         ];
-        let map = HashMap::from([
-            (url_a, JwkSet { keys: vec![shared_jwk.clone()] }),
-            (url_b, JwkSet { keys: vec![shared_jwk] }),
-        ]);
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
         let manager = JwksManager::new_test(list, map);
 
         let token_claims = serde_json::json!({
@@ -2385,7 +2385,9 @@ mod duplicate_key_retry {
     fn it_fails_when_no_jwks_entry_issuer_matches() {
         // Both entries have specific issuers, neither matches the token issuer.
         let signing_key = SigningKey::random(&mut OsRng);
-        let shared_jwk = jwk(&signing_key);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
 
         let url_a = Url::from_str("file:///jwks-a.json").unwrap();
         let url_b = Url::from_str("file:///jwks-b.json").unwrap();
@@ -2410,10 +2412,8 @@ mod duplicate_key_retry {
                 headers: Vec::new(),
             },
         ];
-        let map = HashMap::from([
-            (url_a, JwkSet { keys: vec![shared_jwk.clone()] }),
-            (url_b, JwkSet { keys: vec![shared_jwk] }),
-        ]);
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
         let manager = JwksManager::new_test(list, map);
 
         let token_claims = serde_json::json!({
@@ -2425,7 +2425,10 @@ mod duplicate_key_retry {
 
         match authenticate(&jwt_conf_with_header_source(), &manager, request) {
             ControlFlow::Break(response) => {
-                assert_eq!(response.response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
             }
             ControlFlow::Continue(_) => {
                 panic!("should have been rejected when no entry's issuer matches");
@@ -2440,7 +2443,9 @@ mod duplicate_key_retry {
         // first. A token with audience "aud-a" fails entry B's audience check; the retry loop
         // must continue to entry A and succeed.
         let signing_key = SigningKey::random(&mut OsRng);
-        let shared_jwk = jwk(&signing_key);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
 
         let url_a = Url::from_str("file:///jwks-a.json").unwrap();
         let url_b = Url::from_str("file:///jwks-b.json").unwrap();
@@ -2465,10 +2470,8 @@ mod duplicate_key_retry {
                 headers: Vec::new(),
             },
         ];
-        let map = HashMap::from([
-            (url_a, JwkSet { keys: vec![shared_jwk.clone()] }),
-            (url_b, JwkSet { keys: vec![shared_jwk] }),
-        ]);
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
         let manager = JwksManager::new_test(list, map);
 
         let token_claims = serde_json::json!({
