@@ -534,9 +534,11 @@ This is particularly risky when using closures within callbacks while referencin
 
 ### String interning and concurrent performance
 
-Apollo Router compiles Rhai with the [`sync` feature](https://rhai.rs/book/start/features.html) enabled, which makes the engine safe to share across threads. A side effect of this is that Rhai's string interner — which caches frequently used strings to reduce allocations — is protected by a lock (namely a Rust `RwLock`).
+Rhai comes with a string interner, which caches frequently used strings to reduce allocations. This interner is protected by a lock to make the Rhai engine safe to share across threads.
 
-String interning is enabled by default. Under high concurrency, threads that encounter new strings must acquire a write lock, which serializes those operations across all concurrent requests. You can disable interning with the `intern_strings` configuration option:
+Threads that encounter new strings must acquire a write lock. Under high concurrency, the write lock can be under high contention, which serializes those operations across all concurrent requests.
+
+String interning is enabled by default. You can disable it with the `intern_strings` configuration option:
 
 ```yaml title="config.yaml"
 rhai:
@@ -548,7 +550,7 @@ rhai:
 <Note>
 
 Considerations for disabling string interning:
-- Eliminating `RwLock` contention on the string interner can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts.
+- Eliminating lock contention on the string interner can meaningfully improve throughput for deployments processing many concurrent requests through Rhai scripts.
 - Without interning, repeated identical strings are each allocated separately rather than sharing a single allocation. This increases memory pressure and allocation frequency, which might be noticeable in scripts that produce a high volume of repeated short strings.
 - Without interning, string equality comparisons lose the interning fast path (pointer equality) and must compare bytes. This effect is unlikely to be noticeable in most scripts.
 
