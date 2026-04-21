@@ -1,6 +1,6 @@
-### Allow configuring maximum cardinality for customer-facing metrics ([Issue #ROUTER-1671](https://apollographql.atlassian.net/browse/ROUTER-1671))
+### Allow configuring maximum cardinality for user-facing metrics ([PR #9220](https://github.com/apollographql/router/pull/9220))
 
-Customers can now set a `cardinality_limit` in their router config to override the OpenTelemetry SDK's default limit of 2000 distinct attribute combinations per metric. This is useful when high-cardinality attributes cause metrics to be silently dropped.
+Users can now set a `cardinality_limit` in their router config to override the OpenTelemetry SDK's default limit of 2000 distinct attribute combinations per metric. This is useful when high-cardinality attributes cause metrics to be silently dropped.
 
 The limit can be set globally under `telemetry.exporters.metrics.common.cardinality_limit` and per-metric under individual `views[].cardinality_limit`. The per-metric setting takes precedence over the global one.
 
@@ -27,4 +27,4 @@ views:
         buckets: [0.1, 0.5, 1.0]
 ```
 
-By [@rossregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@rossregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/9220
