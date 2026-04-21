@@ -1546,6 +1546,10 @@ async fn cache_lookup_entities(
         .get_mut(REPRESENTATIONS)
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
+    // When no-cache is set, skip recording cache metrics: the cache was not consulted so
+    // registering every entity as a miss would produce misleading telemetry data.
+    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
+
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
         &name,
@@ -1554,6 +1558,7 @@ async fn cache_lookup_entities(
         cache_metadata,
         cache_result,
         &request.context,
+        !is_no_cache,
     )?;
 
     if !new_representations.is_empty() {
@@ -2329,6 +2334,7 @@ fn filter_representations(
     keys: Vec<CacheMetadata>,
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
+    record_metrics: bool,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -2401,10 +2407,12 @@ fn filter_representations(
         save_original_cache_control(subgraph_req_id.clone(), context, non_updated_cache_control);
     }
 
-    let _ = context.insert(
-        CacheMetricContextKey::new(subgraph_name.to_string()),
-        CacheSubgraph(cache_hit),
-    );
+    if record_metrics {
+        let _ = context.insert(
+            CacheMetricContextKey::new(subgraph_name.to_string()),
+            CacheSubgraph(cache_hit),
+        );
+    }
 
     Ok((new_representations, result, cache_control))
 }

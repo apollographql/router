@@ -13,6 +13,7 @@ use tower::Service;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use super::plugin::CacheSubgraph;
 use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -25,6 +26,7 @@ use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
+use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
@@ -1593,9 +1595,10 @@ async fn no_cache_from_request() {
         .await
         .unwrap();
 
+    let no_cache_context = Context::new();
     let request = supergraph::Request::fake_builder()
         .query(query)
-        .context(Context::new())
+        .context(no_cache_context.clone())
         .header(CACHE_CONTROL, HeaderValue::from_static("no-cache"))
         .build()
         .unwrap();
@@ -1618,6 +1621,16 @@ async fn no_cache_from_request() {
       }
     }
     "#);
+
+    // Metrics must NOT be recorded for no-cache requests (no misleading cache hit/miss counters)
+    let orga_metric = no_cache_context
+        .get::<_, CacheSubgraph>(CacheMetricContextKey::new("orga".to_string()))
+        .ok()
+        .flatten();
+    assert!(
+        orga_metric.is_none(),
+        "no-cache requests should not record cache hit/miss metrics"
+    );
 }
 
 #[tokio::test]
