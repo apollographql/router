@@ -726,7 +726,7 @@ pub(crate) fn precompute_non_local_selection_metadata(
         {
             options_metadata
                 .interface_object_options
-                .extend(options.into_iter());
+                .extend(options);
             continue;
         }
         metadata

@@ -1177,27 +1177,24 @@ where
                             return Ok::<_, FederationError>(true);
                         }
                         match &parent_type_in_supergraph {
-                            CompositeTypeDefinitionPosition::Object(parent_type_in_supergraph) => {
+                            CompositeTypeDefinitionPosition::Object(parent_type_in_supergraph)
                                 if parent_type_in_supergraph
                                     .get(supergraph_schema.schema())?
                                     .implements_interfaces
                                     .iter()
-                                    .any(|item| &item.name == pos.type_name())
-                                {
-                                    return Ok(true);
-                                }
+                                    .any(|item| &item.name == pos.type_name()) =>
+                            {
+                                return Ok(true);
                             }
                             CompositeTypeDefinitionPosition::Interface(
                                 parent_type_in_supergraph,
-                            ) => {
-                                if parent_type_in_supergraph
-                                    .get(supergraph_schema.schema())?
-                                    .implements_interfaces
-                                    .iter()
-                                    .any(|item| &item.name == pos.type_name())
-                                {
-                                    return Ok(true);
-                                }
+                            ) if parent_type_in_supergraph
+                                .get(supergraph_schema.schema())?
+                                .implements_interfaces
+                                .iter()
+                                .any(|item| &item.name == pos.type_name()) =>
+                            {
+                                return Ok(true);
                             }
                             _ => {}
                         }

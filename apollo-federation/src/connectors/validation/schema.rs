@@ -514,7 +514,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             let mut nested = SelectionSetWalker::new(self.name.clone(), self.schema, sub_selection);
             next_shape.visit_shape(&mut nested)?;
             self.unmapped_fields
-                .extend(nested.unmapped_fields.into_iter());
+                .extend(nested.unmapped_fields);
         }
         Ok(())
     }
