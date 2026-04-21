@@ -349,7 +349,9 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_per_view_cardinality_limit_stays_a_counter() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.counter", |v| v.cardinality_limit = NonZeroU32::new(1000));
+        let view = user_view("test.counter", |v| {
+            v.cardinality_limit = NonZeroU32::new(1000)
+        });
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let counter = provider.meter("t").u64_counter("test.counter").build();
@@ -439,7 +441,9 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_with_per_view_cardinality_limit_uses_default_buckets() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.histogram", |v| v.cardinality_limit = NonZeroU32::new(1000));
+        let view = user_view("test.histogram", |v| {
+            v.cardinality_limit = NonZeroU32::new(1000)
+        });
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let histogram = provider.meter("t").f64_histogram("test.histogram").build();
@@ -552,8 +556,7 @@ mod build_view_fn_tests {
         let view = user_view("limited.counter", |v| {
             v.cardinality_limit = NonZeroU32::new(2)
         });
-        let provider =
-            meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
+        let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
 
         let counter = provider.meter("t").u64_counter("limited.counter").build();
         counter.add(1, &[KeyValue::new("k", "a")]);
