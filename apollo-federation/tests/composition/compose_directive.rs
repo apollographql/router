@@ -1412,7 +1412,7 @@ fn generate_subgraph(
 
     Subgraph::parse(name, "", schema.as_str())
         .unwrap()
-        .into_fed2_test_subgraph(true, false)
+        .into_fed2_test_subgraph(true)
         .unwrap()
 }
 

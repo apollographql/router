@@ -6,6 +6,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -34,13 +35,11 @@ use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
-use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
@@ -237,25 +236,50 @@ impl Subgraph<Initial> {
         Self::new(name, url, schema, orphan_extension_types)
     }
 
-    /// Converts the schema to a fed2 schema.
+    /// Given a schema that is assumed to _not_ be a fed2 schema (it does not have a `@link` to the federation spec),
+    /// converts the schema to a fed2 schema by adding `@link` to the last known federation spec.
+    ///
     /// - It is assumed to have no `@link` to the federation spec.
-    /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
-    /// - Imports may optionally be omitted.
+    /// - Returns an equivalent subgraph with a `@link` added with latest federation spec.
+    /// - Based on the `include_all_imports` param, we either import ALL directive definitions OR just up to fed v2.4
     /// - This is mainly for testing and not optimized.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_test_subgraph(
-        self,
-        use_latest: bool,
-        no_imports: bool,
-    ) -> Result<Self, SubgraphError> {
+    pub fn into_fed2_test_subgraph(self, include_all_imports: bool) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
-        let federation_spec = if use_latest {
-            FederationSpecDefinition::latest()
+        let federation_spec = FederationSpecDefinition::latest();
+        // we cannot use FederationSpecDefinition::add_elements_to_schema as we don't have FederationSchema yet
+        let imports: Vec<Node<Value>> = if include_all_imports {
+            federation_spec
+                .directive_specs()
+                .iter()
+                .map(|d| format!("@{}", d.name()).into())
+                .collect()
         } else {
             FederationSpecDefinition::auto_expanded_federation_spec()
+                .directive_specs()
+                .iter()
+                .map(|d| format!("@{}", d.name()).into())
+                .collect()
         };
-        add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
-            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
+
+        schema
+            .schema_definition
+            .make_mut()
+            .directives
+            .push(Component::new(Directive {
+                name: Identity::link_identity().name,
+                arguments: vec![
+                    Node::new(ast::Argument {
+                        name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                        value: federation_spec.url().to_string().into(),
+                    }),
+                    Node::new(ast::Argument {
+                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                        value: Node::new(Value::List(imports)),
+                    }),
+                ],
+            }));
+
         Self::new(
             &self.name,
             &self.url,
@@ -633,7 +657,7 @@ impl<S: HasMetadata> Subgraph<S> {
         self.state.metadata()
     }
 
-    pub(crate) fn schema(&self) -> &FederationSchema {
+    pub fn schema(&self) -> &FederationSchema {
         self.state.schema()
     }
 
@@ -736,54 +760,6 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 }
 
-/// Adds a federation (v2 or above) link directive to the schema.
-/// - Similar to `schema_as_fed2_subgraph`, but the link can be added
-///   before collecting metadata, and imports can be optionally omitted.
-/// - This is mainly for testing.
-fn add_federation_link_to_test_schema(
-    schema: &mut Schema,
-    federation_version: &Version,
-    no_imports: bool,
-) -> Result<(), FederationError> {
-    let federation_spec = FEDERATION_VERSIONS
-        .find(federation_version)
-        .ok_or_else(|| internal_error!(
-            "Subgraph unexpectedly does not use a supported federation spec version. Requested version: {}",
-            federation_version,
-        ))?;
-
-    // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
-    // - auto import all directives, if requested
-    let imports: Vec<_> = if no_imports {
-        Vec::new()
-    } else {
-        federation_spec
-            .directive_specs()
-            .iter()
-            .map(|d| format!("@{}", d.name()).into())
-            .collect()
-    };
-
-    schema
-        .schema_definition
-        .make_mut()
-        .directives
-        .push(Component::new(Directive {
-            name: Identity::link_identity().name,
-            arguments: vec![
-                Node::new(ast::Argument {
-                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    value: federation_spec.url().to_string().into(),
-                }),
-                Node::new(ast::Argument {
-                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
-                    value: Node::new(ast::Value::List(imports)),
-                }),
-            ],
-        }));
-    Ok(())
-}
-
 /// Turns a schema without a federation spec link into a federation 2 subgraph schema.
 /// - The schema must not have a federation spec. But, it may have a link spec.
 /// - This is used for fed1-to-fed2 schema upgrading.
@@ -861,7 +837,7 @@ pub(crate) fn schema_as_fed2_subgraph(
                 }),
                 Node::new(ast::Argument {
                     name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
-                    value: Node::new(ast::Value::List(imports)),
+                    value: Node::new(Value::List(imports)),
                 }),
             ],
         }));

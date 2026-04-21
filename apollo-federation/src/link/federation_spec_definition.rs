@@ -259,18 +259,19 @@ impl FederationSpecDefinition {
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_FIELDS_ARGUMENT_NAME,
+            value: Node::new(Value::String(fields.to_owned())),
+        })];
+        if !resolvable {
+            arguments.push(Node::new(Argument {
+                name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+                value: Node::new(Value::Boolean(false)),
+            }));
+        }
         Ok(Directive {
             name: name_in_schema,
-            arguments: vec![
-                Node::new(Argument {
-                    name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                    value: Node::new(Value::String(fields.to_owned())),
-                }),
-                Node::new(Argument {
-                    name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
-                    value: Node::new(Value::Boolean(resolvable)),
-                }),
-            ],
+            arguments,
         })
     }
 
