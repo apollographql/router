@@ -643,29 +643,38 @@ impl RedisCacheStorage {
         match maybe_client {
             Some(client) => Ok(client),
             None => {
-                let guard = if let Ok(lock) = self.pool_recreation_lock.clone().try_lock_owned() {
-                    lock
-                } else {
-                    let error = RedisError::new(
-                        RedisErrorKind::Unknown,
-                        "Error: attempting to send a command to Redis while its client pool is recreating",
-                    );
-                    record_redis_error(&error, self.redis_client_config.caller, "client");
-                    return Err(error);
+                // Admission control: only one recreation may be in flight at a time.
+                // We take an OwnedMutexGuard here (not a plain MutexGuard) so we can move
+                // it into the spawned task below, keeping the lock held for the full
+                // duration of create_client_pool(). A plain try_lock() would release the
+                // lock as soon as spawn() returns, letting every subsequent caller that
+                // arrives before the recreation finishes also spawn a recreation task.
+                let owned_guard = match self.pool_recreation_lock.clone().try_lock_owned() {
+                    Ok(g) => g,
+                    Err(_) => {
+                        let error = RedisError::new(
+                            RedisErrorKind::Unknown,
+                            "Error: attempting to send a command to Redis while its client pool is recreating",
+                        );
+                        record_redis_error(&error, self.redis_client_config.caller, "client");
+                        return Err(error);
+                    }
                 };
-                // WARN: don't remove this; this makes sure that once we have a lock, we aren't
-                // recreating the client. Multiple recreations can happen if we queue up tasks
-                // waiting for locks and we need to make sure that after we've acquired a lock, we
-                // aren't just recreating for no reason
+
+                // WARN: don't remove this; this makes sure that once we have the guard,
+                // we aren't recreating the client. A racer may have completed a
+                // recreation between our initial read() above and our try_lock_owned().
                 if let Some(client) = self.inner.read().as_ref() {
                     let client = client.next().clone();
+                    // owned_guard drops here; lock released without spawning anything.
                     return Ok(client);
                 }
 
                 let cloned_self = self.clone();
                 tokio::task::spawn(async move {
-                    // make sure we only spawn one background task at a time for pool recreation
-                    let _guard = guard;
+                    // Move the owned guard into the task so the lock is held for the
+                    // full recreation, not just for the duration of spawn() itself.
+                    let _guard = owned_guard;
                     // this will attempt to recreate the client pool on the next command, so we
                     // don't do any special retry logic here; we just record failures
                     if let Err(e) = cloned_self.create_client_pool().await {
@@ -679,6 +688,7 @@ impl RedisCacheStorage {
                             "client",
                         );
                     }
+                    // _guard drops here, after create_client_pool has succeeded or failed.
                 });
 
                 // rather than get into either recursion or a loop, we just return an error and let
