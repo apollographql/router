@@ -21,6 +21,7 @@
 //! - `Apollo`/`ApolloRealtime` - For metrics sent to Apollo Studio with specific filtering
 
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
@@ -220,7 +221,7 @@ impl<'a> MetricsBuilder<'a> {
 fn build_view_fn(
     user_views: HashMap<String, MetricView>,
     boundaries: Vec<f64>,
-    global_cardinality_limit: Option<u32>,
+    global_cardinality_limit: Option<NonZeroU32>,
 ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
     move |instrument: &Instrument| {
         let is_histogram = instrument.kind() == InstrumentKind::Histogram;
@@ -242,7 +243,7 @@ fn build_view_fn(
                     record_min_max: true,
                 });
             if let Some(limit) = global_cardinality_limit {
-                builder = builder.with_cardinality_limit(limit as usize);
+                builder = builder.with_cardinality_limit(limit.get() as usize);
             }
             return Some(
                 builder
@@ -252,7 +253,7 @@ fn build_view_fn(
         }
         global_cardinality_limit.map(|limit| {
             Stream::builder()
-                .with_cardinality_limit(limit as usize)
+                .with_cardinality_limit(limit.get() as usize)
                 .build()
                 .expect("Failed to create stream for cardinality limit view")
         })
@@ -291,7 +292,7 @@ mod build_view_fn_tests {
     fn meter_provider_with(
         exporter: InMemoryMetricExporter,
         user_views: Vec<MetricView>,
-        global_cardinality_limit: Option<u32>,
+        global_cardinality_limit: Option<NonZeroU32>,
     ) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let user_views: HashMap<String, MetricView> = user_views
             .into_iter()
@@ -346,7 +347,7 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_per_view_cardinality_limit_stays_a_counter() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.counter", |v| v.cardinality_limit = Some(1000));
+        let view = user_view("test.counter", |v| v.cardinality_limit = NonZeroU32::new(1000));
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let counter = provider.meter("t").u64_counter("test.counter").build();
@@ -436,7 +437,7 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_with_per_view_cardinality_limit_uses_default_buckets() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.histogram", |v| v.cardinality_limit = Some(1000));
+        let view = user_view("test.histogram", |v| v.cardinality_limit = NonZeroU32::new(1000));
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let histogram = provider.meter("t").f64_histogram("test.histogram").build();
@@ -477,7 +478,7 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_without_user_view_uses_default_buckets() {
         let exporter = InMemoryMetricExporter::default();
-        let provider = meter_provider_with(exporter.clone(), vec![], Some(100));
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
 
         let histogram = provider.meter("t").f64_histogram("defaulted").build();
         histogram.record(0.3, &[]);
@@ -499,7 +500,7 @@ mod build_view_fn_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_without_user_view_and_global_limit_stays_a_counter() {
         let exporter = InMemoryMetricExporter::default();
-        let provider = meter_provider_with(exporter.clone(), vec![], Some(100));
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
 
         let counter = provider.meter("t").u64_counter("plain.counter").build();
         counter.add(5, &[]);
@@ -509,6 +510,30 @@ mod build_view_fn_tests {
             assert!(
                 matches!(data, AggregatedMetrics::U64(MetricData::Sum(_))),
                 "expected Sum aggregation, got {data:?}"
+            );
+        });
+    }
+
+    /// Regression: the global cardinality limit must reach observable instruments
+    /// without coercing them into histograms. Observable gauges take a different
+    /// SDK registration path than synchronous counters, so this case is worth
+    /// covering explicitly.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn observable_gauge_without_user_view_and_global_limit_stays_a_gauge() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
+
+        let _gauge = provider
+            .meter("t")
+            .u64_observable_gauge("observed.gauge")
+            .with_callback(|obs| obs.observe(42, &[]))
+            .build();
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "observed.gauge", |data| {
+            assert!(
+                matches!(data, AggregatedMetrics::U64(MetricData::Gauge(_))),
+                "expected Gauge aggregation, got {data:?}"
             );
         });
     }

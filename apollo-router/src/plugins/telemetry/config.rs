@@ -1,6 +1,7 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use derivative::Derivative;
 use http::HeaderName;
@@ -122,7 +123,7 @@ pub(crate) struct MetricsCommon {
     ///
     /// Individual views can override this via their own `cardinality_limit`.
     /// If not set, the OTel SDK default of 2000 applies.
-    pub(crate) cardinality_limit: Option<u32>,
+    pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
 
 impl Default for MetricsCommon {
@@ -167,7 +168,7 @@ pub(crate) struct MetricView {
     ///
     /// Overrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.
     /// If neither this nor the global limit is set, the OTel SDK default of 2000 applies.
-    pub(crate) cardinality_limit: Option<u32>,
+    pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
 
 impl MetricView {
@@ -190,6 +191,13 @@ impl MetricView {
     /// Merges user-provided overrides into this view configuration.
     /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
     /// retain the values from `self`.
+    ///
+    /// Test-only: production view resolution lives in
+    /// `reload::metrics::build_view_fn`, where the histogram-aggregation default
+    /// is applied conditionally on `InstrumentKind`. Do not reintroduce this
+    /// helper into production. Pre-seeding every user view with
+    /// `default_histogram` previously caused counters and gauges to be silently
+    /// converted to histograms when a `views[]` entry omitted `aggregation`.
     #[cfg(test)]
     pub(crate) fn merge(self, user: Self) -> Self {
         Self {
@@ -230,7 +238,7 @@ impl MetricView {
             stream = stream.with_allowed_attribute_keys(keys.into_iter().map(Key::new));
         }
         if let Some(limit) = self.cardinality_limit {
-            stream = stream.with_cardinality_limit(limit as usize);
+            stream = stream.with_cardinality_limit(limit.get() as usize);
         }
         stream.build().expect("Failed to build metric view")
     }
@@ -1038,7 +1046,7 @@ mod tests {
                 buckets: vec![1.0, 5.0, 10.0],
             }),
             allowed_attribute_keys: Some(HashSet::from(["key1".to_string()])),
-            cardinality_limit: Some(5000),
+            cardinality_limit: NonZeroU32::new(5000),
         };
 
         let merged = default.merge(user);
@@ -1056,7 +1064,7 @@ mod tests {
             merged.allowed_attribute_keys,
             Some(HashSet::from(["key1".to_string()]))
         );
-        assert_eq!(merged.cardinality_limit, Some(5000));
+        assert_eq!(merged.cardinality_limit, NonZeroU32::new(5000));
     }
 
     #[test]
@@ -1349,7 +1357,19 @@ mod tests {
             "cardinality_limit": 5000
         });
         let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
-        assert_eq!(view.cardinality_limit, Some(5000));
+        assert_eq!(view.cardinality_limit, NonZeroU32::new(5000));
+    }
+
+    #[test]
+    fn test_metric_view_cardinality_limit_rejects_zero() {
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "cardinality_limit": 0
+        });
+        assert!(
+            serde_json::from_value::<MetricView>(json_config).is_err(),
+            "cardinality_limit: 0 should be rejected"
+        );
     }
 
     #[test]
@@ -1359,14 +1379,25 @@ mod tests {
         });
         let common: MetricsCommon =
             serde_json::from_value(json_config).expect("should deserialize");
-        assert_eq!(common.cardinality_limit, Some(10000));
+        assert_eq!(common.cardinality_limit, NonZeroU32::new(10000));
+    }
+
+    #[test]
+    fn test_metrics_common_cardinality_limit_rejects_zero() {
+        let json_config = json!({
+            "cardinality_limit": 0
+        });
+        assert!(
+            serde_json::from_value::<MetricsCommon>(json_config).is_err(),
+            "cardinality_limit: 0 should be rejected"
+        );
     }
 
     #[test]
     fn test_merge_cardinality_limit_user_overrides_global() {
         let mut default =
             MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
-        default.cardinality_limit = Some(3000); // simulates global limit
+        default.cardinality_limit = NonZeroU32::new(3000); // simulates global limit
         let user = MetricView {
             name: "my.metric".to_string(),
             rename: None,
@@ -1374,12 +1405,12 @@ mod tests {
             unit: None,
             aggregation: None,
             allowed_attribute_keys: None,
-            cardinality_limit: Some(10000),
+            cardinality_limit: NonZeroU32::new(10000),
         };
         let merged = default.merge(user);
         assert_eq!(
             merged.cardinality_limit,
-            Some(10000),
+            NonZeroU32::new(10000),
             "per-view cardinality limit should override global"
         );
     }
@@ -1388,7 +1419,7 @@ mod tests {
     fn test_merge_cardinality_limit_inherits_global() {
         let mut default =
             MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
-        default.cardinality_limit = Some(5000); // simulates global limit
+        default.cardinality_limit = NonZeroU32::new(5000); // simulates global limit
         let user = MetricView {
             name: "my.metric".to_string(),
             rename: None,
@@ -1401,7 +1432,7 @@ mod tests {
         let merged = default.merge(user);
         assert_eq!(
             merged.cardinality_limit,
-            Some(5000),
+            NonZeroU32::new(5000),
             "global cardinality limit should be preserved when per-view is not set"
         );
     }

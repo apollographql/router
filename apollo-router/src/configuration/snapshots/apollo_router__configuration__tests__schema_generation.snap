@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -7006,7 +7007,7 @@ expression: "&schema"
         "cardinality_limit": {
           "description": "Maximum number of distinct attribute combinations (cardinality) for this instrument.\n\nOverrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.\nIf neither this nor the global limit is set, the OTel SDK default of 2000 applies.",
           "format": "uint32",
-          "minimum": 0,
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -7131,7 +7132,7 @@ expression: "&schema"
           "default": null,
           "description": "Global maximum number of distinct attribute combinations (cardinality) for all\ncustomer-facing metrics.\n\nIndividual views can override this via their own `cardinality_limit`.\nIf not set, the OTel SDK default of 2000 applies.",
           "format": "uint32",
-          "minimum": 0,
+          "minimum": 1,
           "type": [
             "integer",
             "null"
