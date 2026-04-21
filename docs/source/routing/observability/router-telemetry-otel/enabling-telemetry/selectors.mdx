@@ -52,6 +52,7 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
 | `router_overhead`     | No          | `true` \| `false`             | Router processing overhead duration in seconds (excludes subgraph wait time) |
 | `active_subgraph_requests` | No     | `count` \| `bool`            | The number of active subgraph requests (`count`) or whether any are active (`bool`) |
+| `request_duration`    | No          | `seconds` \| `milliseconds` \| `nanoseconds` | Total request duration from when the router received the request |
 
 ### Supergraph
 
@@ -253,9 +254,9 @@ telemetry:
               # response_errors: "$.[0].extensions"
 ```
 
-### Router overhead selectors
+### Router overhead and duration selectors
 
-The `router_overhead` and `active_subgraph_requests` selectors enable you to extract router processing overhead metrics. These selectors are available on the router service and can be used with custom instruments to create detailed overhead metrics with custom attributes.
+The `router_overhead`, `active_subgraph_requests`, and `request_duration` selectors enable you to extract router processing overhead and duration metrics. These selectors are available on the router service and can be used with custom instruments to create detailed overhead metrics with custom attributes.
 
 Example using `router_overhead` selector to track overhead as a custom metric value:
 
@@ -285,6 +286,25 @@ telemetry:
             # Capture the number of active subgraph requests as an attribute
             active_subgraph_requests:
               active_subgraph_requests: count
+```
+
+Example using `request_duration` selector to track total request duration:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Count requests that complete in under 10 seconds
+        my.short.requests:
+          type: counter
+          value: unit
+          unit: reqs
+          description: "Requests completing in under 10 seconds"
+          condition:
+            lt:
+              - request_duration: seconds
+              - 10
 ```
 
 ### Capture HTTP client request and response headers

@@ -176,7 +176,6 @@ mod non_resolvable_keys_tests {
 mod interface_object_tests {
     use super::*;
 
-    #[ignore = "Error message is missing message part about interface object usage"]
     #[test]
     fn fails_on_interface_object_usage_with_missing_key_on_interface() {
         let subgraph_a = ServiceDefinition {

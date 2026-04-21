@@ -121,6 +121,11 @@ impl FederationSchema {
         self.links_metadata.as_deref()
     }
 
+    /// Subgraph metadata after [`FederationBlueprint::on_constructed`] populates it (see [`compute_subgraph_metadata`]).
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.subgraph_metadata.as_deref()
+    }
+
     pub(crate) fn referencers(&self) -> &Referencers {
         &self.referencers
     }
@@ -324,6 +329,16 @@ impl FederationSchema {
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
             .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
+    ///
+    /// Requires [`Self::subgraph_metadata`] to be populated (e.g. after
+    /// [`FederationBlueprint::on_constructed`]). Matches the Fed 1 branch in
+    /// [`FederationBlueprint::ignore_parsed_field`]. Returns `false` if metadata is missing.
+    pub(crate) fn is_fed_1_subgraph(&self) -> bool {
+        self.subgraph_metadata()
+            .is_some_and(|meta| !meta.is_fed_2_schema())
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
@@ -1423,18 +1438,15 @@ pub(crate) trait SchemaElement {
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let extensions = self.extensions();
-        // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // Note: No defined ordering between origins.
-        let first_extension = extensions.first();
-        if let Some(first_extension) = first_extension {
-            // If there is an extension, use the first extension.
-            ComponentOrigin::Extension((*first_extension).clone())
-        } else {
-            // Use the existing definition if exists, or maybe a new definition if no definition
-            // nor extensions exist.
-            ComponentOrigin::Definition
+        let (has_definition, extensions) = self.definition_and_extensions();
+        // Use extension origin only when extensions exist but no definition does
+        // (i.e., only extension elements are populated). Otherwise, use definition.
+        // For more details, see the comments in the `add_to_schema` method.
+        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
+        if !has_definition && let Some(first_extension) = extensions.first() {
+            return ComponentOrigin::Extension((*first_extension).clone());
         }
+        ComponentOrigin::Definition
     }
 }
 
