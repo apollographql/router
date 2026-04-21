@@ -1,4 +1,5 @@
 {
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
     'config:recommended',
     ':semanticCommits',
@@ -25,27 +26,61 @@
     },
   ],
   packageRules: [
-    // Don't do `rust` image updates separately since they'll we want them
-    // managed/grouped into the rule directly above this one.  This prevents
-    // multiple PRs for the same bump, and puts all our Rust version bumps
-    // together.
+    // Group all non-major dependencies in a single, auto-merged PR. They usually don't require manual intervention.
     {
-      matchPackageNames: [
-        'rust',
+      matchCurrentVersion: '>= 1.0.0',
+      matchManagers: ['cargo', 'npm'],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
       ],
-      matchManagers: [
-        'dockerfile',
-        'mise',
-      ],
-      enabled: false,
+      groupName: 'all non-major packages >= 1.0',
+      groupSlug: 'all-non-major-gte-1.0',
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
+
+    // Auto-merge patch updates pre-1.0. Not grouped because they are more likely to require manual intervention.
     {
-      matchPackageNames: [
-        'rust',
+      matchCurrentVersion: '< 1.0.0',
+      matchManagers: ['cargo', 'npm'],
+      matchUpdateTypes: ['patch'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Auto-merge non-major updates from other package managers (these usually don't come in batches)
+    {
+      matchManagers: ['docker', 'mise', 'github-actions', 'circleci'],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
       ],
-      matchManagers: 'regex',
+      minimumReleaseAge: '5 days',
+      automerge: true,
+    },
+
+    // Require explicit approval for updates of pinned dependencies, which are usually pinned for a reason!
+    {
+      matchManagers: ['cargo'],
+      matchCurrentValue: '/^=/',
+      dependencyDashboardApproval: true,
+      automerge: false,
+      groupName: null,
+      groupSlug: null,
+    },
+
+    // Put all the rustc dependencies in a single PR
+    {
+      matchPackageNames: ['rust'],
+      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
       groupName: 'rustc',
     },
+
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
     // underlying package is deprecated. The package works as-is and we can
     // consider replacing it in the future. We'll allow 0.8.x just in case
@@ -56,26 +91,7 @@
       matchPackageNames: ['serde_yaml'],
       allowedVersions: '0.8.x',
     },
-    // Bunch up all non-major dependencies into a single PR.  In the common case
-    // where the upgrades apply cleanly, this causes less noise and is resolved faster
-    // than starting a bunch of upgrades in parallel for what may turn out to be
-    // a suite of related packages all released at once.
-    {
-      matchCurrentVersion: '>= 1.0.0',
-      matchManagers: [
-        'cargo',
-        'npm',
-      ],
-      matchUpdateTypes: [
-        'minor',
-        'patch',
-        'pin',
-        'digest',
-      ],
-      groupName: 'all non-major packages >= 1.0',
-      groupSlug: 'all-non-major-gte-1.0',
-      automerge: true,
-    },
+
     // We're currently constrained in our ability to update the `tracing`
     // packages to the latest versions because of our usage.  As an extension
     // of the same concern, we cannot update our `opentelemetry` packages since
@@ -90,55 +106,56 @@
       ],
       groupName: 'cargo tracing packages',
       groupSlug: 'cargo-tracing-packages',
-      dependencyDashboardApproval: true,
       matchPackageNames: [
         '/^tracing/',
         '/^opentelemetry/',
       ],
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
+
     // Various monorepos / crates that are often released together
     {
       groupName: 'apollo-rs crates',
       groupSlug: 'rust-apollo-rs-updates',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^apollo-(parser|compiler|smith)$/'],
+      automerge: true,
     },
     {
       groupName: 'rand crates',
       groupSlug: 'rust-rand',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
     {
       groupName: 'nom crates',
       groupSlug: 'rust-nom',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^nom$/', '/^nom[-_]/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
     {
       groupName: 'axum crates',
       groupSlug: 'rust-axum',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
     {
       groupName: 'jemalloc crates',
       groupSlug: 'rust-jemalloc',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^tikv-jemallocator$/', '/^tikv-jemalloc-/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
     },
-    // Handle exact version pins (versions starting with =) in Cargo.toml files
-    // separately. Put them in individual PRs and require dashboard approval
-    // since they were explicitly pinned for a reason.
-    {
-      matchManagers: ['cargo'],
-      matchCurrentValue: '/^=/',
-      dependencyDashboardApproval: true,
-      automerge: false,
-      groupName: null,
-      groupSlug: null,
-    },
-    // Add a note to the Rhai update PR to add a changeset
+
+    // Separate out Rhai updates, and recommend adding a changeset
     {
       matchManagers: ['cargo'],
       matchPackageNames: ['/^rhai$/'],

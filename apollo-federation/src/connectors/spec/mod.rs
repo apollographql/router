@@ -265,7 +265,7 @@ pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefiniti
                 minor: 12,
             },
         ));
-        definitions.add(ConnectSpecDefinition::new(
+        definitions.add_preview(ConnectSpecDefinition::new(
             Version { major: 0, minor: 4 },
             Version {
                 major: 2,

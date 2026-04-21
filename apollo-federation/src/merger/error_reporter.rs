@@ -223,7 +223,7 @@ impl ErrorReporter {
                 ));
                 let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
-                    code: code.code().to_string(),
+                    definition: code.definition(),
                     message: format!("{message}{distribution_str}{suffix}"),
                     locations,
                 });

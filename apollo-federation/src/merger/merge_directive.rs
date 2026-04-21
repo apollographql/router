@@ -290,7 +290,7 @@ impl Merger {
             );
             dest.insert_directive(&mut self.merged, merged_directive)?;
             self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
+                    definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                     message: format!(
                         "Directive @{name} is applied to \"{dest}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.and_then(|d| d.arguments_merger.as_ref()).map_or("undefined".to_string(), |m| (m.to_string)())

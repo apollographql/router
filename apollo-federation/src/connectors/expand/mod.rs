@@ -286,7 +286,7 @@ mod helpers {
     use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
-    use crate::supergraph::new_empty_fed_2_subgraph_schema;
+    use crate::subgraph::typestate::new_empty_federation_2_subgraph_schema;
 
     /// Create the appropriate field position for a type (object or interface) and
     /// insert the field if it doesn't already exist in the schema.
@@ -387,7 +387,7 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_fed_2_subgraph_schema()?;
+            let mut schema = new_empty_federation_2_subgraph_schema()?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -849,7 +849,7 @@ mod helpers {
                     arguments: Vec::new(),
                     ty: ty!(ID),
                     directives: ast::DirectiveList(vec![Node::new(Directive {
-                        name: name!("federation__inaccessible"),
+                        name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
                 };
@@ -983,7 +983,7 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_fed_2_subgraph_schema()?;
+            let mut schema = new_empty_federation_2_subgraph_schema()?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -1472,7 +1472,7 @@ mod helpers {
                     arguments: Vec::new(),
                     ty: ty!(ID),
                     directives: ast::DirectiveList(vec![Node::new(Directive {
-                        name: name!("federation__inaccessible"),
+                        name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
                 };
