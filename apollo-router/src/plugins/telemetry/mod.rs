@@ -3202,6 +3202,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_limit() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_cardinality_limit.router.yaml"
+            ))
+            .await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+
+            make_supergraph_request(plugin.as_ref()).await;
+            assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_units_are_included() {
         async {
             let plugin =

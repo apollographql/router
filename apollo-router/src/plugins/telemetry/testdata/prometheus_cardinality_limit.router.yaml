@@ -8,7 +8,9 @@ telemetry:
         service_name: apollo-router
         cardinality_limit: 5000
         views:
-          - name: http.server.request.duration
+          - name: apollo.test.histo
             cardinality_limit: 10000
+            allowed_attribute_keys:
+              - otel_scope_name
       prometheus:
         enabled: true
