@@ -1,10 +1,10 @@
 use apollo_compiler::coord;
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 
 // =============================================================================
@@ -1493,9 +1493,9 @@ mod propagate_auth {
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::FieldDefinition;
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
 
+    use super::compose;
     use crate::composition::ServiceDefinition;
     use crate::composition::compose_as_fed2_subgraphs;
 

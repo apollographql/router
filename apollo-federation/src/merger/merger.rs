@@ -141,11 +141,11 @@ pub(in crate::merger) struct MergedDirectiveInfo {
     pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct CompositionOptions {
+#[derive(Debug, Default, Clone)]
+pub struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
     /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
-    pub(crate) max_validation_subgraph_paths: Option<usize>,
+    pub max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]

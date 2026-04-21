@@ -1,4 +1,3 @@
-use apollo_federation::composition::compose;
 use apollo_federation::error::CompositionError;
 use apollo_federation::subgraph::test_utils::remove_indentation;
 use apollo_federation::subgraph::typestate::Subgraph;
@@ -7,6 +6,7 @@ use apollo_federation::supergraph::Supergraph;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::extract_subgraphs_from_supergraph_result;
 
 fn compose_services(
