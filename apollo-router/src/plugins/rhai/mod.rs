@@ -22,7 +22,6 @@ use rhai::Scope;
 use rhai::Shared;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use strum::Display;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -35,23 +34,11 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
+use crate::services::PipelineStep;
 
 mod engine;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
-
-/// Pipeline stage at which a Rhai script callback was invoked.
-#[derive(Clone, Copy, Debug, Display)]
-enum RhaiStage {
-    RouterRequest,
-    RouterResponse,
-    SupergraphRequest,
-    SupergraphResponse,
-    ExecutionRequest,
-    ExecutionResponse,
-    SubgraphRequest,
-    SubgraphResponse,
-}
 
 mod execution;
 mod router;
@@ -646,7 +633,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::RouterRequest
+                    PipelineStep::RouterRequest
                 );
             }
             ServiceStep::Supergraph(service) => {
@@ -655,7 +642,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::SupergraphRequest
+                    PipelineStep::SupergraphRequest
                 );
             }
             ServiceStep::Execution(service) => {
@@ -664,7 +651,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::ExecutionRequest
+                    PipelineStep::ExecutionRequest
                 );
             }
             ServiceStep::Subgraph(service) => {
@@ -673,7 +660,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::SubgraphRequest
+                    PipelineStep::SubgraphRequest
                 );
             }
         }
@@ -687,7 +674,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::RouterResponse
+                    PipelineStep::RouterResponse
                 );
             }
             ServiceStep::Supergraph(service) => {
@@ -696,7 +683,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::SupergraphResponse
+                    PipelineStep::SupergraphResponse
                 );
             }
             ServiceStep::Execution(service) => {
@@ -705,7 +692,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::ExecutionResponse
+                    PipelineStep::ExecutionResponse
                 );
             }
             ServiceStep::Subgraph(service) => {
@@ -714,7 +701,7 @@ impl ServiceStep {
                     service,
                     rhai_service,
                     callback,
-                    RhaiStage::SubgraphResponse
+                    PipelineStep::SubgraphResponse
                 );
             }
         }
@@ -790,7 +777,7 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
 /// Emits a metric recording the time spent executing the Rhai script.
 fn execute(
     rhai_service: &RhaiService,
-    stage: RhaiStage,
+    stage: PipelineStep,
     callback: &FnPtr,
     args: impl FuncArgs,
 ) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -812,7 +799,7 @@ fn execute(
     result
 }
 
-fn record_rhai_execution(stage: RhaiStage, duration: Duration, succeeded: bool) {
+fn record_rhai_execution(stage: PipelineStep, duration: Duration, succeeded: bool) {
     let duration = duration.as_secs_f64();
     let stage = stage.to_string();
 
