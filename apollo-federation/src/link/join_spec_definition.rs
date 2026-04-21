@@ -533,8 +533,6 @@ impl JoinSpecDefinition {
             ],
             false,
             &[DirectiveLocation::EnumValue],
-            false,
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -610,8 +608,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::InputObject,
                 DirectiveLocation::Scalar,
             ],
-            false,
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -810,8 +806,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::FieldDefinition,
                 DirectiveLocation::InputFieldDefinition,
             ],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -848,8 +842,6 @@ impl JoinSpecDefinition {
             ],
             true, // repeatable
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -913,8 +905,6 @@ impl JoinSpecDefinition {
             ],
             true, // repeatable
             &[DirectiveLocation::Union],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -941,8 +931,6 @@ impl JoinSpecDefinition {
             }],
             true, // repeatable
             &[DirectiveLocation::EnumValue],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -998,8 +986,6 @@ impl JoinSpecDefinition {
                 DirectiveLocation::Interface,
                 DirectiveLocation::FieldDefinition,
             ],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -1069,8 +1055,6 @@ impl JoinSpecDefinition {
             }],
             false, // not repeatable
             &[DirectiveLocation::Object],
-            false, // doesn't compose
-            Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }

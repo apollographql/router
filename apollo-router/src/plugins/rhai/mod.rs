@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use futures::future::ready;
@@ -33,7 +34,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
-use crate::register_plugin;
+use crate::services::PipelineStep;
 
 mod engine;
 
@@ -51,6 +52,10 @@ struct Rhai {
     scope: Arc<Mutex<Scope<'static>>>,
 }
 
+fn default_intern_strings() -> bool {
+    true
+}
+
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +65,17 @@ pub(crate) struct Conf {
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation
     main: Option<String>,
+    /// Whether to enable Rhai's internal string interning.
+    ///
+    /// String interning can reduce memory allocations and string comparison
+    /// cost. But it also introduces synchronization overhead.
+    ///
+    /// Setting this to `false` can improve throughput and is recommended
+    /// for workloads with many concurrent Rhai executions.
+    ///
+    /// Defaults to `true`.
+    #[serde(default = "default_intern_strings")]
+    intern_strings: bool,
 }
 
 #[async_trait::async_trait]
@@ -84,6 +100,7 @@ impl Plugin for Rhai {
             Some(scripts_path),
             sdl.to_string(),
             main.clone(),
+            init.config.intern_strings,
         ));
         let ast = engine
             .compile_file(main.clone())
@@ -203,7 +220,7 @@ pub(crate) enum ServiceStep {
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_request {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
@@ -218,8 +235,12 @@ macro_rules! gen_map_request {
                 .instrument(rhai_service_span())
                 .checkpoint(move |request: $base::Request| {
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result: Result<Dynamic, Box<EvalAltResult>> =
-                        execute(&$rhai_service, &$callback, (shared_request.clone(),));
+                    let result: Result<Dynamic, Box<EvalAltResult>> = execute(
+                        &$rhai_service,
+                        $stage,
+                        &$callback,
+                        (shared_request.clone(),),
+                    );
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
@@ -242,7 +263,7 @@ macro_rules! gen_map_request {
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_router_deferred_request {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
@@ -255,7 +276,7 @@ macro_rules! gen_map_router_deferred_request {
             }
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
-                .checkpoint( move |chunked_request: $base::Request|  {
+                .checkpoint(move |chunked_request: $base::Request|  {
                     // we split the request stream into headers+first body chunk, then a stream of chunks
                     // for which we will implement mapping later
                     let $base::Request { router_request, context } = chunked_request;
@@ -269,7 +290,7 @@ macro_rules! gen_map_router_deferred_request {
                         ),
                     };
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
+                    let result = execute(&$rhai_service, $stage, &$callback, (shared_request.clone(),));
 
                     if let Err(error) = result {
                         let error_details = process_error(error);
@@ -313,6 +334,7 @@ macro_rules! gen_map_router_deferred_request {
 
                                 let result = execute(
                                     &rhai_service,
+                                    $stage,
                                     &callback,
                                     (shared_request.clone(),),
                                 );
@@ -352,13 +374,17 @@ macro_rules! gen_map_router_deferred_request {
 }
 
 macro_rules! gen_map_response {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             service
                 .map_response(move |response: $base::Response| {
                     let shared_response = Shared::new(Mutex::new(Some(response)));
-                    let result: Result<Dynamic, Box<EvalAltResult>> =
-                        execute(&$rhai_service, &$callback, (shared_response.clone(),));
+                    let result: Result<Dynamic, Box<EvalAltResult>> = execute(
+                        &$rhai_service,
+                        $stage,
+                        &$callback,
+                        (shared_response.clone(),),
+                    );
 
                     if let Err(error) = result {
                         let error_details = process_error(error);
@@ -387,7 +413,7 @@ macro_rules! gen_map_response {
 // I can't easily unify the macros because the router response processing is quite different to
 // other service in terms of payload.
 macro_rules! gen_map_router_deferred_response {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
                 |mapped_response: $base::Response| async move {
@@ -406,10 +432,14 @@ macro_rules! gen_map_router_deferred_response {
                     };
                     let shared_response = Shared::new(Mutex::new(Some(response)));
 
-                    let result =
-                        execute(&$rhai_service, &$callback, (shared_response.clone(),));
-                    if let Err(error) = result {
+                    let result = execute(
+                        &$rhai_service,
+                        $stage,
 
+                        &$callback,
+                        (shared_response.clone(),),
+                    );
+                    if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
                             tracing::error!("map_request callback failed: {error_details:#?}");
@@ -452,6 +482,7 @@ macro_rules! gen_map_router_deferred_response {
 
                             let result = execute(
                                 &rhai_service,
+                                $stage,
                                 &callback,
                                 (shared_response.clone(),),
                             );
@@ -493,7 +524,7 @@ macro_rules! gen_map_router_deferred_response {
 }
 
 macro_rules! gen_map_deferred_response {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
                 |mapped_response: $base::Response| async move {
@@ -526,8 +557,13 @@ macro_rules! gen_map_deferred_response {
                     };
                     let shared_response = Shared::new(Mutex::new(Some(response)));
 
-                    let result =
-                        execute(&$rhai_service, &$callback, (shared_response.clone(),));
+                    let result = execute(
+                        &$rhai_service,
+                        $stage,
+
+                        &$callback,
+                        (shared_response.clone(),),
+                    );
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
@@ -562,6 +598,7 @@ macro_rules! gen_map_deferred_response {
 
                             let result = execute(
                                 &rhai_service,
+                                $stage,
                                 &callback,
                                 (shared_response.clone(),),
                             );
@@ -607,16 +644,40 @@ impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_router_deferred_request!(router, service, rhai_service, callback);
+                gen_map_router_deferred_request!(
+                    router,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::RouterRequest
+                );
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_request!(supergraph, service, rhai_service, callback);
+                gen_map_request!(
+                    supergraph,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::SupergraphRequest
+                );
             }
             ServiceStep::Execution(service) => {
-                gen_map_request!(execution, service, rhai_service, callback);
+                gen_map_request!(
+                    execution,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::ExecutionRequest
+                );
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_request!(subgraph, service, rhai_service, callback);
+                gen_map_request!(
+                    subgraph,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::SubgraphRequest
+                );
             }
         }
     }
@@ -624,16 +685,40 @@ impl ServiceStep {
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_router_deferred_response!(router, service, rhai_service, callback);
+                gen_map_router_deferred_response!(
+                    router,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::RouterResponse
+                );
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_deferred_response!(supergraph, service, rhai_service, callback);
+                gen_map_deferred_response!(
+                    supergraph,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::SupergraphResponse
+                );
             }
             ServiceStep::Execution(service) => {
-                gen_map_deferred_response!(execution, service, rhai_service, callback);
+                gen_map_deferred_response!(
+                    execution,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::ExecutionResponse
+                );
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_response!(subgraph, service, rhai_service, callback);
+                gen_map_response!(
+                    subgraph,
+                    service,
+                    rhai_service,
+                    callback,
+                    PipelineStep::SubgraphResponse
+                );
             }
         }
     }
@@ -703,19 +788,45 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     error_details
 }
 
+/// Execute a Rhai callback for a pipeline service stage.
+///
+/// Emits a metric recording the time spent executing the Rhai script.
 fn execute(
     rhai_service: &RhaiService,
+    stage: PipelineStep,
     callback: &FnPtr,
     args: impl FuncArgs,
 ) -> Result<Dynamic, Box<EvalAltResult>> {
-    if callback.is_curried() {
+    let start = Instant::now();
+
+    let result = if callback.is_curried() {
         callback.call(&rhai_service.engine, &rhai_service.ast, args)
     } else {
         let mut guard = rhai_service.scope.lock();
         rhai_service
             .engine
             .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
-    }
+    };
+
+    let duration = start.elapsed();
+
+    record_rhai_execution(stage, duration, result.is_ok());
+
+    result
+}
+
+fn record_rhai_execution(stage: PipelineStep, duration: Duration, succeeded: bool) {
+    let duration = duration.as_secs_f64();
+    let stage = stage.to_string();
+
+    f64_histogram_with_unit!(
+        "apollo.router.operations.rhai.duration",
+        "Time spent executing a Rhai script callback, in seconds",
+        "s",
+        duration,
+        "rhai.stage" = stage,
+        "rhai.succeeded" = succeeded
+    );
 }
 
 register_plugin!("apollo", "rhai", Rhai);

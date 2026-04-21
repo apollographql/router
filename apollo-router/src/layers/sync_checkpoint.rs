@@ -84,7 +84,6 @@ where
 }
 
 /// [`Service`] for Synchronous Checkpoints. See [`ServiceBuilderExt::checkpoint()`](crate::layers::ServiceBuilderExt::checkpoint()).
-#[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct CheckpointService<S, Request>
 where
@@ -105,6 +104,24 @@ where
             + Sync
             + 'static,
     >,
+}
+
+impl<S, Request> Clone for CheckpointService<S, Request>
+where
+    S: Clone,
+    // bounds to match the service struct...
+    Request: Send + 'static,
+    S: Service<Request> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Response: Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            checkpoint_fn: self.checkpoint_fn.clone(),
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]

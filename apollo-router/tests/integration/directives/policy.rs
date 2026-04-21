@@ -226,9 +226,8 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap();
 
     // THEN
-    //   * we get NO data back forthe private field!
-
-    let response = supergraph_harness
+    //   * we get NO data back for the private field!
+    let data = supergraph_harness
         .oneshot(request)
         .await
         .unwrap()
@@ -237,10 +236,7 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
         .unwrap()
         .data
         .unwrap();
-
-    let response = response.as_object().unwrap();
-
-    assert!(response.is_empty());
+    assert!(data.is_null());
 
     Ok(())
 }
@@ -464,9 +460,163 @@ async fn interface_with_different_implementation_policies_should_require_auth() 
     let data = response.data.unwrap();
     let error = response.errors.first().unwrap();
 
-    assert!(data.as_object().unwrap().is_empty());
+    assert!(data.is_null());
     assert_eq!(
         error.extension_code().unwrap(),
         "UNAUTHORIZED_FIELD_OR_TYPE".to_string()
     );
+}
+
+mod all_unauthorized_paths {
+    use apollo_router::graphql;
+    use serde_json::Value;
+
+    use super::*;
+
+    /// Sends a request to a router configured with:
+    ///   * a schema with @policy
+    ///   * an interface where all implementations require the `admin` policy
+    ///   * a context with no matching policies (all paths unauthorized)
+    async fn send_request(authorization_conf: Value) -> Result<graphql::Response, BoxError> {
+        let mock_coprocessor = MockServer::start().await;
+        let coprocessor_address = mock_coprocessor.uri();
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "version": 1,
+                "stage": "SupergraphRequest",
+                "control": "continue",
+                "context": {
+                    "entries": {
+                        "apollo::authorization::required_policies": {
+                            "admin": false
+                        }
+                    }
+                }
+            })))
+            .mount(&mock_coprocessor)
+            .await;
+
+        let mut subgraphs = MockedSubgraphs::default();
+        subgraphs.insert(
+            "subgraph_a",
+            MockSubgraph::builder()
+                .with_json(
+                    json!({"query": "{secure{id}}"}),
+                    json!({"data": {"secure": {"id": "789"}}}),
+                )
+                .build(),
+        );
+
+        let supergraph_harness = TestHarness::builder()
+            .configuration_json(json!({
+                "coprocessor": {
+                    "url": coprocessor_address,
+                    "supergraph": {
+                        "request": {
+                            "context": "all"
+                        }
+                    }
+                },
+                "include_subgraph_errors": {
+                    "all": true
+                },
+                "authorization": authorization_conf
+            }))?
+            .schema(include_str!(
+                "../../fixtures/directives/policy/policy_schema_with_interfaces.graphql"
+            ))
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await?;
+
+        let context = Context::new();
+        context.insert("apollo::authorization::required_policies", json! { [] })?;
+
+        let request = supergraph::Request::fake_builder()
+            .query(r#"{ secure { id } }"#)
+            .context(context)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph_harness
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        Ok(response)
+    }
+
+    /// Given:
+    ///   * the router configuration described in `send_request`
+    ///   * authorization configured to put errors into extensions rather than the errors array
+    /// Then:
+    ///   * data is null
+    ///   * errors array is empty
+    ///   * the authorization error appears in extensions["authorizationErrors"]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn errors_in_extensions() {
+        let authorization_conf = json!({
+            "directives": {
+                "errors": { "response": "extensions" }
+            }
+        });
+        let response = send_request(authorization_conf).await.unwrap();
+
+        assert!(response.data.unwrap().is_null());
+        assert!(response.errors.is_empty());
+        assert!(!response.extensions.is_empty());
+
+        let auth_error = &response.extensions["authorizationErrors"][0];
+        let code = auth_error["extensions"]["code"].as_str().unwrap();
+        assert_eq!(code, "UNAUTHORIZED_FIELD_OR_TYPE");
+    }
+
+    /// Given:
+    ///   * the router configuration described in `send_request`
+    ///   * authorization configured to put errors into the errors array
+    /// Then:
+    ///   * data is null
+    ///   * the authorization error appears in errors
+    ///   * extensions has no `authorizationErrors`
+    #[tokio::test(flavor = "multi_thread")]
+    async fn errors_in_errors() {
+        let authorization_conf = json!({
+            "directives": {
+                "errors": { "response": "errors" }
+            }
+        });
+        let response = send_request(authorization_conf).await.unwrap();
+
+        assert!(response.data.unwrap().is_null());
+        assert!(!response.errors.is_empty());
+        assert!(!response.extensions.contains_key("authorizationErrors"));
+
+        let auth_error = &response.errors[0];
+        let code = auth_error.extension_code().unwrap();
+        assert_eq!(&code, "UNAUTHORIZED_FIELD_OR_TYPE");
+    }
+
+    /// Given:
+    ///   * the router configuration described in `send_request`
+    ///   * authorization configured to suppress errors entirely
+    /// Then:
+    ///   * data is null
+    ///   * errors array is empty
+    ///   * extensions has no `authorizationErrors`
+    #[tokio::test(flavor = "multi_thread")]
+    async fn errors_disabled() {
+        let authorization_conf = json!({
+            "directives": {
+                "errors": { "response": "disabled" }
+            }
+        });
+        let response = send_request(authorization_conf).await.unwrap();
+
+        assert!(response.data.unwrap().is_null());
+        assert!(response.errors.is_empty());
+        assert!(!response.extensions.contains_key("authorizationErrors"));
+    }
 }

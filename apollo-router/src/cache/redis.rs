@@ -1041,8 +1041,8 @@ mod test {
 
         use fred::types::cluster::ClusterRouting;
         use itertools::Itertools;
-        use rand::Rng;
-        use rand::RngCore;
+        use rand::Rng as _;
+        use rand::RngExt as _;
         use rand::distr::Alphanumeric;
         use serde_json::json;
         use tower::BoxError;

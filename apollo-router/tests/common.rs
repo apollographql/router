@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
+use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
@@ -70,6 +71,18 @@ use wiremock::http::Method;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
+
+/// Redact the query hash in cache debug keys so snapshots are stable.
+/// Uses the next `:` after `:hash:` as the end marker (e.g. `:hash:[^:]*`) so it remains
+/// correct if additional fields are added between hash and data.
+#[allow(dead_code)] // used by integration/response_cache and integration/coprocessor test binaries
+pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
+    static REDACT_HASH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r":hash:[^:]*").expect("redact regex"));
+    REDACT_HASH_RE
+        .replace(key, ":hash:[query-hash]")
+        .into_owned()
+}
 
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
@@ -221,6 +234,7 @@ pub struct IntegrationTest {
     jwt: Option<String>,
     env: Option<HashMap<String, OsString>>,
     hot_reload: bool,
+    reqwest_client: reqwest::Client,
 }
 
 impl IntegrationTest {
@@ -562,6 +576,7 @@ impl IntegrationTest {
         env: Option<HashMap<String, OsString>>,
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
+        reqwest_client: Option<reqwest::Client>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -680,8 +695,26 @@ impl IntegrationTest {
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
-                // Decode the OTLP request and forward to the channel
-                if let Ok(msg) = ExportMetricsServiceRequest::decode(req.body.as_ref()) {
+                // Decompress gzip body if Content-Encoding indicates it, then decode as protobuf
+                let body: &[u8] = req.body.as_ref();
+                let is_gzip = req
+                    .headers
+                    .get("content-encoding")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v.contains("gzip"))
+                    .unwrap_or(false);
+                let decoded = if is_gzip {
+                    let mut decoder = GzDecoder::new(body);
+                    let mut buf = Vec::new();
+                    std::io::Read::read_to_end(&mut decoder, &mut buf)
+                        .ok()
+                        .map(|_| buf)
+                } else {
+                    Some(body.to_vec())
+                };
+                if let Some(bytes) = decoded
+                    && let Ok(msg) = ExportMetricsServiceRequest::decode(bytes.as_slice())
+                {
                     let _ = apollo_otlp_metrics_tx.try_send(msg);
                 }
                 // Always match so we return 200 OK
@@ -719,6 +752,7 @@ impl IntegrationTest {
             jwt,
             env,
             hot_reload: hot_reload.unwrap_or(true),
+            reqwest_client: reqwest_client.unwrap_or_default(),
         }
     }
 
@@ -954,12 +988,13 @@ impl IntegrationTest {
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
+
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
@@ -1015,12 +1050,13 @@ impl IntegrationTest {
         );
 
         let url = format!("http://{}", self.bind_address());
+        let client = self.reqwest_client.clone();
+
         async move {
             let span = info_span!("client_raw_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let client = reqwest::Client::new();
                 let mut request = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
@@ -1059,12 +1095,12 @@ impl IntegrationTest {
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
         let span = info_span!("client_request", unit_test = id.as_str());
         let _span_guard = span.enter();
 
-        let mut request = client
+        let mut request = self
+            .reqwest_client
             .post(format!("http://{}", self.bind_address()))
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .header(ACCEPT, "multipart/mixed;subscriptionSpec=1.0")
@@ -1081,7 +1117,7 @@ impl IntegrationTest {
             );
         });
 
-        match client.execute(request).await {
+        match self.reqwest_client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
                 panic!("unable to send successful request to router, {err}")
@@ -1091,16 +1127,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
-        let client = reqwest::Client::new();
-
-        let request = client
+        let request = self
+            .reqwest_client
             .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
             .build()
             .unwrap();
 
-        client.execute(request).await
+        self.reqwest_client.execute(request).await
     }
 
     /// Waits for any metrics to be emitted for the given duration. This will return as soon as the
@@ -1346,6 +1381,25 @@ impl IntegrationTest {
                 error_logs.join("\n"),
                 self.logs.join("\n")
             );
+        }
+    }
+
+    /// Reads metrics from the live endpoint via `IntegrationTest::get_metrics_response` and prints
+    /// them out line by line.
+    ///
+    /// Useful for debugging.
+    #[allow(unused)]
+    pub async fn print_metrics(&self) {
+        if let Ok(metrics) = self
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+        {
+            for line in metrics.split("\n") {
+                println!("{line}");
+            }
         }
     }
 
@@ -1624,7 +1678,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
+    pub async fn assert_redis_cache_contains(&self, key: &str) -> String {
         let url = self.redis_url().expect("no redis urls");
         let config = RedisConfig::from_url(&url).unwrap();
         let client = RedisClient::new(config, None, None, None);
@@ -1635,17 +1689,6 @@ impl IntegrationTest {
         let s = match client.get(&namespaced_key).await {
             Ok(s) => s,
             Err(e) => {
-                println!("non-ignored keys in the same namespace in Redis:");
-                for key in self
-                    .scan(&client)
-                    .await
-                    .expect("couldn't get keys from redis")
-                {
-                    let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                    if Some(unnamespaced_key.as_str()) != ignore {
-                        println!("\t{unnamespaced_key}");
-                    }
-                }
                 panic!(
                     "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
                 );
@@ -1656,6 +1699,33 @@ impl IntegrationTest {
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
         s
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_redis_cache_contains_key_matching(&self, pattern: &str) {
+        let url = self.redis_url().expect("no redis urls");
+        let config = RedisConfig::from_url(&url).unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+
+        let keys = self
+            .scan(&client)
+            .await
+            .expect("couldn't get keys from redis");
+        let redis_namespace = &self.redis_namespace;
+
+        let matching_key = keys.iter().find(|key| {
+            let unnamespaced = key.replace(&format!("{redis_namespace}:"), "");
+            unnamespaced.contains(pattern)
+        });
+
+        if matching_key.is_none() {
+            panic!("no key matching pattern '{pattern}' found in Redis cache");
+        }
+
+        client.quit().await.unwrap();
+        let _ = connection_task.await;
     }
 
     /// Return the first URL in `self.redis_urls`.

@@ -381,7 +381,7 @@ The response retains the initial request's shape but returns `null` for unauthor
 }
 ```
 
-If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
+If _every_ requested field requires authentication and a request is unauthenticated, the router returns `data: null` and reports errors according to the `errors` configuration below.
 
 ### `@policy`
 
@@ -920,7 +920,7 @@ authorization:
 
 ### errors
 
-By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This behavior can be customized for your needs.
+By default, when a query is filtered by authorization (either partially or entirely), the list of filtered paths is added to the response and logged by the router. You can customize this behavior for your needs.
 
 #### log
 

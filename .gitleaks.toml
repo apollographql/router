@@ -5,6 +5,7 @@
             '''Cargo.lock$'''
             ,'''^\.changesets\/.+\.md$'''
             ,'''^CHANGELOG\.md$'''
+            ,'''^apollo-router-benchmarks/benches/rhai_string_interning\.rs$'''
         ]
 
 [[ rules ]]
@@ -128,7 +129,7 @@
 
     [ rules.allowlist ]
         paths = [
-            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
+            '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
         ]
 
 [[ rules ]]
@@ -136,5 +137,5 @@
 
     [ rules.allowlist ]
         paths = [
-            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
+            '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
         ]

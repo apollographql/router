@@ -34,7 +34,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::Service;
 use tower::ServiceExt;
-use tower_http::decompression::DecompressionLayer;
+use tower_http::decompression::RequestDecompressionLayer;
 
 mod tracing_common;
 
@@ -53,9 +53,16 @@ async fn config(
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    // The OTLP HTTP exporter sends gzip-compressed protobuf to /v1/traces, so we need
+    // RequestDecompressionLayer on that route. The Apollo protobuf reporter sends to / with gzip
+    // too, but we intentionally don't decompress there so those bytes fail to decode as OTLP proto
+    // and are ignored.
+    let otlp_routes = axum::Router::new()
+        .route("/v1/traces", post(traces_handler))
+        .layer(RequestDecompressionLayer::new());
     let app = axum::Router::new()
         .route("/", post(traces_handler))
-        .layer(DecompressionLayer::new())
+        .merge(otlp_routes)
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {

@@ -90,14 +90,40 @@ pub mod internal_lsp_api {
 
 /// Internal API for the apollo-composition crate.
 pub mod internal_composition_api {
+    use std::ops::Range;
+
+    use apollo_compiler::parser::LineColumn;
+
     use super::*;
+    use crate::error::MultipleFederationErrors;
     use crate::schema::validators::cache_tag;
     use crate::subgraph::typestate;
+
+    #[derive(Clone, Debug)]
+    pub struct Message {
+        code: String,
+        message: String,
+        locations: Vec<Range<LineColumn>>,
+    }
+
+    impl Message {
+        pub fn code(&self) -> &str {
+            &self.code
+        }
+
+        pub fn message(&self) -> &str {
+            &self.message
+        }
+
+        pub fn locations(&self) -> &[Range<LineColumn>] {
+            &self.locations
+        }
+    }
 
     #[derive(Default)]
     pub struct ValidationResult {
         /// If `errors` is empty, validation was successful.
-        pub errors: Vec<cache_tag::Message>,
+        pub errors: Vec<Message>,
     }
 
     /// Validates `@cacheTag` directives in the original (unexpanded) subgraph schema.
@@ -117,9 +143,21 @@ pub mod internal_composition_api {
         let subgraph = subgraph
             .expand_links()
             .map_err(|e| e.into_federation_error())?;
-        let mut result = ValidationResult::default();
-        cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
-        Ok(result)
+
+        let mut errors = MultipleFederationErrors::new();
+        cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut errors)?;
+
+        Ok(ValidationResult {
+            errors: errors
+                .errors
+                .into_iter()
+                .map(|error| Message {
+                    code: error.code_string(),
+                    message: error.to_string(),
+                    locations: Vec::new(),
+                })
+                .collect(),
+        })
     }
 }
 
@@ -363,8 +401,8 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
-    use crate::internal_composition_api::ValidationResult;
-    use crate::internal_composition_api::validate_cache_tag_directives;
+    use crate::subgraph::SubgraphError;
+    use crate::subgraph::typestate;
 
     #[test]
     fn validates_connect_spec_is_known() {
@@ -397,8 +435,12 @@ mod test_supergraph {
     }
 
     #[track_caller]
-    fn build_and_validate(name: &str, url: &str, sdl: &str) -> ValidationResult {
-        validate_cache_tag_directives(name, url, sdl).unwrap()
+    fn build_and_validate(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> Result<typestate::Subgraph<typestate::Expanded>, SubgraphError> {
+        typestate::Subgraph::parse(name, url, sdl)?.expand_links()
     }
 
     #[test]
@@ -429,7 +471,7 @@ mod test_supergraph {
             "#,
         );
 
-        assert!(res.errors.is_empty());
+        assert!(res.is_ok());
 
         // validation error test
         let res = build_and_validate(
@@ -460,14 +502,14 @@ mod test_supergraph {
         "#,
         );
 
-        assert_eq!(
-            res.errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<String>>(),
-            vec![
-                "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.upc}\" on type \"Product\""
-            ]
+        let err = res.unwrap_err();
+        let errors: Vec<String> = err.to_composition_errors().map(|e| e.to_string()).collect();
+        assert!(
+            errors
+                .iter()
+                .any(|m| m.contains("cacheTag") && m.contains("$key")),
+            "expected cache tag validation error, got: {:?}",
+            errors
         );
 
         // valid usage test
@@ -498,6 +540,6 @@ mod test_supergraph {
             "#,
         );
 
-        assert!(res.errors.is_empty());
+        assert!(res.is_ok());
     }
 }

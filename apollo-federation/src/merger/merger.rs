@@ -16,6 +16,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ComponentOrigin;
@@ -29,8 +30,10 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
+use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
@@ -82,6 +85,7 @@ use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::same_type;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
@@ -163,6 +167,10 @@ pub(crate) struct Merger {
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
     pub(in crate::merger) join_directive_identities: HashSet<Identity>,
+    /// Directives that are composed via `@join__directive` in the supergraph. Populated by
+    /// `validate_and_maybe_add_specs` from composition spec `use_join_directive`. Matches JS
+    /// `directivesUsingJoinDirective` (federation PR #3274).
+    pub(in crate::merger) directives_using_join_directive: HashSet<Name>,
     pub(in crate::merger) join_spec_definition: &'static JoinSpecDefinition,
     pub(in crate::merger) latest_federation_version_used: Version,
     pub(in crate::merger) applied_directives_to_merge: AppliedDirectivesToMerge,
@@ -237,6 +245,7 @@ impl Merger {
             schema_to_import_to_feature_url,
             link_spec_definition,
             join_directive_identities,
+            directives_using_join_directive: HashSet::new(),
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
             latest_federation_version_used,
@@ -284,9 +293,7 @@ impl Merger {
                 .gt(linked_federation_version)
         {
             error_reporter.add_hint(CompositionHint {
-                code: HintCode::ImplicitlyUpgradedFederationVersion
-                    .code()
-                    .to_string(),
+                definition: HintCode::ImplicitlyUpgradedFederationVersion.definition(),
                 message: format!(
                     "Subgraph {} has been implicitly upgraded from federation v{} to v{}",
                     subgraph.name,
@@ -553,7 +560,8 @@ impl Merger {
                     hints,
                 });
             }
-            match Self::validate_supergraph_schema(self.merged) {
+            let merged = self.merged;
+            match Self::validate_supergraph_schema(merged, &self.subgraphs) {
                 Ok(supergraph) => Ok(MergeResult {
                     supergraph: Some(supergraph),
                     errors: Vec::default(),
@@ -572,6 +580,7 @@ impl Merger {
     /// computed.
     fn validate_supergraph_schema(
         merged: FederationSchema,
+        subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
@@ -590,8 +599,11 @@ impl Merger {
         // other errors in theory, but if there are, better to find it now rather than later).
         api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
             |err| {
-                // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
-                Self::convert_to_merge_errors(err)
+                super::supergraph_coordinate::update_inaccessible_errors_with_link_to_subgraphs(
+                    &supergraph_schema,
+                    subgraphs,
+                    err,
+                )
             },
         )?;
 
@@ -603,7 +615,10 @@ impl Merger {
         error
             .into_errors()
             .into_iter()
-            .map(|e| CompositionError::MergeError { error: e })
+            .map(|e| CompositionError::MergeError {
+                error: e,
+                locations: Vec::new(),
+            })
             .collect()
     }
 
@@ -615,7 +630,7 @@ impl Merger {
         {
             let imports = directives
                 .iter()
-                .map(|(original, alias)| {
+                .map(|(alias, original)| {
                     if *alias == *original {
                         Import {
                             alias: None,
@@ -798,19 +813,19 @@ impl Merger {
                 };
             Some(type_kind_description)
         };
-        self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition>(
-                CompositionError::TypeKindMismatch {
-                    message: format!(
-                        "Type \"{}\" has mismatched kind: it is defined as ",
-                        mismatched_type.type_name()
-                    ),
-                },
-                mismatched_type,
-                &sources,
-                |ty| Some(ty.kind().replace("Type", " Type")),
-                |ty, idx| type_kind_to_string(idx, ty),
-            );
+        self.error_reporter.report_mismatch_error(
+            CompositionError::TypeKindMismatch {
+                message: format!(
+                    "Type \"{}\" has mismatched kind: it is defined as ",
+                    mismatched_type.type_name()
+                ),
+            },
+            mismatched_type,
+            &sources,
+            &self.subgraphs,
+            |ty| Some(ty.kind().replace("Type", " Type")),
+            |ty, idx| type_kind_to_string(idx, ty),
+        );
     }
 
     fn add_directives_shallow(&mut self) -> Result<(), FederationError> {
@@ -818,9 +833,6 @@ impl Merger {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
                     && self.is_merged_directive_definition(&subgraph.name, definition)
-                    && !self
-                        .compose_directive_manager
-                        .has_latest_directive_definition(name)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -843,6 +855,15 @@ impl Merger {
             .should_compose_directive(subgraph_name, &directive.name)
         {
             return true;
+        }
+
+        if self
+            .directives_using_join_directive
+            .contains(&directive.name)
+        {
+            // This directive will be added as `@join__directive` by the `add_join_directive_directives`
+            // method. So, we skip the normal merging logic.
+            return false;
         }
 
         self.merged_federation_directive_names
@@ -960,14 +981,14 @@ impl Merger {
         if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
         if self
             .join_spec_definition
             .is_spec_type_name(&self.merged, name)
-            .unwrap_or(false)
+            .is_ok_and(|b| b)
         {
             return false;
         }
@@ -1214,7 +1235,7 @@ impl Merger {
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
                 self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::FromSubgraphDoesNotExist.code().to_string(),
+                    definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
                         "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
                         source_subgraph_name, dest, subgraph_name
@@ -1240,7 +1261,7 @@ impl Merger {
             } else if !subgraph_map.contains_key(&source_subgraph_name) {
                 // hint: source schema no longer contains the field
                 self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                    definition: HintCode::OverrideDirectiveCanBeRemoved.definition(),
                     message: format!(
                         "Field \"{}\" on subgraph \"{}\" no longer exists in the from subgraph. The @override directive can be removed.",
                         dest, subgraph_name
@@ -1297,7 +1318,7 @@ impl Merger {
                     // The from field is explicitly marked external by the user (which means it is "used"
                     // and cannot be completely removed) so the @override can be removed.
                     self.error_reporter.add_hint(CompositionHint {
-                        code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                        definition: HintCode::OverrideDirectiveCanBeRemoved.definition(),
                         message: format!(
                             "Field \"{}\" on subgraph \"{}\" is not resolved anymore by the from subgraph (it is marked \"@external\" in \"{}\"). The @override directive can be removed.",
                             dest, subgraph_name, source_subgraph_name
@@ -1309,7 +1330,7 @@ impl Merger {
                     if override_label.is_none() {
                         // No label, but field is referenced - add hint
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                            definition: HintCode::OverriddenFieldCanBeRemoved.definition(),
                             message: format!(
                                 "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
                                 dest, source_subgraph_name
@@ -1322,7 +1343,7 @@ impl Merger {
                     if override_label.is_none() {
                         // No label and field is not referenced - suggest removal
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                            definition: HintCode::OverriddenFieldCanBeRemoved.definition(),
                             message: format!(
                                 "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
                                 dest, source_subgraph_name
@@ -1373,7 +1394,7 @@ impl Merger {
                         };
 
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverrideMigrationInProgress.code().to_string(),
+                            definition: HintCode::OverrideMigrationInProgress.definition(),
                             message,
                             locations: Default::default(),
                         });
@@ -1573,9 +1594,7 @@ impl Merger {
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
             {
-                self.error_reporter.report_mismatch_hint::<
-                    ObjectOrInterfaceTypeDefinitionPosition,
-                    ObjectOrInterfaceTypeDefinitionPosition>(
+                self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
 format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
@@ -1584,6 +1603,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         ),
                         dest,
                         sources,
+                        &self.subgraphs,
                         |_| Some("yes".to_string()),
                         |pos, idx| pos.field(field.field_name().clone())
                             .try_get(self.subgraphs[idx].schema().schema())
@@ -1607,28 +1627,29 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         let mut source_as_entity = Vec::new();
         let mut source_as_non_entity = Vec::new();
 
-        let mut sources: Sources<usize> = Default::default();
+        let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let Some(key_directive_name) = subgraph.key_directive_name()? else {
                 continue;
             };
-            if obj.try_get(subgraph.schema().schema()).is_some() {
-                sources.insert(idx, Some(idx));
+            if let Some(node) = obj.try_get(subgraph.schema().schema()) {
+                sources.insert(idx, Some(node));
                 if obj.has_applied_directive(subgraph.schema(), &key_directive_name) {
-                    source_as_entity.push(idx);
+                    source_as_entity.push(node);
                 } else {
-                    source_as_non_entity.push(idx);
+                    source_as_non_entity.push(node);
                 }
             }
         }
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize>(
+            self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentEntity,
                 format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
                 obj,
                 &sources,
+                &self.subgraphs,
                 // Categorize whether the source has a @key or not.
                 |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
@@ -1677,10 +1698,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     }
 
     fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
-        // We should skip the supergraph specific directives, that is the @core and @join directives.
+        // We should skip the supergraph specific directives, that is the @link and @join directives.
 
         // Collect all directive names from both the merged schema and the compose directive manager
-        let mut directive_names: IndexSet<Name> = self
+        let directive_names: IndexSet<Name> = self
             .merged
             .schema()
             .directive_definitions
@@ -1688,19 +1709,15 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             .cloned()
             .collect();
 
-        for name in self.compose_directive_manager.composed_directive_names() {
-            directive_names.insert(name.clone());
-        }
-
         for directive_name in directive_names {
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)
-                .unwrap_or(false)
+                .is_ok_and(|b| b)
                 || self
                     .join_spec_definition
                     .is_spec_directive_name(&self.merged, &directive_name)
-                    .unwrap_or(false)
+                    .is_ok_and(|b| b)
             {
                 continue;
             }
@@ -1887,7 +1904,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         is_input_position: bool,
     ) -> Result<bool, FederationError>
     where
-        T: Display + HasType + Debug,
+        T: HasLocations + Display + HasType + Debug,
     {
         if sources.is_empty() {
             self.error_reporter_mut()
@@ -1913,7 +1930,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 continue;
             };
 
-            if Self::same_type(ty, source_ty) {
+            if same_type(ty, source_ty) {
                 trace!("Types are identical");
                 continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
@@ -1962,10 +1979,11 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 }
             };
 
-            self.error_reporter.report_mismatch_error::<Type, T>(
+            self.error_reporter.report_mismatch_error(
                 error,
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(format!("type \"{d}\"")),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -1995,13 +2013,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 "subtype"
             };
 
-            self.error_reporter.report_mismatch_hint::<Type, T>(
+            self.error_reporter.report_mismatch_hint(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
+                &self.subgraphs,
                 |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
@@ -2083,18 +2102,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             // Store updated usage
             self.enum_usages_mut()
                 .insert(base_type_name.to_string(), new_usage);
-        }
-    }
-
-    fn same_type(dest_type: &Type, source_type: &Type) -> bool {
-        match (dest_type, source_type) {
-            (Type::Named(n1), Type::Named(n2)) => n1 == n2,
-            (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
-            (Type::List(inner1), Type::List(inner2)) => Self::same_type(inner1, inner2),
-            (Type::NonNullList(inner1), Type::NonNullList(inner2)) => {
-                Self::same_type(inner1, inner2)
-            }
-            _ => false,
         }
     }
 
@@ -2198,38 +2205,32 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: HasDescription + Display,
+        T: HasLocations + HasDescription + Display,
     {
-        let mut descriptions: IndexMap<String, usize> = sources
+        let descriptions: IndexMap<&str, usize> = sources
             .iter()
-            .map(|(idx, source)| {
+            .filter_map(|(idx, source)| {
                 source
                     .as_ref()
                     .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-                    .map(|d| d.trim().to_string())
-                    .unwrap_or_default()
             })
+            // PORT NOTE: JS was keeping empty descriptions but only using them if no other description was provided
+            //  (i.e. we would pick any description over multiple empty descriptions)
+            .filter(|d| !d.is_empty())
             .fold(Default::default(), |mut acc, desc| {
-                if !desc.is_empty() {
-                    *acc.entry(desc).or_insert(0) += 1;
-                }
+                *acc.entry(desc).or_default() += 1;
                 acc
             });
-        // we don't want to raise a hint if a description is ""
-        descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
-                // Find the description with the highest count
-                if let Some((idx, _)) =
-                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
+                // find the description with the highest count
+                if let Some((description, _)) =
+                    first_max_by_key(descriptions.iter(), |(_, count)| *count)
                 {
-                    // Get the description at the found index
-                    if let Some((description, _)) = descriptions.iter().nth(idx) {
-                        dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
-                    }
+                    dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
                 }
                 // TODO: Currently showing full descriptions in the hint
                 // messages, which is probably fine in some cases. However this
@@ -2250,11 +2251,12 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 } else {
                     format!("Element \"{dest}\"")
                 };
-                self.error_reporter.report_mismatch_hint::<T, T>(
+                self.error_reporter.report_mismatch_hint(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,
                     sources,
+                    &self.subgraphs,
                     |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
                     |elem, idx| {
                         elem.description(self.subgraphs[idx].schema())
@@ -2311,7 +2313,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             Name,
             IndexMap<Vec<Node<Argument>>, IndexSet<Name>>,
         > = IndexMap::default();
-        let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
+        // JS PORT NOTE: This was a Set in JS. We are using Vec instead of IndexSet as Hash trait is not dyn compatible
+        let mut links_to_persist: Vec<&dyn SpecDefinition> = Default::default();
 
         for (idx, source) in sources.iter() {
             let Some(source) = source else {
@@ -2322,38 +2325,62 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             let Some(link_import_identity_url_map) = schema.metadata() else {
                 continue;
             };
-            let Ok(Some(link_directive_name)) = self
-                .link_spec_definition
-                .directive_name_in_schema(schema, &DEFAULT_LINK_NAME)
-            else {
-                continue;
-            };
 
             let source: DirectiveTargetPosition = source.clone().try_into()?;
             for directive in source.get_all_applied_directives(schema).iter() {
-                let mut should_include_as_join_directive = false;
-
-                if directive.name == link_directive_name {
-                    if let Ok(link) = Link::from_directive_application(directive) {
-                        should_include_as_join_directive =
-                            self.should_use_join_directive_for_url(&link.url);
-
-                        if should_include_as_join_directive
-                            && SPEC_REGISTRY.get_definition(&link.url).is_some()
-                        {
-                            links_to_persist.push((link.url.clone(), directive.as_ref().clone()));
-                        }
-                    }
-                } else if let Some(url_for_directive) =
-                    link_import_identity_url_map.source_link_of_directive(&directive.name)
+                let source_link =
+                    link_import_identity_url_map.source_link_of_directive(&directive.name);
+                // `directive_name_for_join_directive`: The directive name to use in the extracted subgraph
+                // schema. For Connectors (see `should_use_join_directive_for_url`), this is an import name (the
+                // same name imported in the supergraph and the extracted subgraphs). For others, this is
+                // the fully qualified directive name in the subgraph schema (re-assigned below).
+                let directive_name_for_join_directive = if source_link
+                    .as_ref()
+                    .is_some_and(|e| e.link.url.identity == Identity::link_identity())
                 {
-                    should_include_as_join_directive =
-                        self.should_use_join_directive_for_url(&url_for_directive.link.url);
-                }
+                    if let Ok(link) = Link::from_directive_application(directive, schema.schema())
+                        && self.should_use_join_directive_for_url(&link.url)
+                    {
+                        // Persist link when the spec uses @join__directive and the feature
+                        // identity is one of the known join-directive feature definitions.
+                        if let Some(definition) = SPEC_REGISTRY.get_definition(&link.url) {
+                            links_to_persist.push(*definition);
+                        }
+                        Some(directive.name.clone())
+                    } else {
+                        None
+                    }
+                // See if directives from this feature URL should use the @join__directive.
+                } else if source_link
+                    .as_ref()
+                    .is_some_and(|e| self.should_use_join_directive_for_url(&e.link.url))
+                {
+                    Some(directive.name.clone())
+                // See if this directive is one of the directives that should use the @join__directive.
+                } else if self
+                    .directives_using_join_directive
+                    .contains(&directive.name)
+                {
+                    if let Some(source_link) = source_link {
+                        // Compute the fully qualified directive name in the subgraph schema without using
+                        // `import`, so it can be referenced in the extracted subgraph schema via
+                        // `@join__directive`.
+                        Some(Link::directive_name_in_schema_for_core_arguments(
+                            &source_link.link.url,
+                            &source_link.link.url.identity.name,
+                            &[],
+                            &source_link.name_in_spec,
+                        ))
+                    } else {
+                        Some(directive.name.clone())
+                    }
+                } else {
+                    None
+                };
 
-                if should_include_as_join_directive {
+                if let Some(directive_name_for_join_directive) = directive_name_for_join_directive {
                     let existing_joins = joins_by_directive_name
-                        .entry(directive.name.clone())
+                        .entry(directive_name_for_join_directive)
                         .or_default();
                     let existing_graphs_with_these_arguments = existing_joins
                         .entry(directive.arguments.clone())
@@ -2379,31 +2406,57 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // change the output supergraph schema. Here, when we encounter a link directive, we
         // preserve the version the subgraph used in a `@join__directive` so the query planner can
         // extract the subgraph schemas with correct links.
-        let mut latest_or_highest_link_by_identity: HashMap<Identity, (Url, Directive)> =
-            HashMap::new();
-        for (url, link_directive) in links_to_persist {
-            if let Some((existing_url, existing_directive)) =
-                latest_or_highest_link_by_identity.get_mut(&url.identity)
-            {
-                if url.version > existing_url.version {
-                    *existing_url = url;
-                    *existing_directive = link_directive;
-                }
-            } else {
-                latest_or_highest_link_by_identity
-                    .insert(url.identity.clone(), (url, link_directive));
-            }
-        }
+        let latest_or_highest_link_by_identity: IndexMap<Identity, &dyn SpecDefinition> =
+            links_to_persist
+                .iter()
+                .fold(IndexMap::default(), |mut acc, spec_definition| {
+                    // auto upgrade connectors spec to latest non_preview
+                    //
+                    // PORT NOTE: JavaScript logic auto upgrade logic was generic allowing any spec to be auto upgraded,
+                    //   keeping it simple for now as auto-upgrade logic is connectors only
+                    let latest_spec: &dyn SpecDefinition = if *spec_definition.identity()
+                        == Identity::connect_identity()
+                        && CONNECT_VERSIONS.latest_non_preview().version()
+                            > spec_definition.version()
+                    {
+                        CONNECT_VERSIONS.latest_non_preview()
+                    } else {
+                        *spec_definition
+                    };
+
+                    acc.entry(latest_spec.identity().clone())
+                        .and_modify(|existing| {
+                            if existing.version() < latest_spec.version() {
+                                *existing = latest_spec
+                            }
+                        })
+                        .or_insert(latest_spec);
+                    acc
+                });
 
         let dest: DirectiveTargetPosition = dest.clone().try_into()?;
-        for (_, directive) in latest_or_highest_link_by_identity.into_values() {
-            // We insert the directive as it was in the subgraph, but with the name of `@link` in
-            // the supergraph, in case it was renamed in the subgraph.
+        for spec in latest_or_highest_link_by_identity.into_values() {
+            // we need to manually apply `@link` for the target spec
+            // we cannot use `apply_feature_to_schema` as @connect spec defines subgraph specification
+            // we use the same link import in the supergraph but we don't bring in any of the types
+            let mut arguments = vec![];
+            arguments.push(Node::new(Argument {
+                name: name!("url"),
+                value: Node::new(Value::String(spec.to_string())),
+            }));
+            if let Some(purpose) = spec.purpose() {
+                arguments.push(Node::new(Argument {
+                    name: name!("for"),
+                    value: Node::new(Value::Enum(Name::new_unchecked(
+                        purpose.to_string().as_str(),
+                    ))),
+                }));
+            }
             dest.insert_directive(
                 &mut self.merged,
                 Directive {
                     name: link_directive_name.clone(),
-                    arguments: directive.arguments,
+                    arguments,
                 },
             )?;
         }

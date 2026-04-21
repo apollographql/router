@@ -26,8 +26,6 @@ use tower::ServiceExt as _;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
-use tracing::event;
-use tracing_core::Level;
 
 use crate::Configuration;
 use crate::apollo_studio_interop::ReferencedEnums;
@@ -301,33 +299,10 @@ impl ExecutionService {
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
-                if query.unauthorized.errors.log {
-                    let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
-
-                    event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
-                }
-
-                match query.unauthorized.errors.response {
-                    crate::plugins::authorization::ErrorLocation::Errors => for path in &query.unauthorized.paths {
-                        response.errors.push(Error::builder()
-                        .message("Unauthorized field or type")
-                        .path(path.clone())
-                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
-                    },
-                    crate::plugins::authorization::ErrorLocation::Extensions =>{
-                        if !query.unauthorized.paths.is_empty() {
-                            let mut v = vec![];
-                            for path in &query.unauthorized.paths{
-                                v.push(serde_json_bytes::to_value(Error::builder()
-                                .message("Unauthorized field or type")
-                                .path(path.clone())
-                                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build()).expect("error serialization should not fail"));
-                            }
-                            response.extensions.insert("authorizationErrors", Value::Array(v));
-                        }
-                    },
-                    crate::plugins::authorization::ErrorLocation::Disabled => {},
-                }
+                query.unauthorized.log_unauthorized_paths();
+                query
+                    .unauthorized
+                    .update_response_with_unauthorized_path_errors(&mut response);
             }
 
             if let Some(filtered_query) = query.filtered_query.as_ref() {
@@ -336,21 +311,17 @@ impl ExecutionService {
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
-                    insert_result_coercion_errors
+                    insert_result_coercion_errors,
                 );
             }
 
-            paths.extend(
-                query
-                    .format_response(
-                        &mut response,
-                        variables.clone(),
-                        schema.api_schema(),
-                        variables_set,
-                        insert_result_coercion_errors
-                    )
-                    ,
-            );
+            paths.extend(query.format_response(
+                &mut response,
+                variables.clone(),
+                schema.api_schema(),
+                variables_set,
+                insert_result_coercion_errors,
+            ));
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
@@ -375,7 +346,9 @@ impl ExecutionService {
                 .extensions()
                 .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
                 .unwrap_or_default();
-            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) =
+                (metrics_ref_mode, &response.data)
+            {
                 extract_enums_from_response(
                     query.clone(),
                     schema.api_schema(),
@@ -385,8 +358,8 @@ impl ExecutionService {
             };
 
             context
-                    .extensions()
-                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
+                .extensions()
+                .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

@@ -101,7 +101,7 @@ mod test_header_value_parse {
     fn simple_expression() {
         assert_debug_snapshot!(
             HeaderValue::from_str("{$config.one}"),
-            @r###"
+            @r#"
         Ok(
             HeaderValue(
                 StringTemplate {
@@ -147,7 +147,7 @@ mod test_header_value_parse {
                                             },
                                         },
                                     ),
-                                    spec: V0_2,
+                                    spec: V0_3,
                                 },
                                 location: 1..12,
                             },
@@ -156,14 +156,14 @@ mod test_header_value_parse {
                 },
             ),
         )
-        "###
+        "#
         );
     }
     #[test]
     fn mixed_constant_and_expression() {
         assert_debug_snapshot!(
             HeaderValue::from_str("text{$config.one}text"),
-            @r###"
+            @r#"
         Ok(
             HeaderValue(
                 StringTemplate {
@@ -215,7 +215,7 @@ mod test_header_value_parse {
                                             },
                                         },
                                     ),
-                                    spec: V0_2,
+                                    spec: V0_3,
                                 },
                                 location: 5..16,
                             },
@@ -230,7 +230,7 @@ mod test_header_value_parse {
                 },
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -253,7 +253,7 @@ mod test_header_value_parse {
     fn expressions_with_nested_braces() {
         assert_debug_snapshot!(
             HeaderValue::from_str("const{$config.one { two { three } }}another-const"),
-            @r###"
+            @r#"
         Ok(
             HeaderValue(
                 StringTemplate {
@@ -373,7 +373,7 @@ mod test_header_value_parse {
                                             },
                                         },
                                     ),
-                                    spec: V0_2,
+                                    spec: V0_3,
                                 },
                                 location: 6..35,
                             },
@@ -388,7 +388,7 @@ mod test_header_value_parse {
                 },
             ),
         )
-        "###
+        "#
         );
     }
 

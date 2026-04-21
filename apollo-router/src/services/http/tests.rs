@@ -92,6 +92,15 @@ fn make_service(
 
 /// Send a JSON request through the service and return the response
 async fn send_request(service: HttpClientService, uri: Uri, body: &'static str) -> HttpResponse {
+    try_send_request(service, uri, body).await.unwrap()
+}
+
+/// Like [`send_request`] but returns the `Result` so callers can assert on failures.
+async fn try_send_request(
+    service: HttpClientService,
+    uri: Uri,
+    body: &'static str,
+) -> Result<HttpResponse, BoxError> {
     service
         .oneshot(HttpRequest {
             http_request: http::Request::builder()
@@ -102,7 +111,6 @@ async fn send_request(service: HttpClientService, uri: Uri, body: &'static str) 
             context: Context::new(),
         })
         .await
-        .unwrap()
 }
 
 /// Assert the response is 200 OK with the expected body bytes
@@ -318,6 +326,44 @@ async fn tls_server_with_client_auth(
             {
                 eprintln!("failed to serve connection: {err:#}");
             }
+        });
+    }
+}
+
+/// Test server for TLS with a pre-built [`ServerConfig`].
+///
+/// Unlike [`tls_server`], this variant does not panic when the TLS handshake fails,
+/// making it suitable for negative tests (e.g. certificate rejection).
+async fn tls_server_with_config(
+    listener: TcpListener,
+    tls_config: Arc<ServerConfig>,
+    body: &'static str,
+) {
+    let acceptor = TlsAcceptor::from(tls_config);
+
+    loop {
+        let (stream, _) = listener.accept().await.expect("accepting connections");
+        let acceptor = acceptor.clone();
+        tokio::spawn(async move {
+            let Ok(acceptor_stream) = acceptor.accept(stream).await else {
+                return;
+            };
+            let tokio_stream = TokioIo::new(acceptor_stream);
+
+            let hyper_service =
+                hyper::service::service_fn(move |_request: Request<Incoming>| async {
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(body.into())
+                            .unwrap(),
+                    )
+                });
+
+            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(tokio_stream, hyper_service)
+                .await;
         });
     }
 }
@@ -564,49 +610,277 @@ mod tls {
         let response = send_request(service, url, r#"{"query":"{ test }"}"#).await;
         assert_response_body(response, r#"{"data": null}"#).await;
     }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_untrusted_self_signed_is_rejected(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                load_certs(certificate_pem).unwrap(),
+                load_key(key_pem).unwrap(),
+            )
+            .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        // No certificate_authorities configured → client has empty root store
+        let config = Configuration::default();
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected TLS handshake to fail when server cert is not trusted"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_wrong_ca_is_rejected(#[case] kind: ServiceKind) {
+        let server_certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let mut server_certs = load_certs(server_certificate_pem).unwrap();
+        server_certs.extend(load_certs(ca_pem).unwrap());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(server_certs, load_key(key_pem).unwrap())
+            .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        // Client trusts the self-signed cert, but the server presents a CA-signed cert
+        let wrong_ca_pem = include_str!("./testdata/server_self_signed.crt");
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(wrong_ca_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected TLS handshake to fail when client trusts the wrong CA"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_client_auth_missing_cert_is_rejected(#[case] kind: ServiceKind) {
+        let server_certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let server_key_pem = include_str!("./testdata/server.key");
+
+        let mut server_certificates = load_certs(server_certificate_pem).unwrap();
+        let ca_certificate = load_certs(ca_pem).unwrap().remove(0);
+        server_certificates.push(ca_certificate.clone());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut client_auth_roots = RootCertStore::empty();
+        client_auth_roots.add(ca_certificate).unwrap();
+        let client_auth = WebPkiClientVerifier::builder(Arc::new(client_auth_roots))
+            .build()
+            .unwrap();
+        let server_config = Arc::new(
+            ServerConfig::builder()
+                .with_client_cert_verifier(client_auth)
+                .with_single_cert(server_certificates, load_key(server_key_pem).unwrap())
+                .unwrap(),
+        );
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            server_config,
+            r#"{"data": null}"#,
+        ));
+
+        // Client trusts the CA but provides no client certificate
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(ca_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected connection to fail when server requires client cert but none is provided"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_1_3_supported(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config =
+            ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(
+                    load_certs(certificate_pem).unwrap(),
+                    load_key(key_pem).unwrap(),
+                )
+                .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert_response_body(response, r#"{"data": null}"#).await;
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_1_2_supported(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config =
+            ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
+                .with_no_client_auth()
+                .with_single_cert(
+                    load_certs(certificate_pem).unwrap(),
+                    load_key(key_pem).unwrap(),
+                )
+                .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert_response_body(response, r#"{"data": null}"#).await;
+    }
 }
 
 mod h2c_cleartext {
     use super::*;
+    use crate::configuration::shared::Client;
 
     // Starts a local server that responds with a default GraphQL response over plain HTTP.
     async fn emulate_h2c_server(listener: TcpListener) {
-        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .status(StatusCode::OK)
-                .body(
-                    serde_json::to_string(&Response {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let response_builder =
+                http::Response::builder().header(CONTENT_TYPE, APPLICATION_JSON.essence_str());
+
+            let response = match request.version() {
+                Version::HTTP_2 => {
+                    let response_body = serde_json::to_string(&Response {
                         data: Some(Value::default()),
                         ..Response::default()
-                    })
-                    .expect("always valid")
-                    .into(),
-                )
-                .unwrap())
+                    });
+                    response_builder
+                        .status(StatusCode::OK)
+                        .body(response_body.unwrap().into())
+                }
+                Version::HTTP_11 => response_builder
+                    .status(StatusCode::HTTP_VERSION_NOT_SUPPORTED)
+                    .body(Body::empty()),
+                version => panic!("unexpected version {version:?}"),
+            };
+
+            Ok(response.unwrap())
         }
 
-        // XXX(@goto-bus-stop): ideally this server would *only* support HTTP 2 and not HTTP 1
         serve(listener, handle).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_h2c() {
+    async fn test_subgraph_h2c_works_with_http2only() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_h2c_server(listener));
 
-        let subgraph_service = HttpClientService::test_new(
-            "test",
-            rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("read native TLS root certificates")
-                .with_no_client_auth(),
-            crate::configuration::shared::Client::builder()
-                .experimental_http2(Http2Config::Http2Only)
-                .build(),
-        )
-        .expect("can create a HttpService");
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = send_request(
@@ -615,7 +889,234 @@ mod h2c_cleartext {
             r#"{"query":"{ me { name username } }"#,
         )
         .await;
+
         assert_response_body(response, r#"{"data":null}"#).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c_not_used_with_enable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Enable)
+            .build();
+        let subgraph_service =
+            HttpClientService::from_client_config(client_config).expect("can create a HttpService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = send_request(
+            subgraph_service,
+            url,
+            r#"{"query":"{ me { name username } }"#,
+        )
+        .await;
+
+        // h2c only works with `Http2Config::Http2Only` - hyper only supports HTTP/2 with TLS or
+        // with 'prior knowledge'
+        // https://github.com/hyperium/hyper/issues/2411
+        assert_eq!(
+            response.http_response.status(),
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        );
+    }
+}
+
+mod h2c_keep_alive {
+    use std::pin::Pin;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    use tokio::io::AsyncRead;
+    use tokio::io::AsyncWrite;
+    use tokio::io::ReadBuf;
+    use tokio::net::TcpStream;
+    use tokio::sync::mpsc::Sender;
+    use tokio::task::JoinHandle;
+
+    use super::*;
+    use crate::configuration::shared::Client;
+
+    /// Wraps a TcpStream and emits a `()` on the `ping_tx` channel each time the server reads an H2
+    /// PING frame sent by the client.
+    struct SpyStream {
+        inner: TcpStream,
+        ping_tx: Sender<()>,
+    }
+
+    impl SpyStream {
+        fn new(stream: TcpStream, ping_tx: Sender<()>) -> Self {
+            Self {
+                inner: stream,
+                ping_tx,
+            }
+        }
+    }
+
+    impl AsyncRead for SpyStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let before = buf.filled().len();
+
+            let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+            if matches!(result, Poll::Ready(Ok(()))) {
+                let new_bytes = buf.filled()[before..].to_vec();
+                if is_ping_frame(&new_bytes) {
+                    self.ping_tx.try_send(()).unwrap();
+                }
+            }
+
+            result
+        }
+    }
+
+    impl AsyncWrite for SpyStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// Check whether a raw byte slice is an H2 PING frame (not an ACK) per RFC 7540.
+    ///
+    /// This assumes the PING frame arrives as its own chunk — it inspects fixed offsets 3 and 4
+    /// for the frame type and flags rather than doing full frame parsing. In practice this works
+    /// because hyper sends keep-alive PINGs as standalone writes.
+    ///
+    /// References: [frame header] (§4.1), [PING frame] (§6.7)
+    ///
+    /// [frame header]: https://datatracker.ietf.org/doc/html/rfc7540#section-4.1
+    /// [PING frame]: https://datatracker.ietf.org/doc/html/rfc7540#section-6.7
+    fn is_ping_frame(data: &[u8]) -> bool {
+        const FRAME_HEADER_SIZE: usize = 9;
+        const PING_FRAME_TYPE: u8 = 0x06;
+        const ACK_FLAG: u8 = 0x01;
+
+        if data.len() < FRAME_HEADER_SIZE {
+            return false;
+        }
+
+        let frame_type = data[3];
+        let flags = data[4];
+
+        frame_type == PING_FRAME_TYPE && flags & ACK_FLAG == 0
+    }
+
+    /// Start a spy H2 server that counts H2 PING frames sent by the client. Returns a
+    /// [`JoinHandle`] that resolves to the total ping count once the server connection closes.
+    fn start_spy_server_and_ping_counter(listener: TcpListener) -> JoinHandle<usize> {
+        let (ping_tx, mut ping_rx) = tokio::sync::mpsc::channel(100);
+
+        let _spy_server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let spy_stream = SpyStream::new(stream, ping_tx);
+
+            let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                let response_body = serde_json::to_string(&Response {
+                    data: Some(Value::default()),
+                    ..Response::default()
+                })
+                .unwrap();
+                Ok::<_, Infallible>(
+                    http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(Body::from(response_body))
+                        .unwrap(),
+                )
+            });
+
+            // serve_connection drives the h2 connection, including automatic PING ACKs
+            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(spy_stream), svc)
+                .await;
+        });
+
+        tokio::spawn(async move {
+            let mut ping_count = 0;
+            while let Some(()) = ping_rx.recv().await {
+                ping_count += 1;
+            }
+            ping_count
+        })
+    }
+
+    /// Start a spy server, make one request with the given client config, wait for keep-alive
+    /// intervals to fire, then return the number of H2 PING frames the server observed.
+    async fn run_server_and_count_keep_alive_pings(
+        client_config: Client,
+    ) -> Result<usize, BoxError> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let socket_addr = listener.local_addr()?;
+
+        let ping_counter = start_spy_server_and_ping_counter(listener);
+        let service = HttpClientService::from_client_config(client_config)?;
+
+        let url = Uri::from_str(&format!("http://{socket_addr}"))?;
+        let request = HttpRequest {
+            http_request: Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{"query":"{ me }"}"#))?,
+            context: crate::Context::new(),
+        };
+
+        // Clone so the service (and its connection pool) stays alive after the request
+        service.clone().oneshot(request).await?;
+
+        // Wait for several keep-alive intervals while the connection sits idle in the pool
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(service);
+
+        Ok(ping_counter.await?)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_keep_alive_pings_are_sent() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            .experimental_http2_keep_alive_interval(Duration::from_millis(50))
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert!(
+            ping_count > 0,
+            "expected at least one H2 PING frame from the client, got {ping_count}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_pings_without_keep_alive() {
+        let client_config = Client::builder()
+            .experimental_http2(Http2Config::Http2Only)
+            // no keep-alive interval configured
+            .build();
+
+        let ping_count = run_server_and_count_keep_alive_pings(client_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            ping_count, 0,
+            "expected no H2 PING frames when keep-alive is not configured"
+        );
     }
 }
 
@@ -1086,5 +1587,58 @@ mod pool_idle_timeout {
             expected_connections,
             "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
         );
+    }
+}
+
+mod redis_tls_config {
+    //! Exercises the `generate_tls_client_config` → `TlsConnector` path that Redis uses.
+    //!
+    //! The router's Redis integration builds a `tokio_rustls::TlsConnector` from a
+    //! `ClientConfig` produced by `crate::services::generate_tls_client_config` (re-exported
+    //! from `subgraph_service`). These tests verify that this construction succeeds for the
+    //! same cert scenarios used by the HTTP client, catching API breakages in rustls/tokio-rustls
+    //! upgrades even without a live Redis server.
+
+    use super::*;
+
+    #[test]
+    fn custom_ca_produces_valid_connector() {
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let mut root_store = RootCertStore::empty();
+        for cert in load_certs(ca_pem).unwrap() {
+            root_store.add(cert).unwrap();
+        }
+
+        let tls_config =
+            crate::services::generate_tls_client_config(Some(root_store), None).unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    }
+
+    #[test]
+    fn client_auth_produces_valid_connector() {
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let client_cert_pem = include_str!("./testdata/client.crt");
+        let client_key_pem = include_str!("./testdata/client.key");
+
+        let mut root_store = RootCertStore::empty();
+        for cert in load_certs(ca_pem).unwrap() {
+            root_store.add(cert).unwrap();
+        }
+
+        let client_auth = TlsClientAuth {
+            certificate_chain: load_certs(client_cert_pem).unwrap(),
+            key: load_key(client_key_pem).unwrap(),
+        };
+
+        let tls_config =
+            crate::services::generate_tls_client_config(Some(root_store), Some(&client_auth))
+                .unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    }
+
+    #[test]
+    fn native_roots_produces_valid_connector() {
+        let tls_config = crate::services::generate_tls_client_config(None, None).unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 }

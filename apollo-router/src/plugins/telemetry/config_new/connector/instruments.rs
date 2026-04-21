@@ -217,10 +217,8 @@ impl ConnectorInstruments {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseHeader {
-                                connector_http_response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(ConnectorSelector::ConnectorResponseBodySize {
+                                connector_http_response_body_size: true,
                             })),
                             selectors,
                             updated: false,

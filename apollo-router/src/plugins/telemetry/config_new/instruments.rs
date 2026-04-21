@@ -124,6 +124,10 @@ pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.resp
 
 pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
     "apollo.router.operations.fetch.duration";
+
+pub(super) const APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED: &str =
+    "apollo.router.operations.subscriptions.terminated.client";
+
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
@@ -255,6 +259,18 @@ impl InstrumentsConfig {
             self.router.attributes.router_overhead.is_enabled(),
         ) {
             static_instruments.insert(name, instrument);
+        }
+
+        if self.router.attributes.subscriptions_terminated.is_enabled() {
+            static_instruments.insert(
+                APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
+                        .with_description("Count of subscription terminations")
+                        .build(),
+                ),
+            );
         }
 
         for (instrument_name, instrument) in &self.router.custom {
@@ -402,6 +418,8 @@ impl InstrumentsConfig {
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
+                            // Compressed sizes are not yet known at the time on_response is called,
+                            // so this will always be the uncompressed size.
                             selector: Some(Arc::new(RouterSelector::ResponseSizeHint { response_size_hint: true })),
                             selectors,
                             updated: false,
@@ -444,12 +462,42 @@ impl InstrumentsConfig {
             &static_instruments,
         );
 
+        let subscriptions_terminated = self
+            .router
+            .attributes
+            .subscriptions_terminated
+            .is_enabled()
+            .then(|| {
+                let attrs = match &self.router.attributes.subscriptions_terminated {
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        attributes.attributes.clone()
+                    }
+                    _ => SubscriptionsTerminatedAttributes::default(),
+                };
+                SubscriptionsTerminatedCounter {
+                    counter: static_instruments
+                        .get(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
+                        .expect(
+                            "cannot get static instrument for subscriptions terminated; this should not happen",
+                        )
+                        .as_counter_f64()
+                        .cloned()
+                        .expect(
+                            "cannot convert instrument to counter for subscriptions terminated; this should not happen",
+                        ),
+                    reason_enabled: attrs.reason(),
+                    subgraph_name_enabled: attrs.subgraph_name(),
+                    client_name_enabled: attrs.client_name(),
+                }
+            });
+
         RouterInstruments {
             http_server_request_duration,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
             router_overhead,
+            subscriptions_terminated,
             custom: CustomInstruments::new(&self.router.custom, static_instruments),
         }
     }
@@ -708,10 +756,8 @@ impl InstrumentsConfig {
                                 )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
-                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
-                                subgraph_response_header: "content-length".to_string(),
-                                redact: None,
-                                default: None,
+                            selector: Some(Arc::new(SubgraphSelector::SubgraphResponseBodySize {
+                                subgraph_response_body_size: true,
                             })),
                             selectors,
                             updated: false,
@@ -1125,6 +1171,87 @@ impl DefaultForLevel for ActiveRequestsAttributes {
             DefaultAttributeRequirementLevel::Recommended
             | DefaultAttributeRequirementLevel::None => {}
         }
+    }
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubscriptionsTerminatedAttributes {
+    /// The reason the subscription terminated
+    reason: Option<bool>,
+    /// The subgraph name
+    #[serde(rename = "subgraph.name")]
+    subgraph_name: Option<bool>,
+    /// The client name
+    #[serde(rename = "client.name")]
+    client_name: Option<bool>,
+}
+
+impl SubscriptionsTerminatedAttributes {
+    fn reason(&self) -> bool {
+        self.reason.unwrap_or(false)
+    }
+    fn subgraph_name(&self) -> bool {
+        self.subgraph_name.unwrap_or(false)
+    }
+    fn client_name(&self) -> bool {
+        self.client_name.unwrap_or(false)
+    }
+}
+
+impl DefaultForLevel for SubscriptionsTerminatedAttributes {
+    fn defaults_for_level(
+        &mut self,
+        requirement_level: DefaultAttributeRequirementLevel,
+        _kind: TelemetryDataKind,
+    ) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                self.reason.get_or_insert(true);
+                self.subgraph_name.get_or_insert(true);
+            }
+            DefaultAttributeRequirementLevel::Recommended
+            | DefaultAttributeRequirementLevel::None => {}
+        }
+    }
+}
+
+/// Handle stashed in the request context so that
+/// [`Multipart`](crate::protocols::multipart::Multipart) can record the
+/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time
+/// with only the attributes that are enabled in config.
+#[derive(Clone, Debug)]
+pub(crate) struct SubscriptionsTerminatedCounter {
+    pub(crate) counter: Counter<f64>,
+    pub(crate) reason_enabled: bool,
+    pub(crate) subgraph_name_enabled: bool,
+    pub(crate) client_name_enabled: bool,
+}
+
+impl SubscriptionsTerminatedCounter {
+    pub(crate) fn record(
+        &self,
+        reason: &str,
+        subgraph_name: Option<&str>,
+        client_name: Option<&str>,
+    ) {
+        let mut attrs = Vec::with_capacity(3);
+        if self.reason_enabled {
+            attrs.push(opentelemetry::KeyValue::new("reason", reason.to_string()));
+        }
+        if self.subgraph_name_enabled {
+            attrs.push(opentelemetry::KeyValue::new(
+                "subgraph.name",
+                subgraph_name.unwrap_or_default().to_string(),
+            ));
+        }
+        if self.client_name_enabled {
+            attrs.push(opentelemetry::KeyValue::new(
+                "client.name",
+                client_name.unwrap_or_default().to_string(),
+            ));
+        }
+        self.counter.add(1.0, &attrs);
     }
 }
 
@@ -2546,6 +2673,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
+    use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphResponseBodySize;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
@@ -3008,12 +3136,12 @@ mod tests {
                                         .subgraph_request(http_request)
                                         .build();
 
-                                        let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
-                                        let body_size = body.len();
-                                        request.context.extensions()
-                                            .with_lock(|lock| {
-                                                lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                            });
+                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body_size = body.len();
+                                    request.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                        });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
@@ -3037,6 +3165,14 @@ mod tests {
                                         .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
+
+                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body_size = body.len();
+                                    response.context.extensions()
+                                        .with_lock(|lock| {
+                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                        });
+
                                     subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
@@ -3232,6 +3368,7 @@ mod tests {
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
+                                        context: context.clone(),
                                         transport_result: Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,

@@ -1,17 +1,17 @@
 version: 2.1
 
-# Cache key bump: 3
+# Cache key bump: 5
 
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@6.0.0
-  secops: apollo/circleci-secops-orb@2.0.7
+  slack: circleci/slack@6.1.3
+  secops: apollo/circleci-secops-orb@2.0.9
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,16 +19,16 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
       - image: cimg/redis:7.4.8
-      - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.38.0
+      - image: openzipkin/zipkin:3.6.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.48.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.8
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
@@ -50,14 +50,14 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -101,7 +101,7 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v4-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   merge_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.merge_version" }}'
@@ -278,6 +278,12 @@ commands:
           name: Fetch dependencies
           command: cargo fetch --locked
 
+  xtask_fmt_check:
+    steps:
+      - run:
+          name: Check formatting
+          command: cargo fmt --all -- --config imports_granularity=Item,group_imports=StdExternalCrate --check
+
   xtask_lint:
     steps:
       - restore_cache:
@@ -418,6 +424,19 @@ commands:
           path: ./codecov_report.json
 
 jobs:
+  fmt_check:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_fmt_check
+
   lint:
     environment:
       <<: *common_job_environment
@@ -844,7 +863,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.28.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: small
     environment:
       <<: *common_job_environment
@@ -965,6 +984,10 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_updated_cargo_deps >>
     jobs:
+      - fmt_check:
+          matrix:
+            parameters:
+              platform: [amd_linux_helm]
       - lint:
           matrix:
             parameters:
@@ -982,9 +1005,7 @@ workflows:
           # this should be changed back to true on dev after release
           fuzz: false
           requires:
-            - lint
-            - check_helm
-            - check_compliance
+            - fmt_check
           matrix:
             parameters:
               platform:

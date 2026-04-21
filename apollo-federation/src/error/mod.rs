@@ -131,8 +131,25 @@ pub struct SubgraphLocation {
 
 pub type Locations = Vec<SubgraphLocation>;
 
+/// Supergraph coordinates carried on `@inaccessible` API schema errors so composition can attach
+/// subgraph source locations (port of JS `inaccessible_elements` / `inaccessible_referencers`
+/// extensions and `updateInaccessibleErrorsWithLinkToSubgraphs`). Those locations are surfaced on
+/// [`CompositionError::MergeError`] as [`SubgraphLocation`] entries (Rust equivalent of JS
+/// `withModifiedErrorNodes`).
+#[derive(Clone, Debug, Default)]
+pub struct InaccessibleCompositionLinks {
+    pub elements: Vec<String>,
+    pub referencers: Vec<String>,
+}
+
 pub(crate) trait HasLocations {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
+}
+
+impl<HL: HasLocations> HasLocations for &HL {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        HL::locations(self, subgraph)
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -144,7 +161,10 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{error}")]
-    MergeError { error: SingleFederationError },
+    MergeError {
+        error: SingleFederationError,
+        locations: Locations,
+    },
     #[error("{error}")]
     MergeValidationError { error: SingleFederationError },
     #[error("{message}")]
@@ -479,6 +499,28 @@ impl CompositionError {
         }
     }
 
+    pub(crate) fn append_locations(
+        mut self,
+        new_locations: impl IntoIterator<Item = SubgraphLocation>,
+    ) -> Self {
+        match &mut self {
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::MergeError { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations.extend(new_locations),
+            // Remaining errors do not have an obvious way to appending locations, so we do nothing
+            _ => {}
+        }
+        self
+    }
+
     pub fn locations(&self) -> &[SubgraphLocation] {
         match self {
             Self::SubgraphError { locations, .. }
@@ -489,6 +531,7 @@ impl CompositionError {
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
             | Self::InvalidFieldSharing { locations, .. }
+            | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
             | Self::InputFieldDefaultMismatch { locations, .. } => locations,
             _ => &[],
@@ -744,19 +787,40 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
     #[error("{message}")]
-    ReferencedInaccessible { message: String },
+    ReferencedInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    DefaultValueUsesInaccessible { message: String },
+    DefaultValueUsesInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    QueryRootTypeInaccessible { message: String },
+    QueryRootTypeInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    RequiredInaccessible { message: String },
+    RequiredInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    ImplementedByInaccessible { message: String },
+    ImplementedByInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    DisallowedInaccessible { message: String },
+    DisallowedInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    OnlyInaccessibleChildren { message: String },
+    OnlyInaccessibleChildren {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
     RequiredInputFieldMissingInSomeSubgraph { message: String },
     #[error("{message}")]
@@ -830,6 +894,21 @@ pub enum SingleFederationError {
     ListSizeInvalidSizedField { message: String },
     #[error("{message}")]
     InvalidTagName { message: String },
+    /// `@cacheTag` directive validation errors (subgraph)
+    #[error("cacheTag format is invalid: {message}")]
+    CacheTagInvalidFormat { message: String },
+    #[error(
+        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields or entity types"
+    )]
+    CacheTagAppliedToNonRootField { type_name: Name, field_name: Name },
+    #[error("cacheTag applied on root fields can only reference arguments in format using $args")]
+    CacheTagInvalidFormatArgumentOnRootField,
+    #[error("cacheTag applied on types can only reference arguments in format using $key")]
+    CacheTagInvalidFormatArgumentOnEntity { type_name: Name, format: String },
+    #[error(
+        "Object \"{0}\" is not an entity. cacheTag can only apply on resolvable entities, object containing at least 1 @key directive and resolvable"
+    )]
+    CacheTagEntityNotResolvable(Name),
     #[error("{message}")]
     QueryRootMissing { message: String },
     #[error(
@@ -1066,6 +1145,19 @@ impl SingleFederationError {
             #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::CacheTagInvalidFormat { .. } => ErrorCode::CacheTagInvalidFormat,
+            SingleFederationError::CacheTagAppliedToNonRootField { .. } => {
+                ErrorCode::CacheTagAppliedToNonRootField
+            }
+            SingleFederationError::CacheTagInvalidFormatArgumentOnRootField => {
+                ErrorCode::CacheTagInvalidFormatArgumentOnRootField
+            }
+            SingleFederationError::CacheTagInvalidFormatArgumentOnEntity { .. } => {
+                ErrorCode::CacheTagInvalidFormatArgumentOnEntity
+            }
+            SingleFederationError::CacheTagEntityNotResolvable { .. } => {
+                ErrorCode::CacheTagEntityNotResolvable
+            }
             SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
             SingleFederationError::AuthRequirementsAppliedOnInterface { .. } => {
                 ErrorCode::AuthRequirementsAppliedOnInterface
@@ -2369,6 +2461,66 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static CACHE_TAG_INVALID_FORMAT: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_INVALID_FORMAT".to_owned(),
+        "Invalid format string in @cacheTag directive.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD".to_owned(),
+        "@cacheTag on a field can only be applied on root fields.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD".to_owned(),
+            "@cacheTag on root fields can only reference arguments using $args in format."
+                .to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.12.0",
+                replaces: &[],
+            }),
+        )
+    });
+
+static CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
+            "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY".to_owned(),
+            "cacheTag applied on types can only reference arguments in format using $key, and each referenced field must be a member of every @key field set.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.12.0",
+                replaces: &[],
+            }),
+        )
+    },
+);
+
+static CACHE_TAG_ENTITY_NOT_RESOLVABLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CACHE_TAG_ENTITY_NOT_RESOLVABLE".to_owned(),
+        "@cacheTag can only apply on resolvable entities (object with at least one @key directive)."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.12.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDefinition> =
     LazyLock::new(|| {
         ErrorCodeDefinition::new(
@@ -2515,6 +2667,11 @@ pub enum ErrorCode {
     ContextNoResolvableKey,
     ContextSelectionInvalid,
     InvalidTagName,
+    CacheTagInvalidFormat,
+    CacheTagAppliedToNonRootField,
+    CacheTagInvalidFormatArgumentOnRootField,
+    CacheTagInvalidFormatArgumentOnEntity,
+    CacheTagEntityNotResolvable,
     OverrideLabelInvalid,
     ContextualArgumentNotContextualInAllSubgraphs,
     QueryRootMissing,
@@ -2637,6 +2794,15 @@ impl ErrorCode {
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
             ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::CacheTagInvalidFormat => &CACHE_TAG_INVALID_FORMAT,
+            ErrorCode::CacheTagAppliedToNonRootField => &CACHE_TAG_APPLIED_TO_NON_ROOT_FIELD,
+            ErrorCode::CacheTagInvalidFormatArgumentOnRootField => {
+                &CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD
+            }
+            ErrorCode::CacheTagInvalidFormatArgumentOnEntity => {
+                &CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY
+            }
+            ErrorCode::CacheTagEntityNotResolvable => &CACHE_TAG_ENTITY_NOT_RESOLVABLE,
             ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
             ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
             ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {

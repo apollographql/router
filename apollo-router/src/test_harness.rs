@@ -647,7 +647,7 @@ async fn test_intercept_subgraph_network_requests() {
 /// # Examples
 ///
 /// ```rust
-/// use crate::test_harness:tracing_test;
+/// use crate::test_harness::tracing_test;
 /// fn test_logs_are_captured() {
 ///     let _guard = tracing_test::dispatcher_guard();
 ///
@@ -679,5 +679,19 @@ pub(crate) mod tracing_test {
 
     pub(crate) fn logs_contain(value: &str) -> bool {
         logs_with_scope_contain("apollo_router", value)
+    }
+
+    pub(crate) fn logs_with_scope_assert<F>(scope: &str, f: F) -> Result<(), String>
+    where
+        F: Fn(&[&str]) -> Result<(), String>,
+    {
+        ::tracing_test::internal::logs_assert(scope, f)
+    }
+
+    pub(crate) fn logs_assert<F>(f: F) -> Result<(), String>
+    where
+        F: Fn(&[&str]) -> Result<(), String>,
+    {
+        logs_with_scope_assert("apollo_router", f)
     }
 }

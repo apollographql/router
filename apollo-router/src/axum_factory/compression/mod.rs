@@ -215,7 +215,7 @@ impl Encode for Compressor {
 mod tests {
     use async_compression::tokio::write::GzipDecoder;
     use futures::stream;
-    use rand::Rng;
+    use rand::RngExt as _;
     use tokio::io::AsyncWriteExt;
 
     use super::*;

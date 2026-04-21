@@ -45,9 +45,9 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::same_type;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
-
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
 
@@ -429,11 +429,21 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
     }
 }
 
+// **** WARNING: DO NOT USE ****
+//
+// Subgraph schema building, at this time of writing, does not really support
+// input objects in specs. We did a number of one-off things to support them in
+// the connect spec's case, and it will be non-maintainable/bug-prone to do them
+// again.
+//
+// There's work to be done to support input objects more generally; please see
+// https://github.com/apollographql/federation/pull/3311 for more information.
 pub(crate) struct InputObjectTypeSpecification {
     pub(crate) name: Name,
     pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
 }
 
+// **** WARNING: DO NOT USE ****
 impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
     fn name(&self) -> &Name {
         &self.name
@@ -446,60 +456,115 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
         let field_specs = (self.fields)(schema);
+        let resolved_specs: IndexMap<Name, ResolvedArgumentSpecification> = field_specs
+            .into_iter()
+            .map(|spec| spec.resolve(schema, link).map(|r| (r.name.clone(), r)))
+            .collect::<Result<IndexMap<Name, ResolvedArgumentSpecification>, FederationError>>()?;
         let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
+            let mut errors: Vec<SingleFederationError> = vec![];
             // ensure existing definition is InputObject
             ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
             let existing_type = existing.get(schema.schema())?;
-            let ExtendedType::InputObject(existing_obj_type) = existing_type else {
+            let ExtendedType::InputObject(existing_input_obj_type) = existing_type else {
                 return Err(FederationError::internal(format!(
                     "Expected ExtendedType::InputObject but got {}",
                     TypeKind::from(existing_type)
                 )));
             };
-
-            // ensure all expected fields are present in the existing object type
-            let mut new_definition_fields = Vec::with_capacity(field_specs.len());
-            for field_spec in field_specs {
-                let field_def = field_spec.resolve(schema, link)?;
-                new_definition_fields.push(field_def);
+            // the following mimics `ensure_same_arguments()`, but with some changes.
+            for ResolvedArgumentSpecification {
+                name: field_name,
+                ty,
+                default_value,
+            } in resolved_specs.values()
+            {
+                if let Some(existing_field) = existing_input_obj_type.fields.get(field_name) {
+                    let mut existing_field_type = (*existing_field.ty).clone();
+                    if existing_field.ty.is_non_null() && !ty.is_non_null() {
+                        // It's ok to redefine an optional input field as mandatory. For
+                        // instance, if you want to force people on your team to provide a
+                        // "maxSize", you can redefine ConnectBatch as
+                        // `input ConnectBatch { maxSize: Int! }` to get validation. In
+                        // other words, you are allowed to always pass an input field that
+                        // is optional if you so wish.
+                        existing_field_type = existing_field_type.nullable();
+                    }
+                    // Note that while `ensureSameArguments()` allows input type
+                    // redefinitions (e.g. allowing users to declare `String` instead of a
+                    // custom scalar), this behavior can be confusing/error-prone more
+                    // generally, so we forbid this for now. We can relax this later on a
+                    // case-by-case basis if needed.
+                    //
+                    // Further, `ensureSameArguments()` would skip default value checking
+                    // if the input type was non-nullable. It's unclear why this is there;
+                    // it may have been a mistake due to the impression that non-nullable
+                    // inputs can't have default values (they can), or this may have been
+                    // to avoid some breaking change, but there's no such limitation in
+                    // the case of input objects, so we always validate default values
+                    // here.
+                    if !same_type(ty, &existing_field_type) {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: input field \"{field_name}\" should have type \"{ty}\" but found type \"{}\"", self.name, existing_field.ty)
+                            }
+                        )
+                    } else if default_value.as_ref() != existing_field.default_value.as_deref() {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: input field \"{field_name}\" should have default value \"{}\" but found default value \"{}\"",
+                                    self.name,
+                                    default_value.as_ref().unwrap_or(&Value::Null),
+                                    existing_field.default_value.as_deref().unwrap_or(&Value::Null),
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    // Not declaring an optional input field is ok: that means you won't
+                    // be able to pass a non-default value in your schema, but we allow
+                    // you that. But missing a required input field it not ok.
+                    if ty.is_non_null() && default_value.is_none() {
+                        errors.push(
+                            SingleFederationError::TypeDefinitionInvalid {
+                                message: format!("Invalid definition for type {}: missing required input field \"{field_name}\"", self.name)
+                            }
+                        )
+                    }
+                    continue;
+                }
             }
-            let existing_definition_fields: Vec<_> = existing_obj_type
-                .fields
-                .values()
-                .map(|v| v.node.clone())
+            for (existing_field_name, _) in &existing_input_obj_type.fields {
+                // If it's an expected input field, we already validated it. But we
+                // still need to reject unknown input fields.
+                if !resolved_specs.contains_key(existing_field_name) {
+                    errors.push(
+                        SingleFederationError::TypeDefinitionInvalid {
+                            message: format!("Invalid definition for type {}: unknown/unsupported input field \"{existing_field_name}\"", self.name)
+                        }
+                    )
+                }
+            }
+            MultipleFederationErrors::from_iter(errors).into_result()
+        } else {
+            let field_map: IndexMap<Name, Component<InputValueDefinition>> = resolved_specs
+                .into_iter()
+                .map(|(k, v)| (k, Component::new(v.into())))
                 .collect();
-            let errors = ensure_same_arguments(
-                new_definition_fields.as_slice(),
-                existing_definition_fields.as_slice(),
+            let type_pos = InputObjectTypeDefinitionPosition {
+                type_name: actual_name,
+            };
+            type_pos.pre_insert(schema)?;
+            type_pos.insert(
                 schema,
-                format!("input object type {actual_name}").as_str(),
-                |s| SingleFederationError::TypeDefinitionInvalid {
-                    message: s.to_string(),
-                },
-            );
-            return MultipleFederationErrors::from_iter(errors).into_result();
+                Node::new(InputObjectType {
+                    description: None,
+                    name: type_pos.type_name.clone(),
+                    directives: Default::default(),
+                    fields: field_map,
+                }),
+            )
         }
-
-        let mut field_map = IndexMap::default();
-        for field_spec in field_specs {
-            let field_def: InputValueDefinition = field_spec.resolve(schema, link)?.into();
-            field_map.insert(field_def.name.clone(), Component::new(field_def));
-        }
-
-        let type_pos = InputObjectTypeDefinitionPosition {
-            type_name: actual_name,
-        };
-        type_pos.pre_insert(schema)?;
-        type_pos.insert(
-            schema,
-            Node::new(InputObjectType {
-                description: None,
-                name: type_pos.type_name.clone(),
-                directives: Default::default(),
-                fields: field_map,
-            }),
-        )
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -538,9 +603,21 @@ type ArgumentMergerFactory =
 pub(crate) type StaticArgumentsTransform =
     dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
 
+/// Options for directive composition. Passed to `DirectiveSpecification::new` when the directive
+/// composes; groups composition-related parameters to keep the constructor under Clippy’s limit.
+#[derive(Clone)]
+pub(crate) struct DirectiveCompositionOptions {
+    pub(crate) supergraph_specification: &'static SupergraphSpecification,
+    pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
+    pub(crate) use_join_directive: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification: &'static SupergraphSpecification,
+    /// Whether this directive is composed via `@join__directive` in the supergraph.
+    /// Matches JS `DirectiveCompositionSpecification.useJoinDirective` (federation PR #3274).
+    pub(crate) use_join_directive: bool,
     /// Factory function returning an actual argument merger for given federation schema.
     pub(crate) argument_merger: Option<Rc<ArgumentMergerFactory>>,
     pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
@@ -561,17 +638,10 @@ impl DirectiveSpecification {
         args: &[DirectiveArgumentSpecification],
         repeatable: bool,
         locations: &[DirectiveLocation],
-        composes: bool,
-        supergraph_specification: Option<&'static SupergraphSpecification>,
-        static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
+        composition: Option<DirectiveCompositionOptions>,
     ) -> Self {
-        let mut composition: Option<DirectiveCompositionSpecification> = None;
-        if composes {
-            let Some(supergraph_specification) = supergraph_specification else {
-                panic!(
-                    "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
-                );
-            };
+        let mut composition_spec: Option<DirectiveCompositionSpecification> = None;
+        if let Some(opts) = composition {
             let mut argument_merger: Option<Rc<ArgumentMergerFactory>> = None;
             let arg_strategies_iter = args.iter().filter_map(|arg| {
                 Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
@@ -593,15 +663,16 @@ impl DirectiveSpecification {
                     arg_strategies,
                 ));
             }
-            composition = Some(DirectiveCompositionSpecification {
-                supergraph_specification,
+            composition_spec = Some(DirectiveCompositionSpecification {
+                supergraph_specification: opts.supergraph_specification,
+                use_join_directive: opts.use_join_directive,
                 argument_merger,
-                static_argument_transform,
+                static_argument_transform: opts.static_argument_transform,
             })
         }
         Self {
             name,
-            composition,
+            composition: composition_spec,
             args: args.to_vec(),
             repeatable,
             locations: locations.to_vec(),
@@ -1014,23 +1085,8 @@ mod tests {
     use crate::link::spec_definition::SpecDefinition;
     use crate::schema::FederationSchema;
     use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
+    use crate::schema::type_and_directive_specification::DirectiveCompositionOptions;
     use crate::schema::type_and_directive_specification::DirectiveSpecification;
-
-    #[test]
-    #[should_panic(
-        expected = "Should provide a @link specification to use in supergraph for directive @foo if it composes"
-    )]
-    fn must_have_supergraph_link_if_composed() {
-        DirectiveSpecification::new(
-            name!("foo"),
-            &[],
-            false,
-            &[DirectiveLocation::Object],
-            true,
-            None,
-            None,
-        );
-    }
 
     #[test]
     #[should_panic(
@@ -1063,13 +1119,15 @@ mod tests {
             ],
             false,
             &[DirectiveLocation::Object],
-            true,
-            Some(&|_| {
-                LINK_VERSIONS
-                    .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &dyn SpecDefinition)
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|_| {
+                    LINK_VERSIONS
+                        .find(&Version { major: 1, minor: 0 })
+                        .map(|v| v as &dyn SpecDefinition)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
             }),
-            None,
         );
     }
 
@@ -1090,13 +1148,15 @@ mod tests {
             }],
             true,
             &[DirectiveLocation::Object],
-            true,
-            Some(&|_| {
-                LINK_VERSIONS
-                    .find(&Version { major: 1, minor: 0 })
-                    .map(|v| v as &dyn SpecDefinition)
+            Some(DirectiveCompositionOptions {
+                supergraph_specification: &|_| {
+                    LINK_VERSIONS
+                        .find(&Version { major: 1, minor: 0 })
+                        .map(|v| v as &dyn SpecDefinition)
+                },
+                static_argument_transform: None,
+                use_join_directive: false,
             }),
-            None,
         );
     }
 }

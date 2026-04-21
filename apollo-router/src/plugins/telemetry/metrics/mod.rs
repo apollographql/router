@@ -5,6 +5,8 @@ mod named;
 pub(crate) mod otlp;
 mod overflow;
 pub(crate) mod prometheus;
+mod retry;
 
 pub(crate) use named::NamedMetricExporter;
 pub(crate) use overflow::OverflowMetricExporter;
+pub(crate) use retry::RetryMetricExporter;

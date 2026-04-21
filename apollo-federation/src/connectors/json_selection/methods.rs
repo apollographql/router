@@ -37,6 +37,7 @@ pub(super) enum ArrowMethod {
     Slice,
     Size,
     Entries,
+    JsonParse,
     JsonStringify,
     JoinNotNull,
     Filter,
@@ -60,6 +61,8 @@ pub(super) enum ArrowMethod {
     Mul,
     Div,
     Mod,
+    KeysToCamelCase,
+    KeysToCamelCaseDeep,
 
     // Future methods:
     TypeOf,
@@ -151,6 +154,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Slice => &public::SliceMethod,
             Self::Size => &public::SizeMethod,
             Self::Entries => &public::EntriesMethod,
+            Self::JsonParse => &public::JsonParseMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
             Self::Filter => &public::FilterMethod,
@@ -174,6 +178,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Mul => &public::MulMethod,
             Self::Div => &public::DivMethod,
             Self::Mod => &public::ModMethod,
+            Self::KeysToCamelCase => &public::KeysToCamelCaseMethod,
+            Self::KeysToCamelCaseDeep => &public::KeysToCamelCaseDeepMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -218,6 +224,7 @@ impl ArrowMethod {
             "not" => Some(Self::Not),
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
+            "jsonParse" => Some(Self::JsonParse),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
             "filter" => Some(Self::Filter),
@@ -231,6 +238,8 @@ impl ArrowMethod {
             "contains" => Some(Self::Contains),
             "toString" => Some(Self::ToString),
             "parseInt" => Some(Self::ParseInt),
+            "keysToCamelCase" => Some(Self::KeysToCamelCase),
+            "keysToCamelCaseDeep" => Some(Self::KeysToCamelCaseDeep),
             _ => None,
         };
 
@@ -255,6 +264,7 @@ impl ArrowMethod {
                 | Self::Slice
                 | Self::Size
                 | Self::Entries
+                | Self::JsonParse
                 | Self::JsonStringify
                 | Self::JoinNotNull
                 | Self::Filter
@@ -278,6 +288,8 @@ impl ArrowMethod {
                 | Self::Mul
                 | Self::Div
                 | Self::Mod
+                | Self::KeysToCamelCase
+                | Self::KeysToCamelCaseDeep
         )
     }
 }

@@ -261,6 +261,7 @@ impl LinkSpecDefinition {
             spec_alias: alias,
             imports,
             purpose: None,
+            line_column_range: None,
         });
         Ok(())
             .and_try(
@@ -361,8 +362,6 @@ impl SpecDefinition for LinkSpecDefinition {
             &self.create_definition_argument_specifications(),
             true,
             &[DirectiveLocation::Schema],
-            false,
-            None,
             None,
         ))]
     }

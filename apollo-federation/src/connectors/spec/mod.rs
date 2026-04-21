@@ -118,11 +118,9 @@ impl PartialOrd for ConnectSpec {
 }
 
 impl ConnectSpec {
-    /// Returns the most recently released [`ConnectSpec`]. Used only in tests
-    /// because using it production code leads to sudden accidental upgrades.
-    #[cfg(test)]
-    pub(crate) fn latest() -> Self {
-        Self::V0_2
+    /// Returns the most recently released [`ConnectSpec`].
+    pub fn latest() -> Self {
+        Self::V0_3
     }
 
     /// Returns the next version of the [`ConnectSpec`] to be released.
@@ -267,7 +265,7 @@ pub(crate) static CONNECT_VERSIONS: LazyLock<SpecDefinitions<ConnectSpecDefiniti
                 minor: 12,
             },
         ));
-        definitions.add(ConnectSpecDefinition::new(
+        definitions.add_preview(ConnectSpecDefinition::new(
             Version { major: 0, minor: 4 },
             Version {
                 major: 2,

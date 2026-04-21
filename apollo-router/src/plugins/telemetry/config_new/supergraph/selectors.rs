@@ -212,6 +212,11 @@ pub(crate) enum SupergraphSelector {
         /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
         is_primary_response: bool,
     },
+    /// The context ID of the request (unique per request).
+    ContextId {
+        /// The context ID
+        context_id: bool,
+    },
 }
 
 impl Selector for SupergraphSelector {
@@ -312,6 +317,9 @@ impl Selector for SupergraphSelector {
             }
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(request.context.id.clone()))
+            }
             // For response
             _ => None,
         }
@@ -406,6 +414,9 @@ impl Selector for SupergraphSelector {
             } if *is_primary => Some(true.into()),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
             // For request
             _ => None,
         }
@@ -508,6 +519,9 @@ impl Selector for SupergraphSelector {
                 .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -573,6 +587,9 @@ impl Selector for SupergraphSelector {
                 ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
                     == Some(serde_json_bytes::Value::Bool(true)),
             )),
+            SupergraphSelector::ContextId { context_id } if *context_id => {
+                Some(opentelemetry::Value::from(ctx.id.clone()))
+            }
             _ => None,
         }
     }
@@ -599,6 +616,7 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::Env { .. }
                     | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
+                    | SupergraphSelector::ContextId { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -612,6 +630,7 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::IsPrimaryResponse { .. }
                     | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
+                    | SupergraphSelector::ContextId { .. }
             ),
             Stage::ResponseEvent => matches!(
                 self,
@@ -625,6 +644,7 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::ResponseContext { .. }
                     | SupergraphSelector::Static(_)
                     | SupergraphSelector::StaticField { .. }
+                    | SupergraphSelector::ContextId { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -637,6 +657,7 @@ impl Selector for SupergraphSelector {
                     | SupergraphSelector::StaticField { .. }
                     | SupergraphSelector::ResponseContext { .. }
                     | SupergraphSelector::IsPrimaryResponse { .. }
+                    | SupergraphSelector::ContextId { .. }
             ),
             Stage::Drop => matches!(
                 self,
@@ -672,6 +693,8 @@ mod test {
     use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
     use crate::plugins::telemetry::otel;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
     use crate::spec::operation_limits::OperationLimits;
 
     #[test]
@@ -1198,5 +1221,50 @@ mod test {
             ),
             Some("default".into())
         );
+    }
+
+    #[test]
+    fn supergraph_context_id() {
+        let selector = SupergraphSelector::ContextId { context_id: true };
+        let context = crate::context::Context::new();
+        let expected_id: opentelemetry::Value = context.id.clone().into();
+
+        // Test on_request
+        let request = SupergraphRequest::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_request(&request).unwrap(), expected_id);
+
+        // Test on_response
+        let response = SupergraphResponse::fake_builder()
+            .context(context.clone())
+            .build()
+            .unwrap();
+        assert_eq!(selector.on_response(&response).unwrap(), expected_id);
+
+        // Test on_response_event
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
+                .unwrap(),
+            expected_id
+        );
+
+        // Test on_error
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("test error")), &context)
+                .unwrap(),
+            expected_id
+        );
+
+        // Test that context_id: false returns None
+        let selector_disabled = SupergraphSelector::ContextId { context_id: false };
+        let request = SupergraphRequest::fake_builder()
+            .context(context)
+            .build()
+            .unwrap();
+        assert!(selector_disabled.on_request(&request).is_none());
     }
 }

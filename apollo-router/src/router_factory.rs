@@ -986,7 +986,6 @@ mod test {
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
-    use crate::register_plugin;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::router_factory::inject_schema_id;
