@@ -15,6 +15,16 @@ telemetry:
             cardinality_limit: 20000
 ```
 
-Per-view configuration (`cardinality_limit`, `rename`, `description`, `unit`, `allowed_attribute_keys`) now works correctly on non-histogram instruments. Previously, any `views[]` entry without an explicit `aggregation` silently converted counters and gauges to histograms.
+**Behavior change for existing `views[]` entries on non-histogram instruments.** Previously, any `views[]` entry without an explicit `aggregation` silently converted counters and gauges to histograms. A counter named `my.counter` with a per-view entry would emit `my_counter_bucket`/`my_counter_sum`/`my_counter_count` instead of `my_counter_total`. Per-view configuration (`cardinality_limit`, `rename`, `description`, `unit`, `allowed_attribute_keys`) now preserves the instrument's native aggregation.
+
+If you were relying on this conversion (e.g., you have dashboards or alerts built on `_bucket`/`_sum`/`_count` series for a counter), add an explicit `aggregation: histogram` to the affected view to keep the previous behavior:
+
+```yaml
+views:
+  - name: my.counter
+    aggregation:
+      histogram:
+        buckets: [0.1, 0.5, 1.0]
+```
 
 By [@rossregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/PULL_NUMBER
