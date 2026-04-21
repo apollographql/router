@@ -77,7 +77,7 @@ fn jwt_error_to_reason(jwt_err: &JWTError) -> &'static str {
 }
 
 impl AuthenticationError {
-    pub(crate) fn as_context_object(&self) -> ErrorContext {
+    pub(super) fn as_context_object(&self) -> ErrorContext {
         let (code, reason) = match self {
             AuthenticationError::CannotConvertToString => ("CANNOT_CONVERT_TO_STRING", None),
             AuthenticationError::InvalidJWTPrefix(_, _) => ("INVALID_PREFIX", None),

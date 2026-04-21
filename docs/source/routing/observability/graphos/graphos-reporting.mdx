@@ -158,6 +158,12 @@ telemetry:
 
 Provide this field to configure which request header names and values are included in trace data that's sent to GraphOS. By default, _no_ header information is sent to GraphOS as a security measure.
 
+<Note>
+
+`send_headers` applies only to incoming client request headers. Subgraph response headers aren't captured by this option, even if they're forwarded to the client response.
+
+</Note>
+
 ```yaml title="router.yaml"
 telemetry:
   apollo:
@@ -359,12 +365,12 @@ An array of names for the variables that the router _will not_ report to GraphOS
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # The percentage of requests will include HTTP request and response headers in traces sent to GraphOS Studio.
+    # The percentage of requests that will include HTTP request headers in traces sent to Studio.
     # This is expensive and should be left at a low value.
     # This cannot be higher than tracing->common->sampler
     field_level_instrumentation_sampler: 0.01 # (default)
 
-    # Include HTTP request and response headers in traces sent to GraphOS Studio
+    # Include HTTP request headers in traces sent to Studio.
     send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
       except: # Send all headers except referer
         - referer
