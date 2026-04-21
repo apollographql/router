@@ -245,17 +245,19 @@ fn build_view_fn(
             if let Some(limit) = global_cardinality_limit {
                 builder = builder.with_cardinality_limit(limit.get() as usize);
             }
-            return Some(
-                builder
-                    .build()
-                    .expect("Failed to create stream for default histogram bucket view"),
-            );
+            let name = instrument.name();
+            return Some(builder.build().unwrap_or_else(|e| {
+                panic!("failed to build default histogram view for {name}: {e}")
+            }));
         }
         global_cardinality_limit.map(|limit| {
+            let name = instrument.name();
             Stream::builder()
                 .with_cardinality_limit(limit.get() as usize)
                 .build()
-                .expect("Failed to create stream for cardinality limit view")
+                .unwrap_or_else(|e| {
+                    panic!("failed to build global cardinality-limit view for {name}: {e}")
+                })
         })
     }
 }
@@ -534,6 +536,44 @@ mod build_view_fn_tests {
             assert!(
                 matches!(data, AggregatedMetrics::U64(MetricData::Gauge(_))),
                 "expected Gauge aggregation, got {data:?}"
+            );
+        });
+    }
+
+    /// The per-view `cardinality_limit` must override the global limit when both
+    /// are set. Without this the documented precedence would silently regress:
+    /// the types still compile and no other test in this module exercises the
+    /// interaction between both limits. We verify by setting a low per-view
+    /// limit (2) alongside a high global (1000) and observing the SDK's
+    /// `otel.metric.overflow` stamp on a third attribute set.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn per_view_cardinality_limit_wins_over_global() {
+        let exporter = InMemoryMetricExporter::default();
+        let view = user_view("limited.counter", |v| {
+            v.cardinality_limit = NonZeroU32::new(2)
+        });
+        let provider =
+            meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
+
+        let counter = provider.meter("t").u64_counter("limited.counter").build();
+        counter.add(1, &[KeyValue::new("k", "a")]);
+        counter.add(1, &[KeyValue::new("k", "b")]);
+        counter.add(1, &[KeyValue::new("k", "c")]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "limited.counter", |data| {
+            let AggregatedMetrics::U64(MetricData::Sum(sum)) = data else {
+                panic!("expected Sum aggregation, got {data:?}")
+            };
+            let has_overflow = sum.data_points().any(|dp| {
+                dp.attributes()
+                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
+            });
+            assert!(
+                has_overflow,
+                "per-view limit of 2 should overflow on the third attribute set; \
+                 if the global limit of 1000 were applied instead, no overflow \
+                 data point would be emitted"
             );
         });
     }

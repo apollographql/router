@@ -3201,8 +3201,12 @@ mod tests {
         .await;
     }
 
+    /// Smoke test: a router config with `cardinality_limit` set both globally
+    /// and per-view parses, activates, and the Prometheus exporter still emits
+    /// the expected series. Enforcement of the limit itself is covered in
+    /// `reload::metrics::build_view_fn_tests`.
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_test_prometheus_metrics_cardinality_limit() {
+    async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_cardinality_limit.router.yaml"

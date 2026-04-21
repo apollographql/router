@@ -214,6 +214,7 @@ impl MetricView {
     /// Builds a Stream from this view configuration.
     /// Use this when you've already matched the instrument by name.
     pub(crate) fn into_stream(self) -> Stream {
+        let name = self.name.clone();
         let mut stream = Stream::builder();
         if let Some(new_name) = self.rename {
             stream = stream.with_name(new_name);
@@ -240,7 +241,9 @@ impl MetricView {
         if let Some(limit) = self.cardinality_limit {
             stream = stream.with_cardinality_limit(limit.get() as usize);
         }
-        stream.build().expect("Failed to build metric view")
+        stream
+            .build()
+            .unwrap_or_else(|e| panic!("failed to build view for {name}: {e}"))
     }
 
     /// Converts this MetricView into a view function for OTel SDK 0.31+
