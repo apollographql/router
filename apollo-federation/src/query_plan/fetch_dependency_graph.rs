@@ -36,6 +36,7 @@ use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
 use crate::operation::DirectiveList;
 use crate::operation::Field;
+use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
@@ -286,6 +287,12 @@ pub(crate) struct FetchDependencyGraph {
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
     /// removing empty/useless fetches, merging fetches with the same subgraph/path).
     is_optimized: bool,
+    /// Edges that were removed during transitive reduction but crossed a defer boundary
+    /// (source.defer_ref != target.defer_ref). These are tracked so that
+    /// `extract_children_and_deferred_dependencies` can still register the correct defer
+    /// dependencies even after the direct edge has been removed from the graph.
+    #[serde(skip)]
+    reduced_defer_edges: Vec<(NodeIndex, NodeIndex)>,
 }
 
 // TODO: Write docstrings
@@ -700,6 +707,7 @@ impl FetchDependencyGraph {
             fetch_id_generation,
             is_reduced: false,
             is_optimized: false,
+            reduced_defer_edges: Vec::new(),
         }
     }
 
@@ -1164,6 +1172,19 @@ impl FetchDependencyGraph {
         let mut redundant_edges = IndexSet::default();
         for node_index in self.graph.node_indices() {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
+        }
+
+        // Before removing redundant edges, record any that cross a defer boundary.
+        // These are needed by `extract_children_and_deferred_dependencies` to register
+        // defer dependencies that would otherwise be lost after transitive reduction.
+        for &edge in &redundant_edges {
+            if let Some((source, target)) = self.graph.edge_endpoints(edge) {
+                let source_defer = &self.graph[source].defer_ref;
+                let target_defer = &self.graph[target].defer_ref;
+                if source_defer != target_defer {
+                    self.reduced_defer_edges.push((source, target));
+                }
+            }
         }
 
         // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
@@ -1714,11 +1735,190 @@ impl FetchDependencyGraph {
             }
         }
 
+        self.collect_reduced_defer_dependencies(node_index, &mut defer_dependencies)?;
+
         for (defer_ref, dependency) in defer_dependencies {
             self.defer_tracking.add_dependency(&defer_ref, dependency);
         }
 
         Ok((children, deferred_nodes))
+    }
+
+    /// Collect defer dependencies from edges that were removed during transitive reduction
+    /// but crossed a defer boundary.
+    ///
+    /// Without this, an ancestor fetch whose direct edge to a deferred node was reduced
+    /// away (because a transitive path exists through an intermediate fetch) would not be
+    /// registered as a dependency, causing the deferred node to miss data at runtime.
+    ///
+    /// At runtime, each registered dependency broadcasts only its own fetch result to the
+    /// deferred node. If an ancestor's edge is reduced away, its result is never broadcast,
+    /// and the deferred node loses access to fields only that ancestor provides (e.g.
+    /// `__typename`, entity keys, or other required fields at the ancestor's response path).
+    ///
+    /// To avoid adding unnecessary dependencies, we only restore the edge when the source
+    /// node's selection has a field-name intersection with the deferred target's required
+    /// inputs. If the source doesn't provide any fields the target needs, the dependency
+    /// is purely transitive and can remain reduced.
+    fn collect_reduced_defer_dependencies(
+        &self,
+        node_index: NodeIndex,
+        defer_dependencies: &mut Vec<(DeferRef, String)>,
+    ) -> Result<(), FederationError> {
+        for &(source, target) in &self.reduced_defer_edges {
+            if source != node_index {
+                continue;
+            }
+            let node = self.node_weight(source)?;
+            let child = self.node_weight(target)?;
+            if node.defer_ref == child.defer_ref {
+                continue;
+            }
+            let Some(child_defer_ref) = &child.defer_ref else {
+                continue;
+            };
+            if node.selection_set.selection_set.selections.is_empty() {
+                continue;
+            }
+
+            // Check if the source's selection provides any fields that the deferred
+            // target's inputs require (excluding __typename which is ubiquitous).
+            let Some(inputs) = &child.inputs else {
+                continue;
+            };
+
+            // Navigate the source's selection down to the target's merge_at level,
+            // so we compare fields at the same nesting depth. When both nodes have
+            // merge_at paths, skip the common prefix and navigate only the remaining
+            // suffix (e.g., child merge_at=["start","q"] and node merge_at=["start"]
+            // means we navigate the source by just ["q"]).
+            let source_selection = match (&child.merge_at, &node.merge_at) {
+                (Some(child_path), None) => {
+                    match Self::selection_set_at_path(&node.selection_set.selection_set, child_path)
+                    {
+                        Some(ss) => ss,
+                        None => continue,
+                    }
+                }
+                (Some(child_path), Some(node_path)) => {
+                    let common_len = child_path
+                        .iter()
+                        .zip(node_path.iter())
+                        .take_while(|(a, b)| a == b)
+                        .count();
+                    let suffix = &child_path[common_len..];
+                    if suffix.is_empty() {
+                        &node.selection_set.selection_set
+                    } else {
+                        match Self::selection_set_at_path(&node.selection_set.selection_set, suffix)
+                        {
+                            Some(ss) => ss,
+                            None => continue,
+                        }
+                    }
+                }
+                _ => &node.selection_set.selection_set,
+            };
+
+            let has_intersection = inputs
+                .selection_sets_per_parent_type
+                .values()
+                .any(|input_ss| Self::has_field_intersection(source_selection, input_ss));
+
+            if has_intersection {
+                let id = *node.id.get_or_init(|| self.fetch_id_generation.next_id());
+                defer_dependencies.push((child_defer_ref.clone(), format!("{id}")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Navigate a selection set down a `merge_at` path, returning the sub-selection
+    /// at that path, or `None` if the path doesn't exist in the selection.
+    /// Note: This is an over-approximation, since it does not check if fragment's type condition
+    ///       is satisfied by the path's type conditions.
+    fn selection_set_at_path<'a>(
+        selection_set: &'a SelectionSet,
+        path: &[FetchDataPathElement],
+    ) -> Option<&'a SelectionSet> {
+        let mut current = selection_set;
+        for element in path {
+            match element {
+                FetchDataPathElement::Key(name, _) => {
+                    current = Self::find_field_in_selection_set(current, name)?;
+                }
+                FetchDataPathElement::AnyIndex(_) => {
+                    // Array indices don't change the selection structure.
+                    continue;
+                }
+                _ => return None,
+            }
+        }
+        Some(current)
+    }
+
+    /// Find a field by response name in a selection set, searching through any layers of
+    /// nested inline fragments. Returns the field's sub-selection set.
+    fn find_field_in_selection_set<'a>(
+        selection_set: &'a SelectionSet,
+        name: &Name,
+    ) -> Option<&'a SelectionSet> {
+        for sel in selection_set.iter() {
+            match sel {
+                Selection::Field(fs) if fs.field.response_name() == name => {
+                    return fs.selection_set.as_ref();
+                }
+                Selection::InlineFragment(inf) => {
+                    if let Some(ss) = Self::find_field_in_selection_set(&inf.selection_set, name) {
+                        return Some(ss);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Check whether two selection sets share any field selections (excluding `__typename`).
+    /// When an inline fragment (type condition) is found in `b`, it is matched against
+    /// the same type condition in `a` via `SelectionMap::get()`, so that fields are only
+    /// compared under the same type context.
+    /// NOTE: This intersection check is not meant be complete. It's meant to identify matching
+    ///       defer node dependencies. We are assuming that the selection sets `a` and `b` have
+    ///       a similar structure in the first place.
+    fn has_field_intersection(a: &SelectionSet, b: &SelectionSet) -> bool {
+        for sel in b.iter() {
+            match sel {
+                Selection::Field(fs) => {
+                    if *fs.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
+                    if a.selections.get(sel.key()).is_some() {
+                        return true;
+                    }
+                    // Here, `a` may have inline fragments without a type condition that contain
+                    // `fs` theoretically. But, our query plan won't generate such inline fragments
+                    // unnecessarily.
+                }
+                Selection::InlineFragment(b_inf) => {
+                    // Try to find a matching type condition in `a` first.
+                    if let Some(Selection::InlineFragment(a_inf)) = a.selections.get(sel.key())
+                        && Self::has_field_intersection(&a_inf.selection_set, &b_inf.selection_set)
+                    {
+                        return true;
+                    }
+
+                    if b_inf.inline_fragment.casted_type() == a.type_position {
+                        // No matching inline fragment in `a`, but `a` is already
+                        // at the same type as `b`'s type condition. Compare directly.
+                        if Self::has_field_intersection(a, &b_inf.selection_set) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn create_state_for_children_of_processed_node(
