@@ -115,7 +115,7 @@ pub(crate) struct ResponseCache {
     entity_type: Option<String>,
     enabled: bool,
     debug: bool,
-    pub(super) send_cache_control_header: bool,
+    pub(super) include_cache_control_header_on_router_response: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -202,8 +202,8 @@ pub(crate) struct Config {
     /// When set to false, the router will not set a Cache-Control header on the client response,
     /// while all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.
     /// Defaults to true for backward compatibility.
-    #[serde(default = "default_send_cache_control_header")]
-    send_cache_control_header: bool,
+    #[serde(default = "default_include_cache_control_header_on_router_response")]
+    include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
@@ -220,7 +220,7 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
     DEFAULT_LRU_PRIVATE_QUERIES_SIZE
 }
 
-const fn default_send_cache_control_header() -> bool {
+const fn default_include_cache_control_header_on_router_response() -> bool {
     true
 }
 
@@ -374,7 +374,7 @@ impl PluginPrivate for ResponseCache {
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
-            send_cache_control_header: init.config.send_cache_control_header,
+            include_cache_control_header_on_router_response: init.config.include_cache_control_header_on_router_response,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -394,10 +394,10 @@ impl PluginPrivate for ResponseCache {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
-        let send_cache_control_header = self.send_cache_control_header;
+        let include_cache_control_header_on_router_response = self.include_cache_control_header_on_router_response;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if send_cache_control_header
+                if include_cache_control_header_on_router_response
                     && let Some(mut cache_control) = response
                         .context
                         .extensions()
@@ -591,7 +591,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
-            send_cache_control_header: true,
+            include_cache_control_header_on_router_response: true,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -636,7 +636,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
-            send_cache_control_header: true,
+            include_cache_control_header_on_router_response: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -4141,7 +4141,7 @@ mod tests {
     }
 
     #[test]
-    fn config_send_cache_control_header_defaults_to_true() {
+    fn config_include_cache_control_header_on_router_response_defaults_to_true() {
         let config: super::Config = serde_json::from_value(serde_json::json!({
             "enabled": true,
             "subgraph": {
@@ -4152,14 +4152,14 @@ mod tests {
             }
         }))
         .unwrap();
-        assert!(config.send_cache_control_header);
+        assert!(config.include_cache_control_header_on_router_response);
     }
 
     #[test]
-    fn config_send_cache_control_header_false() {
+    fn config_include_cache_control_header_on_router_response_false() {
         let config: super::Config = serde_json::from_value(serde_json::json!({
             "enabled": true,
-            "send_cache_control_header": false,
+            "include_cache_control_header_on_router_response": false,
             "subgraph": {
                 "all": {
                     "enabled": true,
@@ -4168,6 +4168,6 @@ mod tests {
             }
         }))
         .unwrap();
-        assert!(!config.send_cache_control_header);
+        assert!(!config.include_cache_control_header_on_router_response);
     }
 }

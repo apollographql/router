@@ -4052,9 +4052,9 @@ async fn no_store_on_partial_subgraph_failure() {
     );
 }
 
-/// Shared setup for send_cache_control_header integration tests.
+/// Shared setup for include_cache_control_header_on_router_response integration tests.
 /// Returns (storage, response_cache, subgraph_mock_config).
-/// The `response_cache` has `send_cache_control_header = true` (the default).
+/// The `response_cache` has `include_cache_control_header_on_router_response = true` (the default).
 async fn setup_send_cache_control_test() -> (Storage, ResponseCache, serde_json::Value) {
     let subgraphs = serde_json::json!({
         "user": {
@@ -4123,12 +4123,12 @@ async fn setup_send_cache_control_test() -> (Storage, ResponseCache, serde_json:
 }
 
 #[tokio::test]
-async fn send_cache_control_header_false_suppresses_headers() {
+async fn include_cache_control_header_on_router_response_false_suppresses_headers() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
     let (storage, mut response_cache, subgraphs) = setup_send_cache_control_test().await;
 
     // Disable cache-control header on supergraph response
-    response_cache.send_cache_control_header = false;
+    response_cache.include_cache_control_header_on_router_response = false;
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -4156,7 +4156,7 @@ async fn send_cache_control_header_false_suppresses_headers() {
     // Cache-Control header should NOT be present
     assert!(
         get_cache_control_header(&response).is_none(),
-        "Cache-Control header should be suppressed when send_cache_control_header is false"
+        "Cache-Control header should be suppressed when include_cache_control_header_on_router_response is false"
     );
 
     // But data should still be cached (internal caching still works)
@@ -4201,9 +4201,9 @@ async fn send_cache_control_header_false_suppresses_headers() {
 }
 
 #[tokio::test]
-async fn send_cache_control_header_true_sends_headers() {
+async fn include_cache_control_header_on_router_response_true_sends_headers() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
-    // send_cache_control_header defaults to true in for_test
+    // include_cache_control_header_on_router_response defaults to true in for_test
     let (_storage, response_cache, subgraphs) = setup_send_cache_control_test().await;
 
     let service = TestHarness::builder()

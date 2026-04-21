@@ -359,18 +359,18 @@ response_cache:
 
 ## Cache-Control response header
 
-By default, the router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy for the response—for example, `Cache-Control: max-age=300, public`.
+By default, router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy—for example, `Cache-Control: max-age=300, public`.
 
-Set `send_cache_control_header: false` to suppress this header when:
+Set `include_cache_control_header_on_router_response: false` to suppress this header when:
 
-- Your router sits behind a CDN or reverse proxy that manages caching headers, and you don't want clients to cache responses locally
-- You have downstream clients that might misinterpret `Cache-Control` headers from the router
-- You want internal Redis caching to remain active while preventing clients from caching responses themselves
+- Router sits behind a CDN or reverse proxy that manages caching headers
+- Downstream clients misinterpret `Cache-Control` headers from router
+- You want internal Redis caching active while preventing clients from caching responses
 
 ```yaml title="router.yaml"
 response_cache:
   enabled: true
-  send_cache_control_header: false
+  include_cache_control_header_on_router_response: false
   subgraph:
     all:
       enabled: true
@@ -378,4 +378,4 @@ response_cache:
         urls: ["redis://..."]
 ```
 
-When `send_cache_control_header` is `false`, the `Cache-Control` header is omitted from client responses. All internal caching behavior—Redis storage, TTL enforcement, cache key computation, and the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger)—remains unchanged.
+When `include_cache_control_header_on_router_response` is `false`, router omits the `Cache-Control` header from client responses. All internal caching behavior—Redis storage, TTL enforcement, cache key computation, and the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger)—remains unchanged.
