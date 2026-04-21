@@ -1159,6 +1159,14 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
             major: 2,
             minor: 12,
         }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 13,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 14,
+        }));
         definitions
     });
 

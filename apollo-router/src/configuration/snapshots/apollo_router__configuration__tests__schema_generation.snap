@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8356,6 +8357,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
+        "intern_strings": {
+          "default": true,
+          "description": "Whether to enable Rhai's internal string interning.\n\nString interning can reduce memory allocations and string comparison\ncost. But it also introduces synchronization overhead.\n\nSetting this to `false` can improve throughput and is recommended\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `true`.",
+          "type": "boolean"
+        },
         "main": {
           "description": "The main entry point for Rhai script evaluation",
           "type": [
