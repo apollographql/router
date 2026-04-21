@@ -1,0 +1,19 @@
+# Config for testing that http_max_request_bytes applies to the operations field
+# but not to file streams in multipart uploads.
+csrf:
+  required_headers:
+    - x-my-header
+    - apollo-require-preflight
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 5mb
+        max_files: 5
+limits:
+  http_max_request_bytes: 50000
+include_subgraph_errors:
+  all: true

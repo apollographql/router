@@ -26,6 +26,7 @@ use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::BodyLimitControl;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -196,7 +197,32 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = router::body::from_result_stream(operations_stream);
+        // Buffer the operations field so http_max_request_bytes applies to it specifically.
+        // The underlying Limited<Body> enforces the limit while we read here. Once buffered,
+        // disable the global limit so file streams aren't constrained by it; per-file size
+        // limits (max_file_size) still apply via the multer parser.
+        //
+        // Buffering is not wasteful: the downstream supergraph service reads the entire
+        // operations body into memory anyway for JSON parsing, and the operations field is
+        // bounded by http_max_request_bytes (default 2 MB), so peak memory usage is unchanged.
+        //
+        // If the operations field exceeds http_max_request_bytes, this never returns an Err:
+        // Limited<Body> stalls (returns Poll::Pending forever) and the RequestBodyLimitLayer's
+        // abort semaphore fires a 413 that cancels this future before .bytes() can resolve.
+        // The only errors that reach map_err here are genuine multer errors (bad encoding, etc.).
+        let operations_bytes = operations_stream
+            .bytes()
+            .await
+            .map_err(FileUploadError::InvalidMultipartRequest)?;
+        if let Some(control) = request_parts.extensions.get::<BodyLimitControl>() {
+            // update_limit asserts new > current, so skip if already at usize::MAX
+            // (only possible if http_max_request_bytes was explicitly set to usize::MAX).
+            if control.limit() < usize::MAX {
+                control.update_limit(usize::MAX);
+            }
+        }
+
+        let request_body = router::body::from_bytes(operations_bytes);
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,
