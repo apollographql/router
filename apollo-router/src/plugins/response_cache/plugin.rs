@@ -374,7 +374,9 @@ impl PluginPrivate for ResponseCache {
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
-            include_cache_control_header_on_router_response: init.config.include_cache_control_header_on_router_response,
+            include_cache_control_header_on_router_response: init
+                .config
+                .include_cache_control_header_on_router_response,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -394,7 +396,8 @@ impl PluginPrivate for ResponseCache {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
-        let include_cache_control_header_on_router_response = self.include_cache_control_header_on_router_response;
+        let include_cache_control_header_on_router_response =
+            self.include_cache_control_header_on_router_response;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
                 if include_cache_control_header_on_router_response
