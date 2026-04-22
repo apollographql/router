@@ -72,24 +72,18 @@ impl PluginPrivate for FileUploadsPlugin {
             .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
+                    let layer_task = router_layer(req, limits);
                     let layer_result = if let Some(timeout) = operation_body_timeout {
-                        match tokio::time::timeout(timeout, router_layer(req, limits)).await {
+                        match tokio::time::timeout(timeout, layer_task).await {
                             Ok(result) => result,
                             Err(_elapsed) => {
                                 return Ok(ControlFlow::Break(
-                                    router::Response::error_builder()
-                                        .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                        .errors(vec![graphql::Error::builder()
-                                            .message("The file upload operation body took too long to arrive")
-                                            .extension_code("GATEWAY_TIMEOUT")
-                                            .build()])
-                                        .context(context)
-                                        .build()?,
+                                    operation_body_timeout_error(context)?,
                                 ))
                             }
                         }
                     } else {
-                        router_layer(req, limits).await
+                        layer_task.await
                     };
                     Ok(match layer_result {
                         Ok(req) => ControlFlow::Continue(req),
@@ -183,6 +177,19 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
         .and_then(|header| header.to_str().ok())
         .and_then(|str| MediaType::parse(str).ok())
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
+}
+
+fn operation_body_timeout_error(
+    context: crate::Context,
+) -> std::result::Result<router::Response, tower::BoxError> {
+    router::Response::error_builder()
+        .status_code(StatusCode::GATEWAY_TIMEOUT)
+        .errors(vec![graphql::Error::builder()
+            .message("The file upload operation body took too long to arrive")
+            .extension_code("GATEWAY_TIMEOUT")
+            .build()])
+        .context(context)
+        .build()
 }
 
 /// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
