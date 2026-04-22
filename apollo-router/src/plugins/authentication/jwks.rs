@@ -451,7 +451,7 @@ pub(super) fn search_jwks(
     } else {
         // Only sort if we need to
         if candidates.len() > 1 {
-            candidates.sort_by(|a, b| a.0.cmp(&b.0));
+            candidates.sort_by_key(|a| a.0);
         }
 
         if found_highest_score {

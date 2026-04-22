@@ -2,12 +2,13 @@ use apollo_compiler::Name;
 use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Supergraph;
-use apollo_federation::composition::compose;
 use apollo_federation::error::ErrorCode;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use test_log::test;
+
+use super::compose;
 
 fn check_cost_and_listsize_directives(
     result: &Supergraph<Satisfiable>,

@@ -3,6 +3,7 @@ use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 
 use crate::composition::ServiceDefinition;
+use crate::composition::compose;
 use crate::composition::compose_as_fed2_subgraphs;
 
 /// Helper to assert that a supergraph has no hints
@@ -249,7 +250,6 @@ mod entity_consistency {
 }
 
 mod value_type_fields {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 
@@ -1671,7 +1671,6 @@ Otherwise the @shareable contract will be broken."#,
 }
 
 mod implicit_federation_upgrades {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 
