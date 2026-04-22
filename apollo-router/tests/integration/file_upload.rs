@@ -1127,6 +1127,7 @@ mod operation_body_timeout {
     use futures::StreamExt;
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
+    use serde_json::Value;
     use tower::BoxError;
 
     use crate::integration::common::graph_os_enabled;
@@ -1134,7 +1135,7 @@ mod operation_body_timeout {
     const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
     const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
 
-    async fn run(config: &str, body: reqwest::Body) -> StatusCode {
+    async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
         let mut router = crate::integration::IntegrationTest::builder()
             .config(config)
             .build()
@@ -1142,16 +1143,17 @@ mod operation_body_timeout {
         router.start().await;
         router.assert_started().await;
         let url = format!("http://{}", router.bind_address());
-        let status = reqwest::Client::new()
+        let response = reqwest::Client::new()
             .post(&url)
             .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
             .body(body)
             .send()
             .await
-            .unwrap()
-            .status();
+            .unwrap();
+        let status = response.status();
+        let body = response.json().await.unwrap_or_default();
         router.graceful_shutdown().await;
-        status
+        (status, body)
     }
 
     fn immediate_body() -> reqwest::Body {
@@ -1161,6 +1163,16 @@ mod operation_body_timeout {
             "{\"query\":\"{ __typename }\"}\r\n",
             "--test--\r\n"
         ))
+    }
+
+    fn slightly_delayed_body() -> reqwest::Body {
+        // Body arrives after 2s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than the 10s operation_body_timeout in GENEROUS_CONFIG.
+        let stream = futures::stream::once(async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
+        reqwest::Body::wrap_stream(stream)
     }
 
     fn slow_body() -> reqwest::Body {
@@ -1180,10 +1192,18 @@ mod operation_body_timeout {
         if !graph_os_enabled() {
             return Ok(());
         }
-        assert_ne!(
-            run(GENEROUS_CONFIG, immediate_body()).await,
-            StatusCode::GATEWAY_TIMEOUT
-        );
+        let (status, _) = run(GENEROUS_CONFIG, immediate_body()).await;
+        assert_ne!(status, StatusCode::GATEWAY_TIMEOUT);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_with_delay() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(GENEROUS_CONFIG, slightly_delayed_body()).await;
+        assert_ne!(status, StatusCode::GATEWAY_TIMEOUT);
         Ok(())
     }
 
@@ -1192,9 +1212,11 @@ mod operation_body_timeout {
         if !graph_os_enabled() {
             return Ok(());
         }
+        let (status, body) = run(STRICT_CONFIG, slow_body()).await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(
-            run(STRICT_CONFIG, slow_body()).await,
-            StatusCode::GATEWAY_TIMEOUT
+            body["errors"][0]["message"],
+            "The file upload operation body took too long to arrive"
         );
         Ok(())
     }
