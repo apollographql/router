@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2194,32 +2193,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "ConnectorConfiguration": {
-      "properties": {
-        "all": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/TlsClient"
-            }
-          ],
-          "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
-          },
-          "description": "Options applying to all sources"
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/TlsClient"
-          },
-          "default": {},
-          "description": "Map of subgraph_name.connector_source_name to configuration",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "ConnectorConfiguration2": {
+    "ConnectorConnectorLimitsConfiguration": {
       "properties": {
         "all": {
           "allOf": [
@@ -2832,6 +2806,31 @@ expression: "&schema"
       "properties": {
         "all": {
           "$ref": "#/definitions/ConnectorStage"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorTlsClientConfiguration": {
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsClient"
+            }
+          ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
+          "description": "Options applying to all sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/TlsClient"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
         }
       },
       "type": "object"
@@ -6811,7 +6810,7 @@ expression: "&schema"
         "connector": {
           "allOf": [
             {
-              "$ref": "#/definitions/ConnectorConfiguration2"
+              "$ref": "#/definitions/ConnectorConnectorLimitsConfiguration"
             }
           ],
           "default": {
@@ -12098,7 +12097,7 @@ expression: "&schema"
         "connector": {
           "allOf": [
             {
-              "$ref": "#/definitions/ConnectorConfiguration"
+              "$ref": "#/definitions/ConnectorTlsClientConfiguration"
             }
           ],
           "default": {

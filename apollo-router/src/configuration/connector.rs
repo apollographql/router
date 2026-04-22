@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "Connector{T}Configuration")]
 pub(crate) struct ConnectorConfiguration<T>
 where
     T: Default + Serialize + JsonSchema,
