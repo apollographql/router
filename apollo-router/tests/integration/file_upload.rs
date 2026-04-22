@@ -1125,18 +1125,24 @@ mod operation_body_timeout {
 
     use bytes::Bytes;
     use futures::StreamExt;
+    use futures::stream::once;
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
     use serde_json::Value;
+    use tokio::time::Instant;
+    use tokio::time::interval_at;
+    use tokio::time::sleep;
+    use tokio_stream::wrappers::IntervalStream;
     use tower::BoxError;
 
+    use crate::integration::IntegrationTest;
     use crate::integration::common::graph_os_enabled;
 
     const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
     const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
 
     async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
-        let mut router = crate::integration::IntegrationTest::builder()
+        let mut router = IntegrationTest::builder()
             .config(config)
             .build()
             .await;
@@ -1168,8 +1174,8 @@ mod operation_body_timeout {
     fn slightly_delayed_body() -> reqwest::Body {
         // Body arrives after 2s — longer than the 1s operation_body_timeout in STRICT_CONFIG
         // but shorter than the 10s operation_body_timeout in GENEROUS_CONFIG.
-        let stream = futures::stream::once(async {
-            tokio::time::sleep(Duration::from_secs(2)).await;
+        let stream = once(async {
+            sleep(Duration::from_secs(2)).await;
             Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
         });
         reqwest::Body::wrap_stream(stream)
@@ -1179,8 +1185,8 @@ mod operation_body_timeout {
         // Body starts sending after 5s — longer than the 1s operation_body_timeout in
         // STRICT_CONFIG but shorter than the 10s global router timeout, proving it is the
         // operation_body_timeout that fires and not the global timeout.
-        let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(5),
+        let stream = IntervalStream::new(interval_at(
+            Instant::now() + Duration::from_secs(5),
             Duration::from_secs(5),
         ))
         .map(|_| Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\n")));
