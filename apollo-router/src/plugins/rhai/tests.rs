@@ -1259,7 +1259,7 @@ async fn test_rhai_metric_router_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.router_service(BoxCloneService::new(mock_service));
         let req = router::Request::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1299,7 +1299,7 @@ async fn test_rhai_metric_supergraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1338,7 +1338,8 @@ async fn test_rhai_metric_subgraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.subgraph_service("test", BoxCloneService::new(mock_service));
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1379,7 +1380,7 @@ async fn test_rhai_metric_failed_callback() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1413,7 +1414,7 @@ async fn test_rhai_metric_no_callback_no_emission() {
             .unwrap();
         // No supergraph_service callback registered — plugin returns original service unchanged
         // and no metric is emitted
-        let _service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let _service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
 
         assert_histogram_not_exists!(
             "apollo.router.operations.rhai.duration",
@@ -1449,7 +1450,8 @@ async fn test_rhai_metric_subgraph_response() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.subgraph_service("test", BoxCloneService::new(mock_service));
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1494,7 +1496,7 @@ async fn test_rhai_metric_deferred_response_causes_multiple_executions() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let resp = router_service
             .ready()
