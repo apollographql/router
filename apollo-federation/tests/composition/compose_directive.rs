@@ -1,11 +1,12 @@
 use apollo_compiler::Name;
 use apollo_compiler::coord;
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 use rstest::rstest;
+
+use super::compose;
 
 mod simple_cases {
     use super::*;
