@@ -249,6 +249,10 @@ impl PlanNode {
                             &subscription_node.input_rewrites,
                             &None,
                         );
+                        debug_assert!(
+                            _unsatisfied_paths.is_empty(),
+                            "subscriptions pass empty `requires` — unsatisfied_paths should always be empty",
+                        );
                         match opt_variables {
                             Some(variables) => {
                                 let service = parameters.service_factory.create();
@@ -857,10 +861,9 @@ mod errors_for_skipped_entity {
                     }
                     // Inline fragment without a type condition inherits the
                     // parent type — always accept.
-                    let matches = match &frag.type_condition {
-                        None => true,
-                        Some(cond) => type_condition_matches(schema, entity_type, cond.as_str()),
-                    };
+                    let matches = frag.type_condition.as_ref().is_none_or(|cond| {
+                        type_condition_matches(schema, entity_type, cond.as_str())
+                    });
                     if matches {
                         collect_response_key_tree(
                             &frag.selection_set,
@@ -898,37 +901,15 @@ mod errors_for_skipped_entity {
     }
 
     fn get_value_at_path<'a>(value: &'a Value, path: &Path) -> &'a Value {
-        let mut current = value;
-        for segment in &path.0 {
-            match segment {
-                PathElement::Key(k, _) => match current {
-                    Value::Object(obj) => {
-                        current = match obj.get(k.as_str()) {
-                            Some(v) => v,
-                            None => &Value::Null,
-                        };
-                    }
-                    _ => {
-                        return &Value::Null;
-                    }
-                },
-                PathElement::Index(i) => match current {
-                    Value::Array(arr) => {
-                        current = match arr.get(*i) {
-                            Some(v) => v,
-                            None => &Value::Null,
-                        };
-                    }
-                    _ => {
-                        return &Value::Null;
-                    }
-                },
-                _ => {
-                    return &Value::Null;
+        path.0
+            .iter()
+            .fold(value, |current, segment| match (segment, current) {
+                (PathElement::Key(k, _), Value::Object(obj)) => {
+                    obj.get(k.as_str()).unwrap_or(&Value::Null)
                 }
-            }
-        }
-        current
+                (PathElement::Index(i), Value::Array(arr)) => arr.get(*i).unwrap_or(&Value::Null),
+                _ => &Value::Null,
+            })
     }
 
     /// Extract `__typename` from a JSON value, returning `None` if not present.
@@ -1241,23 +1222,18 @@ mod errors_for_skipped_entity {
                 // partially fetched across subgraphs — a rare case where we
                 // can't pinpoint per-item paths, so we report at the list
                 // field itself as a best effort.
-                let should_emit = if subtree.is_list_stop {
-                    true
-                } else {
-                    let populated = match data {
-                        Value::Object(obj) => obj.contains_key(key.as_str()),
-                        _ => false,
-                    };
-                    !populated
-                };
+                let should_emit = subtree.is_list_stop
+                    || data
+                        .as_object()
+                        .is_none_or(|obj| !obj.contains_key(key.as_str()));
                 if should_emit {
                     paths.push(current.clone());
                 }
             } else {
-                let child_data = match data {
-                    Value::Object(obj) => obj.get(key.as_str()).unwrap_or(&Value::Null),
-                    _ => &Value::Null,
-                };
+                let child_data = data
+                    .as_object()
+                    .and_then(|obj| obj.get(key.as_str()))
+                    .unwrap_or(&Value::Null);
                 collect_leaf_paths(subtree, child_data, current, paths);
             }
             current.pop();
