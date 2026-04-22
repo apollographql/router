@@ -1,6 +1,9 @@
+use apollo_federation::composition::CompositionOptions;
+
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
+use super::compose_as_fed2_subgraphs_with_options;
 
 mod requires_tests {
     use super::*;
@@ -621,7 +624,6 @@ mod shareable_mutation_fields_tests {
 mod other_validation_errors_tests {
     use super::*;
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn errors_when_max_validation_subgraph_paths_is_exceeded() {
         let subgraph_a = ServiceDefinition {
@@ -690,11 +692,16 @@ mod other_validation_errors_tests {
             "#,
         };
 
-        let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+        let result = compose_as_fed2_subgraphs_with_options(
+            &[subgraph_a, subgraph_b],
+            CompositionOptions {
+                max_validation_subgraph_paths: Some(10),
+            },
+        );
         assert_composition_errors(
             &result,
             &[(
-                "SATISFIABILITY_ERROR",
+                "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED",
                 "Maximum number of validation subgraph paths exceeded: 12",
             )],
         );

@@ -1,5 +1,6 @@
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
+
+use super::compose;
 
 #[test]
 fn test_fed1_fields_are_implicitly_shareable() {

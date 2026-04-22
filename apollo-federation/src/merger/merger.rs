@@ -30,6 +30,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
+use crate::composition::CompositionOptions;
 use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -139,13 +140,6 @@ pub(crate) struct MergeResult {
 pub(in crate::merger) struct MergedDirectiveInfo {
     pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
     pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct CompositionOptions {
-    // Add options as needed - for now keeping it minimal
-    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
-    pub(crate) max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]
@@ -293,9 +287,7 @@ impl Merger {
                 .gt(linked_federation_version)
         {
             error_reporter.add_hint(CompositionHint {
-                code: HintCode::ImplicitlyUpgradedFederationVersion
-                    .code()
-                    .to_string(),
+                definition: HintCode::ImplicitlyUpgradedFederationVersion.definition(),
                 message: format!(
                     "Subgraph {} has been implicitly upgraded from federation v{} to v{}",
                     subgraph.name,
@@ -562,7 +554,8 @@ impl Merger {
                     hints,
                 });
             }
-            match Self::validate_supergraph_schema(self.merged) {
+            let merged = self.merged;
+            match Self::validate_supergraph_schema(merged, &self.subgraphs) {
                 Ok(supergraph) => Ok(MergeResult {
                     supergraph: Some(supergraph),
                     errors: Vec::default(),
@@ -581,6 +574,7 @@ impl Merger {
     /// computed.
     fn validate_supergraph_schema(
         merged: FederationSchema,
+        subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
@@ -599,8 +593,11 @@ impl Merger {
         // other errors in theory, but if there are, better to find it now rather than later).
         api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
             |err| {
-                // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
-                Self::convert_to_merge_errors(err)
+                super::supergraph_coordinate::update_inaccessible_errors_with_link_to_subgraphs(
+                    &supergraph_schema,
+                    subgraphs,
+                    err,
+                )
             },
         )?;
 
@@ -612,7 +609,10 @@ impl Merger {
         error
             .into_errors()
             .into_iter()
-            .map(|e| CompositionError::MergeError { error: e })
+            .map(|e| CompositionError::MergeError {
+                error: e,
+                locations: Vec::new(),
+            })
             .collect()
     }
 
@@ -1229,7 +1229,7 @@ impl Merger {
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
                 self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::FromSubgraphDoesNotExist.code().to_string(),
+                    definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
                         "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
                         source_subgraph_name, dest, subgraph_name
@@ -1255,7 +1255,7 @@ impl Merger {
             } else if !subgraph_map.contains_key(&source_subgraph_name) {
                 // hint: source schema no longer contains the field
                 self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                    definition: HintCode::OverrideDirectiveCanBeRemoved.definition(),
                     message: format!(
                         "Field \"{}\" on subgraph \"{}\" no longer exists in the from subgraph. The @override directive can be removed.",
                         dest, subgraph_name
@@ -1312,7 +1312,7 @@ impl Merger {
                     // The from field is explicitly marked external by the user (which means it is "used"
                     // and cannot be completely removed) so the @override can be removed.
                     self.error_reporter.add_hint(CompositionHint {
-                        code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                        definition: HintCode::OverrideDirectiveCanBeRemoved.definition(),
                         message: format!(
                             "Field \"{}\" on subgraph \"{}\" is not resolved anymore by the from subgraph (it is marked \"@external\" in \"{}\"). The @override directive can be removed.",
                             dest, subgraph_name, source_subgraph_name
@@ -1324,7 +1324,7 @@ impl Merger {
                     if override_label.is_none() {
                         // No label, but field is referenced - add hint
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                            definition: HintCode::OverriddenFieldCanBeRemoved.definition(),
                             message: format!(
                                 "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
                                 dest, source_subgraph_name
@@ -1337,7 +1337,7 @@ impl Merger {
                     if override_label.is_none() {
                         // No label and field is not referenced - suggest removal
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                            definition: HintCode::OverriddenFieldCanBeRemoved.definition(),
                             message: format!(
                                 "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
                                 dest, source_subgraph_name
@@ -1388,7 +1388,7 @@ impl Merger {
                         };
 
                         self.error_reporter.add_hint(CompositionHint {
-                            code: HintCode::OverrideMigrationInProgress.code().to_string(),
+                            definition: HintCode::OverrideMigrationInProgress.definition(),
                             message,
                             locations: Default::default(),
                         });

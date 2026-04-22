@@ -155,9 +155,8 @@ impl Merger {
                             });
                         } else {
                             self.error_reporter.add_hint(CompositionHint {
-                                code: HintCode::ContextualArgumentNotContextualInAllSubgraphs
-                                    .code()
-                                    .to_string(),
+                                definition: HintCode::ContextualArgumentNotContextualInAllSubgraphs
+                                    .definition(),
                                 message: format!(
                                     "Contextual argument \"{pos}\" will not be included in the supergraph since it is contextual in at least one subgraph",
                                 ),

@@ -1,6 +1,5 @@
 use apollo_compiler::coord;
 use apollo_federation::composition::Satisfiable;
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Supergraph;
 use itertools::Itertools;
@@ -8,6 +7,7 @@ use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 
 /// Validates that @tag directives are properly propagated to the supergraph schema

@@ -24,6 +24,7 @@ use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
 
+use super::PipelineStep;
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
@@ -40,26 +41,6 @@ pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs
 
 /// Version of our externalised data. Rev this if it changes
 pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
-
-#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
-pub(crate) enum PipelineStep {
-    RouterRequest,
-    RouterResponse,
-    SupergraphRequest,
-    SupergraphResponse,
-    ExecutionRequest,
-    ExecutionResponse,
-    SubgraphRequest,
-    SubgraphResponse,
-    ConnectorRequest,
-    ConnectorResponse,
-}
-
-impl From<PipelineStep> for opentelemetry::Value {
-    fn from(val: PipelineStep) -> Self {
-        val.to_string().into()
-    }
-}
 
 #[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

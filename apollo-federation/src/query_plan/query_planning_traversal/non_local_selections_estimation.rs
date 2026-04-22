@@ -724,9 +724,7 @@ pub(crate) fn precompute_non_local_selection_metadata(
             .get_mut(node_type_pos.type_name())
             && options_metadata.same_type_options.contains(&node)
         {
-            options_metadata
-                .interface_object_options
-                .extend(options.into_iter());
+            options_metadata.interface_object_options.extend(options);
             continue;
         }
         metadata

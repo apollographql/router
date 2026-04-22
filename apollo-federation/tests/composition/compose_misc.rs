@@ -1,8 +1,8 @@
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 use super::print_sdl;
 
