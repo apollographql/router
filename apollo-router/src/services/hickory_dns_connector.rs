@@ -89,8 +89,43 @@ pub(crate) fn new_async_http_connector(
 fn convert_net_error(err: NetError) -> io::Error {
     match err {
         NetError::Busy => io::Error::new(io::ErrorKind::ResourceBusy, err),
-        NetError::Io(io_err) => io::Error::new(io_err.kind(), io_err.clone()),
+        NetError::Io(io_err) => io::Error::new(io_err.kind(), io_err),
         NetError::Timeout => io::Error::new(io::ErrorKind::TimedOut, err),
         _ => io::Error::other(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::Arc;
+
+    use hickory_resolver::net::NetError;
+
+    use super::convert_net_error;
+
+    #[test]
+    fn busy_maps_to_resource_busy() {
+        let err = convert_net_error(NetError::Busy);
+        assert_eq!(err.kind(), io::ErrorKind::ResourceBusy);
+    }
+
+    #[test]
+    fn timeout_maps_to_timed_out() {
+        let err = convert_net_error(NetError::Timeout);
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn io_preserves_kind() {
+        let inner = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
+        let err = convert_net_error(NetError::Io(Arc::new(inner)));
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+    }
+
+    #[test]
+    fn other_variants_map_to_other() {
+        let err = convert_net_error(NetError::Message("something went wrong"));
+        assert_eq!(err.kind(), io::ErrorKind::Other);
     }
 }
