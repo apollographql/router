@@ -656,9 +656,12 @@ impl Merger {
                     &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
                     &POLICY_DIRECTIVE_NAME_IN_SPEC,
                 ] {
-                    if let Some(directive) = federation_spec
-                        .directive_definition(subgraph.schema(), access_control_directive)?
-                    {
+                    let directive = federation_spec
+                        .directive_name_in_schema(subgraph.schema(), access_control_directive)?
+                        .and_then(|name| {
+                            subgraph.schema().schema().directive_definitions.get(&name)
+                        });
+                    if let Some(directive) = directive {
                         let referencers = subgraph_referencers.get_directive(&directive.name);
                         for type_position in &referencers.object_types {
                             // we will be propagating access control from objects up to the interfaces

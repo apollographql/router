@@ -22,10 +22,20 @@ pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
 
+/// Options that configure composition. Mirrors the JS `CompositionOptions` interface
+/// (see `composition-js/src/compose.ts`). Most fields are not yet ported — add them here
+/// as needed.
+#[derive(Debug, Default, Clone)]
+pub struct CompositionOptions {
+    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
+    pub max_validation_subgraph_paths: Option<usize>,
+}
+
 /// Mirrors the JS `compose` function.
-#[instrument(skip(subgraphs))]
+#[instrument(skip(subgraphs, options))]
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
+    options: CompositionOptions,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     // explicitly sort subgraphs by their names
     // this was done automatically in JS as Subgraphs class stored subgraphs in OrderedMap (by name)
@@ -40,16 +50,17 @@ pub fn compose(
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
     tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs)?;
+    let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
     tracing::debug!("Validating satisfiability...");
-    validate_satisfiability(supergraph)
+    validate_satisfiability(supergraph, &options)
 }
 
 /// Mirrors the `HybridComposition::compose` from the apollo-composition crate.
 pub fn compose_with_connectors(
     subgraphs: Vec<Subgraph<Initial>>,
+    options: CompositionOptions,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     // Pre-expand validation
     // - These were supposed to be pre-merge validations, but historically FBP performed these
@@ -67,7 +78,7 @@ pub fn compose_with_connectors(
     pre_merge_validations(&validated_subgraphs)?;
 
     tracing::debug!("Merging subgraphs...");
-    let supergraph = merge_subgraphs(validated_subgraphs)?;
+    let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
 
     tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
@@ -75,7 +86,7 @@ pub fn compose_with_connectors(
     // - Once JS-to-Rust migration is done, we may consider to move that to the pre-merge validation step.
 
     tracing::debug!("Validating satisfiability...");
-    validate_satisfiability_with_connectors(supergraph)
+    validate_satisfiability_with_connectors(supergraph, &options)
 }
 
 /// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through
@@ -107,11 +118,12 @@ pub fn pre_merge_validations(
     Ok(())
 }
 
-#[instrument(skip(subgraphs))]
+#[instrument(skip(subgraphs, options))]
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
+    options: &CompositionOptions,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
-    let merger = Merger::new(subgraphs, Default::default()).map_err(|e| {
+    let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
         vec![CompositionError::InternalError {
             message: e.to_string(),
         }]
@@ -152,6 +164,7 @@ pub fn post_merge_validations(
 /// - Expand connectors as needed.
 pub fn validate_satisfiability_with_connectors(
     supergraph: Supergraph<Merged>,
+    options: &CompositionOptions,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     // Expand connectors for satisfiability validation.
     let supergraph_str = supergraph.schema().schema().to_string();
@@ -174,7 +187,7 @@ pub fn validate_satisfiability_with_connectors(
                     message: e.to_string(),
                 }]
             })?;
-            let mut result = validate_satisfiability(supergraph);
+            let mut result = validate_satisfiability(supergraph, options);
 
             // Sanitize connectors subgraph names in errors and hints.
             match &mut result {
@@ -191,7 +204,7 @@ pub fn validate_satisfiability_with_connectors(
             }
             result
         }
-        ExpansionResult::Unchanged => validate_satisfiability(supergraph),
+        ExpansionResult::Unchanged => validate_satisfiability(supergraph, options),
     }
 }
 
