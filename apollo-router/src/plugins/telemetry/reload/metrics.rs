@@ -206,7 +206,12 @@ impl<'a> MetricsBuilder<'a> {
             .collect();
 
         self.with_view(meter_provider_type, move |instrument: &Instrument| {
-            resolve_view(instrument, &user_views, &bucket_boundaries, cardinality_limit)
+            resolve_view(
+                instrument,
+                &user_views,
+                &bucket_boundaries,
+                cardinality_limit,
+            )
         });
     }
 }
