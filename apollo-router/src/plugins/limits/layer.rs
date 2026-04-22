@@ -105,11 +105,20 @@ where
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct RequestBodyLimit<Body, S> {
     _phantom: std::marker::PhantomData<Body>,
     inner: S,
     initial_limit: usize,
+}
+
+impl<Body, S: Clone> Clone for RequestBodyLimit<Body, S> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+            inner: self.inner.clone(),
+            initial_limit: self.initial_limit,
+        }
+    }
 }
 
 impl<Body, S> RequestBodyLimit<Body, S>

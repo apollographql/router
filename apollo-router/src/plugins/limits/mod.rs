@@ -173,7 +173,6 @@ impl Plugin for LimitsPlugin {
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
-            .buffered()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
