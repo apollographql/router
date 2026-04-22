@@ -2347,6 +2347,297 @@ async fn missing_nonnull_field_in_requires_returns_error() {
     }
 }
 
+// Variant of `missing_nonnull_field_in_requires_returns_error` where `computed` is a non-nullable
+// field. When the skipped fetch's field is non-nullable, `apply_selection_set` propagates null up
+// to the parent (entity), per the GraphQL spec. The UNSATISFIED_FETCH_CONDITION error is still
+// emitted at the leaf that caused the skip.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+  {
+    entity: Entity @join__field(graph: SUB1)
+  }
+
+  type Entity
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+  {
+    id: ID!
+    name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    computed: String! @join__field(graph: SUB2, requires: "code")
+    nickname: String @join__field(graph: SUB2, requires: "name")
+  }"#;
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT code — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    // `computed: String!` is non-nullable — the missing value bubbles up and nullifies
+    // `data.entity` per GraphQL null-propagation rules.
+    assert_eq!(value["data"]["entity"], serde_json::Value::Null);
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Exactly two UNSATISFIED_FETCH_CONDITION errors — one per field sub2 would have supplied.
+    // No separate null-propagation error is emitted when `computed: String!` bubbles up.
+    assert_eq!(
+        errors.len(),
+        2,
+        "expected only UNSATISFIED_FETCH_CONDITION errors, got: {:?}",
+        errors
+    );
+    let paths: Vec<&serde_json::Value> = errors.iter().map(|e| &e["path"]).collect();
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "computed"])),
+        "should have error for entity.computed, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "nickname"])),
+        "should have error for entity.nickname, got: {:?}",
+        paths
+    );
+    for err in errors {
+        assert_eq!(
+            err["extensions"]["code"].as_str(),
+            Some("UNSATISFIED_FETCH_CONDITION"),
+        );
+    }
+}
+
+// Variant of `missing_nonnull_field_in_requires_returns_error` where the root `Query.entity`
+// field is non-nullable. With `computed: String!` also non-nullable, the missing value at the
+// leaf bubbles up: `computed` → `entity` (becomes null) → `data` (becomes null, since
+// `Query.entity` is non-null). This tests how null-propagation behaves when there's no
+// nullable ancestor to stop at.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+  {
+    entity: Entity! @join__field(graph: SUB1)
+  }
+
+  type Entity
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+  {
+    id: ID!
+    name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    computed: String! @join__field(graph: SUB2, requires: "code")
+    nickname: String @join__field(graph: SUB2, requires: "name")
+  }"#;
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT code — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    // `computed: String!` missing → nullifies `entity` → `Query.entity: Entity!` is non-null →
+    // the null bubbles up to `data` itself.
+    assert_eq!(value["data"], serde_json::Value::Null);
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Still exactly the two UNSATISFIED_FETCH_CONDITION errors — one per field sub2 would have
+    // supplied. No extra error is emitted for the null-propagation to `data`.
+    assert_eq!(
+        errors.len(),
+        2,
+        "expected only UNSATISFIED_FETCH_CONDITION errors, got: {:?}",
+        errors
+    );
+    let paths: Vec<&serde_json::Value> = errors.iter().map(|e| &e["path"]).collect();
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "computed"])),
+        "should have error for entity.computed, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "nickname"])),
+        "should have error for entity.nickname, got: {:?}",
+        paths
+    );
+    for err in errors {
+        assert_eq!(
+            err["extensions"]["code"].as_str(),
+            Some("UNSATISFIED_FETCH_CONDITION"),
+        );
+    }
+}
+
 // Regression test: when a list of entities is fetched and only some entities have missing
 // non-nullable @requires fields, the router should still fetch the successful entities
 // and generate errors only for the failed ones.
@@ -2691,6 +2982,177 @@ async fn run_parallel_sibling_skipped_fetch(generate_query_fragments: bool) {
         errors[0]["extensions"]["code"].as_str(),
         Some("UNSATISFIED_FETCH_CONDITION"),
     );
+}
+
+// Regression test: a chained @requires failure. Fetch A misses a field that
+// fetch B requires; fetch B would have produced an input that fetch C
+// requires, but that input isn't in the user's operation. When B is skipped,
+// C is also skipped — but errors should only be emitted for fields the user
+// asked for. The planner-internal intermediate field should NOT appear in
+// error paths.
+//
+// Scenario:
+//   query { entity { final other } }
+//   sub1: _entities -> { id, code }           (code missing)
+//   sub2: _entities { aux other } requires "code"   (skipped, would have supplied `aux` and `other`)
+//   sub3: _entities { final } requires "aux"        (skipped transitively — `aux` never fetched)
+//
+// Expected errors:
+//   [entity, other] — sub2's skip, user-visible field
+//   [entity, final] — sub3's skip, user-visible field
+// NOT [entity, aux] — planner-internal, not in the user's operation.
+#[tokio::test]
+async fn chained_requires_skipped_fetch_hides_internal_fields() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+  scalar join__FieldSet
+
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/sub2")
+    SUB3 @join__graph(name: "sub3", url: "http://localhost:4002/sub3")
+  }
+
+  scalar link__Import
+
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+    @join__type(graph: SUB3)
+  {
+    entity: Entity @join__field(graph: SUB1)
+  }
+
+  type Entity
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+    @join__type(graph: SUB3, key: "id", extension: true)
+  {
+    id: ID!
+    code: String!
+      @join__field(graph: SUB1)
+      @join__field(graph: SUB2, external: true)
+    aux: String!
+      @join__field(graph: SUB2, requires: "code")
+      @join__field(graph: SUB3, external: true)
+    other: String @join__field(graph: SUB2, requires: "code")
+    final: String @join__field(graph: SUB3, requires: "aux")
+  }"#;
+
+    let query = "query {
+        entity {
+          final
+          other
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id code}}"}},
+                        // code missing — sub2 (which requires code) is skipped; sub3 follows.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                                "__typename": "Entity",
+                                "id": "1"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            // sub2 and sub3 should never be called.
+            ("sub2", MockSubgraph::builder().build()),
+            ("sub3", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    let value = serde_json::to_value(&response).unwrap();
+
+    let errors = value["errors"]
+        .as_array()
+        .expect("errors should be present");
+
+    // Exactly two errors — one per user-visible field that went unfetched.
+    // `aux` is planner-internal (not in the user's operation) and must NOT
+    // appear in any error path.
+    let paths: Vec<&serde_json::Value> = errors.iter().map(|e| &e["path"]).collect();
+    assert_eq!(
+        errors.len(),
+        2,
+        "expected exactly 2 UNSATISFIED_FETCH_CONDITION errors, got: {:?}",
+        errors
+    );
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "other"])),
+        "should have error for entity.other, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.contains(&&serde_json::json!(["entity", "final"])),
+        "should have error for entity.final, got: {:?}",
+        paths
+    );
+    for err in errors {
+        assert_eq!(
+            err["extensions"]["code"].as_str(),
+            Some("UNSATISFIED_FETCH_CONDITION"),
+        );
+        // `aux` is planner-internal — it must NOT leak into user-visible errors.
+        assert_ne!(
+            err["path"],
+            serde_json::json!(["entity", "aux"]),
+            "planner-internal `aux` leaked into errors: {:?}",
+            err
+        );
+    }
 }
 
 // Regression test: when two subgraph fetches share a composite field via
