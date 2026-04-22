@@ -291,6 +291,7 @@ telemetry:
           type: counter
           value: event_unit
           unit: chunk
+          description: "Count of deferred response chunks"
           condition:
             eq:
               - is_primary_response: true
