@@ -1,4 +1,4 @@
-### Fix `is_primary_response` telemetry selector to correctly identify the primary response chunk ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Fix `is_primary_response` telemetry selector to correctly identify the primary response chunk ([PR #9238](https://github.com/apollographql/router/pull/9238))
 
 The `is_primary_response: true` supergraph telemetry selector returned `false` for every chunk of a multipart `@defer` response — including the primary (first) chunk — when evaluated at `on_response` or `on_response_event` scope. This made it impossible for customers to distinguish primary from deferred chunks in metrics, events, and conditional telemetry.
 
@@ -21,4 +21,4 @@ telemetry:
 
 Now produces split metric series (`is_primary="true"` for the primary chunk, `is_primary="false"` for deferred chunks) instead of a single series with `is_primary="false"` for everything.
 
-By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/XXXX
+By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/9238

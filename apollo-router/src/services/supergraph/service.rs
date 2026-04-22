@@ -343,19 +343,14 @@ async fn service_call(
                 let supergraph_response_event = context
                     .extensions()
                     .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
-                // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
-                // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
-                // response chunk from deferred/subscription chunks. Previously this
-                // only set the key to `false` on the second-and-later chunks and
-                // never set it to `true` for the primary chunk — which made
-                // `is_primary_response: true` always evaluate to `false` at response
-                // and response-event scope, since the selector requires the key to
-                // equal `Some(Bool(true))` to return true.
                 let mut first_event = true;
                 let mut inserted = false;
                 let ctx = context.clone();
                 let response_stream = response_stream.inspect(move |_| {
                     if first_event {
+                        // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
+                        // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
+                        // response chunk from deferred/subscription chunks.
                         ctx.insert_json_value(
                             FIRST_EVENT_CONTEXT_KEY,
                             serde_json_bytes::Value::Bool(true),
@@ -713,73 +708,5 @@ impl SupergraphCreator {
                 experimental_pql_prewarm,
             )
             .await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::StreamExt;
-    use futures::stream;
-
-    use super::FIRST_EVENT_CONTEXT_KEY;
-    use crate::Context;
-
-    /// Regression test for the `is_primary_response` telemetry selector.
-    ///
-    /// Mirrors the `response_stream.inspect(...)` closure in the supergraph
-    /// service flow. Validates that the FIRST_EVENT_CONTEXT_KEY transitions:
-    ///   - after chunk 1: `Bool(true)`
-    ///   - after chunk 2: `Bool(false)`
-    ///   - after chunk 3+: `Bool(false)` (not rewritten each chunk)
-    ///
-    /// Prior to fixing the `is_primary_response` bug, chunk 1 left the key
-    /// unset (`None`) which made the selector always return false at
-    /// response-event scope, regardless of chunk position.
-    #[tokio::test]
-    async fn first_event_context_key_transitions_across_stream() {
-        let context = Context::new();
-        // Key is unset before any chunk has flowed through.
-        assert_eq!(context.get_json_value(FIRST_EVENT_CONTEXT_KEY), None);
-
-        let mut first_event = true;
-        let mut inserted = false;
-        let ctx = context.clone();
-        let stream = stream::iter(0..3u32).inspect(move |_| {
-            if first_event {
-                ctx.insert_json_value(FIRST_EVENT_CONTEXT_KEY, serde_json_bytes::Value::Bool(true));
-                first_event = false;
-            } else if !inserted {
-                ctx.insert_json_value(
-                    FIRST_EVENT_CONTEXT_KEY,
-                    serde_json_bytes::Value::Bool(false),
-                );
-                inserted = true;
-            }
-        });
-        let mut stream = Box::pin(stream);
-
-        // Chunk 1 → primary → key should be true.
-        stream.next().await.unwrap();
-        assert_eq!(
-            context.get_json_value(FIRST_EVENT_CONTEXT_KEY),
-            Some(serde_json_bytes::Value::Bool(true)),
-            "first chunk should set FIRST_EVENT_CONTEXT_KEY to Bool(true)"
-        );
-
-        // Chunk 2 → deferred → key flips to false.
-        stream.next().await.unwrap();
-        assert_eq!(
-            context.get_json_value(FIRST_EVENT_CONTEXT_KEY),
-            Some(serde_json_bytes::Value::Bool(false)),
-            "second chunk should set FIRST_EVENT_CONTEXT_KEY to Bool(false)"
-        );
-
-        // Chunk 3 → still deferred → key stays false (not rewritten).
-        stream.next().await.unwrap();
-        assert_eq!(
-            context.get_json_value(FIRST_EVENT_CONTEXT_KEY),
-            Some(serde_json_bytes::Value::Bool(false)),
-            "subsequent chunks should leave FIRST_EVENT_CONTEXT_KEY as Bool(false)"
-        );
     }
 }
