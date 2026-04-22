@@ -1,8 +1,8 @@
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 use test_log::test;
 
+use super::compose;
 use crate::composition::ServiceDefinition;
 use crate::composition::compose_as_fed2_subgraphs;
 

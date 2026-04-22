@@ -30,6 +30,7 @@ use tracing::trace;
 use crate::LinkSpecDefinition;
 use crate::api_schema;
 use crate::bail;
+use crate::composition::CompositionOptions;
 use crate::connectors::spec::CONNECT_VERSIONS;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -139,13 +140,6 @@ pub(crate) struct MergeResult {
 pub(in crate::merger) struct MergedDirectiveInfo {
     pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
     pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct CompositionOptions {
-    // Add options as needed - for now keeping it minimal
-    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
-    pub(crate) max_validation_subgraph_paths: Option<usize>,
 }
 
 #[allow(unused)]

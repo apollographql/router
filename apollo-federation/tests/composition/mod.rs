@@ -28,10 +28,11 @@ pub(crate) mod test_helpers {
     use std::iter::zip;
 
     use apollo_federation::ValidFederationSubgraphs;
-    use apollo_federation::composition::compose;
+    use apollo_federation::composition::CompositionOptions;
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
     use apollo_federation::subgraph::test_utils::remove_indentation;
+    use apollo_federation::subgraph::typestate::Initial;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::CompositionHint;
     use apollo_federation::supergraph::Satisfiable;
@@ -42,12 +43,40 @@ pub(crate) mod test_helpers {
         pub(crate) type_defs: &'a str,
     }
 
+    /// Thin wrapper around [`apollo_federation::composition::compose`] that passes
+    /// [`CompositionOptions::default()`], so tests don't have to spell it out.
+    pub(crate) fn compose(
+        subgraphs: Vec<Subgraph<Initial>>,
+    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+        apollo_federation::composition::compose(subgraphs, CompositionOptions::default())
+    }
+
     /// Composes a set of subgraphs as if they had the latest federation 2 spec link in them.
     /// Also, all federation directives are automatically imported.
     // PORT_NOTE: This function corresponds to `composeAsFed2Subgraphs` in JS implementation.
     pub(crate) fn compose_as_fed2_subgraphs(
         service_list: &[ServiceDefinition<'_>],
     ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+        compose_as_fed2_subgraphs_with_options(service_list, CompositionOptions::default())
+    }
+
+    /// Same as [`compose_as_fed2_subgraphs`], but lets the caller supply
+    /// [`CompositionOptions`]. Use this for tests that exercise non-default options.
+    pub(crate) fn compose_as_fed2_subgraphs_with_options(
+        service_list: &[ServiceDefinition<'_>],
+        options: CompositionOptions,
+    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+        let fed2_subgraphs = as_fed2_subgraphs(service_list)?;
+        apollo_federation::composition::compose(fed2_subgraphs, options)
+    }
+
+    /// Parses the given service definitions and converts them into fed2-ready subgraphs, ready to
+    /// be fed into [`compose`]. Mirrors the `asFed2Service` conversion from the JS implementation.
+    ///
+    /// Use this when a test needs to call [`compose`] directly with custom [`CompositionOptions`].
+    pub(crate) fn as_fed2_subgraphs(
+        service_list: &[ServiceDefinition<'_>],
+    ) -> Result<Vec<Subgraph<Initial>>, Vec<CompositionError>> {
         let mut subgraphs = Vec::new();
         let mut errors = Vec::new();
         for service in service_list {
@@ -69,7 +98,6 @@ pub(crate) mod test_helpers {
             return Err(errors);
         }
 
-        // PORT_NOTE: This statement corresponds to `asFed2Service` function in JS.
         let mut fed2_subgraphs = Vec::new();
         for subgraph in subgraphs {
             match subgraph.into_fed2_test_subgraph(true, false) {
@@ -81,7 +109,7 @@ pub(crate) mod test_helpers {
             return Err(errors);
         }
 
-        compose(fed2_subgraphs)
+        Ok(fed2_subgraphs)
     }
 
     /// Helper function to print schema SDL with consistent formatting for snapshots
@@ -177,6 +205,8 @@ pub(crate) mod test_helpers {
 pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::assert_composition_errors;
 pub(crate) use test_helpers::assert_hints_equal;
+pub(crate) use test_helpers::compose;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
+pub(crate) use test_helpers::compose_as_fed2_subgraphs_with_options;
 pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;
 pub(crate) use test_helpers::print_sdl;
