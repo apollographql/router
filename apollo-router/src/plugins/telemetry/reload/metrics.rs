@@ -25,7 +25,6 @@ use std::num::NonZeroU32;
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -196,8 +195,8 @@ impl<'a> MetricsBuilder<'a> {
     }
 
     pub(crate) fn configure_views(&mut self, meter_provider_type: MeterProviderType) {
-        let boundaries = self.metrics_common().buckets.clone();
-        let global_cardinality_limit = self.metrics_common().cardinality_limit;
+        let bucket_boundaries = self.metrics_common().buckets.clone();
+        let cardinality_limit = self.metrics_common().cardinality_limit;
         let user_views: HashMap<String, MetricView> = self
             .metrics_common()
             .views
@@ -206,64 +205,42 @@ impl<'a> MetricsBuilder<'a> {
             .map(|v| (v.name.clone(), v))
             .collect();
 
-        self.with_view(
-            meter_provider_type,
-            build_view_fn(user_views, boundaries, global_cardinality_limit),
-        );
+        self.with_view(meter_provider_type, move |instrument: &Instrument| {
+            resolve_view(instrument, &user_views, &bucket_boundaries, cardinality_limit)
+        });
     }
 }
 
-/// Builds the view-selection closure used by the OTel SDK.
-///
-/// The default histogram aggregation is applied only when the matched instrument
-/// is actually a histogram — applying it unconditionally would convert counters
-/// and gauges into histograms whenever a `views[]` entry omits `aggregation`.
-fn build_view_fn(
-    user_views: HashMap<String, MetricView>,
-    boundaries: Vec<f64>,
-    global_cardinality_limit: Option<NonZeroU32>,
-) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-    move |instrument: &Instrument| {
-        let is_histogram = instrument.kind() == InstrumentKind::Histogram;
-        if let Some(mut view) = user_views.get(instrument.name()).cloned() {
-            if is_histogram && view.aggregation.is_none() {
-                view.aggregation = Some(MetricAggregation::Histogram {
-                    buckets: boundaries.clone(),
-                });
-            }
-            if view.cardinality_limit.is_none() {
-                view.cardinality_limit = global_cardinality_limit;
-            }
-            return Some(view.into_stream());
-        }
-        if is_histogram {
-            let mut builder =
-                Stream::builder().with_aggregation(Aggregation::ExplicitBucketHistogram {
-                    boundaries: boundaries.clone(),
-                    record_min_max: true,
-                });
-            if let Some(limit) = global_cardinality_limit {
-                builder = builder.with_cardinality_limit(limit.get() as usize);
-            }
-            let name = instrument.name();
-            return Some(builder.build().unwrap_or_else(|e| {
-                panic!("failed to build default histogram view for {name}: {e}")
-            }));
-        }
-        global_cardinality_limit.map(|limit| {
-            let name = instrument.name();
-            Stream::builder()
-                .with_cardinality_limit(limit.get() as usize)
-                .build()
-                .unwrap_or_else(|e| {
-                    panic!("failed to build global cardinality-limit view for {name}: {e}")
-                })
-        })
+/// Resolves the view [`Stream`] for an instrument by layering a user-configured
+/// view (if any) on top of the globals. The histogram aggregation default is
+/// seeded only for histogram instruments, never for counters or gauges.
+fn resolve_view(
+    instrument: &Instrument,
+    user_views: &HashMap<String, MetricView>,
+    bucket_boundaries: &[f64],
+    cardinality_limit: Option<NonZeroU32>,
+) -> Option<Stream> {
+    let is_histogram = instrument.kind() == InstrumentKind::Histogram;
+    let default_aggregation = is_histogram.then(|| MetricAggregation::Histogram {
+        buckets: bucket_boundaries.to_vec(),
+    });
+    let user_view = user_views.get(instrument.name()).cloned();
+
+    if default_aggregation.is_none() && cardinality_limit.is_none() && user_view.is_none() {
+        return None;
     }
+
+    let defaults =
+        MetricView::default_view(instrument.name(), default_aggregation, cardinality_limit);
+    let view = match user_view {
+        Some(user) => defaults.merge(user),
+        None => defaults,
+    };
+    Some(view.into_stream())
 }
 
 #[cfg(test)]
-mod build_view_fn_tests {
+mod view_selection_tests {
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
@@ -295,18 +272,22 @@ mod build_view_fn_tests {
         exporter: InMemoryMetricExporter,
         user_views: Vec<MetricView>,
         global_cardinality_limit: Option<NonZeroU32>,
-    ) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+    ) -> SdkMeterProvider {
         let user_views: HashMap<String, MetricView> = user_views
             .into_iter()
             .map(|v| (v.name.clone(), v))
             .collect();
+        let bucket_boundaries = DEFAULT_BUCKETS.to_vec();
         MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter, runtime::Tokio).build())
-            .with_view(build_view_fn(
-                user_views,
-                DEFAULT_BUCKETS.to_vec(),
-                global_cardinality_limit,
-            ))
+            .with_view(move |instrument: &Instrument| {
+                resolve_view(
+                    instrument,
+                    &user_views,
+                    &bucket_boundaries,
+                    global_cardinality_limit,
+                )
+            })
             .build()
     }
 

@@ -118,10 +118,8 @@ pub(crate) struct MetricsCommon {
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
-    /// Global maximum number of distinct attribute combinations (cardinality) for all
-    /// customer-facing metrics.
+    /// Maximum number of distinct attribute combinations (cardinality)
     ///
-    /// Individual views can override this via their own `cardinality_limit`.
     /// If not set, the OTel SDK default of 2000 applies.
     pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
@@ -172,33 +170,30 @@ pub(crate) struct MetricView {
 }
 
 impl MetricView {
-    /// Creates a default view for a named instrument with histogram aggregation.
-    #[cfg(test)]
-    pub(crate) fn default_histogram(name: String, boundaries: Vec<f64>) -> Self {
+    /// Creates a default view for a named instrument with the given parameters.
+    ///
+    /// `aggregation` should be `Some(Histogram { .. })` only for histogram
+    /// instruments. Passing a histogram aggregation for counters or gauges
+    /// would silently convert them into histograms.
+    pub(crate) fn default_view(
+        name: &str,
+        aggregation: Option<MetricAggregation>,
+        cardinality_limit: Option<NonZeroU32>,
+    ) -> Self {
         Self {
-            name,
+            name: name.to_string(),
             rename: None,
             description: None,
             unit: None,
-            aggregation: Some(MetricAggregation::Histogram {
-                buckets: boundaries,
-            }),
+            aggregation,
             allowed_attribute_keys: None,
-            cardinality_limit: None,
+            cardinality_limit,
         }
     }
 
     /// Merges user-provided overrides into this view configuration.
-    /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
-    /// retain the values from `self`.
-    ///
-    /// Test-only: production view resolution lives in
-    /// `reload::metrics::build_view_fn`, where the histogram-aggregation default
-    /// is applied conditionally on `InstrumentKind`. Do not reintroduce this
-    /// helper into production. Pre-seeding every user view with
-    /// `default_histogram` previously caused counters and gauges to be silently
-    /// converted to histograms when a `views[]` entry omitted `aggregation`.
-    #[cfg(test)]
+    /// User-specified (`Some`) fields take precedence; unspecified (`None`)
+    /// fields retain the values from `self`.
     pub(crate) fn merge(self, user: Self) -> Self {
         Self {
             name: self.name,
@@ -1018,9 +1013,15 @@ mod tests {
     }
 
     #[test]
-    fn test_default_histogram_creates_view_with_buckets() {
+    fn test_default_view_with_histogram_aggregation_sets_buckets() {
         let boundaries = vec![0.1, 0.5, 1.0, 5.0];
-        let view = MetricView::default_histogram("my.metric".to_string(), boundaries.clone());
+        let view = MetricView::default_view(
+            "my.metric",
+            Some(MetricAggregation::Histogram {
+                buckets: boundaries.clone(),
+            }),
+            None,
+        );
 
         assert_eq!(view.name, "my.metric");
         assert_eq!(view.rename, None);
@@ -1038,8 +1039,13 @@ mod tests {
 
     #[test]
     fn test_merge_user_overrides_all_fields() {
-        let default =
-            MetricView::default_histogram("my.histogram".to_string(), vec![0.1, 0.5, 1.0]);
+        let default = MetricView::default_view(
+            "my.histogram",
+            Some(MetricAggregation::Histogram {
+                buckets: vec![0.1, 0.5, 1.0],
+            }),
+            None,
+        );
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: Some("renamed.histogram".to_string()),
@@ -1073,8 +1079,13 @@ mod tests {
     #[test]
     fn test_merge_user_specifies_nothing_preserves_defaults() {
         let default_buckets = vec![0.1, 0.5, 1.0];
-        let default =
-            MetricView::default_histogram("my.histogram".to_string(), default_buckets.clone());
+        let default = MetricView::default_view(
+            "my.histogram",
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets.clone(),
+            }),
+            None,
+        );
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: None,
@@ -1104,9 +1115,12 @@ mod tests {
     #[test]
     fn test_merge_partial_override_preserves_default_aggregation() {
         let default_buckets = vec![0.001, 0.005, 0.015, 0.05, 0.1];
-        let default = MetricView::default_histogram(
-            "http.server.request.duration".to_string(),
-            default_buckets.clone(),
+        let default = MetricView::default_view(
+            "http.server.request.duration",
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets.clone(),
+            }),
+            None,
         );
         let user = MetricView {
             name: "http.server.request.duration".to_string(),
@@ -1141,8 +1155,13 @@ mod tests {
 
     #[test]
     fn test_merge_user_drop_overrides_default_histogram() {
-        let default =
-            MetricView::default_histogram("noisy.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let default = MetricView::default_view(
+            "noisy.metric",
+            Some(MetricAggregation::Histogram {
+                buckets: vec![0.1, 0.5, 1.0],
+            }),
+            None,
+        );
         let user = MetricView {
             name: "noisy.metric".to_string(),
             rename: None,
@@ -1240,8 +1259,13 @@ mod tests {
         let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
 
         // Create a default view with histogram buckets
-        let default_view =
-            MetricView::default_histogram("test.histogram".to_string(), default_buckets.clone());
+        let default_view = MetricView::default_view(
+            "test.histogram",
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets.clone(),
+            }),
+            None,
+        );
 
         // User view specifies only description, not aggregation
         let user_view = MetricView {
@@ -1315,8 +1339,13 @@ mod tests {
         let user_buckets = vec![1.0, 5.0, 10.0, 50.0];
 
         // Create a default view with histogram buckets
-        let default_view =
-            MetricView::default_histogram("test.histogram".to_string(), default_buckets);
+        let default_view = MetricView::default_view(
+            "test.histogram",
+            Some(MetricAggregation::Histogram {
+                buckets: default_buckets,
+            }),
+            None,
+        );
 
         // User view specifies custom aggregation - should override defaults
         let user_view = MetricView {
@@ -1398,8 +1427,13 @@ mod tests {
 
     #[test]
     fn test_merge_cardinality_limit_user_overrides_global() {
-        let mut default =
-            MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let mut default = MetricView::default_view(
+            "my.metric",
+            Some(MetricAggregation::Histogram {
+                buckets: vec![0.1, 0.5, 1.0],
+            }),
+            None,
+        );
         default.cardinality_limit = NonZeroU32::new(3000); // simulates global limit
         let user = MetricView {
             name: "my.metric".to_string(),
@@ -1420,8 +1454,13 @@ mod tests {
 
     #[test]
     fn test_merge_cardinality_limit_inherits_global() {
-        let mut default =
-            MetricView::default_histogram("my.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let mut default = MetricView::default_view(
+            "my.metric",
+            Some(MetricAggregation::Histogram {
+                buckets: vec![0.1, 0.5, 1.0],
+            }),
+            None,
+        );
         default.cardinality_limit = NonZeroU32::new(5000); // simulates global limit
         let user = MetricView {
             name: "my.metric".to_string(),

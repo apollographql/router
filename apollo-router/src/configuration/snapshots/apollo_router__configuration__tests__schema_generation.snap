@@ -7149,7 +7149,7 @@ expression: "&schema"
         },
         "cardinality_limit": {
           "default": null,
-          "description": "Global maximum number of distinct attribute combinations (cardinality) for all\ncustomer-facing metrics.\n\nIndividual views can override this via their own `cardinality_limit`.\nIf not set, the OTel SDK default of 2000 applies.",
+          "description": "Maximum number of distinct attribute combinations (cardinality)\n\nIf not set, the OTel SDK default of 2000 applies.",
           "format": "uint32",
           "minimum": 1,
           "type": [
