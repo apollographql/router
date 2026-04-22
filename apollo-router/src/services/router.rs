@@ -420,7 +420,7 @@ impl Response {
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(
-                    futures::stream::iter(res.into_iter())
+                    futures::stream::iter(res)
                         .map(|bytes| serde_json::from_slice::<graphql::Response>(&bytes)),
                 )
             },

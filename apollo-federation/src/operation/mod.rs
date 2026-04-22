@@ -1927,17 +1927,15 @@ impl SelectionSet {
         ) {
             for selection in selection_set.selections.values() {
                 match selection {
-                    Selection::InlineFragment(inline_fragment) => {
-                        if inline_fragment.is_unnecessary(parent_type, schema) {
-                            process_selection_set(
-                                &inline_fragment.selection_set,
-                                final_selections,
-                                parent_type,
-                                schema,
-                            );
-                        } else {
-                            final_selections.push(selection.clone());
-                        }
+                    Selection::InlineFragment(inline_fragment)
+                        if inline_fragment.is_unnecessary(parent_type, schema) =>
+                    {
+                        process_selection_set(
+                            &inline_fragment.selection_set,
+                            final_selections,
+                            parent_type,
+                            schema,
+                        );
                     }
                     _ => {
                         final_selections.push(selection.clone());

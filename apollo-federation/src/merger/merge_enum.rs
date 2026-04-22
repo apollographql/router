@@ -305,12 +305,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::JOIN_VERSIONS;
     use crate::SpecDefinition;
+    use crate::composition::CompositionOptions;
     use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
     use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
-    use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::utils::FallibleOnceCell;
