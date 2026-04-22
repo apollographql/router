@@ -2303,3 +2303,189 @@ mod issuer_validation {
         }
     }
 }
+
+// Tests for the case where two JWKS entries share identical key material but have different
+// configured issuers or audiences (e.g., Azure AD B2C multi-policy tenants). The retry loop
+// in decode_jwt must continue to the next candidate when signature passes but issuer/audience
+// validation fails.
+mod duplicate_key_retry {
+    use std::collections::HashMap;
+    use std::ops::ControlFlow;
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use http::StatusCode;
+    use jsonwebtoken::get_current_timestamp;
+    use jsonwebtoken::jwk::JwkSet;
+    use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::rand_core::OsRng;
+    use url::Url;
+
+    use super::common::build_request_with_header_token;
+    use super::common::jwk;
+    use super::common::jwt_conf_with_header_source;
+    use crate::plugins::authentication::authenticate;
+    use crate::plugins::authentication::jwks::JwksConfig;
+    use crate::plugins::authentication::jwks::JwksManager;
+
+    #[test]
+    fn it_retries_next_jwks_entry_when_issuer_fails_on_first() {
+        // Two JWKS entries share the same key. Entry A (index 0) expects issuer "tenant-a",
+        // entry B (index 1) expects "tenant-b". iter_jwks uses list.pop() so entry B is tried
+        // first. A token with issuer "tenant-a" fails entry B's issuer check; the retry loop
+        // must continue to entry A and succeed.
+        let signing_key = SigningKey::random(&mut OsRng);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
+
+        let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+        let list = vec![
+            JwksConfig {
+                url: url_a.clone(),
+                issuers: Some(["https://tenant-a.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+            JwksConfig {
+                url: url_b.clone(),
+                issuers: Some(["https://tenant-b.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+        ];
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
+        let manager = JwksManager::new_test(list, map);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://tenant-a.example.com"
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!("should have succeeded via second JWKS entry: {response:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn it_fails_when_no_jwks_entry_issuer_matches() {
+        // Both entries have specific issuers, neither matches the token issuer.
+        let signing_key = SigningKey::random(&mut OsRng);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
+
+        let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+        let list = vec![
+            JwksConfig {
+                url: url_a.clone(),
+                issuers: Some(["https://tenant-a.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+            JwksConfig {
+                url: url_b.clone(),
+                issuers: Some(["https://tenant-b.example.com".to_string()].into()),
+                audiences: None,
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+        ];
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
+        let manager = JwksManager::new_test(list, map);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "iss": "https://attacker.example.com"
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Break(response) => {
+                assert_eq!(
+                    response.response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR
+                );
+            }
+            ControlFlow::Continue(_) => {
+                panic!("should have been rejected when no entry's issuer matches");
+            }
+        }
+    }
+
+    #[test]
+    fn it_retries_next_jwks_entry_when_audience_fails_on_first() {
+        // Two JWKS entries share the same key. Entry A (index 0) expects audience "aud-a",
+        // entry B (index 1) expects "aud-b". iter_jwks uses list.pop() so entry B is tried
+        // first. A token with audience "aud-a" fails entry B's audience check; the retry loop
+        // must continue to entry A and succeed.
+        let signing_key = SigningKey::random(&mut OsRng);
+        let shared_jwk = JwkSet {
+            keys: vec![jwk(&signing_key)],
+        };
+
+        let url_a = Url::from_str("file:///jwks-a.json").unwrap();
+        let url_b = Url::from_str("file:///jwks-b.json").unwrap();
+
+        let list = vec![
+            JwksConfig {
+                url: url_a.clone(),
+                issuers: None,
+                audiences: Some(["aud-a".to_string()].into()),
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+            JwksConfig {
+                url: url_b.clone(),
+                issuers: None,
+                audiences: Some(["aud-b".to_string()].into()),
+                algorithms: None,
+                poll_interval: Duration::from_secs(60),
+                allow_missing_exp: false,
+                headers: Vec::new(),
+            },
+        ];
+
+        let map = HashMap::from([(url_a, shared_jwk.clone()), (url_b, shared_jwk)]);
+        let manager = JwksManager::new_test(list, map);
+
+        let token_claims = serde_json::json!({
+            "sub": "test",
+            "exp": get_current_timestamp(),
+            "aud": "aud-a"
+        });
+        let request = build_request_with_header_token(signing_key, token_claims);
+
+        match authenticate(&jwt_conf_with_header_source(), &manager, request) {
+            ControlFlow::Continue(_) => {}
+            ControlFlow::Break(response) => {
+                panic!("should have succeeded via second JWKS entry: {response:?}");
+            }
+        }
+    }
+}

@@ -11,6 +11,7 @@ apollo-router = { path = "../apollo-router" }
 criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
 memory-stats = "1.1.0"
 once_cell.workspace = true
+rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
 serde_json.workspace = true
 tokio.workspace = true
 tower.workspace = true
@@ -26,4 +27,8 @@ harness = false
 
 [[bench]]
 name = "memory_use"
+harness = false
+
+[[bench]]
+name = "rhai_string_interning"
 harness = false

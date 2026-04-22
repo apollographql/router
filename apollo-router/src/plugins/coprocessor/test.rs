@@ -1,4 +1,4 @@
-use crate::services::external::PipelineStep;
+use crate::services::PipelineStep;
 
 macro_rules! assert_counter_zero_or_absent {
     ($($arg:tt)*) => {{
@@ -97,9 +97,9 @@ mod tests {
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
-    use crate::services::external::PipelineStep;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -6265,8 +6265,8 @@ mod tests {
         use crate::plugins::coprocessor::connector::ConnectorStage;
         use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
         use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::services::PipelineStep;
         use crate::services::connector::request_service;
-        use crate::services::external::PipelineStep;
         use crate::services::http::HttpRequest;
         use crate::services::http::HttpResponse;
         use crate::services::router;
