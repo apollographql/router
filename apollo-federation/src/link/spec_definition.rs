@@ -99,15 +99,9 @@ pub(crate) trait SpecDefinition {
         Some(link.directive_name_in_schema(name_in_spec))
     }
 
-    fn type_name_in_schema(
-        &self,
-        schema: &FederationSchema,
-        name_in_spec: &Name,
-    ) -> Result<Option<Name>, FederationError> {
-        let Some(link) = self.link_in_schema(schema) else {
-            return Ok(None);
-        };
-        Ok(Some(link.type_name_in_schema(name_in_spec)))
+    fn type_name_in_schema(&self, schema: &FederationSchema, name_in_spec: &Name) -> Option<Name> {
+        let link = self.link_in_schema(schema)?;
+        Some(link.type_name_in_schema(name_in_spec))
     }
 
     fn directive_definition<'schema>(
@@ -149,7 +143,7 @@ pub(crate) trait SpecDefinition {
         schema: &'schema FederationSchema,
         name_in_spec: &Name,
     ) -> Result<Option<&'schema ExtendedType>, FederationError> {
-        match self.type_name_in_schema(schema, name_in_spec)? {
+        match self.type_name_in_schema(schema, name_in_spec) {
             Some(name) => schema
                 .schema()
                 .types

@@ -1089,7 +1089,7 @@ impl JoinSpecDefinition {
 
         // Get the graph enum name to access it directly from the schema
         let graph_enum_name = self
-            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
+            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Could not find graph enum name in schema".to_owned(),
             })?;
