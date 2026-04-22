@@ -32,7 +32,7 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_type_mismatch__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "f0bd2bbbff33df8999fbf2e55b0b22be4e3a6956f15a44c6b27b4d479704035c",
+              "schemaAwareHash": "e1e24d3daa8cf818ef1be20c292f2cb850bf166b7274efcff9fab40004113ae7",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -78,7 +78,7 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "dd24edddbb58e815dd5f798051829dda822dd60967283cc0f914371dcc1d0254",
+                "schemaAwareHash": "410abd839d0bd0deec97bb0382cb6582fedd53619cd5a9395aaac961344caef1",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"
