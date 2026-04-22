@@ -95,9 +95,7 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
         name_in_spec: &Name,
     ) -> Option<Name> {
-        let Some(link) = self.link_in_schema(schema) else {
-            return None;
-        };
+        let link = self.link_in_schema(schema)?;
         Some(link.directive_name_in_schema(name_in_spec))
     }
 
@@ -170,9 +168,7 @@ pub(crate) trait SpecDefinition {
     }
 
     fn link_in_schema(&self, schema: &FederationSchema) -> Option<Arc<Link>> {
-        let Some(metadata) = schema.metadata() else {
-            return None;
-        };
+        let metadata = schema.metadata()?;
         metadata.for_identity(self.identity())
     }
 
