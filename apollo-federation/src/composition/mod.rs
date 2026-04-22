@@ -11,7 +11,6 @@ use crate::connectors::expand::Connectors;
 use crate::connectors::expand::ExpansionResult;
 use crate::connectors::expand::expand_connectors;
 use crate::error::CompositionError;
-pub use crate::merger::merge::CompositionOptions;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
 use crate::schema::validators::root_fields::validate_consistent_root_fields;
@@ -22,6 +21,15 @@ use crate::subgraph::typestate::Validated;
 pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
+
+/// Options that configure composition. Mirrors the JS `CompositionOptions` interface
+/// (see `composition-js/src/compose.ts`). Most fields are not yet ported — add them here
+/// as needed.
+#[derive(Debug, Default, Clone)]
+pub struct CompositionOptions {
+    /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
+    pub max_validation_subgraph_paths: Option<usize>,
+}
 
 /// Mirrors the JS `compose` function.
 #[instrument(skip(subgraphs, options))]

@@ -10,10 +10,10 @@ use tracing::instrument;
 use tracing::trace;
 
 use crate::api_schema;
+use crate::composition::CompositionOptions;
 use crate::composition::satisfiability::validation_traversal::ValidationTraversal;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::merger::merge::CompositionOptions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::build_supergraph_api_query_graph;
