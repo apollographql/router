@@ -143,7 +143,7 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl<T: Clone + Sync + 'static> CachingQueryPlanner<T>
+impl<T: Clone + 'static> CachingQueryPlanner<T>
 where
     T: tower::Service<
             QueryPlannerRequest,
