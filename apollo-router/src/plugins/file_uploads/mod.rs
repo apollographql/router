@@ -77,9 +77,9 @@ impl PluginPrivate for FileUploadsPlugin {
                         match tokio::time::timeout(timeout, layer_task).await {
                             Ok(result) => result,
                             Err(_elapsed) => {
-                                return Ok(ControlFlow::Break(
-                                    operation_body_timeout_error(context)?,
-                                ))
+                                return Ok(ControlFlow::Break(operation_body_timeout_error(
+                                    context,
+                                )?));
                             }
                         }
                     } else {
@@ -184,10 +184,12 @@ fn operation_body_timeout_error(
 ) -> std::result::Result<router::Response, tower::BoxError> {
     router::Response::error_builder()
         .status_code(StatusCode::GATEWAY_TIMEOUT)
-        .errors(vec![graphql::Error::builder()
-            .message("The file upload operation body took too long to arrive")
-            .extension_code("GATEWAY_TIMEOUT")
-            .build()])
+        .errors(vec![
+            graphql::Error::builder()
+                .message("The file upload operation body took too long to arrive")
+                .extension_code("GATEWAY_TIMEOUT")
+                .build(),
+        ])
         .context(context)
         .build()
 }

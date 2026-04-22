@@ -1142,10 +1142,7 @@ mod operation_body_timeout {
     const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
 
     async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
-        let mut router = IntegrationTest::builder()
-            .config(config)
-            .build()
-            .await;
+        let mut router = IntegrationTest::builder().config(config).build().await;
         router.start().await;
         router.assert_started().await;
         let url = format!("http://{}", router.bind_address());
