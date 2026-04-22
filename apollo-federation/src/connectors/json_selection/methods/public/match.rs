@@ -237,6 +237,187 @@ mod tests {
         );
     }
 
+    // TSH-22359: Reproduction of a reported parse failure when users place
+    // nested object subselections inside `->match` branches. Under connect/v0.2
+    // through connect/v0.4 (as of today), the top-level `JSONSelection` grammar
+    // distinguishes between:
+    //
+    //   • `LitObject`    — comma-separated key/value list, appearing as a
+    //                      `LitExpr` inside a path or method argument.
+    //   • `SubSelection` — whitespace-separated `NamedSelection` list,
+    //                      appearing as the body of a path tail or the
+    //                      top-level selection.
+    //
+    // That distinction trips users writing nested object shapes inside a
+    // `->match` result arm, because the outer `{ ... }` (inside the match
+    // tuple) is a `LitObject` and so uses commas, but the inner
+    // `address { ... }` is a path tail, which means its `{ ... }` is a
+    // `SubSelection` and must use whitespace. Mixing the styles — e.g.
+    // `address: address { street: street, city: city }` — fails to parse.
+    //
+    // Tests below pin both the bug (test 2) and two user-facing workarounds
+    // (tests 4 and 5). The v0.4 "SubSelection == LitObject" unification is
+    // planned to collapse this distinction entirely; when that lands, test 2
+    // will flip from a failure assertion to a success + apply_to parity
+    // assertion, and additional coverage will be added for the new
+    // flexibility. These tests capture the pre-unification shape so that the
+    // unification commit has a concrete "before" to change.
+
+    #[test]
+    fn tsh_22359_flat_scalars_in_match_with_commas_parses_ok() {
+        // Test 1 from the ticket (verbatim): flat scalar fields inside ->match.
+        // Commas separate LitObject properties, which is correct.
+        let sel = selection!(
+            r#"
+            $.results {
+                ... resultType->match(
+                    ["book", { __typename: "FlatBook", id: id, title: title }],
+                    ["author", { __typename: "FlatAuthor", id: id, name: name }]
+                )
+            }
+            "#,
+            ConnectSpec::V0_4
+        );
+        let (result, errors) = sel.apply_to(&json!({
+            "results": [
+                { "resultType": "book", "id": "1", "title": "Great Expectations" },
+                { "resultType": "author", "id": "2", "name": "Dickens" }
+            ]
+        }));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(
+            result,
+            Some(json!([
+                { "__typename": "FlatBook", "id": "1", "title": "Great Expectations" },
+                { "__typename": "FlatAuthor", "id": "2", "name": "Dickens" }
+            ]))
+        );
+    }
+
+    #[test]
+    fn tsh_22359_flat_scalars_simplified_with_shorthand() {
+        // Same as ticket Test 1, but using V0_4 shorthand: `id` instead of
+        // `id: id`, `title` instead of `title: title`, etc.
+        let sel = selection!(
+            r#"
+            $.results {
+                ... resultType->match(
+                    ["book", { __typename: "FlatBook", id, title }],
+                    ["author", { __typename: "FlatAuthor", id, name }]
+                )
+            }
+            "#,
+            ConnectSpec::V0_4
+        );
+        let (result, errors) = sel.apply_to(&json!({
+            "results": [
+                { "resultType": "book", "id": "1", "title": "Great Expectations" },
+                { "resultType": "author", "id": "2", "name": "Dickens" }
+            ]
+        }));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(
+            result,
+            Some(json!([
+                { "__typename": "FlatBook", "id": "1", "title": "Great Expectations" },
+                { "__typename": "FlatAuthor", "id": "2", "name": "Dickens" }
+            ]))
+        );
+    }
+
+    #[test]
+    fn tsh_22359_nested_subselection_with_commas_fails_to_parse() {
+        // Test 2 from the ticket: nested object fields inside ->match.
+        // Under the pre-unification grammar, the user's input
+        // `address: address { street: street, city: city }` fails to parse.
+        //
+        // Mechanics: the outer `{ ... }` is a LitObject, so its body is a
+        // comma-separated LitProperty list. Inside, `address` on the LHS is
+        // an alias and `address { ... }` on the RHS is a path with a
+        // SubSelection tail — but a SubSelection is whitespace-delimited, so
+        // the comma after `street` inside the inner braces is a parse error.
+        let input = r#"
+            $.results {
+                ... resultType->match(
+                    ["book", { __typename: "NestedBook", id: id, title: title, address: address { street: street, city: city } }],
+                    ["author", { __typename: "NestedAuthor", id: id, name: name, address: address { street: street, city: city } }]
+                )
+            }
+        "#;
+        let result = crate::connectors::json_selection::JSONSelection::parse_with_spec(
+            input,
+            ConnectSpec::V0_4,
+        );
+        assert!(
+            result.is_err(),
+            "expected parse error, but it parsed successfully"
+        );
+    }
+
+    #[test]
+    fn tsh_22359_fix_litobj_commas_with_subselection_spaces() {
+        // Fix option 1: outer LitObject uses commas, inner SubSelection uses
+        // spaces. `address: address { street city }` parses as
+        // LitExpr::Path(PathList::Key("address", PathList::Selection(...))).
+        let sel = selection!(
+            r#"
+            $.results {
+                ... resultType->match(
+                    ["book", { __typename: "NestedBook", id: id, title: title, address: address { street city } }],
+                    ["author", { __typename: "NestedAuthor", id: id, name: name, address: address { street city } }]
+                )
+            }
+            "#,
+            ConnectSpec::V0_4
+        );
+        let (result, errors) = sel.apply_to(&json!({
+            "results": [
+                { "resultType": "book", "id": "1", "title": "Great Expectations", "address": { "street": "48 Doughty St", "city": "London" } },
+                { "resultType": "author", "id": "2", "name": "Dickens", "address": { "street": "1 Gads Hill", "city": "Higham" } }
+            ]
+        }));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(
+            result,
+            Some(json!([
+                { "__typename": "NestedBook", "id": "1", "title": "Great Expectations", "address": { "street": "48 Doughty St", "city": "London" } },
+                { "__typename": "NestedAuthor", "id": "2", "name": "Dickens", "address": { "street": "1 Gads Hill", "city": "Higham" } }
+            ]))
+        );
+    }
+
+    #[test]
+    fn tsh_22359_fix_shorthand_with_nested_subselection() {
+        // Fix option 2 (cleanest): V0_4 shorthand properties. `id` means
+        // `id: id`, and `address { street city }` is a shorthand property
+        // whose value is a path with SubSelection.
+        let sel = selection!(
+            r#"
+            $.results {
+                ... resultType->match(
+                    ["book", { __typename: "NestedBook", id, title, address { street city } }],
+                    ["author", { __typename: "NestedAuthor", id, name, address { street city } }]
+                )
+            }
+            "#,
+            ConnectSpec::V0_4
+        );
+        let (result, errors) = sel.apply_to(&json!({
+            "results": [
+                { "resultType": "book", "id": "1", "title": "Great Expectations", "address": { "street": "48 Doughty St", "city": "London" } },
+                { "resultType": "author", "id": "2", "name": "Dickens", "address": { "street": "1 Gads Hill", "city": "Higham" } }
+            ]
+        }));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(
+            result,
+            Some(json!([
+                { "__typename": "NestedBook", "id": "1", "title": "Great Expectations", "address": { "street": "48 Doughty St", "city": "London" } },
+                { "__typename": "NestedAuthor", "id": "2", "name": "Dickens", "address": { "street": "1 Gads Hill", "city": "Higham" } }
+            ]))
+        );
+    }
+
     #[rstest::rstest]
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
