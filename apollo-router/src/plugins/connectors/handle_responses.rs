@@ -103,13 +103,10 @@ where
                 inner: parts.clone(),
             }));
 
-            let make_err = || {
-                let mut err = RuntimeError::new(
-                    "The server returned data in an unexpected format.".to_string(),
-                    &response_key,
-                );
+            let make_err = |message: String, code: &str| {
+                let mut err = RuntimeError::new(message, &response_key);
                 err.subgraph_name = Some(connector.id.subgraph_name.clone());
-                err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+                err = err.with_code(code);
                 err.coordinate = Some(connector.id.coordinate());
                 err = err.extension(
                     "http",
@@ -121,11 +118,25 @@ where
                 err
             };
 
+            let make_invalid_response_err = || {
+                make_err(
+                    "The server returned data in an unexpected format.".to_string(),
+                    "CONNECTOR_RESPONSE_INVALID",
+                )
+            };
+
+            let make_limit_err = |limit: usize| {
+                make_err(
+                    format!("connector response body exceeded limit of {limit} bytes"),
+                    "CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED",
+                )
+            };
+
             let response_size_limit = context
                 .extensions()
                 .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
 
-            let body_result: Result<_, ()> = match response_size_limit {
+            let body_result: Result<_, RuntimeError> = match response_size_limit {
                 Some(ConnectorResponseSizeLimit(limit)) => {
                     Limited::new(body, limit)
                         .collect()
@@ -140,33 +151,35 @@ where
                                 );
                                 tracing::Span::current()
                                     .record("apollo.connector.response.aborted", "response_size_limit");
+                                make_limit_err(limit)
+                            } else {
+                                make_invalid_response_err()
                             }
                         })
                 }
                 None => body
                     .collect()
                     .await
-                    .map_err(|_| ()),
+                    .map_err(|_| make_invalid_response_err()),
             };
 
-            let deserialized_body = body_result
-                .and_then(|body| {
-                    let body = body.to_bytes();
-                    let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
-                        if let Some(debug_context) = debug_context {
-                            debug_context.lock().push_invalid_response(
-                                debug_request.0.clone(),
-                                &parts,
-                                &body,
-                                &connector.error_settings,
-                                debug_request.1.clone(),
-                            );
-                        }
-                    });
-                    log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
-                    raw
-                })
-                .map_err(|()| make_err());
+            let deserialized_body = body_result.and_then(|body| {
+                let body = body.to_bytes();
+                let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                    if let Some(debug_context) = debug_context {
+                        debug_context.lock().push_invalid_response(
+                            debug_request.0.clone(),
+                            &parts,
+                            &body,
+                            &connector.error_settings,
+                            debug_request.1.clone(),
+                        );
+                    }
+                    make_invalid_response_err()
+                });
+                log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
+                raw
+            });
 
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
@@ -1480,8 +1493,7 @@ mod tests {
         let errors = &graphql_response.body().errors;
         assert!(!errors.is_empty(), "expected an error for exceeded limit");
         assert!(
-            errors[0].message.contains("exceeded limit of 5 bytes")
-                || errors[0].message.contains("unexpected format"),
+            errors[0].message.contains("exceeded limit of 5 bytes"),
             "unexpected error message: {}",
             errors[0].message
         );
