@@ -103,7 +103,7 @@ where
                 inner: parts.clone(),
             }));
 
-            let make_err = |message: String, code: &str| {
+            let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
                 err.subgraph_name = Some(connector.id.subgraph_name.clone());
                 err = err.with_code(code);
@@ -115,7 +115,7 @@ where
                         Value::Number(parts.status.as_u16().into()),
                     )])),
                 );
-                err
+                Box::new(err)
             };
 
             let make_invalid_response_err = || {
@@ -136,7 +136,7 @@ where
                 .extensions()
                 .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
 
-            let body_result: Result<_, RuntimeError> = match response_size_limit {
+            let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
                 Some(ConnectorResponseSizeLimit(limit)) => {
                     Limited::new(body, limit)
                         .collect()
@@ -186,7 +186,7 @@ where
             // in any RawResponse::Error branches.
             let mapped = match &deserialized_body {
                 Err(error) => MappedResponse::Error {
-                    error: error.clone(),
+                    error: error.as_ref().clone(),
                     key: response_key,
                     problems: Vec::new(),
                 },
