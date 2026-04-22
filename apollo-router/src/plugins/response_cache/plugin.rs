@@ -115,7 +115,7 @@ pub(crate) struct ResponseCache {
     entity_type: Option<String>,
     enabled: bool,
     debug: bool,
-    pub(super) include_cache_control_header_on_router_response: bool,
+    include_cache_control_header_on_router_response: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -573,6 +573,7 @@ impl ResponseCache {
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -594,7 +595,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
-            include_cache_control_header_on_router_response: true,
+            include_cache_control_header_on_router_response,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -2748,6 +2749,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
@@ -2803,6 +2805,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap()
@@ -3210,6 +3213,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
