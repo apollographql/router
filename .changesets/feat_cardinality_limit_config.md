@@ -27,4 +27,4 @@ views:
         buckets: [0.1, 0.5, 1.0]
 ```
 
-By [@rossregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/9220
+By [@rregitsky](https://github.com/rossregitsky) in https://github.com/apollographql/router/pull/9220
