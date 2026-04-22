@@ -1,4 +1,4 @@
-### Add `operation_body_timeout` for file upload requests ([PR #NNNN](https://github.com/apollographql/router/pull/NNNN))
+### Add `operation_body_timeout` for file upload requests ([PR #9243](https://github.com/apollographql/router/pull/9243))
 
 Adds a new `operation_body_timeout` limit to the file uploads plugin, allowing operators to set a tight deadline on reading the operations field (GraphQL query + variables) from multipart request bodies, independently of the overall router `timeout`.
 
@@ -18,4 +18,4 @@ preview_file_uploads:
 
 When the timeout fires, the router returns a `504 Gateway Timeout` response with extension code `GATEWAY_TIMEOUT`.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/NNNN
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9243
