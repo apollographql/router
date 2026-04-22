@@ -1778,45 +1778,37 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
     let mut type_definition_positions: Vec<TypeDefinitionPosition> = Vec::new();
     for (type_name, type_) in schema.schema().types.iter() {
         match type_ {
-            ExtendedType::Object(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Object(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    ObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Interface(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InterfaceTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Interface(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InterfaceTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Union(type_) => {
-                if type_.members.is_empty() {
-                    type_definition_positions.push(
-                        UnionTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Union(type_) if type_.members.is_empty() => {
+                type_definition_positions.push(
+                    UnionTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::InputObject(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InputObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::InputObject(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InputObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }
