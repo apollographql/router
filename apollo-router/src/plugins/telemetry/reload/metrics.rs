@@ -501,6 +501,29 @@ mod view_selection_tests {
         });
     }
 
+    /// When there is no user view, no histogram default, and no global
+    /// cardinality limit, `resolve_view` must return `None` so the SDK falls
+    /// back to its implicit default view. The early-return guard prevents
+    /// constructing an empty `MetricView` that `into_stream()` would then try
+    /// to turn into an all-`None` `Stream`. Removing the guard would break this
+    /// case.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counter_without_user_view_or_global_limit_falls_through_to_sdk_default() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        let counter = provider.meter("t").u64_counter("plain.counter").build();
+        counter.add(5, &[]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "plain.counter", |data| {
+            assert!(
+                matches!(data, AggregatedMetrics::U64(MetricData::Sum(_))),
+                "expected Sum aggregation, got {data:?}"
+            );
+        });
+    }
+
     /// Regression: the global cardinality limit must reach observable instruments
     /// without coercing them into histograms. Observable gauges take a different
     /// SDK registration path than synchronous counters, so this case is worth
@@ -521,6 +544,56 @@ mod view_selection_tests {
             assert!(
                 matches!(data, AggregatedMetrics::U64(MetricData::Gauge(_))),
                 "expected Gauge aggregation, got {data:?}"
+            );
+        });
+    }
+
+    /// Exercises the histogram + user view + global cardinality interaction
+    /// (dispatch branch #8). The per-view cardinality limit must win over the
+    /// global one even when the histogram aggregation default is active, and
+    /// the default buckets must still flow through. A regression that silently
+    /// dropped the global limit whenever the histogram default was applied
+    /// would pass every other test in this module.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn histogram_with_per_view_and_global_limits_inherits_default_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let view = user_view("limited.histogram", |v| {
+            v.cardinality_limit = NonZeroU32::new(2)
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
+
+        let histogram = provider
+            .meter("t")
+            .f64_histogram("limited.histogram")
+            .build();
+        histogram.record(0.3, &[KeyValue::new("k", "a")]);
+        histogram.record(0.3, &[KeyValue::new("k", "b")]);
+        histogram.record(0.3, &[KeyValue::new("k", "c")]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "limited.histogram", |data| {
+            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            let bounds: Vec<f64> = hist
+                .data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default();
+            assert_eq!(
+                bounds, DEFAULT_BUCKETS,
+                "default histogram buckets should flow through when the user \
+                 view omits aggregation"
+            );
+            let has_overflow = hist.data_points().any(|dp| {
+                dp.attributes()
+                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
+            });
+            assert!(
+                has_overflow,
+                "per-view limit of 2 should overflow on the third attribute \
+                 set; if the global limit of 1000 were applied instead, no \
+                 overflow data point would be emitted"
             );
         });
     }
