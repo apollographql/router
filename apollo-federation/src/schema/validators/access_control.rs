@@ -129,24 +129,30 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
             );
         }
 
-        let from_context_directive_name = &subgraph
-            .metadata()
-            .federation_spec_definition()
-            .from_context_directive_definition(subgraph.schema())?
-            .name;
-        let from_context_referencers = subgraph
-            .schema()
-            .referencers()
-            .get_directive(from_context_directive_name);
-        // @fromContext should only be present in the subgraphs on the object field arguments
-        // but in the supergraph it can be either on object field or interface (object) field
-        for argument in &from_context_referencers.object_field_arguments {
-            fields_with_from_context.insert(
-                ObjectOrInterfaceTypeDefinitionPosition::try_from(
-                    supergraph_schema.get_type(argument.type_name.clone())?,
-                )?
-                .field(argument.field_name.clone()),
-            );
+        let federation_spec = subgraph.metadata().federation_spec_definition();
+        let from_context_directive = federation_spec
+            .directive_name_in_schema(
+                subgraph.schema(),
+                &crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+            )?
+            .and_then(|name| {
+                subgraph.schema().schema().directive_definitions.get(&name)
+            });
+        if let Some(from_context_directive) = from_context_directive {
+            let from_context_referencers = subgraph
+                .schema()
+                .referencers()
+                .get_directive(&from_context_directive.name);
+            // @fromContext should only be present in the subgraphs on the object field arguments
+            // but in the supergraph it can be either on object field or interface (object) field
+            for argument in &from_context_referencers.object_field_arguments {
+                fields_with_from_context.insert(
+                    ObjectOrInterfaceTypeDefinitionPosition::try_from(
+                        supergraph_schema.get_type(argument.type_name.clone())?,
+                    )?
+                    .field(argument.field_name.clone()),
+                );
+            }
         }
     }
 

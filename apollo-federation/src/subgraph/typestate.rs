@@ -911,7 +911,6 @@ fn new_federation_subgraph_schema(
 }
 
 // PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
-#[allow(unused)]
 pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchema, FederationError>
 {
     let mut schema = new_federation_subgraph_schema(Schema::new())?;
@@ -961,7 +960,11 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     //            It seems to make sense for it to be a part of expansion stage. We can create
     //            a separate stage for it between `Expanded` and `Validated` if we need a stage
     //            that is expanded, but federation operations are not added.
-    trace!("expand_links: add_federation_operations");
+    trace!(
+        is_fed_1_subgraph = schema.is_fed_1_subgraph(),
+        is_fed_2_link = schema.is_fed_2(),
+        "expand_links: add_federation_operations"
+    );
     schema.add_federation_operations()?;
 
     schema.add_implicit_root_operations()?;
@@ -1026,11 +1029,28 @@ impl FederationSchema {
             query_root_pos.get(self.schema())?.name.clone()
         };
 
-        // Add or remove `Query._entities` (if applicable)
+        let is_fed_1_subgraph = self.is_fed_1_subgraph();
+
         let entity_field_pos = ObjectFieldDefinitionPosition {
             type_name: query_root_type_name.clone(),
             field_name: FEDERATION_ENTITIES_FIELD_NAME,
         };
+        let service_field_pos = ObjectFieldDefinitionPosition {
+            type_name: query_root_type_name.clone(),
+            field_name: FEDERATION_SERVICE_FIELD_NAME,
+        };
+
+        // PORT_NOTE: Fed 1 — JS drops user-defined `Query._service` / `Query._entities` while
+        //            building types (`buildNamedTypeInner` in buildSchema.ts; Rust:
+        //            `FederationBlueprint::ignore_parsed_field`). `addFederationOperations` then
+        //            inserts the canonical fields. Match that by removing any existing definitions
+        //            before the check-and-add step below.
+        if is_fed_1_subgraph {
+            entity_field_pos.remove(self)?;
+            service_field_pos.remove(self)?;
+        }
+
+        // Add or remove `Query._entities` (if applicable)
         if let Some(_entity_type) = self.entity_type()? {
             if entity_field_pos.try_get(self.schema()).is_none() {
                 entity_field_pos
@@ -1045,10 +1065,6 @@ impl FederationSchema {
         }
 
         // Add `Query._service` (if not already present)
-        let service_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name,
-            field_name: FEDERATION_SERVICE_FIELD_NAME,
-        };
         if service_field_pos.try_get(self.schema()).is_none() {
             service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
         }
@@ -1138,7 +1154,6 @@ impl FederationSchema {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use apollo_compiler::ast::OperationType;
@@ -1995,5 +2010,51 @@ mod tests {
                 .is_none()
         );
         assert!(subgraph.schema().schema().get_scalar("Mutation").is_some());
+    }
+
+    /// When a schema has both an explicit `schema { ... }` definition and an
+    /// `extend schema @link(...) { ... }` extension, the link-to-link `@link` directive
+    /// should be added to the definition (not the extension), because a definition exists.
+    /// This tests the `origin_to_use()` fix.
+    #[test]
+    fn link_to_link_goes_on_definition_when_both_definition_and_extension_exist() {
+        let subgraph = build_and_validate(
+            r#"
+            schema {
+                mutation: Mutation
+            }
+
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.12") {
+                subscription: Subscription
+            }
+
+            type Mutation {
+                update(id: ID!, value: String!): String
+            }
+
+            type Subscription {
+                news: String!
+            }
+            "#,
+        );
+
+        // Take only the first few lines (schema definition + extension blocks)
+        // to verify the @link placement without snapshotting all the directives.
+        let schema_str = subgraph.schema_string();
+        let first_lines: String = schema_str.lines().take(9).collect::<Vec<_>>().join("\n");
+        // The link-to-link @link should be on the schema definition (first block),
+        // NOT on the extension block. Before the fix, origin_to_use() would return
+        // Extension whenever any extensions existed, causing the @link to end up on
+        // the extend schema block instead of the definition.
+        insta::assert_snapshot!(first_lines, @r#"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
+          query: Query
+          mutation: Mutation
+        }
+
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12") {
+          subscription: Subscription
+        }
+        "#);
     }
 }

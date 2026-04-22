@@ -473,6 +473,8 @@ A path can contain parameters and wildcards:
 
 </Note>
 
+The router normalizes trailing slashes automatically. For example, if you configure the path as `/graphql`, the router accepts requests to both `/graphql` and `/graphql/`. This applies regardless of whether your configured path includes a trailing slash.
+
 #### Introspection
 
 In GraphQL, introspection queries are used during development to learn about a GraphQL API's schema. The router can resolve introspection queries, based on the configuration of `supergraph.introspection`. 

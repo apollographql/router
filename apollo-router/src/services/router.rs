@@ -46,11 +46,13 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = RouterBody;
 pub type Error = hyper::Error;
 
+mod batching;
 pub mod body;
 pub(crate) mod pipeline_handle;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
+mod tower_compat;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -418,7 +420,7 @@ impl Response {
                 let res = body.next().await.and_then(|res| res.ok());
 
                 Either::Right(
-                    futures::stream::iter(res.into_iter())
+                    futures::stream::iter(res)
                         .map(|bytes| serde_json::from_slice::<graphql::Response>(&bytes)),
                 )
             },

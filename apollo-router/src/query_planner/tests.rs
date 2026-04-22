@@ -1892,3 +1892,340 @@ fn broken_plan_does_not_panic() {
         r#"[1:3] Cannot query field "invalid" on type "Query"."#
     );
 }
+
+/// Reproduces a bug (RH-1172) where a deferred node's dependency list was missing a
+/// fetch that provides `__typename` and entity keys at the deferred Flatten path.
+///
+/// The root cause was in the query planner's `collect_redundant_edges` (transitive
+/// reduction): when a direct edge from a primary fetch to a deferred fetch was also
+/// reachable transitively through an intermediate fetch, the direct edge was removed.
+/// This caused `extract_children_and_deferred_dependencies` to only register the
+/// intermediate fetch as a dependency, omitting the primary fetch that provides
+/// `__typename` and entity keys.
+///
+/// The scenario:
+/// - Primary: Fetch(X, id=fetch1) gets `start.inner { __typename id sub }`,
+///   then Flatten Fetch(Y, id=fetch0) gets `sub.data`
+/// - Deferred(depends: [fetch0, fetch1]): Flatten at `start.inner`, Fetch(Z) requires
+///   `Inner { __typename id sub { subId data } }` and returns `target`
+///
+/// With the planner fix, both fetch0 AND fetch1 are registered as dependencies,
+/// ensuring the deferred node has complete data (including `__typename` and `id`).
+#[tokio::test]
+async fn defer_depends_skips_fetch_when_typename_missing() {
+    // Query plan for:
+    //   { start { id inner { __typename id ... @defer { target { x } } } } }
+    // where inner.sub.data is fetched by a dependency (Y, id=fetch0)
+    // and the deferred fetch (Z) requires inner.__typename + id + sub { subId data }
+    let query_plan: QueryPlan = QueryPlan {
+        formatted_query_plan: Default::default(),
+        root: PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ start { id inner { __typename id } } }".to_string()),
+                node: Some(Box::new(PlanNode::Sequence {
+                    nodes: vec![
+                        // Primary fetch: gets start with inner { __typename, id, sub }
+                        // With the planner fix, this fetch gets an id so the deferred
+                        // node can depend on it for __typename and id.
+                        PlanNode::Fetch(FetchNode {
+                            service_name: "X".into(),
+                            requires: vec![],
+                            variable_usages: vec![],
+                            operation: SerializableDocument::from_string(
+                                "{ start { __typename id inner { __typename id sub { __typename subId } } } }",
+                            ),
+                            operation_name: None,
+                            operation_kind: OperationKind::Query,
+                            id: Some("fetch1".into()),
+                            input_rewrites: None,
+                            output_rewrites: None,
+                            context_rewrites: None,
+                            schema_aware_hash: Default::default(),
+                            authorization: Default::default(),
+                        }),
+                        // Dependency fetch: gets sub.data (the deferred node depends on this)
+                        PlanNode::Flatten(FlattenNode {
+                            path: Path(vec![
+                                PathElement::Key("start".to_string(), None),
+                                PathElement::Key("inner".to_string(), None),
+                                PathElement::Key("sub".to_string(), None),
+                            ]),
+                            node: Box::new(PlanNode::Fetch(FetchNode {
+                                service_name: "Y".into(),
+                                requires: vec![
+                                    requires_selection::Selection::InlineFragment(
+                                        requires_selection::InlineFragment {
+                                            type_condition: Some(name!("Sub")),
+                                            selections: vec![
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("__typename"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                                requires_selection::Selection::Field(
+                                                    requires_selection::Field {
+                                                        alias: None,
+                                                        name: name!("subId"),
+                                                        selections: Vec::new(),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ],
+                                variable_usages: vec![],
+                                operation: SerializableDocument::from_string(
+                                    "query($representations:[_Any!]!){_entities(representations:$representations){...on Sub{data}}}",
+                                ),
+                                operation_name: None,
+                                operation_kind: OperationKind::Query,
+                                id: Some("fetch0".into()),
+                                input_rewrites: None,
+                                output_rewrites: None,
+                                context_rewrites: None,
+                                schema_aware_hash: Default::default(),
+                                authorization: Default::default(),
+                            })),
+                        }),
+                    ],
+                })),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![
+                    Depends {
+                        id: "fetch0".into(),
+                    },
+                    Depends {
+                        id: "fetch1".into(),
+                    },
+                ],
+                label: None,
+                query_path: Path(vec![
+                    PathElement::Key("start".to_string(), None),
+                    PathElement::Key("inner".to_string(), None),
+                ]),
+                subselection: Some("{ target { x } }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![
+                        PathElement::Key("start".to_string(), None),
+                        PathElement::Key("inner".to_string(), None),
+                    ]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Z".into(),
+                        requires: vec![
+                            requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
+                                    type_condition: Some(name!("Inner")),
+                                    selections: vec![
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("__typename"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("id"),
+                                                selections: Vec::new(),
+                                            },
+                                        ),
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
+                                                alias: None,
+                                                name: name!("sub"),
+                                                selections: vec![
+                                                    requires_selection::Selection::Field(
+                                                        requires_selection::Field {
+                                                            alias: None,
+                                                            name: name!("subId"),
+                                                            selections: Vec::new(),
+                                                        },
+                                                    ),
+                                                    requires_selection::Selection::Field(
+                                                        requires_selection::Field {
+                                                            alias: None,
+                                                            name: name!("data"),
+                                                            selections: Vec::new(),
+                                                        },
+                                                    ),
+                                                ],
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ],
+                        variable_usages: vec![],
+                        operation: SerializableDocument::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on Inner{target{x}}}}",
+                        ),
+                        operation_name: None,
+                        operation_kind: OperationKind::Query,
+                        id: None,
+                        input_rewrites: None,
+                        output_rewrites: None,
+                        context_rewrites: None,
+                        schema_aware_hash: Default::default(),
+                        authorization: Default::default(),
+                    })),
+                }))),
+            }],
+        }
+        .into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
+        query: Arc::new(Query::empty_for_tests()),
+        query_metrics: Default::default(),
+        estimated_size: Default::default(),
+    };
+
+    // Mock X service: returns the root query data for start
+    let mut mock_x_service = plugin::test::MockSubgraphService::new();
+    mock_x_service.expect_clone().return_once(|| {
+        let mut mock_x_service = plugin::test::MockSubgraphService::new();
+        mock_x_service.expect_call().times(1).returning(|_| {
+            Ok(SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "start": {
+                        "__typename": "T",
+                        "id": "1",
+                        "inner": {
+                            "__typename": "Inner",
+                            "id": "i1",
+                            "sub": {
+                                "__typename": "Sub",
+                                "subId": "s1"
+                            }
+                        }
+                    }
+                }})
+                .build())
+        });
+        mock_x_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_x_service
+    });
+
+    // Mock Y service: entity fetch for Sub, returns data field
+    let mut mock_y_service = plugin::test::MockSubgraphService::new();
+    mock_y_service.expect_clone().return_once(|| {
+        let mut mock_y_service = plugin::test::MockSubgraphService::new();
+        mock_y_service.expect_call().times(1).returning(|_| {
+            Ok(SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"data": "d1"}]
+                }})
+                .build())
+        });
+        mock_y_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_y_service
+    });
+
+    // Mock Z service: entity fetch for Inner, returns target
+    // If the bug exists, this service will NOT be called (fetch is skipped).
+    let mut mock_z_service = plugin::test::MockSubgraphService::new();
+    mock_z_service.expect_clone().return_once(|| {
+        let mut mock_z_service = plugin::test::MockSubgraphService::new();
+        mock_z_service.expect_call().times(1).returning(|_| {
+            Ok(SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"target": {"x": "42"}}]
+                }})
+                .build())
+        });
+        mock_z_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_z_service
+    });
+
+    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+
+    let schema = include_str!("testdata/defer_depends_schema.graphql");
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let ssf = subgraph_service_factory(vec![
+        (
+            "X".into(),
+            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
+        ),
+        (
+            "Y".into(),
+            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
+        ),
+        (
+            "Z".into(),
+            Arc::new(mock_z_service) as Arc<dyn MakeSubgraphService>,
+        ),
+    ]);
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
+    ));
+
+    let response = query_plan
+        .execute(
+            &Context::new(),
+            &sf,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            sender,
+            None,
+            &None,
+            None,
+        )
+        .await;
+
+    // Primary response should have start.inner with __typename and id
+    let primary_data = serde_json::to_value(&response).unwrap();
+    assert_eq!(
+        primary_data,
+        serde_json::json! {{
+            "data": {
+                "start": {
+                    "__typename": "T",
+                    "id": "1",
+                    "inner": {
+                        "__typename": "Inner",
+                        "id": "i1",
+                        "sub": {
+                            "__typename": "Sub",
+                            "subId": "s1",
+                            "data": "d1"
+                        }
+                    }
+                }
+            }
+        }}
+    );
+
+    // Deferred response should include target from Z fetch
+    let deferred = ReceiverStream::new(receiver).next().await.unwrap();
+    let deferred_data = serde_json::to_value(&deferred).unwrap();
+
+    // The deferred response data should contain target with x.
+    // If the bug exists (Z fetch skipped), target will be missing/null.
+    let inner_data = &deferred_data["data"]["start"]["inner"];
+    assert!(
+        inner_data.get("target").is_some() && !inner_data["target"].is_null(),
+        "target should not be null in the deferred response. \
+         This indicates the deferred fetch to Z was skipped because \
+         __typename was missing from the deferred node's context at the Flatten path. \
+         Got deferred response: {}",
+        serde_json::to_string_pretty(&deferred_data).unwrap()
+    );
+    assert_eq!(
+        inner_data["target"]["x"], "42",
+        "target should have x from Z fetch"
+    );
+}

@@ -1,6 +1,6 @@
 version: 2.1
 
-# Cache key bump: 4
+# Cache key bump: 5
 
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
@@ -101,7 +101,7 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v4-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   merge_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.merge_version" }}'

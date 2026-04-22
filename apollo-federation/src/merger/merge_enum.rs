@@ -69,7 +69,7 @@ impl Merger {
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
             self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
+                definition: HintCode::UnusedEnumType.definition(),
                 message: format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
@@ -305,12 +305,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::JOIN_VERSIONS;
     use crate::SpecDefinition;
+    use crate::composition::CompositionOptions;
     use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
     use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
-    use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::utils::FallibleOnceCell;
