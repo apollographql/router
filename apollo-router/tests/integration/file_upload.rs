@@ -1152,6 +1152,7 @@ mod operation_body_timeout {
         let response = reqwest::Client::new()
             .post(&url)
             .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .header("apollo-require-preflight", "true")
             .body(body)
             .send()
             .await
@@ -1199,7 +1200,7 @@ mod operation_body_timeout {
             return Ok(());
         }
         let (status, _) = run(GENEROUS_CONFIG, immediate_body()).await;
-        assert_ne!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(status, StatusCode::OK);
         Ok(())
     }
 
@@ -1209,7 +1210,7 @@ mod operation_body_timeout {
             return Ok(());
         }
         let (status, _) = run(GENEROUS_CONFIG, slightly_delayed_body()).await;
-        assert_ne!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(status, StatusCode::OK);
         Ok(())
     }
 
