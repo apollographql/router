@@ -94,11 +94,11 @@ pub(crate) trait SpecDefinition {
         &self,
         schema: &FederationSchema,
         name_in_spec: &Name,
-    ) -> Result<Option<Name>, FederationError> {
-        let Some(link) = self.link_in_schema(schema)? else {
-            return Ok(None);
+    ) -> Option<Name> {
+        let Some(link) = self.link_in_schema(schema) else {
+            return None;
         };
-        Ok(Some(link.directive_name_in_schema(name_in_spec)))
+        Some(link.directive_name_in_schema(name_in_spec))
     }
 
     fn type_name_in_schema(
@@ -106,7 +106,7 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
         name_in_spec: &Name,
     ) -> Result<Option<Name>, FederationError> {
-        let Some(link) = self.link_in_schema(schema)? else {
+        let Some(link) = self.link_in_schema(schema) else {
             return Ok(None);
         };
         Ok(Some(link.type_name_in_schema(name_in_spec)))
@@ -117,7 +117,7 @@ pub(crate) trait SpecDefinition {
         schema: &'schema FederationSchema,
         name_in_spec: &Name,
     ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
-        match self.directive_name_in_schema(schema, name_in_spec)? {
+        match self.directive_name_in_schema(schema, name_in_spec) {
             Some(name) => schema
                 .schema()
                 .directive_definitions
@@ -132,6 +132,17 @@ pub(crate) trait SpecDefinition {
                 })
                 .map(Some),
             None => Ok(None),
+        }
+    }
+
+    fn try_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name_in_spec: &Name,
+    ) -> Option<&'schema Node<DirectiveDefinition>> {
+        match self.directive_name_in_schema(schema, name_in_spec) {
+            Some(name) => schema.schema().directive_definitions.get(&name),
+            None => None,
         }
     }
 
@@ -158,14 +169,11 @@ pub(crate) trait SpecDefinition {
         }
     }
 
-    fn link_in_schema(
-        &self,
-        schema: &FederationSchema,
-    ) -> Result<Option<Arc<Link>>, FederationError> {
+    fn link_in_schema(&self, schema: &FederationSchema) -> Option<Arc<Link>> {
         let Some(metadata) = schema.metadata() else {
-            return Ok(None);
+            return None;
         };
-        Ok(metadata.for_identity(self.identity()))
+        metadata.for_identity(self.identity())
     }
 
     fn to_string(&self) -> String {
@@ -173,7 +181,7 @@ pub(crate) trait SpecDefinition {
     }
 
     fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let link = self.link_in_schema(schema)?;
+        let link = self.link_in_schema(schema);
         ensure!(
             link.is_some(),
             "The {self_url} specification should have been added to the schema before this is called",

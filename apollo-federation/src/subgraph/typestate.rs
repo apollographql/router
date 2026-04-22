@@ -666,14 +666,14 @@ impl<S: HasMetadata> Subgraph<S> {
         self.schema().schema().to_string()
     }
 
-    pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn extends_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)
     }
 
     #[allow(clippy::wrong_self_convention)]
-    pub(crate) fn from_context_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn from_context_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(
@@ -682,43 +682,43 @@ impl<S: HasMetadata> Subgraph<S> {
             )
     }
 
-    pub(crate) fn inaccessible_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn inaccessible_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn key_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn override_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn override_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn provides_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn provides_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn requires_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn requires_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn external_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn external_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn tag_directive_name(&self) -> Option<Name> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
@@ -783,7 +783,7 @@ pub(crate) fn schema_as_fed2_subgraph(
             "Fed2 schema must use @link with version >= 1.0, but schema uses {spec_url}",
             spec_url = link_spec.url()
         );
-        let Some(link) = link_spec.link_in_schema(schema)? else {
+        let Some(link) = link_spec.link_in_schema(schema) else {
             bail!("Core schema is missing the link spec link directive");
         };
         (link.spec_name_in_schema().clone(), metadata)

@@ -222,7 +222,7 @@ impl FederationBlueprint {
                 };
             }
 
-            let Ok(Some(name_in_schema)) = metadata
+            let Some(name_in_schema) = metadata
                 .federation_spec_definition()
                 .directive_name_in_schema(schema, &Name::new_unchecked(unknown_directive_name))
             else {
