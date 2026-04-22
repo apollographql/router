@@ -1164,9 +1164,11 @@ mod operation_body_timeout {
     }
 
     fn slow_body() -> reqwest::Body {
-        // Body starts sending after 10s; with a 1s timeout this triggers a timeout error.
+        // Body starts sending after 5s — longer than the 1s operation_body_timeout in
+        // STRICT_CONFIG but shorter than the 10s global router timeout, proving it is the
+        // operation_body_timeout that fires and not the global timeout.
         let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(10),
+            tokio::time::Instant::now() + Duration::from_secs(5),
             Duration::from_secs(5),
         ))
         .map(|_| Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\n")));
