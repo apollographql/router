@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -3347,6 +3348,25 @@ expression: "&schema"
         {
           "const": "ipv4_then_ipv6",
           "description": "Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records",
+          "type": "string"
+        }
+      ]
+    },
+    "DurationUnit": {
+      "oneOf": [
+        {
+          "const": "milliseconds",
+          "description": "Duration in milliseconds (integer)",
+          "type": "string"
+        },
+        {
+          "const": "seconds",
+          "description": "Duration in seconds (floating point)",
+          "type": "string"
+        },
+        {
+          "const": "nanoseconds",
+          "description": "Duration in nanoseconds (integer)",
           "type": "string"
         }
       ]
@@ -8337,6 +8357,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
+        "intern_strings": {
+          "default": true,
+          "description": "Whether to enable Rhai's internal string interning.\n\nString interning can reduce memory allocations and string comparison\ncost. But it also introduces synchronization overhead.\n\nSetting this to `false` can improve throughput and is recommended\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `true`.",
+          "type": "boolean"
+        },
         "main": {
           "description": "The main entry point for Rhai script evaluation",
           "type": [
@@ -8768,6 +8793,24 @@ expression: "&schema"
           },
           "required": [
             "router_overhead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Total request duration from when the request was received",
+          "properties": {
+            "request_duration": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DurationUnit"
+                }
+              ],
+              "description": "The unit for the duration (milliseconds, seconds, nanoseconds)"
+            }
+          },
+          "required": [
+            "request_duration"
           ],
           "type": "object"
         },

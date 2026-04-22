@@ -16,6 +16,7 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Value;
 
 use crate::error::FederationError;
+use crate::error::InaccessibleCompositionLinks;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::Purpose;
@@ -249,7 +250,7 @@ fn type_uses_inaccessible(
 }
 
 /// Check if a directive uses the @inaccessible directive anywhere in its definition.
-fn directive_uses_inaccessible(
+pub(crate) fn directive_uses_inaccessible(
     inaccessible_directive: &Name,
     directive: &DirectiveDefinition,
 ) -> bool {
@@ -300,6 +301,10 @@ fn validate_inaccessible_in_default_value(
                 if input_field_position.is_inaccessible(schema, inaccessible_directive)? {
                     errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                         message: format!("Input field `{input_field_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
+                        links: InaccessibleCompositionLinks {
+                            elements: vec![input_field_position.to_string()],
+                            referencers: vec![value_position.clone()],
+                        },
                     }.into());
                 }
 
@@ -351,6 +356,10 @@ fn validate_inaccessible_in_default_value(
             if enum_value_position.is_inaccessible(schema, inaccessible_directive)? {
                 errors.push(SingleFederationError::DefaultValueUsesInaccessible {
                     message: format!("Enum value `{enum_value_position}` is @inaccessible but is used in the default value of `{value_position}`, which is in the API schema."),
+                    links: InaccessibleCompositionLinks {
+                        elements: vec![enum_value_position.to_string()],
+                        referencers: vec![value_position.clone()],
+                    },
                 }.into());
             }
         }
@@ -380,6 +389,10 @@ fn validate_inaccessible_in_arguments(
             };
             errors.push(SingleFederationError::RequiredInaccessible {
                 message: format!("Argument `{usage_position}({arg_name}:)` is @inaccessible but is a required argument of its {kind}."),
+                links: InaccessibleCompositionLinks {
+                    elements: vec![format!("{usage_position}({arg_name}:)")],
+                    referencers: vec![],
+                },
             }.into());
         }
 
@@ -438,6 +451,10 @@ fn validate_inaccessible_in_fields(
                 errors.push(
                     SingleFederationError::ImplementedByInaccessible {
                         message: format!("Field `{type_position}.{field_name}` is @inaccessible but implements the interface field `{super_position}`, which is in the API schema."),
+                        links: InaccessibleCompositionLinks {
+                            elements: vec![format!("{type_position}.{field_name}")],
+                            referencers: vec![super_position.to_string()],
+                        },
                     }
                     .into(),
                 );
@@ -475,6 +492,12 @@ fn validate_inaccessible_in_fields(
                     for accessible_reference in accessible_super_references {
                         errors.push(SingleFederationError::ImplementedByInaccessible {
                             message: format!("Argument `{type_position}.{field_name}({arg_name}:)` is @inaccessible but implements the interface argument `{accessible_reference}` which is in the API schema."),
+                            links: InaccessibleCompositionLinks {
+                                elements: vec![format!(
+                                    "{type_position}.{field_name}({arg_name}:)"
+                                )],
+                                referencers: vec![accessible_reference.to_string()],
+                            },
                         }.into());
                     }
                 } else if arg.is_required() {
@@ -520,6 +543,12 @@ fn validate_inaccessible_in_fields(
                     for inaccessible_reference in inaccessible_super_references {
                         errors.push(SingleFederationError::RequiredInaccessible {
                             message: format!("Argument `{inaccessible_reference}` is @inaccessible but is implemented by the argument `{type_position}.{field_name}({arg_name}:)` which is in the API schema."),
+                            links: InaccessibleCompositionLinks {
+                                elements: vec![inaccessible_reference.to_string()],
+                                referencers: vec![format!(
+                                    "{type_position}.{field_name}({arg_name}:)"
+                                )],
+                            },
                         }.into());
                     }
                 }
@@ -549,6 +578,10 @@ fn validate_inaccessible_in_fields(
     if has_inaccessible_field && !has_accessible_field {
         errors.push(SingleFederationError::OnlyInaccessibleChildren {
             message: format!("Type `{type_position}` is in the API schema but all of its members are @inaccessible."),
+            links: InaccessibleCompositionLinks {
+                elements: vec![type_position.to_string()],
+                referencers: vec![],
+            },
         }.into());
     }
 
@@ -751,6 +784,10 @@ fn validate_inaccessible_type(
             if !$ref.is_inaccessible(schema, inaccessible_directive)? {
                 errors.push(SingleFederationError::ReferencedInaccessible {
                     message: format!("Type `{}` is @inaccessible but is referenced by `{}`, which is in the API schema.", $ty, $ref),
+                    links: InaccessibleCompositionLinks {
+                        elements: vec![$ty.to_string()],
+                        referencers: vec![$ref.to_string()],
+                    },
                 }.into())
             }
         }
@@ -805,6 +842,10 @@ fn validate_inaccessible_type(
             {
                 errors.push(SingleFederationError::QueryRootTypeInaccessible {
                         message: format!("Type `{position}` is @inaccessible but is the query root type, which must be in the API schema."),
+                        links: InaccessibleCompositionLinks {
+                            elements: vec![position.to_string()],
+                            referencers: vec![],
+                        },
                     }.into());
             }
             check_inaccessible_referencers!(
@@ -899,6 +940,10 @@ fn validate_inaccessible(
                         message: format!(
                             "Core feature type `{position}` cannot use @inaccessible."
                         ),
+                        links: InaccessibleCompositionLinks {
+                            elements: vec![position.to_string()],
+                            referencers: vec![],
+                        },
                     }
                     .into(),
                 )
@@ -947,6 +992,10 @@ fn validate_inaccessible(
                         if field_inaccessible && field.is_required() {
                             errors.push(SingleFederationError::RequiredInaccessible{
                                 message: format!("Input field `{position}` is @inaccessible but is a required input field of its type."),
+                                links: InaccessibleCompositionLinks {
+                                    elements: vec![input_object_position.field(field.name.clone()).to_string()],
+                                    referencers: vec![],
+                                },
                             }.into());
                         }
 
@@ -970,6 +1019,10 @@ fn validate_inaccessible(
                     if has_inaccessible_field && !has_accessible_field {
                         errors.push(SingleFederationError::OnlyInaccessibleChildren {
                             message: format!("Type `{position}` is in the API schema but all of its input fields are @inaccessible."),
+                            links: InaccessibleCompositionLinks {
+                                elements: vec![position.to_string()],
+                                referencers: vec![],
+                            },
                         }.into());
                     }
                 }
@@ -985,6 +1038,10 @@ fn validate_inaccessible(
                     if !any_accessible_member {
                         errors.push(SingleFederationError::OnlyInaccessibleChildren {
                             message: format!("Type `{position}` is in the API schema but all of its members are @inaccessible."),
+                            links: InaccessibleCompositionLinks {
+                                elements: vec![position.to_string()],
+                                referencers: vec![],
+                            },
                         }.into());
                     }
                 }
@@ -1001,6 +1058,10 @@ fn validate_inaccessible(
                     if has_inaccessible_value && !has_accessible_value {
                         errors.push(SingleFederationError::OnlyInaccessibleChildren {
                             message: format!("Type `{enum_position}` is in the API schema but all of its members are @inaccessible."),
+                            links: InaccessibleCompositionLinks {
+                                elements: vec![enum_position.to_string()],
+                                referencers: vec![],
+                            },
                         }.into());
                     }
                 }
@@ -1028,6 +1089,10 @@ fn validate_inaccessible(
                         message: format!(
                             "Core feature directive `{position}` cannot use @inaccessible.",
                         ),
+                        links: InaccessibleCompositionLinks {
+                            elements: vec![position.to_string()],
+                            referencers: vec![],
+                        },
                     }
                     .into(),
                 );
@@ -1042,6 +1107,10 @@ fn validate_inaccessible(
                     .join(", ");
                 errors.push(SingleFederationError::DisallowedInaccessible {
                     message: format!("Directive `{position}` cannot use @inaccessible because it may be applied to these type-system locations: {type_system_locations}"),
+                    links: InaccessibleCompositionLinks {
+                        elements: vec![position.to_string()],
+                        referencers: vec![],
+                    },
                 }.into());
             }
         } else {

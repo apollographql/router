@@ -614,3 +614,35 @@ async fn test_response_body_size_records_compressed_size_with_gzip() {
 
     router.graceful_shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_request_duration_selector() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/request_duration.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"request_happened_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"reasonably_short_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"overly_short_total{otel_scope_name="apollo/router"}"#)
+        .await;
+
+    router.graceful_shutdown().await;
+}

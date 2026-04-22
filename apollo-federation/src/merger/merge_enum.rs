@@ -69,7 +69,7 @@ impl Merger {
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
             self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
+                definition: HintCode::UnusedEnumType.definition(),
                 message: format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
