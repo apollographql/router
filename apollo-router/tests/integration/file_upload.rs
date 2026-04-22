@@ -1120,6 +1120,84 @@ async fn it_rejects_operations_field_larger_than_http_max_request_bytes() -> Res
         .await
 }
 
+mod operation_body_timeout {
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use futures::StreamExt;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use tower::BoxError;
+
+    use crate::integration::common::graph_os_enabled;
+
+    const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
+    const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
+
+    async fn run(config: &str, body: reqwest::Body) -> StatusCode {
+        let mut router = crate::integration::IntegrationTest::builder()
+            .config(config)
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+        let url = format!("http://{}", router.bind_address());
+        let status = reqwest::Client::new()
+            .post(&url)
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+            .status();
+        router.graceful_shutdown().await;
+        status
+    }
+
+    fn immediate_body() -> reqwest::Body {
+        reqwest::Body::from(concat!(
+            "--test\r\n",
+            "Content-Disposition: form-data; name=\"operations\"\r\n\r\n",
+            "{\"query\":\"{ __typename }\"}\r\n",
+            "--test--\r\n"
+        ))
+    }
+
+    fn slow_body() -> reqwest::Body {
+        // Body starts sending after 10s; with a 1s timeout this triggers a timeout error.
+        let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(5),
+        ))
+        .map(|_| Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\n")));
+        reqwest::Body::wrap_stream(stream)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_quickly() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        assert_ne!(
+            run(GENEROUS_CONFIG, immediate_body()).await,
+            StatusCode::GATEWAY_TIMEOUT
+        );
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn times_out_when_body_is_slow() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        assert_eq!(
+            run(STRICT_CONFIG, slow_body()).await,
+            StatusCode::GATEWAY_TIMEOUT
+        );
+        Ok(())
+    }
+}
+
 mod helper {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
