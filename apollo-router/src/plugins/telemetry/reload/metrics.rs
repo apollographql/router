@@ -235,11 +235,11 @@ fn resolve_view(
         return None;
     }
 
-    let defaults =
+    let default_view =
         MetricView::default_view(instrument.name(), default_aggregation, cardinality_limit);
     let view = match user_view {
-        Some(user) => defaults.merge(user),
-        None => defaults,
+        Some(user) => default_view.merge(user),
+        None => default_view,
     };
     Some(view.into_stream())
 }
@@ -259,8 +259,8 @@ mod view_selection_tests {
 
     const DEFAULT_BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0];
 
-    fn user_view(name: &str, f: impl FnOnce(&mut MetricView)) -> MetricView {
-        let mut view = MetricView {
+    fn empty_view(name: &str) -> MetricView {
+        MetricView {
             name: name.to_string(),
             rename: None,
             description: None,
@@ -268,9 +268,7 @@ mod view_selection_tests {
             aggregation: None,
             allowed_attribute_keys: None,
             cardinality_limit: None,
-        };
-        f(&mut view);
-        view
+        }
     }
 
     fn meter_provider_with(
@@ -335,9 +333,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_per_view_cardinality_limit_stays_a_counter() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.counter", |v| {
-            v.cardinality_limit = NonZeroU32::new(1000)
-        });
+        let mut view = empty_view("test.counter");
+        view.cardinality_limit = NonZeroU32::new(1000);
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let counter = provider.meter("t").u64_counter("test.counter").build();
@@ -355,9 +352,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_per_view_drop_is_not_exported() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("dropped.counter", |v| {
-            v.aggregation = Some(MetricAggregation::Drop)
-        });
+        let mut view = empty_view("dropped.counter");
+        view.aggregation = Some(MetricAggregation::Drop);
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let counter = provider.meter("t").u64_counter("dropped.counter").build();
@@ -370,9 +366,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_per_view_allowed_attribute_keys_filters_attributes() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("filtered.counter", |v| {
-            v.allowed_attribute_keys = Some(HashSet::from_iter(["keep".to_string()]))
-        });
+        let mut view = empty_view("filtered.counter");
+        view.allowed_attribute_keys = Some(HashSet::from_iter(["keep".to_string()]));
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let counter = provider.meter("t").u64_counter("filtered.counter").build();
@@ -402,7 +397,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn up_down_counter_with_per_view_rename_preserves_kind() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("original.name", |v| v.rename = Some("renamed.name".into()));
+        let mut view = empty_view("original.name");
+        view.rename = Some("renamed.name".into());
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let updown = provider
@@ -427,9 +423,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_with_per_view_cardinality_limit_uses_default_buckets() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("test.histogram", |v| {
-            v.cardinality_limit = NonZeroU32::new(1000)
-        });
+        let mut view = empty_view("test.histogram");
+        view.cardinality_limit = NonZeroU32::new(1000);
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let histogram = provider.meter("t").f64_histogram("test.histogram").build();
@@ -452,9 +447,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_with_per_view_drop_is_not_exported() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("dropped.histogram", |v| {
-            v.aggregation = Some(MetricAggregation::Drop)
-        });
+        let mut view = empty_view("dropped.histogram");
+        view.aggregation = Some(MetricAggregation::Drop);
         let provider = meter_provider_with(exporter.clone(), vec![view], None);
 
         let histogram = provider
@@ -562,9 +556,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn histogram_with_per_view_and_global_limits_inherits_default_buckets() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("limited.histogram", |v| {
-            v.cardinality_limit = NonZeroU32::new(2)
-        });
+        let mut view = empty_view("limited.histogram");
+        view.cardinality_limit = NonZeroU32::new(2);
         let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
 
         let histogram = provider
@@ -612,9 +605,8 @@ mod view_selection_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn per_view_cardinality_limit_wins_over_global() {
         let exporter = InMemoryMetricExporter::default();
-        let view = user_view("limited.counter", |v| {
-            v.cardinality_limit = NonZeroU32::new(2)
-        });
+        let mut view = empty_view("limited.counter");
+        view.cardinality_limit = NonZeroU32::new(2);
         let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
 
         let counter = provider.meter("t").u64_counter("limited.counter").build();
