@@ -74,6 +74,12 @@ pub(crate) struct SubscriptionConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) max_lifetime: Option<Duration>,
+    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. Default is 0 (no reconnection attempts).
+    pub(crate) max_reconnect_attempts: Option<u32>,
+    /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. Defaults to 1 second.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) reconnect_delay: Option<Duration>,
 }
 
 /// Subscription deduplication configuration
@@ -107,6 +113,8 @@ impl Default for SubscriptionConfig {
             max_opened_subscriptions: None,
             queue_capacity: None,
             max_lifetime: None,
+            max_reconnect_attempts: None,
+            reconnect_delay: None,
         }
     }
 }
@@ -1066,6 +1074,8 @@ mod tests {
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
         assert!(sub_config.max_lifetime.is_none());
+        assert!(sub_config.max_reconnect_attempts.is_none());
+        assert!(sub_config.reconnect_delay.is_none());
     }
 
     #[test]
@@ -1096,6 +1106,41 @@ mod tests {
         .unwrap();
 
         assert!(config_no_lifetime.max_lifetime.is_none());
+    }
+
+    #[test]
+    fn it_test_subscription_config_reconnect() {
+        let config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "passthrough": {
+                    "all": {
+                        "path": "/subscriptions"
+                    }
+                }
+            },
+            "max_reconnect_attempts": 5,
+            "reconnect_delay": "2s"
+        }))
+        .unwrap();
+
+        assert_eq!(config.max_reconnect_attempts, Some(5));
+        assert_eq!(config.reconnect_delay, Some(Duration::from_secs(2)));
+
+        let config_no_reconnect: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "passthrough": {
+                    "all": {
+                        "path": "/subscriptions"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert!(config_no_reconnect.max_reconnect_attempts.is_none());
+        assert!(config_no_reconnect.reconnect_delay.is_none());
     }
 }
 

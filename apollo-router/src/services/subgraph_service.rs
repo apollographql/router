@@ -1964,6 +1964,8 @@ mod tests {
             max_opened_subscriptions: None,
             queue_capacity: None,
             max_lifetime: None,
+            max_reconnect_attempts: None,
+            reconnect_delay: None,
         }
     }
 

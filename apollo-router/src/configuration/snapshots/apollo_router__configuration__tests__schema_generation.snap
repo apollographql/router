@@ -11188,6 +11188,16 @@ expression: "&schema"
             "null"
           ]
         },
+        "max_reconnect_attempts": {
+          "default": null,
+          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. Default is 0 (no reconnection attempts).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "mode": {
           "allOf": [
             {
@@ -11207,6 +11217,14 @@ expression: "&schema"
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "reconnect_delay": {
+          "default": null,
+          "description": "Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. Defaults to 1 second.",
+          "type": [
+            "string",
             "null"
           ]
         }
