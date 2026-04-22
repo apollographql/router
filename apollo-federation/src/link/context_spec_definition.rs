@@ -121,29 +121,25 @@ impl ContextSpecDefinition {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn context_directive_name(
-        schema: &FederationSchema,
-    ) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn context_directive_name(schema: &FederationSchema) -> Option<Name> {
         if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
             fed_spec.directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         } else {
-            Ok(None)
+            None
         }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn from_context_directive_name(
-        schema: &FederationSchema,
-    ) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn from_context_directive_name(schema: &FederationSchema) -> Option<Name> {
         if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
             fed_spec
                 .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         } else {
-            Ok(None)
+            None
         }
     }
 }

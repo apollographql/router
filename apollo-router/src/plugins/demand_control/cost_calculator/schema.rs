@@ -97,7 +97,7 @@ impl FieldDefinition {
                 ))
             })?;
         let cost_directive =
-            CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type)?;
+            CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type);
         let directives = CostSpecDefinition::list_size_directives_from_field_definition(
             schema,
             field_definition,
