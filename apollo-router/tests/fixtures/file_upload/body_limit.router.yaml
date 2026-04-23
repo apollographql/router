@@ -14,6 +14,7 @@ preview_file_uploads:
         max_file_size: 5mb
         max_files: 5
 limits:
-  http_max_request_bytes: 50000
+  router:
+    http_max_request_bytes: 50000
 include_subgraph_errors:
   all: true
