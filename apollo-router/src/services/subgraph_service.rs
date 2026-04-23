@@ -753,7 +753,7 @@ async fn call_http(
 /// call_single_http makes http calls with modified graphql::Request (body)
 pub(crate) async fn call_single_http(
     request: SubgraphRequest,
-    client: crate::services::http::BoxService,
+    client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = request
@@ -1008,7 +1008,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
+    mut client: crate::services::http::BoxCloneService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
@@ -1144,7 +1144,7 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .service(maker.make())
-                .boxed();
+                .boxed_clone();
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1161,9 +1161,9 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.services.get(name).map(|svc| svc.clone().boxed())
+        self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }
 

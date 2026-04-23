@@ -218,7 +218,7 @@ where
             self.plugins
                 .iter()
                 .rev()
-                .fold(self.delegate.clone().boxed(), |acc, (_, e)| {
+                .fold(self.delegate.clone().boxed_clone(), |acc, (_, e)| {
                     e.query_planner_service(acc)
                 }),
         );

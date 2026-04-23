@@ -361,7 +361,7 @@ impl PluginPrivate for Telemetry {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let config = self.config.clone();
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
@@ -564,7 +564,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(mut custom_attributes, custom_instruments, mut custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -581,34 +581,6 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
-                        // NB: client name and version must be picked up here, rather than in the
-                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
-                        //  at the router service to modify the name and version.
-                        let get_from_context =
-                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
-                            )
-                        });
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
-                            )
-                        });
-
-                        if let Some(key) = client_name_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
-                        }
-
-                        if let Some(key) = client_version_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
-                        }
-
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
                         {
@@ -632,6 +604,44 @@ impl PluginPrivate for Telemetry {
                         let span = Span::current();
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
+
+                        // Client name and version must be picked up after awaiting
+                        // the inner service future, because router service plugins
+                        // (e.g. rhai) may modify these values in the shared context
+                        // during request processing. With buffered service layers,
+                        // that processing is deferred until the future is polled.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
+                            )
+                        });
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
+                            get_from_context(
+                                &ctx,
+                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
+                            )
+                        });
+
+                        if let Some(key) = client_name_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_name.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
+
+                        if let Some(key) = client_version_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_version.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
 
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
@@ -728,10 +738,13 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let config = self.config.clone();
@@ -919,10 +932,10 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         let config = self.config.clone();
         let config_map_res_first = config.clone();
 
@@ -953,10 +966,14 @@ impl PluginPrivate for Telemetry {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
@@ -1088,14 +1105,14 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
         let span_mode = self.config.instrumentation.spans.mode;
@@ -1201,14 +1218,14 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
 
@@ -1285,7 +1302,7 @@ impl PluginPrivate for Telemetry {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -2120,7 +2137,7 @@ mod tests {
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxService;
+    use tower::util::BoxCloneService;
 
     use super::CustomTraceIdPropagator;
     use super::EnabledFeatures;
@@ -2252,7 +2269,7 @@ mod tests {
                     .unwrap())
             });
 
-        let mut supergraph_service = plugin.supergraph_service(BoxService::new(mock_service));
+        let mut supergraph_service = plugin.supergraph_service(BoxCloneService::new(mock_service));
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2453,7 +2470,7 @@ mod tests {
                 },
             );
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(BoxCloneService::new(mock_bad_request_service));
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2500,7 +2517,7 @@ mod tests {
                         .unwrap())
                 });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneService::new(mock_bad_request_service));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2577,7 +2594,7 @@ mod tests {
                         .unwrap())
                 });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneService::new(mock_bad_request_service));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2664,7 +2681,7 @@ mod tests {
                 },
             );
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(BoxCloneService::new(mock_bad_request_service));
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2779,7 +2796,7 @@ mod tests {
                 },
             );
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", BoxCloneService::new(mock_bad_request_service));
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2881,7 +2898,7 @@ mod tests {
                 },
             );
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", BoxCloneService::new(mock_bad_request_service));
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2982,7 +2999,7 @@ mod tests {
                     .unwrap())
             });
         let mut request_supergraph_service =
-            plugin.supergraph_service(BoxService::new(mock_request_service));
+            plugin.supergraph_service(BoxCloneService::new(mock_request_service));
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3043,8 +3060,10 @@ mod tests {
                         .build())
                 });
 
-            let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+            let mut subgraph_service = plugin.subgraph_service(
+                "my_subgraph_name",
+                BoxCloneService::new(mock_subgraph_service),
+            );
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3103,7 +3122,7 @@ mod tests {
 
             let mut subgraph_service = plugin.subgraph_service(
                 "my_subgraph_name_error",
-                BoxService::new(mock_subgraph_service_in_error),
+                BoxCloneService::new(mock_subgraph_service_in_error),
             );
 
             let subgraph_req = SubgraphRequest::fake_builder()
@@ -3414,7 +3433,7 @@ mod tests {
                     .build()
             });
 
-        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let mut service = plugin.supergraph_service(BoxCloneService::new(mock_service));
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()

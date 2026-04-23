@@ -25,7 +25,7 @@ use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::util::BoxService;
+use tower::util::BoxCloneService;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -124,7 +124,7 @@ impl Plugin for Rhai {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -145,7 +145,10 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -166,7 +169,7 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -187,7 +190,11 @@ impl Plugin for Rhai {
         shared_service.take_unwrap()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;
@@ -212,10 +219,10 @@ impl Plugin for Rhai {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ServiceStep {
-    Router(SharedMut<router::BoxService>),
-    Supergraph(SharedMut<supergraph::BoxService>),
-    Execution(SharedMut<execution::BoxService>),
-    Subgraph(SharedMut<subgraph::BoxService>),
+    Router(SharedMut<router::BoxCloneService>),
+    Supergraph(SharedMut<supergraph::BoxCloneService>),
+    Execution(SharedMut<execution::BoxCloneService>),
+    Subgraph(SharedMut<subgraph::BoxCloneService>),
 }
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
@@ -256,7 +263,7 @@ macro_rules! gen_map_request {
                     Ok(ControlFlow::Continue(request_opt.unwrap()))
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         })
     };
 }
@@ -368,7 +375,7 @@ macro_rules! gen_map_router_deferred_request {
                     */
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         })
     };
 }
@@ -402,7 +409,7 @@ macro_rules! gen_map_response {
                     let response_opt = guard.take();
                     response_opt.unwrap()
                 })
-                .boxed()
+                .boxed_clone()
         })
     };
 }
@@ -415,7 +422,7 @@ macro_rules! gen_map_response {
 macro_rules! gen_map_router_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxService::new(service.and_then(
+            BoxCloneService::new(service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
@@ -526,7 +533,7 @@ macro_rules! gen_map_router_deferred_response {
 macro_rules! gen_map_deferred_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident, $stage: expr) => {
         $borrow.replace(|service| {
-            BoxService::new(service.and_then(
+            BoxCloneService::new(service.and_then(
                 |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later

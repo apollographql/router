@@ -17,7 +17,7 @@ use sha2::Digest;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
-use tower::util::BoxService;
+use tower::util::BoxCloneService;
 use tracing_futures::WithSubscriber;
 use uuid::Uuid;
 
@@ -144,7 +144,7 @@ async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
@@ -199,7 +199,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.execution_service(BoxCloneService::new(mock_service));
         let fake_req = http_ext::Request::fake_builder()
             .header("x-custom-header", "CUSTOM_VALUE")
             .body(Request::builder().query(String::new()).build())
@@ -831,7 +831,7 @@ async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
     let context = Context::new();
     context.insert("test", 5i64).unwrap();
     let supergraph_req = SupergraphRequest::fake_builder()
@@ -871,7 +871,7 @@ async fn it_can_access_demand_control_context() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
     let context = Context::new();
     context.insert_estimated_cost(50.0).unwrap();
     context.insert_actual_cost(35.0).unwrap();
@@ -949,7 +949,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
         .await
         .unwrap();
 
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
     let context = Context::new();
     let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
@@ -986,7 +986,7 @@ async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
     let req = SupergraphRequest::fake_builder()
         .context(Context::new())
         .build()?;
@@ -1016,7 +1016,7 @@ async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError>
         mock_service
     });
     let dyn_plugin = create_plugin(script_name).await?;
-    let mut service = dyn_plugin.execution_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.execution_service(BoxCloneService::new(mock_service));
     let fake_req = http_ext::Request::fake_builder()
         .body(Request::builder().query(String::new()).build())
         .build()?;
@@ -1035,7 +1035,7 @@ async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.router_service(BoxService::new(mock_service));
+    let mut service = dyn_plugin.router_service(BoxCloneService::new(mock_service));
     let req = crate::services::RouterRequest::fake_builder()
         .context(Context::new())
         .build()?;
@@ -1050,7 +1050,8 @@ async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> 
 
     let dyn_plugin = create_plugin(script_name).await?;
 
-    let mut service = dyn_plugin.subgraph_service("test_subgraph", BoxService::new(mock_service));
+    let mut service =
+        dyn_plugin.subgraph_service("test_subgraph", BoxCloneService::new(mock_service));
     let req = SubgraphRequest::fake_builder()
         .context(Context::new())
         .build();
@@ -1258,7 +1259,7 @@ async fn test_rhai_metric_router_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.router_service(BoxCloneService::new(mock_service));
         let req = router::Request::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1298,7 +1299,7 @@ async fn test_rhai_metric_supergraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1337,7 +1338,8 @@ async fn test_rhai_metric_subgraph_request() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.subgraph_service("test", BoxCloneService::new(mock_service));
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1378,7 +1380,7 @@ async fn test_rhai_metric_failed_callback() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1412,7 +1414,7 @@ async fn test_rhai_metric_no_callback_no_emission() {
             .unwrap();
         // No supergraph_service callback registered — plugin returns original service unchanged
         // and no metric is emitted
-        let _service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let _service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
 
         assert_histogram_not_exists!(
             "apollo.router.operations.rhai.duration",
@@ -1448,7 +1450,8 @@ async fn test_rhai_metric_subgraph_response() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.subgraph_service("test", BoxService::new(mock_service));
+        let mut router_service =
+            dyn_plugin.subgraph_service("test", BoxCloneService::new(mock_service));
         let req = SubgraphRequest::fake_builder().build();
         let _ = router_service.ready().await.unwrap().call(req).await;
 
@@ -1493,7 +1496,7 @@ async fn test_rhai_metric_deferred_response_causes_multiple_executions() {
             )
             .await
             .unwrap();
-        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let mut router_service = dyn_plugin.supergraph_service(BoxCloneService::new(mock_service));
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let resp = router_service
             .ready()

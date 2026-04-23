@@ -39,7 +39,7 @@ impl Plugin for ForbidMutations {
         })
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if self.forbid {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
@@ -59,7 +59,7 @@ impl Plugin for ForbidMutations {
                     }
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -98,7 +98,7 @@ mod forbid_http_get_mutations_tests {
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock_service.boxed());
+        .execution_service(mock_service.boxed_clone());
 
         let request = create_request(Method::GET, OperationKind::Query);
 
@@ -125,7 +125,7 @@ mod forbid_http_get_mutations_tests {
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(MockExecutionService::new().boxed());
+        .execution_service(MockExecutionService::new().boxed_clone());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
         let mut response = service_stack.oneshot(request).await.unwrap();
@@ -150,7 +150,7 @@ mod forbid_http_get_mutations_tests {
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock_service.boxed());
+        .execution_service(mock_service.boxed_clone());
 
         let request = create_request(Method::GET, OperationKind::Mutation);
 

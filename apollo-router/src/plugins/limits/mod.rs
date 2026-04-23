@@ -26,7 +26,6 @@ use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::router::BoxService;
 use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
@@ -257,7 +256,7 @@ impl PluginPrivate for LimitsPlugin {
         })
     }
 
-    fn router_service(&self, service: BoxService) -> BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
@@ -272,10 +271,14 @@ impl PluginPrivate for LimitsPlugin {
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         match self.config.subgraph_response_size_limit(name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -284,15 +287,15 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 
     fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> connector::request_service::BoxService {
+    ) -> connector::request_service::BoxCloneService {
         match self.config.connector_response_size_limit(&source_name) {
             None => service,
             Some(limit) => ServiceBuilder::new()
@@ -301,7 +304,7 @@ impl PluginPrivate for LimitsPlugin {
                     req
                 })
                 .service(service)
-                .boxed(),
+                .boxed_clone(),
         }
     }
 }

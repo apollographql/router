@@ -73,8 +73,8 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .subgraph_hook(move |name, _| match name {
-                "accounts" => mock_service1.clone().boxed(),
-                _ => mock_service2.clone().boxed(),
+                "accounts" => mock_service1.clone().boxed_clone(),
+                _ => mock_service2.clone().boxed_clone(),
             })
             // .log_level("DEBUG")
             .build_router()
