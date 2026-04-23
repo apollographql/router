@@ -607,21 +607,7 @@ GraphOS's composition strategy for authorization directives is intentionally acc
 
 ### Authorization on root operation types
 
-Root operation types (`Query`, `Mutation`, and `Subscription`) are shared merged types in a federated graph: every subgraph that contributes fields to them shares the same composed type in the supergraph. This has an important consequence for authorization directives.
-
-When you apply `@authenticated`, `@requiresScopes`, or `@policy` to a root operation type in a subgraph:
-
-```graphql
-type Mutation @authenticated {
-  bookHotel: BookedHotel
-}
-```
-
-the directive composes into the shared supergraph root type and applies to every field on that type, including fields contributed by other subgraphs. Composition does not reject this pattern since the directive's schema location allows `OBJECT`, but the result is cross-subgraph enforcement that is rarely intended.
-
-#### Apply authorization directives to specific fields
-
-To scope authorization on root operation types reliably, apply the directive to each field rather than to the root type:
+To scope authorization on `Query`, `Mutation`, and `Subscription` reliably, apply `@authenticated`, `@requiresScopes`, or `@policy` to each field rather than to the root operation type itself:
 
 ```graphql
 type Mutation {
@@ -629,7 +615,19 @@ type Mutation {
 }
 ```
 
-The same guidance applies to `@requiresScopes` and `@policy`.
+Root operation types are shared merged types in a federated graph. Every subgraph that contributes fields to `Query`, `Mutation`, or `Subscription` shares the same composed root type in the supergraph. An authorization directive applied to the root type composes into that shared root and applies to every field on it, including fields that other subgraphs contribute.
+
+The following pattern is valid composition, but produces cross-subgraph enforcement that is rarely intended:
+
+```graphql
+type Mutation @authenticated {
+  bookHotel: BookedHotel
+}
+```
+
+Every field on `Mutation` across every subgraph now requires authentication, not only `bookHotel` in the subgraph that declared the directive.
+
+Keep `@authenticated`, `@requiresScopes`, and `@policy` on individual fields in every subgraph that contributes to a root operation type, so each subgraph enforces only what it owns.
 
 ### Composed fields with different authorization directives
 
