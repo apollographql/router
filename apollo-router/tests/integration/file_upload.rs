@@ -10,6 +10,7 @@ use tower::BoxError;
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
 const FILE_CONFIG_WITH_RHAI: &str = include_str!("../fixtures/file_upload/rhai.router.yaml");
+const FILE_CONFIG_BODY_LIMIT: &str = include_str!("../fixtures/file_upload/body_limit.router.yaml");
 
 /// Create a valid handler for the [helper::FileUploadTestServer].
 macro_rules! make_handler {
@@ -1041,6 +1042,80 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
               ]
             }
             "###);
+        })
+        .await
+}
+
+/// Verifies that a file larger than http_max_request_bytes can still be uploaded when the file
+/// itself is within max_file_size. The body limit should apply only to the operations field.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_uploads_file_larger_than_http_max_request_bytes() -> Result<(), BoxError> {
+    // body_limit.router.yaml sets http_max_request_bytes = 50000 (~50 KB) and max_file_size = 5 MB.
+    // This file is 200 KB — well above the global body limit but within the per-file limit.
+    // Without the fix this test fails because Limited<Body> fires while streaming file data.
+    const ONE_KB: usize = 1024;
+    const FILE_SIZE: usize = 200 * ONE_KB;
+    static FILE_DATA: [u8; ONE_KB] = [0xBB; ONE_KB];
+
+    let file = tokio_stream::iter(
+        (0..FILE_SIZE / ONE_KB).map(|_| Ok(bytes::Bytes::from_static(&FILE_DATA))),
+    );
+
+    let request = helper::create_request(vec!["large.bin"], vec![file]);
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_BODY_LIMIT)
+        .handler(make_handler!(helper::verify_stream).with_state((FILE_SIZE, 0xBB)))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "large.bin",
+                  "body": "successfully verified all bytes as '0xBB'"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+/// Verifies that an operations field larger than http_max_request_bytes is still rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_operations_field_larger_than_http_max_request_bytes() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    // body_limit.router.yaml sets http_max_request_bytes = 50000 (~50 KB).
+    // Build an operations field that is larger than 50 KB.
+    let large_query = format!(
+        r#"{{"query":"mutation ($file: Upload) {{ file: singleUpload(file: $file) {{ filename body }} }}","variables":{{"file":null,"padding":"{}"}}}}"#,
+        "x".repeat(60_000),
+    );
+
+    let request = Form::new()
+        .part("operations", Part::text(large_query))
+        .part(
+            "map",
+            Part::text(serde_json::json!({ "0": ["variables.file"] }).to_string()),
+        )
+        .part("0", Part::text("tiny").file_name("tiny.txt"));
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_BODY_LIMIT)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            assert!(
+                !response.errors.is_empty(),
+                "expected an error for oversized operations field but got: {response:?}"
+            );
         })
         .await
 }
