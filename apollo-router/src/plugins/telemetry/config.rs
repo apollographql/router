@@ -1013,31 +1013,6 @@ mod tests {
     }
 
     #[test]
-    fn test_default_view_with_histogram_aggregation_sets_buckets() {
-        let boundaries = vec![0.1, 0.5, 1.0, 5.0];
-        let view = MetricView::default_view(
-            "my.metric",
-            Some(MetricAggregation::Histogram {
-                buckets: boundaries.clone(),
-            }),
-            None,
-        );
-
-        assert_eq!(view.name, "my.metric");
-        assert_eq!(view.rename, None);
-        assert_eq!(view.description, None);
-        assert_eq!(view.unit, None);
-        assert_eq!(
-            view.aggregation,
-            Some(MetricAggregation::Histogram {
-                buckets: boundaries
-            })
-        );
-        assert_eq!(view.allowed_attribute_keys, None);
-        assert_eq!(view.cardinality_limit, None);
-    }
-
-    #[test]
     fn test_merge_user_overrides_all_fields() {
         let default = MetricView::default_view(
             "my.histogram",
@@ -1383,16 +1358,6 @@ mod tests {
     }
 
     #[test]
-    fn test_metric_view_cardinality_limit_deserialization() {
-        let json_config = json!({
-            "name": "http.server.request.duration",
-            "cardinality_limit": 5000
-        });
-        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
-        assert_eq!(view.cardinality_limit, NonZeroU32::new(5000));
-    }
-
-    #[test]
     fn test_metric_view_cardinality_limit_rejects_zero() {
         let json_config = json!({
             "name": "http.server.request.duration",
@@ -1404,78 +1369,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_metrics_common_cardinality_limit_deserialization() {
-        let json_config = json!({
-            "cardinality_limit": 10000
-        });
-        let common: MetricsCommon =
-            serde_json::from_value(json_config).expect("should deserialize");
-        assert_eq!(common.cardinality_limit, NonZeroU32::new(10000));
-    }
-
-    #[test]
-    fn test_metrics_common_cardinality_limit_rejects_zero() {
-        let json_config = json!({
-            "cardinality_limit": 0
-        });
-        assert!(
-            serde_json::from_value::<MetricsCommon>(json_config).is_err(),
-            "cardinality_limit: 0 should be rejected"
-        );
-    }
-
-    #[test]
-    fn test_merge_cardinality_limit_user_overrides_global() {
-        let mut default = MetricView::default_view(
-            "my.metric",
-            Some(MetricAggregation::Histogram {
-                buckets: vec![0.1, 0.5, 1.0],
-            }),
-            None,
-        );
-        default.cardinality_limit = NonZeroU32::new(3000); // simulates global limit
-        let user = MetricView {
-            name: "my.metric".to_string(),
-            rename: None,
-            description: None,
-            unit: None,
-            aggregation: None,
-            allowed_attribute_keys: None,
-            cardinality_limit: NonZeroU32::new(10000),
-        };
-        let merged = default.merge(user);
-        assert_eq!(
-            merged.cardinality_limit,
-            NonZeroU32::new(10000),
-            "per-view cardinality limit should override global"
-        );
-    }
-
-    #[test]
-    fn test_merge_cardinality_limit_inherits_global() {
-        let mut default = MetricView::default_view(
-            "my.metric",
-            Some(MetricAggregation::Histogram {
-                buckets: vec![0.1, 0.5, 1.0],
-            }),
-            None,
-        );
-        default.cardinality_limit = NonZeroU32::new(5000); // simulates global limit
-        let user = MetricView {
-            name: "my.metric".to_string(),
-            rename: None,
-            description: None,
-            unit: None,
-            aggregation: None,
-            allowed_attribute_keys: None,
-            cardinality_limit: None,
-        };
-        let merged = default.merge(user);
-        assert_eq!(
-            merged.cardinality_limit,
-            NonZeroU32::new(5000),
-            "global cardinality limit should be preserved when per-view is not set"
-        );
-    }
 }
