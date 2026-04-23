@@ -17,7 +17,7 @@ pub(crate) fn validate_shareable_directives(
 ) -> Result<(), FederationError> {
     let directive_name = meta
         .federation_spec_definition()
-        .shareable_directive_name_in_schema(schema)?
+        .shareable_directive_name_in_schema(schema)
         .unwrap_or(FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC);
     let shareable_referencers = schema.referencers().get_directive(&directive_name);
 

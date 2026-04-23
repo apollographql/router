@@ -158,6 +158,12 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
   - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 
+## Rhai
+
+- `apollo.router.operations.rhai.duration` - Time spent executing a Rhai script callback, in seconds
+  - `rhai.stage`: string (`RouterRequest`, `RouterResponse`, `SupergraphRequest`, `SupergraphResponse`, `ExecutionRequest`, `ExecutionResponse`, `SubgraphRequest`, `SubgraphResponse`)
+  - `rhai.succeeded`: bool
+
 ## Performance
 
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
@@ -278,6 +284,14 @@ telemetry:
 
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
+## Limits
+
+- `apollo.router.limits.subgraph_response_size.exceeded`: A counter of subgraph responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.subgraph`.
+  - `subgraph.name`: The name of the subgraph whose response was aborted.
+
+- `apollo.router.limits.connector_response_size.exceeded` - A counter of connector responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.connector`.
+  - `connector.source`: The source key (`subgraph_name.source_name`) whose response was aborted.
 
 ## GraphOS Studio
 

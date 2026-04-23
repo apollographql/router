@@ -521,57 +521,40 @@ impl LinksMetadata {
         self.by_identity.get(identity).cloned()
     }
 
-    pub fn source_link_of_type<'e>(&'e self, type_name: &'e Name) -> Option<LinkedElement> {
-        // For types, it's either fully qualified or it must be an imported name.
-        if let Some((spec_name, name_in_spec)) = type_name.split_once("__") {
-            let Ok(name_in_spec) = Name::new(name_in_spec) else {
-                return None;
-            };
-            return self
-                .by_name_in_schema
-                .get(spec_name)
-                .map(|link| LinkedElement {
-                    link: Arc::clone(link),
-                    import: None,
-                    name: type_name.clone(),
-                    name_in_spec,
-                });
-        }
-
-        self.types_by_imported_name
-            .get(type_name)
-            .map(|(link, import)| LinkedElement {
+    pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {
+        // For types, it's either an imported name or it must be fully qualified
+        if let Some((link, import)) = self.types_by_imported_name.get(type_name) {
+            return Some(LinkedElement {
                 link: Arc::clone(link),
                 import: Some(Arc::clone(import)),
                 name: type_name.clone(),
                 name_in_spec: import.element.clone(),
+            });
+        }
+
+        type_name
+            .split_once("__")
+            .and_then(|(spec_name, name_in_spec)| {
+                let Ok(name_in_spec) = Name::new(name_in_spec) else {
+                    return None;
+                };
+                self.by_name_in_schema
+                    .get(spec_name)
+                    .map(|link| LinkedElement {
+                        link: Arc::clone(link),
+                        import: None,
+                        name: type_name.clone(),
+                        name_in_spec,
+                    })
             })
     }
 
-    pub fn source_link_of_directive<'e>(
-        &'e self,
-        directive_name: &'e Name,
-    ) -> Option<LinkedElement> {
+    pub fn source_link_of_directive(&self, directive_name: &Name) -> Option<LinkedElement> {
         // For directives, it can be either:
-        //   1. be fully qualified,
-        //   2. be an imported name,
-        //   2. or it must be the "imported" name of a linked spec (special case of a directive
-        //      named like the spec).
-        if let Some((spec_name, name_in_spec)) = directive_name.split_once("__") {
-            let Ok(name_in_spec) = Name::new(name_in_spec) else {
-                return None;
-            };
-            return self
-                .by_name_in_schema
-                .get(spec_name)
-                .map(|link| LinkedElement {
-                    link: Arc::clone(link),
-                    import: None,
-                    name: directive_name.clone(),
-                    name_in_spec,
-                });
-        }
-
+        //   1. be an imported name,
+        //   2. be the "imported" name of a linked spec (special case of a directive named like the
+        //      spec),
+        //   3. or it must be fully qualified.
         if let Some((link, import)) = self.directives_by_imported_name.get(directive_name) {
             return Some(LinkedElement {
                 link: Arc::clone(link),
@@ -581,13 +564,29 @@ impl LinksMetadata {
             });
         }
 
-        self.by_name_in_schema
-            .get(directive_name)
-            .map(|link| LinkedElement {
+        if let Some(link) = self.by_name_in_schema.get(directive_name) {
+            return Some(LinkedElement {
                 link: Arc::clone(link),
                 import: None,
                 name: directive_name.clone(),
                 name_in_spec: link.url.identity.name.clone(),
+            });
+        }
+
+        directive_name
+            .split_once("__")
+            .and_then(|(spec_name, name_in_spec)| {
+                let Ok(name_in_spec) = Name::new(name_in_spec) else {
+                    return None;
+                };
+                self.by_name_in_schema
+                    .get(spec_name)
+                    .map(|link| LinkedElement {
+                        link: Arc::clone(link),
+                        import: None,
+                        name: directive_name.clone(),
+                        name_in_spec,
+                    })
             })
     }
 

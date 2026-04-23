@@ -408,19 +408,19 @@ impl LicenseEnforcementReport {
         if !allowed_features.contains(&AllowedFeature::RequestLimits) {
             configuration_restrictions.extend(vec![
                 ConfigurationRestriction::builder()
-                    .path("$.limits.max_depth")
+                    .path("$.limits.router.max_depth")
                     .name("Operation depth limiting")
                     .build(),
                 ConfigurationRestriction::builder()
-                    .path("$.limits.max_height")
+                    .path("$.limits.router.max_height")
                     .name("Operation height limiting")
                     .build(),
                 ConfigurationRestriction::builder()
-                    .path("$.limits.max_root_fields")
+                    .path("$.limits.router.max_root_fields")
                     .name("Operation root fields limiting")
                     .build(),
                 ConfigurationRestriction::builder()
-                    .path("$.limits.max_aliases")
+                    .path("$.limits.router.max_aliases")
                     .name("Operation aliases limiting")
                     .build(),
             ]);

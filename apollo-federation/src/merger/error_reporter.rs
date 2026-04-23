@@ -61,6 +61,7 @@ impl ErrorReporter {
         self.hints.push(hint);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         !self.hints.is_empty()
     }
@@ -223,7 +224,7 @@ impl ErrorReporter {
                 ));
                 let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
-                    code: code.code().to_string(),
+                    definition: code.definition(),
                     message: format!("{message}{distribution_str}{suffix}"),
                     locations,
                 });

@@ -1,12 +1,13 @@
 use apollo_compiler::coord;
 use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
-use apollo_federation::composition::compose;
+use apollo_federation::error::CompositionError;
 use apollo_federation::subgraph::typestate::Subgraph;
 use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 
 // =============================================================================
@@ -295,6 +296,85 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
             r#"Type `A` is @inaccessible but is referenced by `Query.q2`, which is in the API schema."#,
         )],
     );
+}
+
+/// API-schema `@inaccessible` validation runs after merge; [`CompositionError::MergeError`] should
+/// carry subgraph source ranges (Rust port of JS `updateInaccessibleErrorsWithLinkToSubgraphs`).
+#[test]
+fn referenced_inaccessible_merge_error_includes_subgraph_locations() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          q1: Int
+          q2: A
+        }
+
+        type A @shareable {
+          x: Int
+          y: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type A @shareable @inaccessible {
+          x: Int
+          y: Int
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let errors = result.expect_err("Expected composition to fail");
+
+    let merge_errors: Vec<_> = errors
+        .iter()
+        .filter_map(|e| match e {
+            CompositionError::MergeError { error, locations } => {
+                Some((error, locations.as_slice()))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        !merge_errors.is_empty(),
+        "Expected at least one MergeError from API schema validation, got {errors:#?}"
+    );
+
+    let mut seen_subgraphs: Vec<&str> = merge_errors
+        .iter()
+        .flat_map(|(_, locs)| locs.iter().map(|l| l.subgraph.as_str()))
+        .collect();
+    seen_subgraphs.sort_unstable();
+    seen_subgraphs.dedup();
+
+    assert!(
+        seen_subgraphs.contains(&"subgraphA"),
+        "Expected referencer location in subgraphA, saw subgraphs {seen_subgraphs:?}. Errors: {merge_errors:#?}"
+    );
+    assert!(
+        seen_subgraphs.contains(&"subgraphB"),
+        "Expected @inaccessible definition location in subgraphB, saw subgraphs {seen_subgraphs:?}. Errors: {merge_errors:#?}"
+    );
+
+    for (err, locs) in &merge_errors {
+        assert!(
+            !locs.is_empty(),
+            "Each MergeError from this path should include at least one SubgraphLocation: {err}"
+        );
+        for loc in *locs {
+            let (sl, sc) = (loc.range.start.line, loc.range.start.column);
+            let (el, ec) = (loc.range.end.line, loc.range.end.column);
+            assert!(
+                el > sl || (el == sl && ec > sc),
+                "Expected non-empty source range for {loc:?}"
+            );
+        }
+    }
 }
 
 #[test]

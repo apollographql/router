@@ -362,7 +362,7 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.client().pipeline().with_options(&options);
-        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
+        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,

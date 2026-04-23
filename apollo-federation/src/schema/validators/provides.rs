@@ -33,7 +33,7 @@ pub(crate) fn validate_provides_directives(
 ) -> Result<(), FederationError> {
     let provides_directive_name = metadata
         .federation_spec_definition()
-        .directive_name_in_schema(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)
         .unwrap_or(FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC);
 
     let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<ProvidesDirective>>> = vec![

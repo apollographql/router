@@ -11,7 +11,6 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 
 impl Merger {
     /// Merge union type from multiple subgraphs
-    #[allow(dead_code)]
     pub(crate) fn merge_union(
         &mut self,
         sources: Sources<Node<UnionType>>,
