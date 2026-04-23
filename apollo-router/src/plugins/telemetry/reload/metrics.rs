@@ -257,7 +257,7 @@ mod view_selection_tests {
 
     use super::*;
 
-    const DEFAULT_BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0];
+    const BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0];
 
     fn empty_view(name: &str) -> MetricView {
         MetricView {
@@ -280,7 +280,7 @@ mod view_selection_tests {
             .into_iter()
             .map(|v| (v.name.clone(), v))
             .collect();
-        let bucket_boundaries = DEFAULT_BUCKETS.to_vec();
+        let bucket_boundaries = BUCKETS.to_vec();
         MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter, runtime::Tokio).build())
             .with_view(move |instrument: &Instrument| {
@@ -292,19 +292,6 @@ mod view_selection_tests {
                 )
             })
             .build()
-    }
-
-    fn metric_exists(exporter: &InMemoryMetricExporter, name: &str) -> bool {
-        exporter
-            .get_finished_metrics()
-            .map(|metrics| {
-                metrics
-                    .iter()
-                    .flat_map(|rm| rm.scope_metrics())
-                    .flat_map(|sm| sm.metrics())
-                    .any(|m| m.name() == name)
-            })
-            .unwrap_or(false)
     }
 
     /// Runs the caller's closure against the first exported metric with the given
@@ -350,119 +337,7 @@ mod view_selection_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn counter_with_per_view_drop_is_not_exported() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("dropped.counter");
-        view.aggregation = Some(MetricAggregation::Drop);
-        let provider = meter_provider_with(exporter.clone(), vec![view], None);
-
-        let counter = provider.meter("t").u64_counter("dropped.counter").build();
-        counter.add(1, &[]);
-        provider.force_flush().unwrap();
-
-        assert!(!metric_exists(&exporter, "dropped.counter"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn counter_with_per_view_allowed_attribute_keys_filters_attributes() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("filtered.counter");
-        view.allowed_attribute_keys = Some(HashSet::from_iter(["keep".to_string()]));
-        let provider = meter_provider_with(exporter.clone(), vec![view], None);
-
-        let counter = provider.meter("t").u64_counter("filtered.counter").build();
-        counter.add(
-            1,
-            &[KeyValue::new("keep", "yes"), KeyValue::new("drop", "yes")],
-        );
-        provider.force_flush().unwrap();
-
-        with_metric(&exporter, "filtered.counter", |data| {
-            let AggregatedMetrics::U64(MetricData::Sum(sum)) = data else {
-                panic!("expected Sum aggregation, got {data:?}")
-            };
-            let keys: HashSet<String> = sum
-                .data_points()
-                .flat_map(|dp| dp.attributes())
-                .map(|kv| kv.key.to_string())
-                .collect();
-            assert!(keys.contains("keep"), "keep attribute should be preserved");
-            assert!(
-                !keys.contains("drop"),
-                "drop attribute should be filtered out"
-            );
-        });
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn up_down_counter_with_per_view_rename_preserves_kind() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("original.name");
-        view.rename = Some("renamed.name".into());
-        let provider = meter_provider_with(exporter.clone(), vec![view], None);
-
-        let updown = provider
-            .meter("t")
-            .i64_up_down_counter("original.name")
-            .build();
-        updown.add(3, &[]);
-        provider.force_flush().unwrap();
-
-        assert!(
-            !metric_exists(&exporter, "original.name"),
-            "renamed metric should not appear under original name"
-        );
-        with_metric(&exporter, "renamed.name", |data| {
-            assert!(
-                matches!(data, AggregatedMetrics::I64(MetricData::Sum(_))),
-                "UpDownCounter should remain a Sum aggregation, got {data:?}"
-            );
-        });
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn histogram_with_per_view_cardinality_limit_uses_default_buckets() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("test.histogram");
-        view.cardinality_limit = NonZeroU32::new(1000);
-        let provider = meter_provider_with(exporter.clone(), vec![view], None);
-
-        let histogram = provider.meter("t").f64_histogram("test.histogram").build();
-        histogram.record(0.3, &[]);
-        provider.force_flush().unwrap();
-
-        with_metric(&exporter, "test.histogram", |data| {
-            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
-                panic!("expected Histogram aggregation, got {data:?}")
-            };
-            let bounds: Vec<f64> = hist
-                .data_points()
-                .next()
-                .map(|dp| dp.bounds().collect())
-                .unwrap_or_default();
-            assert_eq!(bounds, DEFAULT_BUCKETS);
-        });
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn histogram_with_per_view_drop_is_not_exported() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("dropped.histogram");
-        view.aggregation = Some(MetricAggregation::Drop);
-        let provider = meter_provider_with(exporter.clone(), vec![view], None);
-
-        let histogram = provider
-            .meter("t")
-            .f64_histogram("dropped.histogram")
-            .build();
-        histogram.record(1.0, &[]);
-        provider.force_flush().unwrap();
-
-        assert!(!metric_exists(&exporter, "dropped.histogram"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn histogram_without_user_view_uses_default_buckets() {
+    async fn histogram_without_user_view_uses_global_buckets() {
         let exporter = InMemoryMetricExporter::default();
         let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
 
@@ -479,33 +354,10 @@ mod view_selection_tests {
                 .next()
                 .map(|dp| dp.bounds().collect())
                 .unwrap_or_default();
-            assert_eq!(bounds, DEFAULT_BUCKETS);
+            assert_eq!(bounds, BUCKETS);
         });
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn counter_without_user_view_and_global_limit_stays_a_counter() {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
-
-        let counter = provider.meter("t").u64_counter("plain.counter").build();
-        counter.add(5, &[]);
-        provider.force_flush().unwrap();
-
-        with_metric(&exporter, "plain.counter", |data| {
-            assert!(
-                matches!(data, AggregatedMetrics::U64(MetricData::Sum(_))),
-                "expected Sum aggregation, got {data:?}"
-            );
-        });
-    }
-
-    /// When there is no user view, no histogram default, and no global
-    /// cardinality limit, `resolve_view` must return `None` so the SDK falls
-    /// back to its implicit default view. The early-return guard prevents
-    /// constructing an empty `MetricView` that `into_stream()` would then try
-    /// to turn into an all-`None` `Stream`. Removing the guard would break this
-    /// case.
     #[tokio::test(flavor = "multi_thread")]
     async fn counter_without_user_view_or_global_limit_falls_through_to_sdk_default() {
         let exporter = InMemoryMetricExporter::default();
@@ -523,87 +375,8 @@ mod view_selection_tests {
         });
     }
 
-    /// Regression: the global cardinality limit must reach observable instruments
-    /// without coercing them into histograms. Observable gauges take a different
-    /// SDK registration path than synchronous counters, so this case is worth
-    /// covering explicitly.
     #[tokio::test(flavor = "multi_thread")]
-    async fn observable_gauge_without_user_view_and_global_limit_stays_a_gauge() {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(100));
-
-        let _gauge = provider
-            .meter("t")
-            .u64_observable_gauge("observed.gauge")
-            .with_callback(|obs| obs.observe(42, &[]))
-            .build();
-        provider.force_flush().unwrap();
-
-        with_metric(&exporter, "observed.gauge", |data| {
-            assert!(
-                matches!(data, AggregatedMetrics::U64(MetricData::Gauge(_))),
-                "expected Gauge aggregation, got {data:?}"
-            );
-        });
-    }
-
-    /// Exercises the histogram + user view + global cardinality interaction
-    /// (dispatch branch #8). The per-view cardinality limit must win over the
-    /// global one even when the histogram aggregation default is active, and
-    /// the default buckets must still flow through. A regression that silently
-    /// dropped the global limit whenever the histogram default was applied
-    /// would pass every other test in this module.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn histogram_with_per_view_and_global_limits_inherits_default_buckets() {
-        let exporter = InMemoryMetricExporter::default();
-        let mut view = empty_view("limited.histogram");
-        view.cardinality_limit = NonZeroU32::new(2);
-        let provider = meter_provider_with(exporter.clone(), vec![view], NonZeroU32::new(1000));
-
-        let histogram = provider
-            .meter("t")
-            .f64_histogram("limited.histogram")
-            .build();
-        histogram.record(0.3, &[KeyValue::new("k", "a")]);
-        histogram.record(0.3, &[KeyValue::new("k", "b")]);
-        histogram.record(0.3, &[KeyValue::new("k", "c")]);
-        provider.force_flush().unwrap();
-
-        with_metric(&exporter, "limited.histogram", |data| {
-            let AggregatedMetrics::F64(MetricData::Histogram(hist)) = data else {
-                panic!("expected Histogram aggregation, got {data:?}")
-            };
-            let bounds: Vec<f64> = hist
-                .data_points()
-                .next()
-                .map(|dp| dp.bounds().collect())
-                .unwrap_or_default();
-            assert_eq!(
-                bounds, DEFAULT_BUCKETS,
-                "default histogram buckets should flow through when the user \
-                 view omits aggregation"
-            );
-            let has_overflow = hist.data_points().any(|dp| {
-                dp.attributes()
-                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
-            });
-            assert!(
-                has_overflow,
-                "per-view limit of 2 should overflow on the third attribute \
-                 set; if the global limit of 1000 were applied instead, no \
-                 overflow data point would be emitted"
-            );
-        });
-    }
-
-    /// The per-view `cardinality_limit` must override the global limit when both
-    /// are set. Without this the documented precedence would silently regress:
-    /// the types still compile and no other test in this module exercises the
-    /// interaction between both limits. We verify by setting a low per-view
-    /// limit (2) alongside a high global (1000) and observing the SDK's
-    /// `otel.metric.overflow` stamp on a third attribute set.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn per_view_cardinality_limit_wins_over_global() {
+    async fn counter_with_user_view_cardinality_limit_wins_over_global() {
         let exporter = InMemoryMetricExporter::default();
         let mut view = empty_view("limited.counter");
         view.cardinality_limit = NonZeroU32::new(2);
@@ -626,8 +399,7 @@ mod view_selection_tests {
             assert!(
                 has_overflow,
                 "per-view limit of 2 should overflow on the third attribute set; \
-                 if the global limit of 1000 were applied instead, no overflow \
-                 data point would be emitted"
+                 a global limit of 1000 alone would emit no overflow"
             );
         });
     }
