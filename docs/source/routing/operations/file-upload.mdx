@@ -130,6 +130,8 @@ If a request exceeds a limit, the router rejects the request.
 The `limits.http_max_request_bytes` setting applies to the GraphQL operations field (the query and variables) of the multipart request, not to the uploaded file data itself.
 Limit file data using `protocols.multipart.limits.max_file_size`.
 
+Unlike other GraphQL requests, file upload requests stream their body through the router's plugin layer so the multipart body can be parsed before query planning begins. This means a slow or stalled client can hold a connection open until the global router `timeout` fires. Use `operation_body_timeout` to set a tighter deadline specifically for receiving the GraphQL operation (query and variables) at the start of the upload, while still allowing the full router `timeout` for subgraph round-trips. `operation_body_timeout` covers only the time to receive the operation — it does not apply to the time taken to upload the files themselves.
+
 #### Configuration reference
 
 The following are attributes of the root [`preview_file_uploads`](#configure-file-upload-support-in-the-router) configuration.
@@ -229,6 +231,27 @@ If this limit is exceeded, the router rejects the entire request.
 
 </td>
 <td>integer</td>
+</tr>
+<tr>
+<td>
+
+##### `protocols.multipart.limits.operation_body_timeout`
+
+The maximum time to allow the client to deliver the GraphQL operation (query and variables) within the multipart body. This timeout does not apply to reading the file contents themselves. If the operation is too slow to arrive, the router rejects the request with a `504 Gateway Timeout` error.
+
+If not set, no operation body timeout is applied.
+
+</td>
+<td>
+
+unset
+
+</td>
+<td>
+
+duration string, for example `5s` or `30s`
+
+</td>
 </tr>
 </tbody>
 </table>
