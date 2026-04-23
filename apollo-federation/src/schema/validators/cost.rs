@@ -8,7 +8,7 @@ pub(crate) fn validate_cost_directives(
     schema: &FederationSchema,
     errors: &mut MultipleFederationErrors,
 ) -> Result<(), FederationError> {
-    let Some(cost_directive_name) = CostSpecDefinition::cost_directive_name(schema)? else {
+    let Some(cost_directive_name) = CostSpecDefinition::cost_directive_name(schema) else {
         return Ok(());
     };
     let cost_directive_referencers = schema

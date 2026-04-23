@@ -1005,24 +1005,17 @@ impl Merger {
             let external = source
                 .try_into()
                 .is_ok_and(|pos| self.is_field_external(idx, &pos));
-            let requires = self.get_field_set(
-                &field_def,
-                subgraph.requires_directive_name().ok().flatten().as_ref(),
-            );
+            let requires =
+                self.get_field_set(&field_def, subgraph.requires_directive_name().as_ref());
 
-            let provides = self.get_field_set(
-                &field_def,
-                subgraph.provides_directive_name().ok().flatten().as_ref(),
-            );
+            let provides =
+                self.get_field_set(&field_def, subgraph.provides_directive_name().as_ref());
 
             let has_unknown_target = merge_context.has_override_with_unknown_target(idx);
             let override_from = if has_unknown_target {
                 None
             } else {
-                self.get_override_from(
-                    &field_def,
-                    subgraph.override_directive_name().ok().flatten().as_ref(),
-                )
+                self.get_override_from(&field_def, subgraph.override_directive_name().as_ref())
             };
 
             let context_arguments = self.extract_context_arguments(idx, &field_def)?;
@@ -1078,7 +1071,7 @@ impl Merger {
         for (&idx, source_opt) in &sources {
             if let Some(source_pos) = source_opt
                 && let Some(subgraph) = self.subgraphs.get(idx)
-                && let Ok(Some(override_directive_name)) = subgraph.override_directive_name()
+                && let Some(override_directive_name) = subgraph.override_directive_name()
             {
                 let has_override = match source_pos {
                     DirectiveTargetPosition::ObjectField(pos) => !pos
@@ -1139,8 +1132,8 @@ impl Merger {
         //   3) none of the field is @external.
         for (&idx, source_opt) in &sources {
             let subgraph = &self.subgraphs[idx];
-            let provides_directive_name = subgraph.provides_directive_name().ok().flatten();
-            let requires_directive_name = subgraph.requires_directive_name().ok().flatten();
+            let provides_directive_name = subgraph.provides_directive_name();
+            let requires_directive_name = subgraph.requires_directive_name();
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {
@@ -1231,7 +1224,7 @@ impl Merger {
 
         // Check if the @fromContext directive is defined in the schema
         // If the directive is not defined in the schema, we cannot extract context arguments
-        let Ok(Some(from_context_name)) = self.subgraphs[idx].from_context_directive_name() else {
+        let Some(from_context_name) = self.subgraphs[idx].from_context_directive_name() else {
             return Ok(None);
         };
 

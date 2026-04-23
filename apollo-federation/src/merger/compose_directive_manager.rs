@@ -247,21 +247,11 @@ impl ComposeDirectiveManager {
 
         let tag_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.tag_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.tag_directive_name().zip(Some(s.name.clone())))
             .collect();
         let inaccessible_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.inaccessible_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.inaccessible_directive_name().zip(Some(s.name.clone())))
             .collect();
 
         for subgraph in subgraphs {
@@ -467,7 +457,7 @@ impl ComposeDirectiveManager {
                 .collect();
             if !subgraphs_with_different_naming.is_empty() {
                 error_reporter.add_hint(CompositionHint {
-                    code: HintCode::DirectiveCompositionWarn.code().to_string(),
+                    definition: HintCode::DirectiveCompositionWarn.definition(),
                     message: format!("Composed directive \"@{name}\" is named differently in a subgraph that doesn't export it. Consistent naming will be required to export it."),
                     locations: Self::locations_for_identity(item.identity(), subgraphs_with_different_naming),
                 });
@@ -561,7 +551,7 @@ impl ComposeDirectiveManager {
                 // the user determine whether it's an issue.
                 if !major_mismatch_hint_raised {
                     error_reporter.add_hint(CompositionHint {
-                        code: HintCode::DirectiveCompositionInfo.code().to_string(),
+                        definition: HintCode::DirectiveCompositionInfo.definition(),
                         message: format!("Non-composed core feature \"{identity}\" has major version mismatch across subgraphs"),
                         locations: Self::locations_for_identity(identity, subgraphs),
                     });
@@ -677,7 +667,7 @@ impl ErrorReporter {
         locations: Vec<SubgraphLocation>,
     ) {
         self.add_hint(CompositionHint {
-            code: HintCode::DirectiveCompositionInfo.code().to_string(),
+            definition: HintCode::DirectiveCompositionInfo.definition(),
             message: format!("Directive \"{name}\" should not be explicitly manually composed since it is a federation directive composed by default"),
             locations,
         });

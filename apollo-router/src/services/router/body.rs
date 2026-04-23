@@ -6,9 +6,11 @@ use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
+use http_body_util::Limited;
 use http_body_util::StreamBody;
 use http_body_util::combinators::UnsyncBoxBody;
 use hyper::body::Body as HttpBody;
+use tower::BoxError;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
 
@@ -45,6 +47,16 @@ where
     ))
 }
 
+/// Like `into_bytes`, but rejects the body if it exceeds `limit` bytes.
+/// Checks size per-frame as data arrives — does not buffer the full body before checking.
+pub(crate) async fn into_bytes_limited<B>(body: B, limit: usize) -> Result<Bytes, BoxError>
+where
+    B: HttpBody,
+    B::Error: Into<BoxError>,
+{
+    Ok(Limited::new(body, limit).collect().await?.to_bytes())
+}
+
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
 pub async fn into_string<B>(input: B) -> Result<String, AxumError>
 where
@@ -59,4 +71,41 @@ where
         .to_vec();
     let string = String::from_utf8(bytes).map_err(AxumError::new)?;
     Ok(string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn into_bytes_limited_under_limit() {
+        let body = from_bytes("hello");
+        let result = into_bytes_limited(body, 10).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn into_bytes_limited_at_limit() {
+        let body = from_bytes("hello");
+        let result = into_bytes_limited(body, 5).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn into_bytes_limited_over_limit() {
+        use http_body_util::LengthLimitError;
+
+        let body = from_bytes("hello world");
+        let result = into_bytes_limited(body, 5).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .downcast_ref::<LengthLimitError>()
+                .is_some(),
+            "error should be a LengthLimitError"
+        );
+    }
 }

@@ -264,8 +264,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::parser::Parser::new()
-            .recursion_limit(configuration.limits.parser_max_recursion)
-            .token_limit(configuration.limits.parser_max_tokens);
+            .recursion_limit(configuration.limits.router.parser_max_recursion)
+            .token_limit(configuration.limits.router.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(errors) => {

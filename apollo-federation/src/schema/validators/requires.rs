@@ -30,7 +30,7 @@ pub(crate) fn validate_requires_directives(
 ) -> Result<(), FederationError> {
     let requires_directive_name = meta
         .federation_spec_definition()
-        .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
         .unwrap_or(FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC);
 
     let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<RequiresDirective>>> = vec![

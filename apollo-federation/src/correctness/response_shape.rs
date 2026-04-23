@@ -337,7 +337,7 @@ impl NormalizedTypeCondition {
         for ty in &types {
             let pos = schema.get_type(ty.clone())?.try_into()?;
             let pos_types = schema.possible_runtime_types(pos)?;
-            ground_types.extend(pos_types.into_iter());
+            ground_types.extend(pos_types);
         }
         if ground_types.is_empty() {
             return Ok(None);
