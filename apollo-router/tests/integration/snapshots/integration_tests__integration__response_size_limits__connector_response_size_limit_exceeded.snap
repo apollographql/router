@@ -6,12 +6,12 @@ expression: response_json
   "data": null,
   "errors": [
     {
-      "message": "The server returned data in an unexpected format.",
+      "message": "connector response body exceeded limit of 50 bytes",
       "path": [
         "posts"
       ],
       "extensions": {
-        "code": "CONNECTOR_RESPONSE_INVALID",
+        "code": "CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED",
         "service": "connectors",
         "connector": {
           "coordinate": "connectors:Query.posts[0]"

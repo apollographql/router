@@ -208,8 +208,8 @@ async fn test_connector_response_size_limit_exceeded() -> Result<(), BoxError> {
     assert_eq!(response.status(), 200);
     let response = response.text().await?;
     assert!(
-        response.contains("CONNECTOR_RESPONSE_INVALID"),
-        "expected CONNECTOR_RESPONSE_INVALID in response, got: {response}"
+        response.contains("CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED"),
+        "expected CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED in response, got: {response}"
     );
     let response_json: serde_json::Value = serde_json::from_str(&response)?;
     assert_json_snapshot!(response_json);
