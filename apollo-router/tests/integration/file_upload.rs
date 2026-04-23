@@ -1182,8 +1182,8 @@ mod operation_body_timeout {
 
     fn slow_body() -> reqwest::Body {
         // Body starts sending after 5s — longer than the 1s operation_body_timeout in
-        // STRICT_CONFIG but shorter than the 10s global router timeout, proving it is the
-        // operation_body_timeout that fires and not the global timeout.
+        // STRICT_CONFIG but shorter than both the 10s operation_body_timeout in GENEROUS_CONFIG
+        // and the 10s global router timeout, proving it is the operation_body_timeout that fires.
         let stream = IntervalStream::new(interval_at(
             Instant::now() + Duration::from_secs(5),
             Duration::from_secs(5),
