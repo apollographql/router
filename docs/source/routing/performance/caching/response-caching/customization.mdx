@@ -356,3 +356,26 @@ response_cache:
         urls: ["redis://..."]
         pool_size: 15
 ```
+
+## Suppressing the `Cache-Control` client response header
+
+By default, router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy—for example, `Cache-Control: max-age=300, public`.
+
+Set `include_cache_control_header_on_router_response: false` to suppress this header when:
+
+- Router sits behind a CDN or reverse proxy that manages caching headers
+- Downstream clients misinterpret `Cache-Control` headers from router
+- You want internal Redis caching active while preventing clients from caching responses
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  include_cache_control_header_on_router_response: false
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+```
+
+When `include_cache_control_header_on_router_response` is `false`, router omits the `Cache-Control` header from client responses. All internal caching behavior—Redis storage, TTL enforcement, cache key computation, and the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger)—remains unchanged.

@@ -1044,7 +1044,6 @@ impl Merger {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn needs_join_field<T>(
         &self,
         sources: &Sources<T>,
@@ -1214,7 +1213,6 @@ impl Merger {
         Ok(false)
     }
 
-    #[allow(dead_code)]
     fn extract_context_arguments(
         &self,
         idx: usize,
@@ -1271,7 +1269,6 @@ impl Merger {
     }
 
     /// Extract field set from directive
-    #[allow(dead_code)]
     fn get_field_set(
         &self,
         field_def: &JoinableField,
@@ -1288,7 +1285,6 @@ impl Merger {
     }
 
     /// Extract override "from" argument
-    #[allow(dead_code)]
     fn get_override_from(
         &self,
         field_def: &JoinableField,
@@ -1308,12 +1304,10 @@ impl Merger {
 }
 
 /// Simple builder for join__field directives (minimal version for compatibility)
-#[allow(dead_code)]
 pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }
 
-#[allow(dead_code)]
 impl JoinFieldBuilder {
     pub(crate) fn new() -> Self {
         Self {

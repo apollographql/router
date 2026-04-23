@@ -2043,6 +2043,11 @@ expression: "&schema"
           "description": "Enable or disable the response caching feature",
           "type": "boolean"
         },
+        "include_cache_control_header_on_router_response": {
+          "default": true,
+          "description": "Whether to include a Cache-Control header in the supergraph response sent to clients.\nWhen set to false, the router will not set a Cache-Control header on the client response,\nwhile all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.\nDefaults to true for backward compatibility.",
+          "type": "boolean"
+        },
         "invalidation": {
           "anyOf": [
             {

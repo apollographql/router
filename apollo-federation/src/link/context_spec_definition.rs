@@ -11,7 +11,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
-use super::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::internal_error;
@@ -110,36 +109,6 @@ impl ContextSpecDefinition {
                 default_value: None,
             },
             composition_strategy: None,
-        }
-    }
-
-    fn for_federation_schema(schema: &FederationSchema) -> Option<&'static Self> {
-        let link = schema
-            .metadata()?
-            .for_identity(&Identity::context_identity())?;
-        CONTEXT_VERSIONS.find(&link.url.version)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn context_directive_name(schema: &FederationSchema) -> Option<Name> {
-        if let Some(spec) = Self::for_federation_schema(schema) {
-            spec.directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
-        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
-            fed_spec.directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
-        } else {
-            None
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn from_context_directive_name(schema: &FederationSchema) -> Option<Name> {
-        if let Some(spec) = Self::for_federation_schema(schema) {
-            spec.directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
-        } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
-            fed_spec
-                .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
-        } else {
-            None
         }
     }
 }
