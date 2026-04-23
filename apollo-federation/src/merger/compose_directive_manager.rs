@@ -119,7 +119,6 @@ impl std::fmt::Display for MergeDirectiveItem {
 
 type DirectiveImportSpecNamesByAlias<'a> = Cow<'a, IndexMap<Name, Name>>;
 
-#[allow(dead_code)]
 impl ComposeDirectiveManager {
     pub(crate) fn new() -> Self {
         Self {

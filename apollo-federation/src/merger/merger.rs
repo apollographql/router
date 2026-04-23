@@ -173,7 +173,6 @@ pub(crate) struct Merger {
         FallibleOnceCell<HashMap<String, AdditionalDirectiveSources>>,
 }
 
-#[allow(dead_code)]
 impl Merger {
     pub(crate) fn new(
         subgraphs: Vec<Subgraph<Validated>>,
@@ -384,6 +383,7 @@ impl Merger {
     }
 
     /// Get access to the error reporter
+    #[allow(dead_code)]
     pub(crate) fn error_reporter(&self) -> &ErrorReporter {
         &self.error_reporter
     }
@@ -394,6 +394,7 @@ impl Merger {
     }
 
     /// Get access to the subgraph names
+    #[allow(dead_code)]
     pub(crate) fn subgraph_names(&self) -> &[String] {
         &self.names
     }
@@ -409,16 +410,19 @@ impl Merger {
     }
 
     /// Check if there are any errors
+    #[allow(dead_code)]
     pub(crate) fn has_errors(&self) -> bool {
         self.error_reporter.has_errors()
     }
 
     /// Check if there are any hints
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         self.error_reporter.has_hints()
     }
 
     /// Get enum usage for a specific enum type
+    #[allow(dead_code)]
     pub(crate) fn get_enum_usage(&self, enum_name: &str) -> Option<&EnumTypeUsage> {
         self.enum_usages.get(enum_name)
     }
@@ -1122,6 +1126,7 @@ impl Merger {
         // Structure to hold mapped information about each source
         struct MappedValue {
             idx: usize,
+            #[allow(dead_code)]
             name: String,
             is_interface_field: bool,
             is_interface_object: bool,
@@ -1870,6 +1875,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_field_provided_by_an_interface_object(&self, field_name: &Name, itf_name: &Name) -> bool {
         self.subgraphs.iter().any(|subgraph| {
             let obj_pos = ObjectTypeDefinitionPosition {

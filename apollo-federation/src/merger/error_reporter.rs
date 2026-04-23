@@ -61,6 +61,7 @@ impl ErrorReporter {
         self.hints.push(hint);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         !self.hints.is_empty()
     }
