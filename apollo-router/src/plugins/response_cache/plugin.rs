@@ -1510,6 +1510,8 @@ async fn cache_lookup_entities(
     debug: bool,
     cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
+    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
+
     let cache_metadata = extract_cache_keys(
         &name,
         supergraph_schema,
@@ -1525,41 +1527,39 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
             cache_keys
-                .into_iter()
+                .iter()
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
     );
 
-    if cache_control.is_some_and(|c| c.is_no_cache()) {
-        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
-        // just performing the query, so there's no benefit to hitting the cache
-        return Ok(ControlFlow::Continue((
-            request,
-            ResponseCacheResults::default(),
-        )));
-    }
+    // When no-cache is set, skip using any cached values: treat every entity as a cache miss
+    // so that all representations are fetched fresh from the subgraph. We still build the
+    // IntermediateResult list (all with cache_entry = None) so that insert_entities_in_result
+    // can properly assemble the response in the correct order.
+    let cache_result: Vec<Option<CacheEntry>> = if is_no_cache {
+        vec![None; keys_len]
+    } else {
+        match cache.fetch_multiple(&cache_keys, &name).await {
+            Ok(res) => res
+                .into_iter()
+                .map(|v| match v {
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
+                })
+                .collect(),
+            Err(err) => {
+                if !err.is_row_not_found() {
+                    let span = Span::current();
+                    span.mark_as_error(format!("cannot get cache entry: {err}"));
+                }
 
-    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
-        Ok(res) => res
-            .into_iter()
-            .map(|v| match v {
-                Some(v) if v.control.can_use() => Some(v),
-                _ => None,
-            })
-            .collect(),
-        Err(err) => {
-            if !err.is_row_not_found() {
-                let span = Span::current();
-                span.mark_as_error(format!("cannot get cache entry: {err}"));
+                vec![None; keys_len]
             }
-
-            std::iter::repeat_n(None, keys_len).collect()
         }
     };
     let body = request.subgraph_request.body_mut();
@@ -1569,6 +1569,9 @@ async fn cache_lookup_entities(
         .get_mut(REPRESENTATIONS)
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
+    // When no-cache is set, skip recording cache metrics: the cache was not consulted so
+    // registering every entity as a miss would produce misleading telemetry data.
+
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
         &name,
@@ -1577,6 +1580,7 @@ async fn cache_lookup_entities(
         cache_metadata,
         cache_result,
         &request.context,
+        !is_no_cache,
     )?;
 
     if !new_representations.is_empty() {
@@ -2352,6 +2356,7 @@ fn filter_representations(
     keys: Vec<CacheMetadata>,
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
+    record_metrics: bool,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -2424,10 +2429,12 @@ fn filter_representations(
         save_original_cache_control(subgraph_req_id.clone(), context, non_updated_cache_control);
     }
 
-    let _ = context.insert(
-        CacheMetricContextKey::new(subgraph_name.to_string()),
-        CacheSubgraph(cache_hit),
-    );
+    if record_metrics {
+        let _ = context.insert(
+            CacheMetricContextKey::new(subgraph_name.to_string()),
+            CacheSubgraph(cache_hit),
+        );
+    }
 
     Ok((new_representations, result, cache_control))
 }
