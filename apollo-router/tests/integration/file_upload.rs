@@ -1124,7 +1124,6 @@ mod operation_body_timeout {
     use std::time::Duration;
 
     use bytes::Bytes;
-    use futures::StreamExt;
     use futures::stream::once;
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
