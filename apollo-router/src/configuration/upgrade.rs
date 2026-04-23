@@ -56,8 +56,7 @@ enum Action {
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
-const HEADERS_OPS_MIGRATION_DESCRIPTION: &str =
-    "`headers.all.request`, `headers.all.response`, and per-subgraph equivalents \
+const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request`, `headers.all.response`, and per-subgraph equivalents \
      now require an `operations` key wrapping the list of propagation rules. \
      Your configuration has been automatically migrated.";
 
