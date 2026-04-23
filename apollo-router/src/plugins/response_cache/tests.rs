@@ -13,6 +13,7 @@ use tower::Service;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use super::plugin::CacheSubgraph;
 use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
@@ -25,6 +26,7 @@ use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
+use crate::plugins::response_cache::metrics::CacheMetricContextKey;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
@@ -1480,6 +1482,155 @@ async fn no_store_from_request() {
         .await
         .unwrap();
     assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
+}
+
+// Regression test for ROUTER-1689:
+// When `cache-control: no-cache` is sent by the client and response_cache is enabled,
+// entity fields resolved via `_entities` queries must not be discarded.
+// Previously, the no-cache fast-path returned an empty IntermediateResult list,
+// causing insert_entities_in_result to produce `_entities: []` and entity fields to be null.
+#[tokio::test]
+async fn no_cache_from_request() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            }
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ]
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        Default::default(),
+        valid_schema.clone(),
+        false,
+        drop_tx,
+    )
+    .await
+    .unwrap();
+
+    // Phase 1: Warm up the cache with a normal request (no cache-control header)
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
+            "all": {
+                "request": [{
+                    "propagate": {
+                        "named": "cache-control"
+                    }
+                }]
+            }
+        } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+
+    // Sanity-check: normal request returns entity data
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "#);
+
+    // Phase 2: Request with `no-cache` — cache must be bypassed for lookup but entity data
+    // from the subgraph must still be returned correctly (regression for ROUTER-1689).
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
+            "all": {
+                "request": [{
+                    "propagate": {
+                        "named": "cache-control"
+                    }
+                }]
+            }
+        } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let no_cache_context = Context::new();
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(no_cache_context.clone())
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-cache"))
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let response = response.next_response().await.unwrap();
+
+    // Entity fields must NOT be null — this was the regression
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "id": "1",
+            "creatorUser": {
+              "__typename": "User",
+              "id": 2
+            }
+          }
+        }
+      }
+    }
+    "#);
+
+    // Metrics must NOT be recorded for no-cache requests (no misleading cache hit/miss counters)
+    let orga_metric = no_cache_context
+        .get::<_, CacheSubgraph>(CacheMetricContextKey::new("orga".to_string()))
+        .ok()
+        .flatten();
+    assert!(
+        orga_metric.is_none(),
+        "no-cache requests should not record cache hit/miss metrics"
+    );
 }
 
 #[tokio::test]
