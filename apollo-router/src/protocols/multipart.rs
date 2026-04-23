@@ -895,7 +895,9 @@ mod tests {
                 graphql::Response::builder()
                     .error(
                         graphql::Error::builder()
-                            .message("subscription closed because the maximum lifetime has been reached")
+                            .message(
+                                "subscription closed because the maximum lifetime has been reached",
+                            )
                             .extension_code("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")
                             .build(),
                     )

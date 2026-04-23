@@ -1308,7 +1308,10 @@ async fn subscription_max_lifetime_exceeded() {
             .unwrap();
     let mut stream = service.oneshot(request).await.unwrap();
     // First response: subscription established
-    stream.next_response().await.expect("should receive initial response");
+    stream
+        .next_response()
+        .await
+        .expect("should receive initial response");
     // After max_lifetime elapses, the subscription is closed with the expected error
     let timeout_response = tokio::time::timeout(Duration::from_secs(1), stream.next_response())
         .await
