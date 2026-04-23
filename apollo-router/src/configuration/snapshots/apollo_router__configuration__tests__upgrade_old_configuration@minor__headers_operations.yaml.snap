@@ -1,0 +1,31 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+headers:
+  all:
+    request:
+      operations:
+        - propagate:
+            matching: ".*"
+        - propagate:
+            named: x-request-id
+  subgraphs:
+    products:
+      request:
+        operations:
+          - insert:
+              name: x-internal
+              value: "true"
+          - propagate:
+              named: authorization
+    reviews:
+      request:
+        operations:
+          - propagate:
+              named: x-user-id
+      response:
+        operations:
+          - propagate:
+              named: set-cookie

@@ -56,6 +56,10 @@ enum Action {
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
+const HEADERS_OPS_MIGRATION_DESCRIPTION: &str =
+    "`headers.all.request`, `headers.all.response`, and per-subgraph equivalents \
+     now require an `operations` key wrapping the list of propagation rules. \
+     Your configuration has been automatically migrated.";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UpgradeMode {
@@ -105,14 +109,29 @@ pub(crate) fn upgrade_configuration(
         // Get ready for the next migration
         config = new_config;
     }
-    if !effective_migrations.is_empty() && log_warnings {
+
+    // Custom migration: wrap headers operation lists under an `operations` key.
+    // Handled in Rust rather than a proteus YAML action because the source path
+    // is a prefix of the destination path and subgraph names are dynamic.
+    let migrated = migrate_headers_operations(config.clone());
+    let headers_ops_migrated = migrated != config;
+    if headers_ops_migrated {
+        config = migrated;
+    }
+
+    if (!effective_migrations.is_empty() || headers_ops_migrated) && log_warnings {
+        let mut descriptions: Vec<String> = effective_migrations
+            .iter()
+            .enumerate()
+            .map(|(idx, m)| format!("  {}. {}", idx + 1, m.description))
+            .collect();
+        if headers_ops_migrated {
+            let idx = descriptions.len() + 1;
+            descriptions.push(format!("  {idx}. {HEADERS_OPS_MIGRATION_DESCRIPTION}"));
+        }
         tracing::error!(
             "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
-            effective_migrations
-                .iter()
-                .enumerate()
-                .map(|(idx, m)| format!("  {}. {}", idx + 1, m.description))
-                .join("\n\n")
+            descriptions.join("\n\n")
         );
     }
     Ok(config)
@@ -284,6 +303,43 @@ fn cleanup(value: &mut Value) {
                 cleanup(value);
             }
         }
+    }
+}
+
+/// Migrate the headers plugin config from the old flat-list shape to the new wrapped shape.
+///
+/// Old: `headers.all.request: [list of operations]`
+/// New: `headers.all.request.operations: [list of operations]`
+///
+/// The same wrapping applies to `headers.all.response` and all entries under
+/// `headers.subgraphs.*`. Can't be expressed as a proteus YAML action because
+/// the source path is a prefix of the destination path, and subgraph names are
+/// dynamic so they can't be addressed with static dot-notation paths.
+fn migrate_headers_operations(mut config: Value) -> Value {
+    let Some(headers) = config.get_mut("headers") else {
+        return config;
+    };
+
+    if let Some(all) = headers.get_mut("all") {
+        wrap_operations_if_array(all, "request");
+        wrap_operations_if_array(all, "response");
+    }
+
+    if let Some(Value::Object(subgraphs)) = headers.get_mut("subgraphs") {
+        for sg in subgraphs.values_mut() {
+            wrap_operations_if_array(sg, "request");
+            wrap_operations_if_array(sg, "response");
+        }
+    }
+
+    config
+}
+
+/// If `parent[key]` is an array, replace it with `{ "operations": <array> }`.
+fn wrap_operations_if_array(parent: &mut Value, key: &str) {
+    if matches!(parent.get(key), Some(Value::Array(_))) {
+        let arr = parent[key].take();
+        parent[key] = serde_json::json!({ "operations": arr });
     }
 }
 

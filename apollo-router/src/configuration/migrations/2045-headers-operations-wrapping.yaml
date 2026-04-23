@@ -1,0 +1,2 @@
+description: "`headers.all.request`, `headers.all.response`, and per-subgraph equivalents now require an `operations` key wrapping the list of propagation rules. Your configuration has been automatically migrated."
+actions: []
