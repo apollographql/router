@@ -1140,6 +1140,7 @@ mod operation_body_timeout {
 
     const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
     const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
+    const NO_TIMEOUT_CONFIG: &str = include_str!("fixtures/file_upload_no_timeout.router.yaml");
 
     async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
         let mut router = IntegrationTest::builder().config(config).build().await;
@@ -1207,6 +1208,16 @@ mod operation_body_timeout {
             return Ok(());
         }
         let (status, _) = run(GENEROUS_CONFIG, slightly_delayed_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_with_slow_body_when_no_timeout_configured() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(NO_TIMEOUT_CONFIG, slow_body()).await;
         assert_eq!(status, StatusCode::OK);
         Ok(())
     }
