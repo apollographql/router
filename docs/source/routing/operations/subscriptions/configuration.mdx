@@ -386,9 +386,9 @@ The router then sends the following as a final response payload to all active su
 
 A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` or `SUBSCRIPTION_CONFIG_RELOAD` error code can reconnect by executing a new subscription operation.
 
-### Limiting subscription lifetime
+### Limit subscription lifetime
 
-By default, subscriptions can remain open indefinitely. You can set a maximum duration using `max_lifetime`, after which the router closes the subscription and sends a terminal error to the client:
+By default, subscriptions can remain open indefinitely. Set a maximum duration using `max_lifetime` to have the router close the subscription and send a terminal error to the client after the configured duration:
 
 ```yaml title="router.yaml"
 subscription:
@@ -415,7 +415,7 @@ When the lifetime expires, the client receives a final response payload:
 
 A client that receives the `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED` error code can reconnect by executing a new subscription operation.
 
-This is useful for enforcing resource limits, rotating authentication tokens, or preventing stale long-lived connections.
+Use `max_lifetime` to enforce resource limits, rotate authentication tokens, or prevent stale long-lived connections.
 
 ### WebSocket auth support
 
@@ -502,7 +502,7 @@ The `apollo.subscription.end_reason` attribute can have these values:
 | `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
 | `schema_reload` | The subscription was terminated because Apollo Router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
 | `config_reload` | The subscription was terminated because Apollo Router's configuration was updated. Clients can reconnect to resume the subscription. |
-| `max_lifetime` | The subscription was terminated because the configured [`max_lifetime`](#limiting-subscription-lifetime) duration was reached. Clients can reconnect to resume the subscription. |
+| `max_lifetime` | The subscription was terminated because the configured [max lifetime](#limit-subscription-lifetime) was reached. Clients can reconnect to resume the subscription. |
 
 ### Tracking subgraph connection failures and closures
 
