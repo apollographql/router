@@ -3,4 +3,5 @@ health_check:
 homepage:
   enabled: false
 limits:
-  parser_max_recursion: 1000
+  router:
+    parser_max_recursion: 1000

@@ -1039,7 +1039,7 @@ impl FederationSchema {
     pub(crate) fn list_size_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ListSizeDirective<'_>> {
-        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)
         else {
             return Ok(Vec::new());
         };
@@ -1056,18 +1056,15 @@ impl FederationSchema {
                 self,
                 field_definition,
             ) {
-                Ok(Some(list_size_directive)) => {
+                Some(list_size_directive) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
                         parent_type: field_definition_position.type_name().clone(),
                         target: field_definition,
                     }));
                 }
-                Ok(None) => {
+                None => {
                     // No listSize directive found, continue
-                }
-                Err(error) => {
-                    applications.push(Err(error));
                 }
             }
         }

@@ -127,6 +127,9 @@ The router includes default limits for file uploads to prevent denial-of-service
 You can configure both the maximum file size and number of files to accept.
 If a request exceeds a limit, the router rejects the request.
 
+The `limits.http_max_request_bytes` setting applies to the GraphQL operations field (the query and variables) of the multipart request, not to the uploaded file data itself.
+Limit file data using `protocols.multipart.limits.max_file_size`.
+
 #### Configuration reference
 
 The following are attributes of the root [`preview_file_uploads`](#configure-file-upload-support-in-the-router) configuration.

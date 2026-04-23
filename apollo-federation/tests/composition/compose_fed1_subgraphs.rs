@@ -102,7 +102,7 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           name: String!
         }
@@ -119,7 +119,7 @@ mod basic_type_extensions {
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
         assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           price: Int!
         }
@@ -177,7 +177,7 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           price: Int!
         }
@@ -187,7 +187,7 @@ mod basic_type_extensions {
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
         assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           name: String!
         }
@@ -263,7 +263,7 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           price: Int!
         }
@@ -289,7 +289,7 @@ mod basic_type_extensions {
             .get("subgraphC")
             .expect("Expected subgraphC to be present");
         assert_snapshot!(get_type(subgraph_c_extracted, "Product"), @r#"
-        type Product @key(fields: "sku", resolvable: true) {
+        type Product @key(fields: "sku") {
           sku: String! @shareable
           color: String!
         }

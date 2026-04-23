@@ -115,6 +115,7 @@ pub(crate) struct ResponseCache {
     entity_type: Option<String>,
     enabled: bool,
     debug: bool,
+    include_cache_control_header_on_router_response: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -197,6 +198,13 @@ pub(crate) struct Config {
     /// Enable debug mode for the debugger
     debug: bool,
 
+    /// Whether to include a Cache-Control header in the supergraph response sent to clients.
+    /// When set to false, the router will not set a Cache-Control header on the client response,
+    /// while all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.
+    /// Defaults to true for backward compatibility.
+    #[serde(default = "default_include_cache_control_header_on_router_response")]
+    include_cache_control_header_on_router_response: bool,
+
     /// Configure invalidation per subgraph
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
@@ -210,6 +218,10 @@ pub(crate) struct Config {
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {
     DEFAULT_LRU_PRIVATE_QUERIES_SIZE
+}
+
+const fn default_include_cache_control_header_on_router_response() -> bool {
+    true
 }
 
 /// Per subgraph configuration for response caching
@@ -362,6 +374,9 @@ impl PluginPrivate for ResponseCache {
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
+            include_cache_control_header_on_router_response: init
+                .config
+                .include_cache_control_header_on_router_response,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -381,12 +396,15 @@ impl PluginPrivate for ResponseCache {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
+        let include_cache_control_header_on_router_response =
+            self.include_cache_control_header_on_router_response;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if let Some(mut cache_control) = response
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<CacheControl>().cloned())
+                if include_cache_control_header_on_router_response
+                    && let Some(mut cache_control) = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
                     // If the response contains GraphQL errors, force Cache-Control: no-store to prevent
                     // intermediate caches (CDNs, reverse proxies) from caching partial or error responses.
@@ -555,6 +573,7 @@ impl ResponseCache {
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -576,6 +595,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
+            include_cache_control_header_on_router_response,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -620,6 +640,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
+            include_cache_control_header_on_router_response: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -2728,6 +2749,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
@@ -2783,6 +2805,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap()
@@ -3190,6 +3213,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
@@ -4121,5 +4145,36 @@ mod tests {
             result.is_ok(),
             "should handle concrete type (isInterfaceObject: false)"
         );
+    }
+
+    #[test]
+    fn config_include_cache_control_header_on_router_response_defaults_to_true() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "24h"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.include_cache_control_header_on_router_response);
+    }
+
+    #[test]
+    fn config_include_cache_control_header_on_router_response_false() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "include_cache_control_header_on_router_response": false,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "24h"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!config.include_cache_control_header_on_router_response);
     }
 }

@@ -470,7 +470,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph(true, false)?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };
@@ -488,7 +488,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph(true, false)?
+            subgraph.into_fed2_test_subgraph(true)?
         } else {
             subgraph
         };

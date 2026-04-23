@@ -100,7 +100,7 @@ pub(crate) mod test_helpers {
 
         let mut fed2_subgraphs = Vec::new();
         for subgraph in subgraphs {
-            match subgraph.into_fed2_test_subgraph(true, false) {
+            match subgraph.into_fed2_test_subgraph(true) {
                 Ok(subgraph) => fed2_subgraphs.push(subgraph),
                 Err(err) => errors.extend(err.to_composition_errors()),
             }

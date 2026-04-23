@@ -32,7 +32,7 @@ impl Merger {
                 continue;
             }
 
-            let Some(key_directive_name) = subgraph.key_directive_name()? else {
+            let Some(key_directive_name) = subgraph.key_directive_name() else {
                 continue;
             };
             let interface_pos: TypeDefinitionPosition = dest.clone().into();

@@ -218,6 +218,7 @@ async fn insert() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -391,6 +392,7 @@ async fn insert_with_custom_key() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -577,6 +579,7 @@ async fn already_expired_cache_control() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -745,6 +748,7 @@ async fn insert_without_debug_header() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -905,6 +909,7 @@ async fn insert_with_requires() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -1070,6 +1075,7 @@ async fn insert_with_nested_field_set() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -1219,6 +1225,7 @@ async fn no_cache_control() {
         valid_schema.clone(),
         false,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -1346,6 +1353,7 @@ async fn no_store_from_request() {
         valid_schema.clone(),
         false,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -1546,7 +1554,7 @@ async fn private_only() {
         let subgraphs_conf = create_subgraph_conf(map);
 
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -1754,6 +1762,7 @@ async fn private_and_public() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -1964,7 +1973,7 @@ async fn polymorphic_private_and_public() {
             .collect();
         let subgraphs_conf = create_subgraph_conf(map);
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -2351,7 +2360,7 @@ async fn private_without_private_id() {
 
         let subgraphs_conf = create_subgraph_conf(map);
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -2530,6 +2539,7 @@ async fn no_data() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -2779,6 +2789,7 @@ async fn missing_entities() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -2818,6 +2829,7 @@ async fn missing_entities() {
         valid_schema.clone(),
         false,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -2948,7 +2960,7 @@ async fn invalidate_by_cache_tag() {
             .collect();
         let subgraphs_conf = create_subgraph_conf(map);
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -3164,7 +3176,7 @@ async fn complex_cache_tag() {
             .collect();
         let subgraphs_conf = create_subgraph_conf(map);
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -3275,7 +3287,7 @@ async fn invalidate_by_type() {
             .collect();
         let subgraphs_conf = create_subgraph_conf(map);
         let response_cache =
-            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx)
+            ResponseCache::for_test(storage.clone(), subgraphs_conf, valid_schema.clone(), true, drop_tx, true)
                 .await
                 .unwrap();
 
@@ -3890,6 +3902,7 @@ async fn no_store_on_subgraph_timeout() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -4001,6 +4014,7 @@ async fn no_store_on_partial_subgraph_failure() {
         valid_schema.clone(),
         true,
         drop_tx,
+        true,
     )
     .await
     .unwrap();
@@ -4050,4 +4064,186 @@ async fn no_store_on_partial_subgraph_failure() {
         !body.errors.is_empty(),
         "expected errors in response body due to failing subgraph"
     );
+}
+
+/// Shared setup for include_cache_control_header_on_router_response integration tests.
+/// Returns (storage, response_cache, subgraph_mock_config).
+async fn setup_send_cache_control_test(
+    include_cache_control_header_on_router_response: bool,
+) -> (Storage, ResponseCache, serde_json::Value) {
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(
+        [
+            (
+                "user".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+            (
+                "orga".to_string(),
+                Subgraph {
+                    redis: None,
+                    private_id: Some("sub".to_string()),
+                    enabled: true.into(),
+                    ttl: None,
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema,
+        true,
+        drop_tx,
+        include_cache_control_header_on_router_response,
+    )
+    .await
+    .unwrap();
+
+    (storage, response_cache, subgraphs)
+}
+
+#[tokio::test]
+async fn include_cache_control_header_on_router_response_false_suppresses_headers() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let (storage, response_cache, subgraphs) = setup_send_cache_control_test(false).await;
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Cache-Control header should NOT be present
+    assert!(
+        get_cache_control_header(&response).is_none(),
+        "Cache-Control header should be suppressed when include_cache_control_header_on_router_response is false"
+    );
+
+    // But data should still be cached (internal caching still works)
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+
+    // Second request — verify cache hit and still no Cache-Control header
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Still no Cache-Control header on cache hit
+    assert!(
+        get_cache_control_header(&response).is_none(),
+        "Cache-Control header should remain suppressed on cache hit"
+    );
+
+    // Verify we got a cache hit
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|ck| matches!(ck.source, super::debugger::CacheKeySource::Cache)),
+        "second request should produce a cache hit"
+    );
+}
+
+#[tokio::test]
+async fn include_cache_control_header_on_router_response_true_sends_headers() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let (_storage, response_cache, subgraphs) = setup_send_cache_control_test(true).await;
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    // Cache-Control header SHOULD be present (regression test for default behavior)
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 }

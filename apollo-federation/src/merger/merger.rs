@@ -173,7 +173,6 @@ pub(crate) struct Merger {
         FallibleOnceCell<HashMap<String, AdditionalDirectiveSources>>,
 }
 
-#[allow(dead_code)]
 impl Merger {
     pub(crate) fn new(
         subgraphs: Vec<Subgraph<Validated>>,
@@ -307,7 +306,7 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                if let Some(directive_name) = subgraph.from_context_directive_name() {
                     let referencers = subgraph
                         .schema()
                         .referencers()
@@ -326,7 +325,7 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                if let Some(directive_name) = subgraph.override_directive_name() {
                     let referencers = subgraph
                         .schema()
                         .referencers()
@@ -384,6 +383,7 @@ impl Merger {
     }
 
     /// Get access to the error reporter
+    #[allow(dead_code)]
     pub(crate) fn error_reporter(&self) -> &ErrorReporter {
         &self.error_reporter
     }
@@ -394,6 +394,7 @@ impl Merger {
     }
 
     /// Get access to the subgraph names
+    #[allow(dead_code)]
     pub(crate) fn subgraph_names(&self) -> &[String] {
         &self.names
     }
@@ -409,16 +410,19 @@ impl Merger {
     }
 
     /// Check if there are any errors
+    #[allow(dead_code)]
     pub(crate) fn has_errors(&self) -> bool {
         self.error_reporter.has_errors()
     }
 
     /// Check if there are any hints
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         self.error_reporter.has_hints()
     }
 
     /// Get enum usage for a specific enum type
+    #[allow(dead_code)]
     pub(crate) fn get_enum_usage(&self, enum_name: &str) -> Option<&EnumTypeUsage> {
         self.enum_usages.get(enum_name)
     }
@@ -1122,6 +1126,7 @@ impl Merger {
         // Structure to hold mapped information about each source
         struct MappedValue {
             idx: usize,
+            #[allow(dead_code)]
             name: String,
             is_interface_field: bool,
             is_interface_object: bool,
@@ -1406,7 +1411,7 @@ impl Merger {
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Option<Component<Directive>>, FederationError> {
         let subgraph = &self.subgraphs[source_idx];
-        let Some(override_directive_name) = subgraph.override_directive_name()? else {
+        let Some(override_directive_name) = subgraph.override_directive_name() else {
             return Ok(None);
         };
 
@@ -1463,7 +1468,7 @@ impl Merger {
         let from_subgraph_name = &self.names[from_idx];
 
         // Check for conflict with @requires
-        if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
+        if let Some(requires_name) = from_subgraph.requires_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &requires_name)
         {
             return Ok(Some((
@@ -1473,7 +1478,7 @@ impl Merger {
         }
 
         // Check for conflict with @provides
-        if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
+        if let Some(provides_name) = from_subgraph.provides_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &provides_name)
         {
             return Ok(Some((
@@ -1485,7 +1490,7 @@ impl Merger {
         // Check for conflict with @external
         let overriding_subgraph_name = &self.names[overriding_idx];
         let field_pos: FieldDefinitionPosition = field.clone().into();
-        if let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+        if let Some(external_name) = from_subgraph.external_directive_name()
             && self.is_field_external(overriding_idx, &field_pos)
         {
             return Ok(Some((
@@ -1623,7 +1628,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let Some(key_directive_name) = subgraph.key_directive_name()? else {
+            let Some(key_directive_name) = subgraph.key_directive_name() else {
                 continue;
             };
             if let Some(node) = obj.try_get(subgraph.schema().schema()) {
@@ -1870,6 +1875,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_field_provided_by_an_interface_object(&self, field_name: &Name, itf_name: &Name) -> bool {
         self.subgraphs.iter().any(|subgraph| {
             let obj_pos = ObjectTypeDefinitionPosition {
@@ -2386,7 +2392,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let Some(link_directive_name) = self
             .link_spec_definition
-            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)?
+            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)
         else {
             bail!(
                 "Link directive must exist in the supergraph schema in order to apply join directives"
@@ -2458,7 +2464,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         if self
             .join_spec_definition
             .directive_name_in_schema(&self.merged, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)
-            .is_err()
+            .is_none()
         {
             // If we got here and have no definition for `@join__directive`, then we're probably
             // operating on a schema that uses join v0.3 or earlier. We don't want to break those
@@ -2523,7 +2529,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     pub(crate) fn remove_redundant_join_fields(&mut self) -> Result<(), FederationError> {
         let Some(join_field_directive_name) = self
             .join_spec_definition
-            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)
         else {
             return Ok(());
         };

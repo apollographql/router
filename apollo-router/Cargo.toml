@@ -141,7 +141,7 @@ jsonschema = { version = "0.46.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
-lru = "0.16.0"
+lru = "0.17.0"
 mediatype = "0.21.0"
 mockall = "0.14.0"
 mime = "0.3.17"
@@ -263,7 +263,7 @@ tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.25.0"
+hickory-resolver = "0.26.0"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }

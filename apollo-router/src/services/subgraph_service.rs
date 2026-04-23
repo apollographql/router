@@ -17,6 +17,7 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::response::Parts;
 use http_body::Body;
+use http_body_util::LengthLimitError;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::MediaType;
@@ -59,6 +60,7 @@ use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
+use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -419,7 +421,8 @@ pub(crate) async fn process_batch(
         "http.url" = %schema_uri,
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %&service,
-        "graphql.operation.name" = "batch"
+        "graphql.operation.name" = "batch",
+        "apollo.subgraph.response.aborted" = tracing::field::Empty,
     );
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
@@ -850,6 +853,7 @@ pub(crate) async fn call_single_http(
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %service_name,
         "graphql.operation.name" = %operation_name,
+        "apollo.subgraph.response.aborted" = tracing::field::Empty,
     );
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
@@ -1084,19 +1088,53 @@ async fn do_fetch(
 
     let content_type = get_graphql_content_type(service_name, &parts);
 
+    let response_size_limit = context
+        .extensions()
+        .with_lock(|e| e.get::<SubgraphResponseSizeLimit>().copied());
+
     let body = if content_type.is_ok() {
-        let body = router::body::into_bytes(body)
-            .instrument(tracing::debug_span!("aggregate_response_data"))
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = ?err);
-                FetchError::SubrequestHttpError {
-                    status_code: Some(parts.status.as_u16()),
-                    service: service_name.to_string(),
-                    reason: err.to_string(),
-                }
-            });
-        Some(body)
+        let body_result = match response_size_limit {
+            Some(SubgraphResponseSizeLimit(limit)) => {
+                router::body::into_bytes_limited(body, limit)
+                    .instrument(tracing::debug_span!("aggregate_response_data"))
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(fetch_error = ?err);
+                        let reason = if err.downcast_ref::<LengthLimitError>().is_some() {
+                            u64_counter!(
+                                "apollo.router.limits.subgraph_response_size.exceeded",
+                                "Number of subgraph responses aborted because they exceeded the configured response size limit",
+                                1,
+                                subgraph.name = service_name.to_string()
+                            );
+                            tracing::Span::current()
+                                .record("apollo.subgraph.response.aborted", "response_size_limit");
+                            format!("subgraph response body exceeded limit of {limit} bytes")
+                        } else {
+                            err.to_string()
+                        };
+                        FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
+                            service: service_name.to_string(),
+                            reason,
+                        }
+                    })
+            }
+            None => {
+                router::body::into_bytes(body)
+                    .instrument(tracing::debug_span!("aggregate_response_data"))
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(fetch_error = ?err);
+                        FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
+                            service: service_name.to_string(),
+                            reason: err.to_string(),
+                        }
+                    })
+            }
+        };
+        Some(body_result)
     } else {
         None
     };
@@ -1383,6 +1421,21 @@ mod tests {
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
+                .unwrap())
+        }
+
+        serve(listener, handle).await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning a large JSON response
+    async fn emulate_subgraph_large_response(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            // 100 bytes of JSON — enough to exceed a small limit in tests
+            let body = format!(r#"{{"data":{{"field":"{}"}}}}"#, "x".repeat(80));
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .body(body.into())
                 .unwrap())
         }
 
@@ -2175,6 +2228,96 @@ mod tests {
         assert_eq!(
             response.response.body().errors[0].message,
             "service 'test' response was malformed: expected value at line 1 column 1"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_response_size_limit_exceeded() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_large_response(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                crate::configuration::shared::Client::default(),
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(10)));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(context)
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        let errors = &response.response.body().errors;
+        assert!(!errors.is_empty(), "expected an error for exceeded limit");
+        assert!(
+            errors[0].message.contains("exceeded limit of 10 bytes"),
+            "unexpected error message: {}",
+            errors[0].message
+        );
+        assert_eq!(
+            errors[0].extensions.get("code").and_then(|v| v.as_str()),
+            Some("SUBREQUEST_HTTP_ERROR")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_response_size_limit_under() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_application_json_response(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                crate::configuration::shared::Client::default(),
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let context = Context::new();
+        // Limit of 1000 bytes — well above {"data": null} (14 bytes)
+        context
+            .extensions()
+            .with_lock(|e| e.insert(SubgraphResponseSizeLimit(1000)));
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(context)
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            response.response.body().errors.is_empty(),
+            "expected no errors when response is under the limit"
         );
     }
 
