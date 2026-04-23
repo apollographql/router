@@ -7,6 +7,6 @@ preview_file_uploads:
       limits:
         max_file_size: 512kb
         max_files: 5
-        operation_body_timeout: 10s
+        operation_body_timeout: 15s
 include_subgraph_errors:
   all: true

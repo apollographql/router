@@ -13,4 +13,4 @@ include_subgraph_errors:
 
 traffic_shaping:
   router:
-    timeout: 10s
+    timeout: 15s

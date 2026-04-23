@@ -1129,10 +1129,7 @@ mod operation_body_timeout {
     use http::StatusCode;
     use http::header::CONTENT_TYPE;
     use serde_json::Value;
-    use tokio::time::Instant;
-    use tokio::time::interval_at;
     use tokio::time::sleep;
-    use tokio_stream::wrappers::IntervalStream;
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
@@ -1181,14 +1178,13 @@ mod operation_body_timeout {
     }
 
     fn slow_body() -> reqwest::Body {
-        // Body starts sending after 5s — longer than the 1s operation_body_timeout in
-        // STRICT_CONFIG but shorter than both the 10s operation_body_timeout in GENEROUS_CONFIG
-        // and the 10s global router timeout, proving it is the operation_body_timeout that fires.
-        let stream = IntervalStream::new(interval_at(
-            Instant::now() + Duration::from_secs(5),
-            Duration::from_secs(5),
-        ))
-        .map(|_| Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\n")));
+        // Body arrives after 5s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than both the 10s operation_body_timeout in GENEROUS_CONFIG and the 15s
+        // global router timeout, proving it is the operation_body_timeout that fires.
+        let stream = once(async {
+            sleep(Duration::from_secs(5)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
         reqwest::Body::wrap_stream(stream)
     }
 
