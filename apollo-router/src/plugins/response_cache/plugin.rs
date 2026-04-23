@@ -1489,6 +1489,8 @@ async fn cache_lookup_entities(
     debug: bool,
     cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
+    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
+
     let cache_metadata = extract_cache_keys(
         &name,
         supergraph_schema,
@@ -1518,8 +1520,8 @@ async fn cache_lookup_entities(
     // so that all representations are fetched fresh from the subgraph. We still build the
     // IntermediateResult list (all with cache_entry = None) so that insert_entities_in_result
     // can properly assemble the response in the correct order.
-    let cache_result: Vec<Option<CacheEntry>> = if cache_control.is_some_and(|c| c.is_no_cache()) {
-        std::iter::repeat_n(None, keys_len).collect()
+    let cache_result: Vec<Option<CacheEntry>> = if is_no_cache {
+        vec![None; keys_len]
     } else {
         match cache.fetch_multiple(&cache_keys, &name).await {
             Ok(res) => res
@@ -1535,7 +1537,7 @@ async fn cache_lookup_entities(
                     span.mark_as_error(format!("cannot get cache entry: {err}"));
                 }
 
-                std::iter::repeat_n(None, keys_len).collect()
+                vec![None; keys_len]
             }
         }
     };
@@ -1548,7 +1550,6 @@ async fn cache_lookup_entities(
         .expect("we already checked that representations exist");
     // When no-cache is set, skip recording cache metrics: the cache was not consulted so
     // registering every entity as a miss would produce misleading telemetry data.
-    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
 
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
