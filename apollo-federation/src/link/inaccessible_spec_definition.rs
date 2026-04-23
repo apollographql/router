@@ -914,7 +914,7 @@ fn validate_inaccessible(
     inaccessible_spec: &InaccessibleSpecDefinition,
 ) -> Result<(), FederationError> {
     let inaccessible_directive = inaccessible_spec
-        .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
         .ok_or_else(|| SingleFederationError::Internal {
             message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
         })?;
@@ -1138,7 +1138,7 @@ fn remove_inaccessible_elements(
     inaccessible_spec: &InaccessibleSpecDefinition,
 ) -> Result<(), FederationError> {
     let directive_name = inaccessible_spec
-        .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC)
         .ok_or_else(|| SingleFederationError::Internal {
             message: "Unexpectedly could not find inaccessible spec in schema".to_owned(),
         })?;

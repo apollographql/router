@@ -307,7 +307,7 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.from_context_directive_name() {
+                if let Some(directive_name) = subgraph.from_context_directive_name() {
                     let referencers = subgraph
                         .schema()
                         .referencers()
@@ -326,7 +326,7 @@ impl Merger {
         subgraphs
             .iter()
             .fold(Default::default(), |mut acc, subgraph| {
-                if let Ok(Some(directive_name)) = subgraph.override_directive_name() {
+                if let Some(directive_name) = subgraph.override_directive_name() {
                     let referencers = subgraph
                         .schema()
                         .referencers()
@@ -1406,7 +1406,7 @@ impl Merger {
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Option<Component<Directive>>, FederationError> {
         let subgraph = &self.subgraphs[source_idx];
-        let Some(override_directive_name) = subgraph.override_directive_name()? else {
+        let Some(override_directive_name) = subgraph.override_directive_name() else {
             return Ok(None);
         };
 
@@ -1463,7 +1463,7 @@ impl Merger {
         let from_subgraph_name = &self.names[from_idx];
 
         // Check for conflict with @requires
-        if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
+        if let Some(requires_name) = from_subgraph.requires_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &requires_name)
         {
             return Ok(Some((
@@ -1473,7 +1473,7 @@ impl Merger {
         }
 
         // Check for conflict with @provides
-        if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
+        if let Some(provides_name) = from_subgraph.provides_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &provides_name)
         {
             return Ok(Some((
@@ -1485,7 +1485,7 @@ impl Merger {
         // Check for conflict with @external
         let overriding_subgraph_name = &self.names[overriding_idx];
         let field_pos: FieldDefinitionPosition = field.clone().into();
-        if let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+        if let Some(external_name) = from_subgraph.external_directive_name()
             && self.is_field_external(overriding_idx, &field_pos)
         {
             return Ok(Some((
@@ -1623,7 +1623,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let mut sources: Sources<_> = Default::default();
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let Some(key_directive_name) = subgraph.key_directive_name()? else {
+            let Some(key_directive_name) = subgraph.key_directive_name() else {
                 continue;
             };
             if let Some(node) = obj.try_get(subgraph.schema().schema()) {
@@ -2386,7 +2386,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let Some(link_directive_name) = self
             .link_spec_definition
-            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)?
+            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)
         else {
             bail!(
                 "Link directive must exist in the supergraph schema in order to apply join directives"
@@ -2458,7 +2458,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         if self
             .join_spec_definition
             .directive_name_in_schema(&self.merged, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)
-            .is_err()
+            .is_none()
         {
             // If we got here and have no definition for `@join__directive`, then we're probably
             // operating on a schema that uses join v0.3 or earlier. We don't want to break those
@@ -2523,7 +2523,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     pub(crate) fn remove_redundant_join_fields(&mut self) -> Result<(), FederationError> {
         let Some(join_field_directive_name) = self
             .join_spec_definition
-            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(&self.merged, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)
         else {
             return Ok(());
         };

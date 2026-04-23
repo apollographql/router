@@ -48,7 +48,7 @@ impl IntrospectionCache {
             storage.activate();
             Self(Mode::Enabled {
                 storage,
-                max_depth: if configuration.limits.introspection_max_depth {
+                max_depth: if configuration.limits.router.introspection_max_depth {
                     MaxDepth::Check
                 } else {
                     MaxDepth::Ignore

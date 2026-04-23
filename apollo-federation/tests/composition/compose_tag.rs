@@ -204,7 +204,7 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
         "#,
     )
     .unwrap()
-    .into_fed2_test_subgraph(true, false)
+    .into_fed2_test_subgraph(true)
     .unwrap();
 
     let supergraph =
@@ -330,7 +330,7 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
           lastName: String @tag(name: "aMergedTagOnField")
         }
         "#,
-    ).unwrap().into_fed2_test_subgraph(true, false).unwrap();
+    ).unwrap().into_fed2_test_subgraph(true).unwrap();
 
     let supergraph =
         compose(vec![subgraph_a, subgraph_b]).expect("Expected composition to succeed");
@@ -452,7 +452,7 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
         "#,
     )
     .unwrap()
-    .into_fed2_test_subgraph(true, false)
+    .into_fed2_test_subgraph(true)
     .unwrap();
 
     let result = compose(vec![subgraph_a, subgraph_b]);
