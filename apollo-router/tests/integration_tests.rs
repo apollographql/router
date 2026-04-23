@@ -1396,8 +1396,8 @@ impl Plugin for CountingServiceRegistry {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let name = subgraph_name.to_owned();
         let counters = self.clone();
         service
@@ -1405,7 +1405,7 @@ impl Plugin for CountingServiceRegistry {
                 counters.increment(&name);
                 request
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 

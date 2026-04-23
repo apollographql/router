@@ -618,7 +618,7 @@ mod tests {
                     .unwrap(),
             )
         })
-        .boxed();
+        .boxed_clone();
 
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
@@ -659,7 +659,7 @@ mod tests {
                 .context(req.context)
                 .build()
         })
-        .boxed();
+        .boxed_clone();
 
         let mut mm = MultiMap::new();
         mm.insert(

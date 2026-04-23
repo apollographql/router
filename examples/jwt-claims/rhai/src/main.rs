@@ -102,7 +102,7 @@ mod tests {
         apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .supergraph_hook(move |_| mock_service.clone().boxed())
+            .supergraph_hook(move |_| mock_service.clone().boxed_clone())
             .build_router()
             .await
             .unwrap()

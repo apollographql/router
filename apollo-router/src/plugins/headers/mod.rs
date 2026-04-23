@@ -263,7 +263,11 @@ impl PluginPrivate for Headers {
         })
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.subgraph_operations
@@ -272,14 +276,14 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.connector_source_operations
@@ -288,7 +292,7 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -312,6 +316,7 @@ impl<S> Layer<S> for HeadersLayer {
         }
     }
 }
+#[derive(Clone)]
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
@@ -623,6 +628,7 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;

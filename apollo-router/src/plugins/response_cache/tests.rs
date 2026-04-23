@@ -2627,7 +2627,7 @@ async fn no_data() {
                     .expect_call()
                     .times(1)
                     .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed()
+                subgraph.boxed_clone()
             } else {
                 service
             }
@@ -3918,7 +3918,7 @@ async fn no_store_on_subgraph_timeout() {
                     // Unreachable in practice — the traffic shaping timeout fires first.
                     Err::<subgraph::Response, tower::BoxError>("orga sleep exceeded".into())
                 })
-                .boxed()
+                .boxed_clone()
             } else {
                 service
             }

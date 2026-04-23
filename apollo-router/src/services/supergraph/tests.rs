@@ -3216,7 +3216,7 @@ async fn id_scalar_can_overflow_i32() {
                 let id = &request.subgraph_request.body().variables["id"];
                 Err(format!("$id = {id}").into())
             })
-            .boxed()
+            .boxed_clone()
         })
         .build_supergraph()
         .await

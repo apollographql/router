@@ -225,7 +225,7 @@ impl PluginPrivate for HealthCheck {
 
     // Track rejected requests due to traffic shaping.
     // We always do this; even if the health check is disabled.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let my_rejected = self.rejected.clone();
 
         ServiceBuilder::new()
@@ -238,7 +238,7 @@ impl PluginPrivate for HealthCheck {
                 res
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     // Support the health-check endpoint for the router, incorporating both live and ready.
@@ -300,7 +300,7 @@ impl PluginPrivate for HealthCheck {
                             .build()
                     }
                 })
-                .boxed(),
+                .boxed_clone(),
             );
 
             map.insert(self.config.listen.clone(), endpoint);
@@ -344,7 +344,7 @@ mod test {
         response_status_code: StatusCode,
     ) -> (
         Option<Endpoint>,
-        Option<ServiceHandle<router::Request, router::BoxService>>,
+        Option<ServiceHandle<router::Request, router::BoxCloneService>>,
         PluginTestHarness<HealthCheck>,
     ) {
         let test_harness: PluginTestHarness<HealthCheck> = PluginTestHarness::builder()
