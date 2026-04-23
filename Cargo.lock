@@ -5827,7 +5827,7 @@ dependencies = [
  "http 1.4.0",
  "libfuzzer-sys",
  "log",
- "rand 0.8.6",
+ "rand 0.9.3",
  "reqwest",
  "schemars",
  "serde",
