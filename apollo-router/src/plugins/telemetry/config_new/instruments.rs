@@ -1430,6 +1430,7 @@ pub(crate) enum InstrumentValue<T> {
     Chunked(Event<T>),
     Field(Field<T>),
     Custom(T),
+    Stream(Lifecycle),
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
@@ -1470,6 +1471,20 @@ pub(crate) enum Field<T> {
     Custom(T),
 }
 
+/// Lifecycle-anchored instrument values: emit once per request at a specific point in
+/// the response-stream lifecycle (currently only stream end). Sibling to `Standard`
+/// (request-level) and `Event` (per-chunk) value-shapes; future variants would cover
+/// other stream-anchored emissions (e.g. first-byte, item-count).
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Lifecycle {
+    /// Duration of the full response-stream lifecycle — wall-clock elapsed from the moment
+    /// the supergraph response is ready until the stream closes. Captures the `@defer`
+    /// or subscription tail that `http.server.request.duration` misses. Recorded once per
+    /// request, on normal stream completion.
+    StreamDuration,
+}
+
 pub(crate) trait Instrumented {
     type Request;
     type Response;
@@ -1486,6 +1501,10 @@ pub(crate) trait Instrumented {
         _ctx: &Context,
     ) {
     }
+    /// Called once when a streamed response fully drains (e.g. the last `@defer` chunk
+    /// emits). Default no-op; instruments whose value is `stream_duration` use this to
+    /// record the elapsed lifecycle.
+    fn on_stream_end(&self, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -1522,6 +1541,10 @@ where
         ctx: &Context,
     ) {
         self.attributes.on_response_field(ty, field, value, ctx);
+    }
+
+    fn on_stream_end(&self, ctx: &Context) {
+        self.attributes.on_stream_end(ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -1602,6 +1625,12 @@ where
                                 (Some(Arc::new(selector)), Increment::FieldCustom(None))
                             }
                         },
+                        InstrumentValue::Stream(_) => {
+                            failfast_error!(
+                                "stream_duration is only supported on histograms; skipping counter instrument {instrument_name:?}"
+                            );
+                            continue;
+                        }
                     };
                     match static_instruments
                         .get(instrument_name)
@@ -1662,6 +1691,12 @@ where
                             Field::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::FieldCustom(None))
                             }
+                        },
+                        InstrumentValue::Stream(incr) => match incr {
+                            Lifecycle::StreamDuration => (
+                                None,
+                                Increment::StreamDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                         },
                     };
 
@@ -1767,6 +1802,15 @@ where
             histogram.on_response_field(ty, field, value, ctx);
         }
     }
+
+    fn on_stream_end(&self, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_stream_end(ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_stream_end(ctx);
+        }
+    }
 }
 
 pub(crate) struct SupergraphInstruments {
@@ -1798,6 +1842,11 @@ impl Instrumented for SupergraphInstruments {
         self.cost.on_response_event(response, ctx);
         self.custom.on_response_event(response, ctx);
     }
+
+    fn on_stream_end(&self, ctx: &Context) {
+        self.cost.on_stream_end(ctx);
+        self.custom.on_stream_end(ctx);
+    }
 }
 
 // ---------------- Counter -----------------------
@@ -1808,6 +1857,9 @@ pub(crate) enum Increment {
     FieldUnit,
     Duration(Instant, String),
     EventDuration(Instant, String),
+    // Timer started at instrument creation, recorded once when the response stream closes.
+    // Only valid for histograms.
+    StreamDuration(Instant, String),
     Custom(Option<opentelemetry::Value>),
     EventCustom(Option<opentelemetry::Value>),
     FieldCustom(Option<opentelemetry::Value>),
@@ -1937,6 +1989,10 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
+            // Stream-lifecycle instruments are intentionally NOT in this keep-list:
+            // their condition is evaluated against the response (not per chunk), so a
+            // failed response-level condition should drop the instrument now and
+            // prevent any later on_stream_end emission.
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
@@ -1982,9 +2038,10 @@ where
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
+            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
-                // Nothing to do because we're incrementing on events or fields
+                // Nothing to do because we're incrementing on events, fields, or stream end
                 return;
             }
         } {
@@ -2067,6 +2124,11 @@ where
             Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
                 duration_to_value(instant.elapsed(), unit)
             }
+            Increment::StreamDuration(_, _) => {
+                // Stream-lifecycle instruments do not emit on error — an errored request
+                // never reached normal stream completion, so no lifecycle duration is defined.
+                return;
+            }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 val.as_ref()
                     .cloned()
@@ -2079,6 +2141,10 @@ where
         {
             counter.add(value, &attrs);
         }
+    }
+
+    fn on_stream_end(&self, _ctx: &Context) {
+        // stream_duration is histogram-only — see CustomInstruments::new. Counters skip.
     }
 
     fn on_response_field(
@@ -2121,6 +2187,7 @@ where
             | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::EventDuration(_, _)
+            | Increment::StreamDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2175,11 +2242,14 @@ where
                     Increment::Custom(val) | Increment::EventCustom(val) => {
                         val.as_ref().and_then(value_to_f64)
                     }
-                    Increment::FieldUnit | Increment::FieldCustom(_) => {
-                        // Dropping a metric on a field will never increment.
-                        // We can't increment graphql metrics unless we actually process the result.
-                        // It's not like we're counting the number of requests, where we want to increment
-                        // with the data that we know so far if the request stops.
+                    Increment::StreamDuration(_, _)
+                    | Increment::FieldUnit
+                    | Increment::FieldCustom(_) => {
+                        // Stream-lifecycle instruments only emit on normal stream close
+                        // (via on_stream_end); a dropped / cancelled stream does not emit.
+                        // Field instruments likewise cannot emit on drop — we can't
+                        // increment GraphQL field metrics unless we actually processed
+                        // the result.
                         return;
                     }
                 }
@@ -2364,6 +2434,8 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
+            // See sibling note in CustomCounter::on_response — StreamDuration is gated
+            // here, not in on_stream_end.
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
@@ -2408,9 +2480,10 @@ where
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
+            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
-                // Nothing to do because we're incrementing on events or fields
+                // Nothing to do because we're incrementing on events, fields, or stream end
                 return;
             }
         };
@@ -2465,6 +2538,7 @@ where
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
+            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events
@@ -2492,6 +2566,10 @@ where
             }
             Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
                 Some(duration_to_value(instant.elapsed(), unit))
+            }
+            Increment::StreamDuration(_, _) => {
+                // Stream-lifecycle instruments do not emit on error — see CustomCounter::on_error.
+                return;
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 val.clone()
@@ -2545,6 +2623,7 @@ where
             | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::EventDuration(_, _)
+            | Increment::StreamDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2573,6 +2652,18 @@ where
             inner.attributes.truncate(original_length);
         }
     }
+
+    fn on_stream_end(&self, _ctx: &Context) {
+        let mut inner = self.inner.lock();
+        let value = match &inner.increment {
+            Increment::StreamDuration(instant, unit) => duration_to_value(instant.elapsed(), unit),
+            _ => return,
+        };
+        if let (Some(histogram), Some(sample)) = (&inner.histogram, value_to_f64(&value)) {
+            histogram.record(sample, &inner.attributes);
+            inner.updated = true;
+        }
+    }
 }
 
 impl<A, T, Request, Response, EventResponse> Drop
@@ -2596,11 +2687,14 @@ where
                         Some(duration_to_value(instant.elapsed(), unit))
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => val.clone(),
-                    Increment::FieldUnit | Increment::FieldCustom(_) => {
-                        // Dropping a metric on a field will never increment.
-                        // We can't increment graphql metrics unless we actually process the result.
-                        // It's not like we're counting the number of requests, where we want to increment
-                        // with the data that we know so far if the request stops.
+                    Increment::StreamDuration(_, _)
+                    | Increment::FieldUnit
+                    | Increment::FieldCustom(_) => {
+                        // Stream-lifecycle instruments only emit on normal stream close —
+                        // a dropped / cancelled stream does not produce a duration sample.
+                        // Field instruments likewise cannot emit on drop — we can't
+                        // increment GraphQL field metrics unless we actually processed
+                        // the result.
                         return;
                     }
                 };
@@ -2807,6 +2901,10 @@ mod tests {
             #[schemars(with = "Option<serde_json::Value>")]
             mapping_problems: Vec<Problem>,
         },
+        /// Fires `on_stream_end` on the current supergraph instruments. Use after any
+        /// per-chunk `graphql_response` events to simulate the response stream closing
+        /// normally (e.g. the last `@defer` chunk).
+        SupergraphStreamEnd,
     }
 
     #[derive(Deserialize, JsonSchema)]
@@ -3390,6 +3488,14 @@ mod tests {
                                         .take()
                                         .expect("connector request must have been made first")
                                         .on_response(&response);
+                                }
+                                Event::SupergraphStreamEnd => {
+                                    supergraph_instruments
+                                        .as_ref()
+                                        .expect(
+                                            "supergraph request event should have happened first",
+                                        )
+                                        .on_stream_end(&context);
                                 }
                             }
                         }

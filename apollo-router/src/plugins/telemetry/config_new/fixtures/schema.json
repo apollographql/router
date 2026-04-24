@@ -537,6 +537,11 @@
             "connector_response"
           ],
           "additionalProperties": false
+        },
+        {
+          "description": "Fires `on_stream_end` on the current supergraph instruments. Use after any\nper-chunk `graphql_response` events to simulate the response stream closing\nnormally (e.g. the last `@defer` chunk).",
+          "type": "string",
+          "const": "supergraph_stream_end"
         }
       ]
     },

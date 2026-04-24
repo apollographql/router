@@ -1,0 +1,10 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        "custom.histogram.stream.duration":
+          description: "histogram of streamed response lifecycle duration"
+          type: histogram
+          unit: "s"
+          value: stream_duration

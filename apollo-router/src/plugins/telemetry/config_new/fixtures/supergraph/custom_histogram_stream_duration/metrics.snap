@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram stream_duration
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        supergraph:
+          custom.histogram.stream.duration:
+            description: histogram of streamed response lifecycle duration
+            type: histogram
+            unit: s
+            value: stream_duration
+---
+- name: custom.histogram.stream.duration
+  description: histogram of streamed response lifecycle duration
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes: {}

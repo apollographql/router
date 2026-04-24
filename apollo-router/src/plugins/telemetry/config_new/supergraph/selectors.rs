@@ -19,6 +19,7 @@ use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::Event;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::Lifecycle;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationKind;
@@ -34,6 +35,7 @@ use crate::spec::operation_limits::OperationLimits;
 pub(crate) enum SupergraphValue {
     Standard(Standard),
     Event(Event<SupergraphSelector>),
+    Stream(Lifecycle),
     Custom(SupergraphSelector),
 }
 
@@ -48,6 +50,7 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
                 _ => InstrumentValue::Custom(selector.clone()),
             },
             SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+            SupergraphValue::Stream(l) => InstrumentValue::Stream(l.clone()),
         }
     }
 }

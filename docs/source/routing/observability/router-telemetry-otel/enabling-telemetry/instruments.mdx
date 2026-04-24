@@ -351,12 +351,31 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 </tr>
+<tr>
+<td>
+
+##### `stream_duration`
+
+</td>
+<td>The wall-clock duration of the full response-stream lifecycle — from the moment the supergraph response is ready until the response stream closes. Captures the `@defer` or subscription tail that `duration` (which fires on the response object, before streaming) does not. Histogram-only; recorded once per request, on normal stream completion.</td>
+<td>
+
+`supergraph`
+
+</td>
+</tr>
 </tbody>
 </table>
 
 <Note>
 
 `event_*` are mandantory when you want to use a [selector](/router/configuration/telemetry/instrumentation/selectors) on the supergraph response body (`response_data` and `response_errors`).
+
+</Note>
+
+<Note>
+
+Use `stream_duration` to capture how long a streamed response takes to fully drain — for example, the total time between the first and last chunk of a `@defer` query. The built-in `http.server.request.duration` only captures time up to when the router's response object is ready, which excludes the deferred tail. `stream_duration` does not emit on errored or cancelled streams — only on normal completion.
 
 </Note>
 
@@ -415,7 +434,7 @@ telemetry:
 
 ##### Duration unit conversion
 
-For instruments with `value: duration` or `value: event_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
+For instruments with `value: duration`, `value: event_duration`, or `value: stream_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
 
 - `s` - seconds (default, recommended)
 - `ms` - milliseconds
@@ -561,7 +580,7 @@ telemetry:
 | `type`                      | `counter` \| `histogram`                                                         |            | The name of the custom instrument.            |
 | `unit`                      |                                                                                |            | A unit name, for example `By` or `{request}`. |
 | `description`               |                                                                                |            | The description of the custom instrument.     |
-| `value`                     | `unit` \| `duration` \| `<custom>` \| `event_unit` \| `event_duration` \| `event_custom` |            | The value of the instrument.                  |
+| `value`                     | `unit` \| `duration` \| `<custom>` \| `event_unit` \| `event_duration` \| `event_custom` \| `stream_duration` |            | The value of the instrument.                  |
 
 ### Production instrumentation example
 

@@ -6812,6 +6812,15 @@ expression: "&schema"
       "description": "The license enforcement plugin has no configuration.",
       "type": "object"
     },
+    "Lifecycle": {
+      "oneOf": [
+        {
+          "const": "stream_duration",
+          "description": "Duration of the full response-stream lifecycle — wall-clock elapsed from the moment\nthe supergraph response is ready until the stream closes. Captures the `@defer`\nor subscription tail that `http.server.request.duration` misses. Recorded once per\nrequest, on normal stream completion.",
+          "type": "string"
+        }
+      ]
+    },
     "LimitsConfig": {
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
@@ -12104,6 +12113,9 @@ expression: "&schema"
         },
         {
           "$ref": "#/definitions/Event5"
+        },
+        {
+          "$ref": "#/definitions/Lifecycle"
         },
         {
           "$ref": "#/definitions/SupergraphSelector"

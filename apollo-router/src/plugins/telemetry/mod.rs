@@ -166,6 +166,7 @@ pub(crate) mod reload;
 pub(crate) mod resource;
 pub(crate) mod span_ext;
 mod span_factory;
+mod stream_end;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
@@ -1359,6 +1360,11 @@ impl Telemetry {
         // Wait for the first response of the stream
         let (parts, stream) = response.response.into_parts();
         let config_cloned = config.clone();
+        // Shared between the per-chunk inspect and the end-of-stream hook below; both
+        // dispatch to the same supergraph instruments.
+        let custom_instruments = Arc::new(custom_instruments);
+        let instruments_for_chunk = custom_instruments.clone();
+        let ctx_for_chunk = ctx.clone();
         let stream = stream.inspect(move |resp| {
             let span = Span::current();
             span.set_span_dyn_attributes(
@@ -1367,20 +1373,21 @@ impl Telemetry {
                     .spans
                     .supergraph
                     .attributes
-                    .on_response_event(resp, &ctx),
+                    .on_response_event(resp, &ctx_for_chunk),
             );
-            custom_instruments.on_response_event(resp, &ctx);
-            custom_events.on_response_event(resp, &ctx);
-            custom_graphql_instruments.on_response_event(resp, &ctx);
+            instruments_for_chunk.on_response_event(resp, &ctx_for_chunk);
+            custom_events.on_response_event(resp, &ctx_for_chunk);
+            custom_graphql_instruments.on_response_event(resp, &ctx_for_chunk);
         });
         let (first_response, rest) = StreamExt::into_future(stream).await;
 
-        let response = http::Response::from_parts(
-            parts,
-            once(ready(first_response.unwrap_or_default()))
-                .chain(rest)
-                .boxed(),
-        );
+        let chained = once(ready(first_response.unwrap_or_default())).chain(rest);
+        let instruments_for_end = custom_instruments;
+        let observed = stream_end::StreamEndObserver::new(chained, move || {
+            instruments_for_end.on_stream_end(&ctx);
+        });
+
+        let response = http::Response::from_parts(parts, observed.boxed());
 
         Ok(SupergraphResponse { context, response })
     }
