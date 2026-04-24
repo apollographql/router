@@ -6234,31 +6234,6 @@ mod tests {
     }
 
     #[cfg(test)]
-    mod duration_histogram_tests {
-        use crate::plugin::test::MockInternalHttpClientService;
-        
-        /// Creates a mock HTTP client that sleeps for `delay` before returning an error.
-        /// Useful for testing timeout behavior: wrap the returned mock with
-        /// `tower::timeout::TimeoutLayer` using a shorter deadline to trigger a real
-        /// `tower::timeout` error before the sleep completes.
-        fn create_mock_http_client_with_delay(
-            delay: std::time::Duration,
-        ) -> MockInternalHttpClientService {
-            let mut mock = MockInternalHttpClientService::new();
-            mock.expect_clone()
-                .returning(move || create_mock_http_client_with_delay(delay));
-            mock.expect_call().returning(move |_| {
-                Box::pin(async move {
-                    tokio::time::sleep(delay).await;
-                    Err::<crate::services::http::HttpResponse, tower::BoxError>(
-                        "mock: simulated slow coprocessor".into(),
-                    )
-                })
-            });
-            mock
-        }
-    }
-    #[cfg(test)]
     mod connector_tests {
         use std::str::FromStr;
         use std::sync::Arc;
