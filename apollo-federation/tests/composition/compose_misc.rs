@@ -10,6 +10,88 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
+/// Invalid `{}` on inputs with required fields (e.g. `AuditsFilterV2`) must not appear on the
+/// composed supergraph, matching `FED-1001.graphql` / graphql-js `printSchema`. Valid `{}` on
+/// all-optional inputs is kept; see `misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it`.
+#[test]
+fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
+    let subgraph = ServiceDefinition {
+        name: "subgraph",
+        type_defs: r#"
+        type Query {
+          audits(filter: AuditsFilterV2 = {}): String
+          carriers(filter: CarriersFilterV2 = {}): String
+        }
+
+        input AuditsFilterV2 {
+          startDate: String!
+          endDate: String!
+          carrierId: String!
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
+    let sdl = print_sdl(supergraph.schema().schema());
+
+    assert!(
+        !sdl.contains("filter: AuditsFilterV2 = {}"),
+        "supergraph should omit invalid empty-object default for AuditsFilterV2 (FED-1001), got:\n{sdl}"
+    );
+    assert!(
+        sdl.contains("filter: CarriersFilterV2 = {}"),
+        "supergraph should keep valid empty-object default when all input fields are optional, got:\n{sdl}"
+    );
+}
+
+#[test]
+fn misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it() {
+    let with_default = ServiceDefinition {
+        name: "withDefault",
+        type_defs: r#"
+        type Query {
+          q: Int @shareable
+        }
+
+        type Thing @shareable {
+          f(filter: CarriersFilterV2 = {}): String
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+    let without_default = ServiceDefinition {
+        name: "withoutDefault",
+        type_defs: r#"
+        type Query {
+          q: Int @shareable
+        }
+
+        type Thing @shareable {
+          f(filter: CarriersFilterV2): String
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[with_default, without_default])
+        .expect("composition should succeed");
+    let sdl = print_sdl(supergraph.schema().schema());
+    assert!(
+        sdl.contains("filter: CarriersFilterV2 = {}"),
+        "supergraph should keep `= {{}}` when at least one subgraph declares it and the default is valid, got:\n{sdl}"
+    );
+}
+
 #[test]
 fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
     let subgraph_a = ServiceDefinition {

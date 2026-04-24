@@ -577,9 +577,14 @@ impl Merger {
     /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be
     /// computed.
     fn validate_supergraph_schema(
-        merged: FederationSchema,
+        mut merged: FederationSchema,
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
+        // Match graphql-js `printSchema(buildSchema(...))` behavior: argument and input-field
+        // defaults that cannot be coerced to their types (for example `{}` when the input object
+        // has required fields) are removed rather than left on the composed supergraph SDL.
+        crate::compat::coerce_schema_default_values(merged.schema_mut());
+
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
         // supergraph) and don't point back to the subgraphs in any way.
