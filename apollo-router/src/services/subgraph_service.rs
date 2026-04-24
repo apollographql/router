@@ -719,7 +719,7 @@ pub(crate) async fn process_batches(
 }
 
 async fn call_http(
-    mut request: SubgraphRequest,
+    request: SubgraphRequest,
     client_factory: HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -741,13 +741,7 @@ async fn call_http(
     if let Some(query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
-        //
-        // signal_progress takes request and gql_request separately: it uses request for transport
-        // details (URI, headers, context) and gql_request for the GraphQL payload.
-        // TODO: taking the body out of the request is not actually safe — assemble_batch reads
-        // operation_name from first_request.body(), which will be empty after this take.
-        let gql_request = std::mem::take(request.subgraph_request.body_mut());
-        let response_rx = query.signal_progress(client_factory, request, gql_request).await?;
+        let response_rx = query.signal_progress(client_factory, request).await?;
 
         // Park this query until we have our response and pass it back up
         response_rx
