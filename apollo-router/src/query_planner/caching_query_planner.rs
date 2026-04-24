@@ -109,7 +109,7 @@ impl std::fmt::Debug for ConfigModeHash {
 
 /// A query planner wrapper that caches results.
 ///
-/// The query planner performs LRU caching.
+/// The query planner uses a W-TinyLFU (Window TinyLFU) in-memory cache backed by moka.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: Clone> {
     cache: Arc<
@@ -225,33 +225,29 @@ where
 
         let mut cache_keys = match previous_cache {
             Some(ref previous_cache) => {
-                let cache = previous_cache.lock().await;
+                let count = count.unwrap_or(previous_cache.entry_count() as usize / 3);
 
-                let count = count.unwrap_or(cache.len() / 3);
-
-                cache
+                previous_cache
                     .iter()
-                    .map(
-                        |(
-                            CachingQueryKey {
-                                query,
-                                operation,
-                                hash,
-                                metadata,
-                                plan_options,
-                                config_mode_hash: _,
-                                schema_id: _,
-                            },
-                            _,
-                        )| WarmUpCachingQueryKey {
-                            query: query.clone(),
-                            operation_name: operation.clone(),
-                            hash: Some(hash.clone()),
-                            metadata: metadata.clone(),
-                            plan_options: plan_options.clone(),
+                    .map(|(key, _)| {
+                        let CachingQueryKey {
+                            query,
+                            operation,
+                            hash,
+                            metadata,
+                            plan_options,
+                            config_mode_hash: _,
+                            schema_id: _,
+                        } = (*key).clone();
+                        WarmUpCachingQueryKey {
+                            query,
+                            operation_name: operation,
+                            hash: Some(hash),
+                            metadata,
+                            plan_options,
                             config_mode_hash: self.config_mode_hash.clone(),
-                        },
-                    )
+                        }
+                    })
                     .take(count)
                     .collect::<Vec<_>>()
             }
@@ -282,8 +278,21 @@ where
             );
         }
 
-        // persisted queries are added first because they should get a lower priority in the LRU cache,
-        // since a lot of them may be there to support old clients
+        // persisted queries are added first so that regular queries — appended via extend below —
+        // warm up last and therefore get more recent access history under the TinyLFU sketch.
+        // Under the previous LRU backend, insertion order directly determined eviction priority;
+        // under moka W-TinyLFU, priority is frequency-driven, so this is a best-effort
+        // approximation of the old intent.
+        //
+        // The shuffle (applied to PQs only, before regular queries are appended) serves two
+        // purposes:
+        //   1. Distributed deduplication: when multiple router instances warm up concurrently
+        //      against a shared Redis cache, different PQ orderings mean each instance races to
+        //      plan different PQs first. A plan written to Redis by one instance is found by
+        //      others before they reach that key, avoiding redundant planning work.
+        //   2. Single-instance fairness: if warm-up is interrupted mid-way (schema reload,
+        //      shutdown), a randomized order spreads coverage across the PQ set over successive
+        //      restarts rather than always skipping the same tail entries.
         let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
         if should_warm_with_pqs && let Some(queries) = persisted_queries_operations {
             for query in queries {
@@ -350,8 +359,7 @@ where
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
                     if let Some(hash) = hash
                         && hash == doc.hash
-                        && let Some(entry) =
-                            { previous_cache.lock().await.get(&caching_key).cloned() }
+                        && let Some(entry) = previous_cache.get(&caching_key).await
                     {
                         self.cache.insert_in_memory(caching_key, entry).await;
                         reused += 1;

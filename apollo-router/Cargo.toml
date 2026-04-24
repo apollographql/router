@@ -142,6 +142,7 @@ jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
+moka = { version = "0.12", features = ["future"] }
 mediatype = "0.21.0"
 mockall = "0.14.0"
 mime = "0.3.17"

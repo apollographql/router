@@ -20,7 +20,7 @@ In extremely large edge cases though, the cache can save 2-10x time to create th
 
 ## In-memory caching
 
-GraphOS Router enables query plan caching by default using an in-memory LRU cache. In your router's [YAML config file](/graphos/routing/configuration/overview#yaml-config-file), you can configure the maximum number of query plan entries in the cache:
+GraphOS Router enables query plan caching by default using an in-memory cache backed by a W-TinyLFU (Window TinyLFU) eviction policy. In your router's [YAML config file](/graphos/routing/configuration/overview#yaml-config-file), you can configure the maximum number of query plan entries in the cache:
 
 ```yaml title="router.yaml"
 supergraph:
