@@ -88,6 +88,7 @@ impl QueryPlan {
                     subscription_handle: &subscription_handle,
                     subscription_config,
                     subgraph_schemas,
+                    is_deferred: false,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -126,6 +127,11 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
+    /// `true` when the walker is inside a `DeferredNode` subtree, `false`
+    /// inside `PlanNode::Defer`'s primary branch or anywhere outside a
+    /// `Defer` node. Propagated to each `FetchRequest` so that subgraph
+    /// telemetry can split primary vs deferred fetches.
+    pub(crate) is_deferred: bool,
 }
 
 impl PlanNode {
@@ -303,6 +309,7 @@ impl PlanNode {
                                         .supergraph_request(parameters.supergraph_request.clone())
                                         .variables(variables)
                                         .current_dir(current_dir.clone())
+                                        .is_deferred(parameters.is_deferred)
                                         .build(),
                                 );
                                 let raw_errors;
@@ -403,6 +410,7 @@ impl PlanNode {
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
                                         subgraph_schemas: parameters.subgraph_schemas,
+                                        is_deferred: false,
                                     },
                                     current_dir,
                                     &value,
@@ -590,6 +598,7 @@ impl DeferredNode {
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
                             subgraph_schemas: &subgraph_schemas,
+                            is_deferred: true,
                         },
                         &Path::default(),
                         &value,
