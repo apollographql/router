@@ -430,10 +430,8 @@ pub(crate) async fn assemble_batch(
     ),
     BoxError,
 > {
-    let (txs, requests): (Vec<_>, Vec<_>) = requests
-        .into_iter()
-        .map(|r| (r.sender, r.request))
-        .unzip();
+    let (txs, requests): (Vec<_>, Vec<_>) =
+        requests.into_iter().map(|r| (r.sender, r.request)).unzip();
 
     // Retain the various contexts for later use
     let contexts = requests
@@ -455,7 +453,8 @@ pub(crate) async fn assemble_batch(
         .unwrap_or_default();
     let (parts, first_body) = first_request.into_parts();
 
-    let mut gql_requests = vec![first_body];
+    let mut gql_requests = Vec::with_capacity(txs.len());
+    gql_requests.push(first_body);
     for r in requests_iter {
         let (_, body) = r.subgraph_request.into_parts();
         gql_requests.push(body);
@@ -515,9 +514,7 @@ mod tests {
                     rx,
                     BatchQueryInfo {
                         request: SubgraphRequest::fake_builder()
-                            .subgraph_request(
-                                http::Request::builder().body(gql_request).unwrap(),
-                            )
+                            .subgraph_request(http::Request::builder().body(gql_request).unwrap())
                             .subgraph_name(format!("slot{index}"))
                             .build(),
                         sender: tx,
@@ -656,19 +653,12 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress(
-                factory.clone(),
-                request.clone(),
-            )
-            .await
-            .is_ok()
+            bq.signal_progress(factory.clone(), request.clone())
+                .await
+                .is_ok()
         );
         assert!(bq.finished());
-        assert!(
-            bq.signal_progress(factory, request)
-                .await
-                .is_err()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -696,11 +686,7 @@ mod tests {
                 .is_ok()
         );
         assert!(!bq.finished());
-        assert!(
-            bq.signal_progress(factory, request)
-                .await
-                .is_ok()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_ok());
         assert!(bq.finished());
         assert!(
             bq.signal_cancelled("only once though".to_string())
@@ -731,11 +717,7 @@ mod tests {
         let qh = Arc::new(QueryHash::default());
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
-        assert!(
-            bq.signal_progress(factory, request)
-                .await
-                .is_ok()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_ok());
         assert!(!bq.finished());
         assert!(
             bq.signal_cancelled("only twice though".to_string())

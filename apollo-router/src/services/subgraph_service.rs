@@ -222,8 +222,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // Replace the body with the APQ body, saving the original for potential retries.
             let original_body = std::mem::replace(request.subgraph_request.body_mut(), apq_body);
 
-            let response = call_http(request.clone(), client_factory.clone(), &service_name)
-                .await?;
+            let response =
+                call_http(request.clone(), client_factory.clone(), &service_name).await?;
 
             // Check the error for the request with only persistedQuery.
             // If PersistedQueryNotSupported, disable APQ for this subgraph
@@ -783,7 +783,11 @@ pub(crate) async fn call_single_http(
     } = request;
 
     let (parts, body) = subgraph_request.into_parts();
-    let operation_name = body.operation_name.as_deref().unwrap_or_default().to_owned();
+    let operation_name = body
+        .operation_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, router::body::from_bytes(body));
