@@ -197,30 +197,20 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 return call_http(request, client_factory.clone(), &service_name).await;
             }
 
-            // Else, if APQ is enabled,
-            // Calculate the query hash and try the request with
-            // a persistedQuery instead of the whole query.
-            let body = request.subgraph_request.body();
+            // APQ works by sending the query hash via extensions with an empty query body.
+            // We use query.take() to save the query in case it's needed for a retry.
+            let body = request.subgraph_request.body_mut();
+            let original_query = body.query.take();
+
             let hash_value =
-                apq::calculate_hash_for_query(body.query.as_deref().unwrap_or_default());
-
-            let persisted_query = serde_json_bytes::json!({
-                HASH_VERSION_KEY: HASH_VERSION_VALUE,
-                HASH_KEY: hash_value
-            });
-
-            let mut extensions_with_apq = body.extensions.clone();
-            extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
-
-            let apq_body = graphql::Request {
-                query: None,
-                operation_name: body.operation_name.clone(),
-                variables: body.variables.clone(),
-                extensions: extensions_with_apq,
-            };
-
-            // Replace the body with the APQ body, saving the original for potential retries.
-            let original_body = std::mem::replace(request.subgraph_request.body_mut(), apq_body);
+                apq::calculate_hash_for_query(original_query.as_deref().unwrap_or_default());
+            body.extensions.insert(
+                PERSISTED_QUERY_KEY,
+                serde_json_bytes::json!({
+                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                    HASH_KEY: hash_value
+                }),
+            );
 
             let response =
                 call_http(request.clone(), client_factory.clone(), &service_name).await?;
@@ -233,11 +223,14 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    *request.subgraph_request.body_mut() = original_body;
+                    let body = request.subgraph_request.body_mut();
+                    body.query = original_query;
+                    // Remove the persistedQuery extension we added for the APQ attempt.
+                    body.extensions.remove(PERSISTED_QUERY_KEY);
                     call_http(request, client_factory.clone(), &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
-                    request.subgraph_request.body_mut().query = original_body.query;
+                    request.subgraph_request.body_mut().query = original_query;
                     call_http(request, client_factory.clone(), &service_name).await
                 }
                 _ => Ok(response),
