@@ -182,7 +182,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let service_name = (*self.service).to_owned();
 
         let client_factory = self.client_factory.clone();
@@ -190,66 +190,40 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let arc_apq_enabled = self.apq.clone();
 
         let make_calls = async move {
-            // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
-            // It will normally not be super expensive? but it still does not seem great or
-            // necessary.
-
-            let SubgraphRequest {
-                subgraph_request,
-                context,
-                ..
-            } = request.clone();
-            let body = subgraph_request.into_body();
-
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_http(
-                    request,
-                    body,
-                    context,
-                    client_factory.clone(),
-                    &service_name,
-                )
-                .await;
+                return call_http(request, client_factory.clone(), &service_name).await;
             }
 
             // Else, if APQ is enabled,
             // Calculate the query hash and try the request with
             // a persistedQuery instead of the whole query.
-            let graphql::Request {
-                query,
-                operation_name,
-                variables,
-                extensions,
-            } = body.clone();
-
-            let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
+            let body = request.subgraph_request.body();
+            let hash_value =
+                apq::calculate_hash_for_query(body.query.as_deref().unwrap_or_default());
 
             let persisted_query = serde_json_bytes::json!({
                 HASH_VERSION_KEY: HASH_VERSION_VALUE,
                 HASH_KEY: hash_value
             });
 
-            let mut extensions_with_apq = extensions.clone();
+            let mut extensions_with_apq = body.extensions.clone();
             extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
 
-            let mut apq_body = graphql::Request {
+            let apq_body = graphql::Request {
                 query: None,
-                operation_name,
-                variables,
+                operation_name: body.operation_name.clone(),
+                variables: body.variables.clone(),
                 extensions: extensions_with_apq,
             };
 
-            let response = call_http(
-                request.clone(),
-                apq_body.clone(),
-                context.clone(),
-                client_factory.clone(),
-                &service_name,
-            )
-            .await?;
+            // Replace the body with the APQ body, saving the original for potential retries.
+            let original_body = std::mem::replace(request.subgraph_request.body_mut(), apq_body);
+
+            let response = call_http(request.clone(), client_factory.clone(), &service_name)
+                .await?;
 
             // Check the error for the request with only persistedQuery.
             // If PersistedQueryNotSupported, disable APQ for this subgraph
@@ -259,25 +233,12 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    call_http(
-                        request,
-                        body,
-                        context,
-                        client_factory.clone(),
-                        &service_name,
-                    )
-                    .await
+                    *request.subgraph_request.body_mut() = original_body;
+                    call_http(request, client_factory.clone(), &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
-                    apq_body.query = query;
-                    call_http(
-                        request,
-                        apq_body,
-                        context,
-                        client_factory.clone(),
-                        &service_name,
-                    )
-                    .await
+                    request.subgraph_request.body_mut().query = original_body.query;
+                    call_http(request, client_factory.clone(), &service_name).await
                 }
                 _ => Ok(response),
             }
@@ -758,9 +719,7 @@ pub(crate) async fn process_batches(
 }
 
 async fn call_http(
-    request: SubgraphRequest,
-    body: graphql::Request,
-    context: Context,
+    mut request: SubgraphRequest,
     client_factory: HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -771,7 +730,7 @@ async fn call_http(
     // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
     // we have the context extensions lock held. That would be very bad...
     // We grab the (potential) BatchQuery and then operate on it later
-    let opt_batch_query = context.extensions().with_lock(|lock| {
+    let opt_batch_query = request.context.extensions().with_lock(|lock| {
         lock.get::<Batching>()
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
             .and_then(|_| lock.get::<BatchQuery>().cloned())
@@ -782,7 +741,13 @@ async fn call_http(
     if let Some(query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
-        let response_rx = query.signal_progress(client_factory, request, body).await?;
+        //
+        // signal_progress takes request and gql_request separately: it uses request for transport
+        // details (URI, headers, context) and gql_request for the GraphQL payload.
+        // TODO: taking the body out of the request is not actually safe — assemble_batch reads
+        // operation_name from first_request.body(), which will be empty after this take.
+        let gql_request = std::mem::take(request.subgraph_request.body_mut());
+        let response_rx = query.signal_progress(client_factory, request, gql_request).await?;
 
         // Park this query until we have our response and pass it back up
         response_rx
@@ -794,19 +759,18 @@ async fn call_http(
     } else {
         tracing::debug!("we called http");
         let client = client_factory.create(service_name);
-        call_single_http(request, body, context, client, service_name).await
+        call_single_http(request, client, service_name).await
     }
 }
 
 /// call_single_http makes http calls with modified graphql::Request (body)
 pub(crate) async fn call_single_http(
     request: SubgraphRequest,
-    body: graphql::Request,
-    context: Context,
     client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
-    let subgraph_request_event = context
+    let subgraph_request_event = request
+        .context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
     let log_request_level = subgraph_request_event.and_then(|s| {
@@ -819,17 +783,13 @@ pub(crate) async fn call_single_http(
 
     let SubgraphRequest {
         subgraph_request,
+        context,
         id: subgraph_request_id,
         ..
     } = request;
 
-    let operation_name = subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
-
-    let (parts, _) = subgraph_request.into_parts();
+    let (parts, body) = subgraph_request.into_parts();
+    let operation_name = body.operation_name.as_deref().unwrap_or_default().to_owned();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, router::body::from_bytes(body));
