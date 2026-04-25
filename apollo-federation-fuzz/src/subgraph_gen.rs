@@ -145,6 +145,15 @@ pub struct GenConfig {
     /// entity-traversal join planning across subgraph boundaries —
     /// needed for PR #8016 territory (multi-hop `@requires`).
     pub inter_entity_ref_chance: u8,
+    /// Probability (0..=255) that an entity gets a *second* independent
+    /// `@key` directive, e.g. `@key(fields: "id") @key(fields: "sku")`.
+    /// Distinct from `compound_key_chance`: that one extends a single
+    /// `@key` with extra fields (one compound join path); this one
+    /// adds a second `@key` (alternative single-field join paths). The
+    /// secondary key field is uniformly hosted by every host of the
+    /// entity. Targets the "multiple `@key` directives on one entity"
+    /// gap from COVERAGE_GAPS.md.
+    pub multiple_key_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -165,6 +174,7 @@ impl Default for GenConfig {
             provides_chance: 130, // ~51% of entities with eligible fields
             interface_object_chance: 150, // ~59% of generated interfaces
             inter_entity_ref_chance: 150, // ~59% of entities get a ref
+            multiple_key_chance: 130, // ~51% of entities get a second @key
         }
     }
 }
@@ -228,6 +238,12 @@ struct EntityPlan {
     /// entity, a key-only stub of the target is emitted in that
     /// subgraph so federation can stitch the reference.
     entity_ref_fields: Vec<EntityRefField>,
+    /// Optional secondary `@key`. When present, every host of the
+    /// entity declares a second `@key(fields: "<name>")` directive in
+    /// addition to the primary key, plus the keyed field itself. Gives
+    /// the planner an alternative single-field join path between
+    /// subgraphs.
+    secondary_key: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +341,7 @@ pub fn generate_federated_subgraphs(
             extra_key_fields: Vec::new(),
             provides_on_root: None,
             entity_ref_fields: Vec::new(),
+            secondary_key: None,
         });
     }
 
@@ -344,6 +361,22 @@ pub fn generate_federated_subgraphs(
                 .extra_key_fields
                 .push((format!("k{k}"), scalar.to_string()));
         }
+    }
+
+    // Secondary `@key` augmentation. With probability `multiple_key_chance`,
+    // an entity gets a second independent `@key(fields: "<name>")`
+    // directive on a fresh single non-null scalar field. Distinct from
+    // compound-key augmentation: this opens an *alternative* join path
+    // for the planner rather than extending one. Field name uses the
+    // `sk` prefix to avoid colliding with `id`, `k<n>`, `f<i>_<j>`,
+    // `r<i>_<n>`, and `io<n>`.
+    for entity in entities.iter_mut() {
+        if u.arbitrary::<u8>()? > cfg.multiple_key_chance {
+            continue;
+        }
+        const KEY_SCALARS: &[&str] = &["String!", "ID!", "Int!"];
+        let scalar = KEY_SCALARS[u.choose_index(KEY_SCALARS.len())?];
+        entity.secondary_key = Some(("sk0".to_string(), scalar.to_string()));
     }
 
     // Make sure every subgraph hosts at least one entity. If not, append the
@@ -790,12 +823,19 @@ fn emit(
             } else {
                 ""
             };
+            let secondary_key_clause = match &e.secondary_key {
+                Some((n, _)) => format!(" @key(fields: \"{n}\")"),
+                None => String::new(),
+            };
             let _ = writeln!(
                 sdl,
-                "type {}{implements_clause} @key(fields: \"{key_fields_sel}\"){extra_id_key_clause} {{",
+                "type {}{implements_clause} @key(fields: \"{key_fields_sel}\"){extra_id_key_clause}{secondary_key_clause} {{",
                 e.name
             );
             sdl.push_str("  id: ID!\n");
+            if let Some((n, t)) = &e.secondary_key {
+                let _ = writeln!(sdl, "  {n}: {t}");
+            }
             for (n, t) in &e.extra_key_fields {
                 let _ = writeln!(sdl, "  {n}: {t}");
             }
