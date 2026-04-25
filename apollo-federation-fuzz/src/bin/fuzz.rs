@@ -10,7 +10,7 @@ use clap::Parser;
 use apollo_federation_fuzz::compose::{ComposeOutcome, try_compose};
 use apollo_federation_fuzz::diff::{DiffOutcome, run_diff};
 use apollo_federation_fuzz::harness::{CommonConfig, CommonOptions};
-use apollo_federation_fuzz::op_gen::generate_operation;
+use apollo_federation_fuzz::op_gen::{OpGenConfig, generate_operation_with_config};
 use apollo_federation_fuzz::subgraph_gen::{
     GenConfig, SubgraphSdl, generate_federated_subgraphs, smoke_test_fixture,
 };
@@ -41,6 +41,11 @@ struct Args {
     /// divergence under this directory.
     #[arg(long, default_value = "regressions")]
     regressions_dir: PathBuf,
+    /// Enable `@defer`: op-gen sprinkles the directive on inline fragments
+    /// and the planner is configured with `incremental_delivery = true` so
+    /// `DeferNode` actually appears in plans.
+    #[arg(long, default_value_t = false)]
+    enable_defer: bool,
 }
 
 #[derive(Default, Debug)]
@@ -57,9 +62,16 @@ struct Stats {
 
 fn main() {
     let args = Args::parse();
-    let cfg = CommonConfig::default();
+    let cfg = CommonConfig {
+        incremental_delivery: args.enable_defer,
+        ..CommonConfig::default()
+    };
     let opts = CommonOptions::default();
     let gen_cfg = GenConfig::default();
+    let op_cfg = OpGenConfig {
+        defer_chance: if args.enable_defer { 64 } else { 0 },
+        ..OpGenConfig::default()
+    };
 
     let mut stats = Stats::default();
     let mut state = args.seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -111,7 +123,7 @@ fn main() {
 
         let op_bytes = next_bytes(&mut state, 1024);
         stats.ops_attempted += 1;
-        let op_text = match generate_operation(supergraph_sdl, &op_bytes) {
+        let op_text = match generate_operation_with_config(supergraph_sdl, &op_bytes, &op_cfg) {
             Ok(op) => op,
             Err(e) => {
                 stats.ops_skipped += 1;

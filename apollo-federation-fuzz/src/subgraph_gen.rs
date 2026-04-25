@@ -84,6 +84,12 @@ pub struct GenConfig {
     /// Probability (0..=255) that an entity hosted by ≥2 subgraphs gets a
     /// `@requires` link added. Set to 0 to disable.
     pub requires_chance: u8,
+    /// Probability (0..=255) that the generated subgraph set declares a
+    /// non-default name for the root query type (e.g. `RootQuery0`). All
+    /// subgraphs in a generated set agree on the chosen name. Set to 0 to
+    /// always use `Query`. Pokes at PR #7580: planner used to emit
+    /// `... on Query` even when the root was renamed.
+    pub renamed_root_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -95,6 +101,7 @@ impl Default for GenConfig {
             max_entities: 6,
             max_fields_per_entity: 5,
             requires_chance: 200, // ~78% of eligible entities
+            renamed_root_chance: 80, // ~31% of generated sets
         }
     }
 }
@@ -139,6 +146,16 @@ pub fn generate_federated_subgraphs(
 ) -> ArbResult<Vec<SubgraphSdl>> {
     let subgraph_count = sample_range(u, cfg.min_subgraphs, cfg.max_subgraphs)?;
     let entity_count = sample_range(u, cfg.min_entities, cfg.max_entities)?;
+
+    // Pick a root query type name. Renaming exercises PR #7580 territory.
+    let query_root_name: String = if cfg.renamed_root_chance > 0
+        && u8::arbitrary(u)? < cfg.renamed_root_chance
+    {
+        let pool = ["RootQuery", "MyQuery", "Q", "GraphQuery"];
+        pool[u.choose_index(pool.len())?].to_string()
+    } else {
+        "Query".to_string()
+    };
 
     let mut entities: Vec<EntityPlan> = Vec::with_capacity(entity_count);
     for i in 0..entity_count {
@@ -233,10 +250,10 @@ pub fn generate_federated_subgraphs(
             .push((requirer_host, provider_name));
     }
 
-    Ok(emit(subgraph_count, &entities))
+    Ok(emit(subgraph_count, &entities, &query_root_name))
 }
 
-fn emit(subgraph_count: usize, entities: &[EntityPlan]) -> Vec<SubgraphSdl> {
+fn emit(subgraph_count: usize, entities: &[EntityPlan], query_root_name: &str) -> Vec<SubgraphSdl> {
     let mut out = Vec::with_capacity(subgraph_count);
     for s in 0..subgraph_count {
         let mut sdl = String::new();
@@ -246,7 +263,16 @@ fn emit(subgraph_count: usize, entities: &[EntityPlan]) -> Vec<SubgraphSdl> {
         let primary_for: Vec<&EntityPlan> =
             entities.iter().filter(|e| e.primary == s).collect();
         if !primary_for.is_empty() {
-            sdl.push_str("type Query {\n");
+            // The `schema { query: <Name> }` declaration only makes sense
+            // when this subgraph actually defines the root type. Subgraphs
+            // without root fields skip both lines and the planner sees them
+            // as having no root contribution. (Per the federation spec,
+            // root type names are per-subgraph and merged into the
+            // supergraph's `Query`.)
+            if query_root_name != "Query" {
+                let _ = writeln!(sdl, "schema {{\n  query: {query_root_name}\n}}\n");
+            }
+            let _ = writeln!(sdl, "type {query_root_name} {{");
             for e in &primary_for {
                 let _ = writeln!(sdl, "  q{}: {}", e.name, e.name);
             }
