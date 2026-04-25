@@ -121,6 +121,14 @@ pub struct GenConfig {
     /// host of the entity. Probes the planner's compound-key handling for
     /// entity boundary fetches.
     pub compound_key_chance: u8,
+    /// Probability (0..=255) that the Query root field `q<Entity>: <Entity>`
+    /// in the entity's primary subgraph gets a `@provides(fields: "f [g]")`
+    /// directive. Each named field is owned by some *other* subgraph and is
+    /// marked `@external` on the primary's declaration of the entity. The
+    /// planner can then resolve those fields without bouncing to the
+    /// owner subgraph for that access path. Pokes a planner code path
+    /// adjacent to but distinct from `@requires`.
+    pub provides_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -138,6 +146,7 @@ impl Default for GenConfig {
             interface_chance: 130, // ~51% of generated sets
             multi_field_requires_chance: 150, // ~59% of @requires sites
             compound_key_chance: 130, // ~51% of entities get a compound key
+            provides_chance: 130, // ~51% of entities with eligible fields
         }
     }
 }
@@ -167,6 +176,10 @@ struct EntityField {
     external_in: Vec<usize>,
     requires_in: Vec<(usize, String)>,
     override_in: Option<(usize, String, Option<String>)>,
+    /// `true` once this field appears in some entity's `provides_on_root`
+    /// selection. Federation treats every `@provides` site as an additional
+    /// resolver, so the original owner must mark the field `@shareable`.
+    in_provides: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +198,12 @@ struct EntityPlan {
     /// non-empty, every host emits these fields and the same compound
     /// `@key(fields: "id ...")` directive.
     extra_key_fields: Vec<(String, String)>,
+    /// Optional `@provides(fields: "f [g]")` to attach to this entity's
+    /// `q<Entity>: <Entity>` Query root field in `primary`. The named
+    /// fields are owned by some other subgraph and marked `@external` on
+    /// the primary's entity declaration so the planner can resolve them
+    /// inline through this access path.
+    provides_on_root: Option<String>,
 }
 
 /// One generated interface, declared in a single subgraph. Implementing
@@ -238,6 +257,7 @@ pub fn generate_federated_subgraphs(
                 external_in: Vec::new(),
                 requires_in: Vec::new(),
                 override_in: None,
+                in_provides: false,
             });
         }
 
@@ -247,6 +267,7 @@ pub fn generate_federated_subgraphs(
             primary,
             fields,
             extra_key_fields: Vec::new(),
+            provides_on_root: None,
         });
     }
 
@@ -448,6 +469,63 @@ pub fn generate_federated_subgraphs(
         }
     }
 
+    // @provides augmentation. For each entity, with probability
+    // `provides_chance`, attach `@provides(fields: "f [g]")` to the entity's
+    // `q<Entity>: <Entity>` Query root field. Each provided field is owned
+    // by some subgraph other than `primary` and gets `@external` added on
+    // primary's entity declaration so the planner sees a valid provide
+    // site. Pokes a planner code path adjacent to but distinct from
+    // `@requires`.
+    //
+    // Eligibility per field: hosted by exactly one subgraph (other than
+    // primary), no `@override`, no entanglement that would conflict with
+    // `@external` (no existing `external_in.contains(&primary)`, no
+    // `requires_in` from primary).
+    for entity in entities.iter_mut() {
+        if u.arbitrary::<u8>()? > cfg.provides_chance {
+            continue;
+        }
+        let primary = entity.primary;
+        let candidate_idxs: Vec<usize> = entity
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                f.hosts.len() == 1
+                    && f.hosts[0] != primary
+                    && f.override_in.is_none()
+                    && !f.external_in.contains(&primary)
+                    && !f.requires_in.iter().any(|(s, _)| *s == primary)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if candidate_idxs.is_empty() {
+            continue;
+        }
+        // 1 field most of the time, occasionally 2 to exercise multi-field
+        // `@provides(fields: "f g")` selections.
+        let want = if candidate_idxs.len() >= 2 && bool::arbitrary(u)? {
+            2
+        } else {
+            1
+        };
+        let mut chosen_names = Vec::with_capacity(want);
+        let mut remaining = candidate_idxs;
+        for _ in 0..want {
+            if remaining.is_empty() {
+                break;
+            }
+            let pick = u.choose_index(remaining.len())?;
+            let field_idx = remaining.remove(pick);
+            entity.fields[field_idx].external_in.push(primary);
+            entity.fields[field_idx].in_provides = true;
+            chosen_names.push(entity.fields[field_idx].name.clone());
+        }
+        if !chosen_names.is_empty() {
+            entity.provides_on_root = Some(chosen_names.join(" "));
+        }
+    }
+
     Ok(emit(subgraph_count, &entities, &query_root_name, &interfaces))
 }
 
@@ -482,7 +560,11 @@ fn emit(
             }
             let _ = writeln!(sdl, "type {query_root_name} {{");
             for e in &primary_for {
-                let _ = writeln!(sdl, "  q{}: {}", e.name, e.name);
+                let provides_clause = match &e.provides_on_root {
+                    Some(sel) => format!(" @provides(fields: \"{sel}\")"),
+                    None => String::new(),
+                };
+                let _ = writeln!(sdl, "  q{}: {}{provides_clause}", e.name, e.name);
             }
             for i in &interfaces_here {
                 let _ = writeln!(sdl, "  q{}: {}", i.name, i.name);
@@ -552,9 +634,14 @@ fn emit(
                             let _ = write!(directives, " @override(from: \"{from}\")");
                         }
                     }
-                } else if owned_here && f.hosts.len() > 1 && !field_has_override {
+                } else if owned_here
+                    && !field_has_override
+                    && (f.hosts.len() > 1 || f.in_provides)
+                {
                     // Once a field has an `@override`, post-composition there
                     // is exactly one resolver, so no host needs `@shareable`.
+                    // `@provides` adds the providing subgraph as an extra
+                    // resolver, so the owner must mark the field shareable.
                     directives.push_str(" @shareable");
                 }
                 if external_here {
