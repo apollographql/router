@@ -114,6 +114,13 @@ pub struct GenConfig {
     /// of `@requires(fields: "f")`. Pokes at PR #8016 territory: assembly
     /// of multiple `@external` inputs for a single `@requires` site.
     pub multi_field_requires_chance: u8,
+    /// Probability (0..=255) that an entity's `@key` becomes compound (more
+    /// than just `id`). When fired, 1 (or rarely 2) extra non-null scalar
+    /// key components are appended, e.g. `@key(fields: "id k0")` or
+    /// `@key(fields: "id k0 k1")`. The compound key is uniform across every
+    /// host of the entity. Probes the planner's compound-key handling for
+    /// entity boundary fetches.
+    pub compound_key_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -130,6 +137,7 @@ impl Default for GenConfig {
             progressive_override_chance: 90, // ~35% of overrides get a label
             interface_chance: 130, // ~51% of generated sets
             multi_field_requires_chance: 150, // ~59% of @requires sites
+            compound_key_chance: 130, // ~51% of entities get a compound key
         }
     }
 }
@@ -171,6 +179,12 @@ struct EntityPlan {
     /// Always one of `hosts`. Keeps Query non-shareable.
     primary: usize,
     fields: Vec<EntityField>,
+    /// Extra key components beyond the always-present `id: ID!`. Each is a
+    /// `(name, type_str)` pair where `type_str` is a non-null scalar (e.g.
+    /// `"String!"`). Empty for a single-field `@key(fields: "id")`. When
+    /// non-empty, every host emits these fields and the same compound
+    /// `@key(fields: "id ...")` directive.
+    extra_key_fields: Vec<(String, String)>,
 }
 
 /// One generated interface, declared in a single subgraph. Implementing
@@ -232,7 +246,26 @@ pub fn generate_federated_subgraphs(
             hosts,
             primary,
             fields,
+            extra_key_fields: Vec::new(),
         });
+    }
+
+    // Compound `@key` augmentation. With probability `compound_key_chance`,
+    // an entity gets 1 (or, half the time, 2) extra non-null scalar key
+    // components appended to its key. The same compound key is declared on
+    // every host. Probes compound-key handling at entity boundaries.
+    for entity in entities.iter_mut() {
+        if u.arbitrary::<u8>()? > cfg.compound_key_chance {
+            continue;
+        }
+        let extra_count = if bool::arbitrary(u)? { 1 } else { 2 };
+        const KEY_SCALARS: &[&str] = &["String!", "ID!", "Int!"];
+        for k in 0..extra_count {
+            let scalar = KEY_SCALARS[u.choose_index(KEY_SCALARS.len())?];
+            entity
+                .extra_key_fields
+                .push((format!("k{k}"), scalar.to_string()));
+        }
     }
 
     // Make sure every subgraph hosts at least one entity. If not, append the
@@ -478,12 +511,20 @@ fn emit(
             } else {
                 format!(" implements {}", implements.join(" & "))
             };
+            let mut key_fields_sel = String::from("id");
+            for (n, _) in &e.extra_key_fields {
+                key_fields_sel.push(' ');
+                key_fields_sel.push_str(n);
+            }
             let _ = writeln!(
                 sdl,
-                "type {}{implements_clause} @key(fields: \"id\") {{",
+                "type {}{implements_clause} @key(fields: \"{key_fields_sel}\") {{",
                 e.name
             );
             sdl.push_str("  id: ID!\n");
+            for (n, t) in &e.extra_key_fields {
+                let _ = writeln!(sdl, "  {n}: {t}");
+            }
             for f in &e.fields {
                 let owned_here = f.hosts.contains(&s);
                 let external_here = !owned_here && f.external_in.contains(&s);
