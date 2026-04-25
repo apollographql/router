@@ -1,0 +1,151 @@
+iter=879 seed=42 sha1_prefix=df35e0bf033f
+
+=== SUBGRAPHS ===
+# s0
+type Query {
+  qT0: T0
+  qT1: T1
+}
+
+type T0 @key(fields: "id") {
+  id: ID!
+}
+
+type T1 @key(fields: "id") {
+  id: ID!
+  f1_0: String!
+}
+
+
+# s1
+type T1 @key(fields: "id") {
+  id: ID!
+}
+
+
+
+=== SUPERGRAPH ===
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  S0 @join__graph(name: "s0", url: "http://s0")
+  S1 @join__graph(name: "s1", url: "http://s1")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+type Query @join__type(graph: S0) @join__type(graph: S1) {
+  qT0: T0 @join__field(graph: S0)
+  qT1: T1 @join__field(graph: S0)
+}
+
+type T0 @join__type(graph: S0, key: "id") {
+  id: ID!
+}
+
+type T1 @join__type(graph: S0, key: "id") @join__type(graph: S1, key: "id") {
+  id: ID!
+  f1_0: String! @join__field(graph: S0)
+}
+
+=== OPERATION ===
+query UsAYyN($__v0: Boolean!, $__v1: Boolean!) {
+  ... on Query @include(if: $__v1) {
+    ... on Query {
+      qT0 @skip(if: $__v0) {
+        rr7fzcHKq7b7cYqlUz0g0UqeSjcUg51: id @skip(if: $__v1)
+        id @include(if: $__v1)
+        ... on T0 @include(if: $__v1) {
+          id
+        }
+        m2jubr8TPec10: id @skip(if: $__v1)
+        id
+      }
+      oxt5KSbe_PAAAAAAAAAAAAAA2: qT1 {
+        id @include(if: $__v0)
+      }
+    }
+    qT0 {
+      id
+    }
+    qT0 {
+      id
+    }
+    qT0 @skip(if: $__v1) {
+      id @include(if: $__v1)
+    }
+  }
+  qT0 {
+    id @include(if: $__v1)
+  }
+  qT0 {
+    id
+  }
+  qT0 {
+    id @include(if: $__v1)
+  }
+}
+
+=== DIFF ===
+--- base
++++ head
+ {
+   "node": {
+     "Fetch": {
+       "subgraph_name": "s0",
+       "variable_usages": [
+         "__v0",
+         "__v1"
+       ],
+-      "operation_document": "query UsAYyN__s0__0($__v0: Boolean!, $__v1: Boolean!) { ... on Query @include(if: $__v1) { qT0 @skip(if: $__v0) { rr7fzcHKq7b7cYqlUz0g0UqeSjcUg51: id @skip(if: $__v1) id @include(if: $__v1) ... on T0 @include(if: $__v1) { id } m2jubr8TPec10: id @skip(if: $__v1) id } qT0 { id } qT0 @skip(if: $__v1) { id @include(if: $__v1) } oxt5KSbe_PAAAAAAAAAAAAAA2: qT1 { id @include(if: $__v0) } } qT0 { id @include(if: $__v1) id } }",
++      "operation_document": "query UsAYyN__s0__0($__v0: Boolean!, $__v1: Boolean!) { ... @include(if: $__v1) { qT0 @skip(if: $__v0) { rr7fzcHKq7b7cYqlUz0g0UqeSjcUg51: id @skip(if: $__v1) id @include(if: $__v1) ... on T0 @include(if: $__v1) { id } m2jubr8TPec10: id @skip(if: $__v1) id } qT0 { id } qT0 @skip(if: $__v1) { id @include(if: $__v1) } oxt5KSbe_PAAAAAAAAAAAAAA2: qT1 { id @include(if: $__v0) } } qT0 { id @include(if: $__v1) id } }",
+       "operation_name": "UsAYyN__s0__0",
+       "operation_kind": "query",
+       "input_rewrites": [],
+       "output_rewrites": [],
+       "context_rewrites": []
+     }
+   }
+ }
