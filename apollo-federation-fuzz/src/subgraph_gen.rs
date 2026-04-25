@@ -138,6 +138,13 @@ pub struct GenConfig {
     /// every implementer in the supergraph. Targets PR #8109 territory
     /// (`__typename` on interface object types).
     pub interface_object_chance: u8,
+    /// Probability (0..=255) that an entity gets one (or rarely two)
+    /// inter-entity reference fields, e.g. `related: T<j>`. Each
+    /// referencing subgraph emits a key-only stub of the target entity
+    /// if it doesn't already host that entity. Probes the planner's
+    /// entity-traversal join planning across subgraph boundaries —
+    /// needed for PR #8016 territory (multi-hop `@requires`).
+    pub inter_entity_ref_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -157,6 +164,7 @@ impl Default for GenConfig {
             compound_key_chance: 130, // ~51% of entities get a compound key
             provides_chance: 130, // ~51% of entities with eligible fields
             interface_object_chance: 150, // ~59% of generated interfaces
+            inter_entity_ref_chance: 150, // ~59% of entities get a ref
         }
     }
 }
@@ -214,6 +222,25 @@ struct EntityPlan {
     /// the primary's entity declaration so the planner can resolve them
     /// inline through this access path.
     provides_on_root: Option<String>,
+    /// Inter-entity reference fields, e.g. `related: T<j>`. These are
+    /// emitted alongside scalar fields in each contributing subgraph;
+    /// when a subgraph emits one but doesn't already host the target
+    /// entity, a key-only stub of the target is emitted in that
+    /// subgraph so federation can stitch the reference.
+    entity_ref_fields: Vec<EntityRefField>,
+}
+
+#[derive(Debug, Clone)]
+struct EntityRefField {
+    /// Field name (e.g. `r0_1` — `r` prefix to avoid collisions with
+    /// scalar `f<i>_<j>`, key `k<n>`, and interface-object `io<n>`
+    /// names).
+    name: String,
+    /// Index into `entities` of the target entity type.
+    target_idx: usize,
+    /// Subset of the containing entity's hosts that contribute this
+    /// reference. Multi-host fields get `@shareable` like scalars do.
+    hosts: Vec<usize>,
 }
 
 /// One generated interface, declared in a single subgraph. Implementing
@@ -297,6 +324,7 @@ pub fn generate_federated_subgraphs(
             fields,
             extra_key_fields: Vec::new(),
             provides_on_root: None,
+            entity_ref_fields: Vec::new(),
         });
     }
 
@@ -332,6 +360,36 @@ pub fn generate_federated_subgraphs(
             entities[idx].hosts.push(s);
             entities[idx].hosts.sort_unstable();
             entities[idx].hosts.dedup();
+        }
+    }
+
+    // Inter-entity reference augmentation. For each entity T_i, with
+    // probability `inter_entity_ref_chance`, append 1 (or sometimes 2)
+    // reference field(s) of the form `r<i>_<n>: T<j>` for some j != i.
+    // Each ref field gets a non-empty subset of T_i's hosts. Subgraphs
+    // that contribute the field but don't already host T_j will emit a
+    // key-only stub of T_j during emission.
+    if entities.len() >= 2 {
+        for i in 0..entities.len() {
+            if u.arbitrary::<u8>()? > cfg.inter_entity_ref_chance {
+                continue;
+            }
+            let want = if bool::arbitrary(u)? { 1 } else { 2 };
+            for n in 0..want {
+                let candidate_targets: Vec<usize> =
+                    (0..entities.len()).filter(|&j| j != i).collect();
+                if candidate_targets.is_empty() {
+                    break;
+                }
+                let target_idx =
+                    candidate_targets[u.choose_index(candidate_targets.len())?];
+                let host_subset = sample_nonempty_subset_of(u, &entities[i].hosts)?;
+                entities[i].entity_ref_fields.push(EntityRefField {
+                    name: format!("r{i}_{n}"),
+                    target_idx,
+                    hosts: host_subset,
+                });
+            }
         }
     }
 
@@ -515,13 +573,22 @@ pub fn generate_federated_subgraphs(
         // *not* declare any implementation types of `I0`. Even
         // implementers without an explicit `implements I0` clause in this
         // subgraph still count as implementers of the supergraph type.
+        // Also: inter-entity reference stubs of an implementer (emitted
+        // by another entity's `entity_ref_fields` pointing here) count
+        // as a declaration of that implementer too.
+        let stub_host = |s: usize, target_idx: usize| -> bool {
+            entities.iter().any(|e| {
+                e.entity_ref_fields
+                    .iter()
+                    .any(|r| r.target_idx == target_idx && r.hosts.contains(&s))
+            })
+        };
         let candidates: Vec<usize> = (0..subgraph_count)
             .filter(|s| {
                 *s != iface.host_subgraph
-                    && !iface
-                        .implementing_entities
-                        .iter()
-                        .any(|&e_idx| entities[e_idx].hosts.contains(s))
+                    && !iface.implementing_entities.iter().any(|&e_idx| {
+                        entities[e_idx].hosts.contains(s) || stub_host(*s, e_idx)
+                    })
             })
             .collect();
         if candidates.is_empty() {
@@ -780,6 +847,55 @@ fn emit(
                     let _ = write!(directives, " @requires(fields: \"{sel}\")");
                 }
                 let _ = writeln!(sdl, "  {}: {}{}", f.name, f.type_str, directives);
+            }
+            // Inter-entity reference fields. Multi-host refs get
+            // @shareable like scalar fields do (federation requires
+            // every resolver of a field to opt into sharing).
+            for r in &e.entity_ref_fields {
+                if !r.hosts.contains(&s) {
+                    continue;
+                }
+                let shareable = if r.hosts.len() > 1 { " @shareable" } else { "" };
+                let _ = writeln!(
+                    sdl,
+                    "  {}: {}{}",
+                    r.name, entities[r.target_idx].name, shareable
+                );
+            }
+            sdl.push_str("}\n\n");
+        }
+
+        // Key-only stubs: for any entity referenced from this subgraph
+        // (via someone's `entity_ref_fields`) that this subgraph doesn't
+        // itself host, emit a stub `type T_j @key(fields: "id [k0 k1]")
+        // { id: ID! [k0: ... ] }` so federation can stitch the reference.
+        let mut needs_stub: Vec<usize> = Vec::new();
+        for e in entities.iter() {
+            for r in &e.entity_ref_fields {
+                if r.hosts.contains(&s)
+                    && !entities[r.target_idx].hosts.contains(&s)
+                    && !needs_stub.contains(&r.target_idx)
+                {
+                    needs_stub.push(r.target_idx);
+                }
+            }
+        }
+        needs_stub.sort_unstable();
+        for j in needs_stub {
+            let target = &entities[j];
+            let mut key_fields_sel = String::from("id");
+            for (n, _) in &target.extra_key_fields {
+                key_fields_sel.push(' ');
+                key_fields_sel.push_str(n);
+            }
+            let _ = writeln!(
+                sdl,
+                "type {} @key(fields: \"{key_fields_sel}\") {{",
+                target.name
+            );
+            sdl.push_str("  id: ID!\n");
+            for (n, t) in &target.extra_key_fields {
+                let _ = writeln!(sdl, "  {n}: {t}");
             }
             sdl.push_str("}\n\n");
         }
