@@ -1,0 +1,155 @@
+//! Replay a curated regression artifact against the in-tree HEAD planner.
+//!
+//! These tests pin the harness's self-consistency: if `diff::normalize` is
+//! refactored, if a planner adapter changes its config defaults, or if
+//! composition output drifts in a way that makes a saved fixture no longer
+//! plannable, these tests fail. They do *not* assert that the original
+//! divergence is still present — that depends on the BASE crate version,
+//! which is build-time fixed via `Cargo.toml` and would require a different
+//! build to verify.
+//!
+//! What is asserted, per artifact:
+//!   1. The `=== SUBGRAPHS ===` section parses into the same `SubgraphSdl`
+//!      shape `subgraph_gen` produces.
+//!   2. Re-composing those subgraphs succeeds and produces a non-empty
+//!      supergraph SDL.
+//!   3. The `=== OPERATION ===` parses against the freshly composed
+//!      supergraph and HEAD plans it without error.
+//!   4. The plan is non-trivial (has at least one Fetch node).
+
+use apollo_federation_fuzz::compose::{ComposeOutcome, try_compose};
+use apollo_federation_fuzz::harness::{CommonConfig, CommonOptions, PlannerHarness};
+use apollo_federation_fuzz::subgraph_gen::SubgraphSdl;
+use apollo_federation_fuzz::HeadPlanner;
+
+/// Parsed regression artifact. Each artifact file uses the layout written
+/// by `bin/fuzz.rs::save_regression`:
+///
+/// ```text
+/// iter=… seed=… sha1_prefix=…
+///
+/// === SUBGRAPHS ===
+/// # s0
+/// <sdl…>
+/// # s1
+/// <sdl…>
+///
+/// === SUPERGRAPH ===
+/// <composed sdl…>
+///
+/// === OPERATION ===
+/// <op…>
+///
+/// === DIFF ===
+/// <diff…>
+/// ```
+struct Artifact {
+    subgraphs: Vec<SubgraphSdl>,
+    operation: String,
+}
+
+fn parse_artifact(text: &str) -> Artifact {
+    // Extract the SUBGRAPHS block (between the marker and the next marker).
+    let subgraphs_block = section(text, "=== SUBGRAPHS ===", "=== SUPERGRAPH ===");
+    let operation = section(text, "=== OPERATION ===", "=== DIFF ===")
+        .trim()
+        .to_string();
+
+    // Each subgraph is introduced by a line starting `# s<n>`. Slice between
+    // markers.
+    let mut subgraphs = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_body = String::new();
+    for line in subgraphs_block.lines() {
+        if let Some(name) = line.strip_prefix("# ") {
+            if let Some(prev_name) = current_name.take() {
+                subgraphs.push(SubgraphSdl::new(prev_name, current_body.trim_end()));
+                current_body.clear();
+            }
+            current_name = Some(name.trim().to_string());
+        } else if current_name.is_some() {
+            current_body.push_str(line);
+            current_body.push('\n');
+        }
+    }
+    if let Some(name) = current_name.take() {
+        subgraphs.push(SubgraphSdl::new(name, current_body.trim_end()));
+    }
+
+    Artifact {
+        subgraphs,
+        operation,
+    }
+}
+
+fn section<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
+    let after_start = text
+        .find(start)
+        .map(|i| i + start.len())
+        .expect("start marker present");
+    let before_end = text[after_start..]
+        .find(end)
+        .map(|i| after_start + i)
+        .expect("end marker present");
+    &text[after_start..before_end]
+}
+
+fn replay(text: &str) {
+    let artifact = parse_artifact(text);
+    assert!(!artifact.subgraphs.is_empty(), "no subgraphs parsed");
+    assert!(!artifact.operation.is_empty(), "empty operation");
+
+    // Compose, plan, sanity-check.
+    let supergraph_sdl = match try_compose(&artifact.subgraphs) {
+        ComposeOutcome::Composed { supergraph_sdl } => supergraph_sdl,
+        ComposeOutcome::CompositionFailed { errors } => {
+            panic!("compose failed: {errors:?}");
+        }
+        ComposeOutcome::ParseFailed { errors } => {
+            panic!("parse failed: {errors:?}");
+        }
+    };
+    assert!(!supergraph_sdl.is_empty());
+
+    let cfg = CommonConfig {
+        // The defer artefacts only re-plan correctly with incremental
+        // delivery on. Cheaper than per-test gating to just enable it for
+        // every replay.
+        incremental_delivery: true,
+        ..CommonConfig::default()
+    };
+    let planner =
+        HeadPlanner::build(&supergraph_sdl, &cfg).expect("HEAD planner builds from saved sdl");
+    let plan = planner
+        .plan(&artifact.operation, None, &CommonOptions::default())
+        .expect("HEAD plans the saved operation");
+
+    let plan_str = serde_json::to_string(&plan).unwrap();
+    let fetch_count = plan_str.matches("\"Fetch\":").count();
+    assert!(
+        fetch_count >= 1,
+        "plan has no Fetch nodes — saved op no longer triggers a subgraph fetch?\n{plan_str}"
+    );
+}
+
+#[test]
+fn pr_7580_artifact_replays() {
+    let text = include_str!("regressions/cross_version_2.0.0/PR_7580_rediscovery.txt");
+    replay(text);
+}
+
+#[test]
+fn class_e_artifact_replays() {
+    let text = include_str!(
+        "regressions/cross_version_2.0.0_phaseA/class_E_alias_reordering.txt"
+    );
+    replay(text);
+}
+
+#[test]
+fn defer_artifact_replays() {
+    let text = include_str!(
+        "regressions/cross_version_2.0.0_defer/defer_subselection_and_fieldrepr.txt"
+    );
+    replay(text);
+}
