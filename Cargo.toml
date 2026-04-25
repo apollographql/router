@@ -6,6 +6,7 @@ members = [
     "apollo-router-benchmarks",
     "apollo-federation",
     "apollo-federation/cli",
+    "apollo-federation-fuzz",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
     "examples/cache-control/rhai",

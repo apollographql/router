@@ -1,0 +1,44 @@
+[package]
+name = "apollo-federation-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Generative differential testing for the Apollo Federation query planner"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "fuzz"
+path = "src/bin/fuzz.rs"
+
+[features]
+default = []
+# When enabled, the head adapter calls into apollo_federation::correctness::check_plan
+# before returning each plan. Useful as a sanity gate against the diff layer.
+correctness = ["apollo-federation/correctness"]
+
+[dependencies]
+# HEAD: the in-tree, under-development planner.
+apollo-federation = { path = "../apollo-federation" }
+
+# BASELINE: a previously published planner from crates.io, renamed so both
+# versions can be linked into the same binary. Swap to `git = "..."`/`rev = "..."`
+# (or bump the version) to compare against any other release.
+apollo-federation-base = { package = "apollo-federation", version = "=2.13.0" }
+
+apollo-compiler.workspace = true
+apollo-parser.workspace = true
+apollo-smith.workspace = true
+arbitrary = { version = "1", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+similar.workspace = true
+sha1.workspace = true
+hex.workspace = true
+thiserror = "2.0"
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1.5"
+insta.workspace = true
