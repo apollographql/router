@@ -1,11 +1,12 @@
 //! Layer 1: federated subgraph SDL generator.
 //!
 //! Current scope: composition-valid subgraph sets exercising `@key`,
-//! `@shareable`, `@requires`, and `@external`. Still narrow:
+//! `@shareable`, `@requires`, `@external`, and `@override` (plus optional
+//! progressive labels). Still narrow:
 //! - All object types are entities with single-field `id: ID!` keys.
 //! - No interfaces, unions, enums, input objects, or inter-object fields.
 //! - Built-in scalars only.
-//! - `@override`, `@provides`, `@interfaceObject` not yet emitted.
+//! - `@provides`, `@interfaceObject` not yet emitted.
 //!
 //! The generator is driven by [`arbitrary::Unstructured`] so it plugs into
 //! both proptest and libfuzzer harnesses unchanged.
@@ -90,6 +91,16 @@ pub struct GenConfig {
     /// always use `Query`. Pokes at PR #7580: planner used to emit
     /// `... on Query` even when the root was renamed.
     pub renamed_root_chance: u8,
+    /// Probability (0..=255) that an eligible 2-host field gets an
+    /// `@override(from:)` directive transferring ownership. Eligibility =
+    /// non-key field hosted by exactly 2 subgraphs with no `@requires` /
+    /// `@external` / `@provides` entanglement and no prior `@override`.
+    /// Pokes at PR #7929 territory.
+    pub override_chance: u8,
+    /// Conditional on `override_chance` firing: probability (0..=255) that
+    /// the emitted `@override` is "progressive" — gets a `label:` argument
+    /// (`"percent(N)"`). Requires federation v2.7+ in the supergraph.
+    pub progressive_override_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -102,6 +113,8 @@ impl Default for GenConfig {
             max_fields_per_entity: 5,
             requires_chance: 200, // ~78% of eligible entities
             renamed_root_chance: 80, // ~31% of generated sets
+            override_chance: 160, // ~62% of eligible 2-host fields
+            progressive_override_chance: 90, // ~35% of overrides get a label
         }
     }
 }
@@ -118,6 +131,11 @@ const SCALAR_TYPES: &[&str] = &["ID", "String", "Int", "Float", "Boolean"];
 ///   field's `@requires(fields: <self.name>)` in that subgraph.
 /// - `requires_in`: per-subgraph `@requires` directive. The string is the
 ///   selection that goes inside `@requires(fields: "<...>")`.
+/// - `override_in`: at most one `(new_owner_subgraph_index, "from"_subgraph_name,
+///   optional_label)` triple. The subgraph at `new_owner_subgraph_index` emits
+///   `@override(from: "<from>", [label: "<label>"])`; the `from` subgraph
+///   keeps its declaration but neither side gets `@shareable`. Federation
+///   forbids more than one `@override` per field.
 #[derive(Debug, Clone)]
 struct EntityField {
     name: String,
@@ -125,6 +143,7 @@ struct EntityField {
     hosts: Vec<usize>,
     external_in: Vec<usize>,
     requires_in: Vec<(usize, String)>,
+    override_in: Option<(usize, String, Option<String>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +192,7 @@ pub fn generate_federated_subgraphs(
                 hosts: field_hosts,
                 external_in: Vec::new(),
                 requires_in: Vec::new(),
+                override_in: None,
             });
         }
 
@@ -250,6 +270,56 @@ pub fn generate_federated_subgraphs(
             .push((requirer_host, provider_name));
     }
 
+    // @override augmentation. Pokes at PR #7929 territory.
+    //
+    // Federation rules we honour:
+    // - At most one `@override` per field across all subgraphs.
+    // - Cannot @override "from self" — `from` must be a different subgraph.
+    // - Cannot combine with `@external` / `@requires` / `@provides` on the
+    //   same field. We satisfy this by only picking fields with empty
+    //   `external_in` / `requires_in` (we don't generate `@provides` yet).
+    // - @key fields are off-limits (we only override generated non-key fields).
+    //
+    // Restricting candidates to fields hosted by exactly 2 subgraphs keeps
+    // the rule "no other host needs @shareable post-override" trivially
+    // satisfied: there *are* no other hosts.
+    for entity in entities.iter_mut() {
+        if u.arbitrary::<u8>()? > cfg.override_chance {
+            continue;
+        }
+        let candidates: Vec<usize> = entity
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                f.hosts.len() == 2
+                    && f.external_in.is_empty()
+                    && f.requires_in.is_empty()
+                    && f.override_in.is_none()
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let field_idx = candidates[u.choose_index(candidates.len())?];
+        let hosts = &entity.fields[field_idx].hosts;
+        let new_owner_pos = u.choose_index(2)?;
+        let new_owner = hosts[new_owner_pos];
+        let from_subgraph = hosts[1 - new_owner_pos];
+        let from_name = format!("s{from_subgraph}");
+
+        let label = if u.arbitrary::<u8>()? < cfg.progressive_override_chance {
+            // `percent(N)` is the simplest progressive-override label that
+            // composition will accept. Choose 0..=100 so we hit edges.
+            let pct = u.int_in_range(0..=100u32)?;
+            Some(format!("percent({pct})"))
+        } else {
+            None
+        };
+        entity.fields[field_idx].override_in = Some((new_owner, from_name, label));
+    }
+
     Ok(emit(subgraph_count, &entities, &query_root_name))
 }
 
@@ -295,7 +365,27 @@ fn emit(subgraph_count: usize, entities: &[EntityPlan], query_root_name: &str) -
 
                 // Build directive suffix.
                 let mut directives = String::new();
-                if owned_here && f.hosts.len() > 1 {
+                let is_override_owner = f
+                    .override_in
+                    .as_ref()
+                    .is_some_and(|(idx, _, _)| *idx == s);
+                let field_has_override = f.override_in.is_some();
+                if is_override_owner {
+                    let (_, from, label) = f.override_in.as_ref().unwrap();
+                    match label {
+                        Some(l) => {
+                            let _ = write!(
+                                directives,
+                                " @override(from: \"{from}\", label: \"{l}\")"
+                            );
+                        }
+                        None => {
+                            let _ = write!(directives, " @override(from: \"{from}\")");
+                        }
+                    }
+                } else if owned_here && f.hosts.len() > 1 && !field_has_override {
+                    // Once a field has an `@override`, post-composition there
+                    // is exactly one resolver, so no host needs `@shareable`.
                     directives.push_str(" @shareable");
                 }
                 if external_here {
