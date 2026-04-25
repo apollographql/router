@@ -1,10 +1,11 @@
 //! Layer 1: federated subgraph SDL generator.
 //!
-//! Phase C scope: a constructive generator that emits **composition-valid**
-//! subgraph sets exercising `@key` + `@shareable`. Intentionally narrow:
+//! Current scope: composition-valid subgraph sets exercising `@key`,
+//! `@shareable`, `@requires`, and `@external`. Still narrow:
 //! - All object types are entities with single-field `id: ID!` keys.
-//! - No interfaces, unions, enums, input objects, or inter-object fields yet.
-//! - Built-in scalars only. (Phase E expands the directive surface.)
+//! - No interfaces, unions, enums, input objects, or inter-object fields.
+//! - Built-in scalars only.
+//! - `@override`, `@provides`, `@interfaceObject` not yet emitted.
 //!
 //! The generator is driven by [`arbitrary::Unstructured`] so it plugs into
 //! both proptest and libfuzzer harnesses unchanged.
@@ -80,6 +81,9 @@ pub struct GenConfig {
     pub min_entities: usize,
     pub max_entities: usize,
     pub max_fields_per_entity: usize,
+    /// Probability (0..=255) that an entity hosted by ≥2 subgraphs gets a
+    /// `@requires` link added. Set to 0 to disable.
+    pub requires_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -88,8 +92,9 @@ impl Default for GenConfig {
             min_subgraphs: 2,
             max_subgraphs: 4,
             min_entities: 2,
-            max_entities: 5,
-            max_fields_per_entity: 4,
+            max_entities: 6,
+            max_fields_per_entity: 5,
+            requires_chance: 200, // ~78% of eligible entities
         }
     }
 }
@@ -99,11 +104,20 @@ const SCALAR_TYPES: &[&str] = &["ID", "String", "Int", "Float", "Boolean"];
 /// One non-key field on an entity, plus the indices of the subgraphs that
 /// contribute it. If `hosts.len() > 1` the field is emitted with `@shareable`
 /// in each contributing subgraph.
+///
+/// Federation extras:
+/// - `external_in`: subgraphs in which this field is *also* declared, but
+///   only as an `@external` stub (it isn't owned there). Driven by another
+///   field's `@requires(fields: <self.name>)` in that subgraph.
+/// - `requires_in`: per-subgraph `@requires` directive. The string is the
+///   selection that goes inside `@requires(fields: "<...>")`.
 #[derive(Debug, Clone)]
 struct EntityField {
     name: String,
     type_str: String,
     hosts: Vec<usize>,
+    external_in: Vec<usize>,
+    requires_in: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +154,8 @@ pub fn generate_federated_subgraphs(
                 name: format!("f{i}_{j}"),
                 type_str,
                 hosts: field_hosts,
+                external_in: Vec::new(),
+                requires_in: Vec::new(),
             });
         }
 
@@ -166,6 +182,55 @@ pub fn generate_federated_subgraphs(
             entities[idx].hosts.sort_unstable();
             entities[idx].hosts.dedup();
         }
+    }
+
+    // @requires augmentation. For each multi-host entity, with probability
+    // `requires_chance/256`, attempt to wire up a `@requires` link between
+    // two of its non-key fields living in different exclusive subgraphs.
+    for entity in entities.iter_mut() {
+        if entity.hosts.len() < 2 {
+            continue;
+        }
+        if u.arbitrary::<u8>()? > cfg.requires_chance {
+            continue;
+        }
+
+        // Candidates: fields hosted by exactly one subgraph (exclusive).
+        // Group them by their host so we can pick a (provider, requirer)
+        // pair living in different subgraphs.
+        let exclusive_fields: Vec<usize> = entity
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.hosts.len() == 1)
+            .map(|(i, _)| i)
+            .collect();
+        if exclusive_fields.len() < 2 {
+            continue;
+        }
+
+        let provider_idx = exclusive_fields[u.choose_index(exclusive_fields.len())?];
+        let provider_host = entity.fields[provider_idx].hosts[0];
+
+        let requirer_candidates: Vec<usize> = exclusive_fields
+            .iter()
+            .copied()
+            .filter(|&i| i != provider_idx && entity.fields[i].hosts[0] != provider_host)
+            .collect();
+        if requirer_candidates.is_empty() {
+            continue;
+        }
+
+        let requirer_idx = requirer_candidates[u.choose_index(requirer_candidates.len())?];
+        let requirer_host = entity.fields[requirer_idx].hosts[0];
+
+        // Apply the link: provider becomes @external in requirer's subgraph;
+        // requirer gets @requires(fields: "<provider.name>") in its subgraph.
+        let provider_name = entity.fields[provider_idx].name.clone();
+        entity.fields[provider_idx].external_in.push(requirer_host);
+        entity.fields[requirer_idx]
+            .requires_in
+            .push((requirer_host, provider_name));
     }
 
     Ok(emit(subgraph_count, &entities))
@@ -196,11 +261,28 @@ fn emit(subgraph_count: usize, entities: &[EntityPlan]) -> Vec<SubgraphSdl> {
             let _ = writeln!(sdl, "type {} @key(fields: \"id\") {{", e.name);
             sdl.push_str("  id: ID!\n");
             for f in &e.fields {
-                if !f.hosts.contains(&s) {
+                let owned_here = f.hosts.contains(&s);
+                let external_here = !owned_here && f.external_in.contains(&s);
+                if !owned_here && !external_here {
                     continue;
                 }
-                let shareable = if f.hosts.len() > 1 { " @shareable" } else { "" };
-                let _ = writeln!(sdl, "  {}: {}{}", f.name, f.type_str, shareable);
+
+                // Build directive suffix.
+                let mut directives = String::new();
+                if owned_here && f.hosts.len() > 1 {
+                    directives.push_str(" @shareable");
+                }
+                if external_here {
+                    directives.push_str(" @external");
+                }
+                if let Some((_, sel)) = f
+                    .requires_in
+                    .iter()
+                    .find(|(sub, _)| *sub == s && owned_here)
+                {
+                    let _ = write!(directives, " @requires(fields: \"{sel}\")");
+                }
+                let _ = writeln!(sdl, "  {}: {}{}", f.name, f.type_str, directives);
             }
             sdl.push_str("}\n\n");
         }
