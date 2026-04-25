@@ -118,8 +118,21 @@ pub fn generate_operation_with_config(
     let decorated = decorate_operation(&op_text, &mut decorator_u, cfg)
         .map_err(|e| OpGenError::Decorate(e.to_string()))?;
 
+    // Composed federation supergraphs don't declare `@defer` (the planner
+    // augments its internal schema when `incremental_delivery` is on, but
+    // the SDL we hand to op-gen for validation is the raw composed form).
+    // Inject the directive declaration locally so apollo-compiler's
+    // validator accepts decorated operations. Harmless when no `@defer`
+    // was emitted.
+    let schema_for_validation: String = if cfg.defer_chance > 0 {
+        format!(
+            "directive @defer(if: Boolean! = true, label: String) on FRAGMENT_SPREAD | INLINE_FRAGMENT\n\n{api_schema_sdl}"
+        )
+    } else {
+        api_schema_sdl.to_string()
+    };
     let valid_schema =
-        apollo_compiler::Schema::parse_and_validate(api_schema_sdl, "api.graphql")
+        apollo_compiler::Schema::parse_and_validate(&schema_for_validation, "api.graphql")
             .map_err(|e| OpGenError::SchemaValidate(e.to_string()))?;
     let _doc: Valid<ExecutableDocument> =
         ExecutableDocument::parse_and_validate(&valid_schema, &decorated, "operation.graphql")

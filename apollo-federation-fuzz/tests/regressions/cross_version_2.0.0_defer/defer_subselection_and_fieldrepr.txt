@@ -1,0 +1,231 @@
+iter=52 seed=17 sha1_prefix=01bfd7cd7952
+
+=== SUBGRAPHS ===
+# s0
+type Query {
+  qT0: T0 @provides(fields: "f0_0 f0_2")
+}
+
+type T0 @key(fields: "id") {
+  id: ID!
+  f0_0: Int! @external
+  f0_1: String
+  f0_2: Int @external
+  f0_3: Float @shareable
+}
+
+
+# s1
+type Query {
+  qI0: I0
+}
+
+interface I0 {
+  id: ID!
+}
+
+type T0 implements I0 @key(fields: "id") {
+  id: ID!
+  f0_0: Int! @external
+  f0_1: String @override(from: "s0", label: "percent(41)")
+  f0_2: Int @shareable @requires(fields: "f0_0")
+  f0_3: Float @shareable
+}
+
+
+# s2
+type Query {
+  qT1: T1
+}
+
+type T0 @key(fields: "id") {
+  id: ID!
+  f0_0: Int! @shareable
+  f0_3: Float @shareable
+}
+
+type T1 @key(fields: "id") {
+  id: ID!
+  f1_0: ID
+  f1_1: Int
+}
+
+
+# s3
+type T1 @key(fields: "id") {
+  id: ID!
+}
+
+
+
+=== SUPERGRAPH ===
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  S0 @join__graph(name: "s0", url: "http://s0")
+  S1 @join__graph(name: "s1", url: "http://s1")
+  S2 @join__graph(name: "s2", url: "http://s2")
+  S3 @join__graph(name: "s3", url: "http://s3")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+type Query @join__type(graph: S0) @join__type(graph: S1) @join__type(graph: S2) @join__type(graph: S3) {
+  qT0: T0 @join__field(graph: S0, provides: "f0_0 f0_2")
+  qI0: I0 @join__field(graph: S1)
+  qT1: T1 @join__field(graph: S2)
+}
+
+type T0 implements I0 @join__implements(graph: S1, interface: "I0") @join__type(graph: S0, key: "id") @join__type(graph: S1, key: "id") @join__type(graph: S2, key: "id") {
+  id: ID!
+  f0_0: Int! @join__field(graph: S0, external: true) @join__field(graph: S1, external: true) @join__field(graph: S2)
+  f0_1: String @join__field(graph: S0, overrideLabel: "percent(41)") @join__field(graph: S1, override: "s0", overrideLabel: "percent(41)")
+  f0_2: Int @join__field(graph: S0, external: true) @join__field(graph: S1, requires: "f0_0")
+  f0_3: Float
+}
+
+interface I0 @join__type(graph: S1) {
+  id: ID!
+}
+
+type T1 @join__type(graph: S2, key: "id") @join__type(graph: S3, key: "id") {
+  id: ID!
+  f1_0: ID @join__field(graph: S2)
+  f1_1: Int @join__field(graph: S2)
+}
+
+=== OPERATION ===
+query($__v1: Boolean!) {
+  zvOkhmfZYtyUN47l2: qT0 @include(if: $__v1) {
+    DwVAdN4l4Ey7WRzJQ82: id
+    f0_2
+  }
+  qT0 {
+    f0_2
+    ... @defer {
+      id
+      f0_1
+      f0_3 @include(if: $__v1)
+      f0_3
+      id
+    }
+    mm5: f0_1
+    lypL9FkK4jeD5: f0_2
+    f0_3
+  }
+}
+
+=== DIFF ===
+--- base
++++ head
+ {
+   "node": {
+     "Defer": {
+       "primary": {
++        "sub_selection": "{ zvOkhmfZYtyUN47l2: qT0 @include(if: $__v1) { DwVAdN4l4Ey7WRzJQ82: id f0_2 } qT0 { f0_2 lypL9FkK4jeD5: f0_2 mm5: f0_1 f0_3 } }",
+         "node": {
+           "Fetch": {
+             "subgraph_name": "s0",
+             "id": 0,
+             "variable_usages": [
+               "__v1"
+             ],
+             "operation_document": "query($__v1: Boolean!) { zvOkhmfZYtyUN47l2: qT0 @include(if: $__v1) { DwVAdN4l4Ey7WRzJQ82: id f0_2 } qT0 { __typename f0_2 lypL9FkK4jeD5: f0_2 id mm5: f0_1 f0_3 } }",
+             "operation_kind": "query",
+             "input_rewrites": [],
+             "output_rewrites": [],
+             "context_rewrites": []
+           }
+         }
+       },
+       "deferred": [
+         {
+           "depends": [
+             {
+               "id": "0"
+             }
+           ],
+           "query_path": [
+             {
+-              "Field": "qT0"
++              "Field": {
++                "response_key": "qT0"
++              }
+             }
+           ],
+           "sub_selection": "{ id f0_1 f0_3 @include(if: $__v1) f0_3 }",
+           "node": {
+             "Flatten": {
+               "path": [
+                 {
+                   "Key": [
+                     "qT0",
+                     null
+                   ]
+                 }
+               ],
+               "node": {
+                 "Fetch": {
+                   "subgraph_name": "s0",
+                   "variable_usages": [
+                     "__v1"
+                   ],
+                   "requires": [
+                     "... on T0 { __typename id }"
+                   ],
+                   "operation_document": "query($representations: [_Any!]!, $__v1: Boolean!) { _entities(representations: $representations) { ... on T0 { f0_1 f0_3 @include(if: $__v1) f0_3 } } }",
+                   "operation_kind": "query",
+                   "input_rewrites": [],
+                   "output_rewrites": [],
+                   "context_rewrites": []
+                 }
+               }
+             }
+           }
+         }
+       ]
+     }
+   }
+ }
