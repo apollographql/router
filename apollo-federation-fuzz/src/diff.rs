@@ -71,6 +71,39 @@ fn normalize(value: &Value) -> Value {
         Value::Object(map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
             for (k, v) in map {
+                // `statistics` is planner metadata, not the plan itself.
+                // Cross-version drift here is well-known noise: e.g.
+                // `best_plan_cost` was added to QueryPlanningStatistics
+                // after 2.1.3, so keeping it would flag every plan as
+                // divergent for that single metadata field.
+                if k == "statistics" {
+                    continue;
+                }
+                // Drop null-valued keys: older versions (e.g. 2.0.0) serialize
+                // absent options as `"x": null`, newer ones add
+                // `#[serde(skip_serializing_if = "Option::is_none")]`. These
+                // are semantically identical (field absent) but produce a
+                // diff line on every plan otherwise.
+                if v.is_null() {
+                    continue;
+                }
+                // The `requires:` array on entity-fetch nodes was serialized
+                // as raw SDL strings in 2.0.0 ("... on T0 { __typename id }")
+                // and as a structured AST tree in newer versions. Same plan,
+                // different wire format. Render both back to canonical SDL
+                // strings so the diff layer flags only genuine algorithm
+                // differences.
+                if let ("requires", Value::Array(items)) = (k.as_str(), v) {
+                    let canon: Vec<Value> = items
+                        .iter()
+                        .map(|item| match item {
+                            Value::String(s) => Value::String(canonicalize_sdl(s)),
+                            _ => Value::String(render_selection_node(item)),
+                        })
+                        .collect();
+                    out.insert(k.clone(), Value::Array(canon));
+                    continue;
+                }
                 let normalized = normalize(v);
                 // The `Parallel` plan node has a `nodes` array whose ordering
                 // is not semantically meaningful. We lex-sort by canonical
@@ -91,6 +124,53 @@ fn normalize(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(normalize).collect()),
         other => other.clone(),
     }
+}
+
+/// Render a selection-set AST node back to its SDL string form so the
+/// raw-SDL representation (older versions) and the AST representation
+/// (newer versions) collapse to the same canonical text.
+fn render_selection_node(node: &Value) -> String {
+    let obj = match node.as_object() {
+        Some(o) => o,
+        None => return String::new(),
+    };
+    let kind = obj.get("kind").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "Field" => {
+            let name = obj.get("name").and_then(Value::as_str).unwrap_or("");
+            let alias = obj.get("alias").and_then(Value::as_str);
+            let mut out = String::new();
+            if let Some(a) = alias {
+                out.push_str(a);
+                out.push_str(": ");
+            }
+            out.push_str(name);
+            if let Some(Value::Array(sels)) = obj.get("selections") {
+                out.push_str(" { ");
+                let parts: Vec<String> = sels.iter().map(render_selection_node).collect();
+                out.push_str(&parts.join(" "));
+                out.push_str(" }");
+            }
+            out
+        }
+        "InlineFragment" => {
+            let cond = obj.get("typeCondition").and_then(Value::as_str).unwrap_or("");
+            let sels = obj
+                .get("selections")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let parts: Vec<String> = sels.iter().map(render_selection_node).collect();
+            format!("... on {cond} {{ {} }}", parts.join(" "))
+        }
+        _ => String::new(),
+    }
+}
+
+/// Trim and squash whitespace so trivially-different SDL strings collapse
+/// to the same canonical form.
+fn canonicalize_sdl(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn render_diff(head: &Value, base: &Value) -> String {

@@ -25,6 +25,10 @@ apollo-federation = { path = "../apollo-federation" }
 # BASELINE: a previously published planner from crates.io, renamed so both
 # versions can be linked into the same binary. Swap to `git = "..."`/`rev = "..."`
 # (or bump the version) to compare against any other release.
+#
+# Note: older versions (pre-~2.10) lack `apollo_federation::composition`, so
+# composition only ever runs on HEAD. Both planners ingest the resulting
+# supergraph SDL string, which is the version-agnostic contract.
 apollo-federation-base = { package = "apollo-federation", version = "=2.13.0" }
 
 apollo-compiler.workspace = true

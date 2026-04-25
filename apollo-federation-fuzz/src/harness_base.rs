@@ -8,7 +8,6 @@
 use std::num::NonZeroU32;
 
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::collections::IndexSet;
 use apollo_federation_base::Supergraph;
 use apollo_federation_base::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation_base::query_plan::query_planner::QueryPlanOptions;
@@ -30,11 +29,12 @@ impl PlannerHarness for BasePlanner {
     }
 
     fn build(supergraph_sdl: &str, cfg: &CommonConfig) -> Result<Self, HarnessError> {
-        let supergraph =
-            Supergraph::new_with_router_specs(supergraph_sdl).map_err(|e| HarnessError::Supergraph {
-                version: VERSION,
-                detail: e.to_string(),
-            })?;
+        // 2.1.3 lacks `new_with_router_specs`. Both fall back to `new`,
+        // which uses the default supported-spec set.
+        let supergraph = Supergraph::new(supergraph_sdl).map_err(|e| HarnessError::Supergraph {
+            version: VERSION,
+            detail: e.to_string(),
+        })?;
 
         let max_evaluated_plans =
             NonZeroU32::new(cfg.max_evaluated_plans.max(1)).unwrap_or(NonZeroU32::new(1).unwrap());
@@ -87,11 +87,14 @@ impl PlannerHarness for BasePlanner {
             })
             .transpose()?;
 
+        // QueryPlanOptions shape varies across versions. Using struct-update
+        // syntax means we set the field that's stable across the 2.x series
+        // (`override_conditions`) and let the version's `Default` fill in
+        // the rest. This is exactly the kind of drift the adapter absorbs.
+        let _ = (&opts.disabled_subgraph_names, opts.non_local_selections_limit);
         let options = QueryPlanOptions {
             override_conditions: opts.override_conditions.clone(),
-            check_for_cooperative_cancellation: None,
-            non_local_selections_limit_enabled: opts.non_local_selections_limit,
-            disabled_subgraph_names: opts.disabled_subgraph_names.iter().cloned().collect::<IndexSet<_>>(),
+            ..Default::default()
         };
 
         let plan = self
