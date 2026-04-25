@@ -108,6 +108,12 @@ pub struct GenConfig {
     /// interfaces) and PR #7929 (progressive `@override` on interface
     /// implementations). Set to 0 to disable.
     pub interface_chance: u8,
+    /// Conditional on `requires_chance` firing: probability (0..=255) that
+    /// the emitted `@requires` pulls in a *second* provider field owned by
+    /// yet another subgraph, producing `@requires(fields: "f g")` instead
+    /// of `@requires(fields: "f")`. Pokes at PR #8016 territory: assembly
+    /// of multiple `@external` inputs for a single `@requires` site.
+    pub multi_field_requires_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -123,6 +129,7 @@ impl Default for GenConfig {
             override_chance: 160, // ~62% of eligible 2-host fields
             progressive_override_chance: 90, // ~35% of overrides get a label
             interface_chance: 130, // ~51% of generated sets
+            multi_field_requires_chance: 150, // ~59% of @requires sites
         }
     }
 }
@@ -285,13 +292,40 @@ pub fn generate_federated_subgraphs(
         let requirer_idx = requirer_candidates[u.choose_index(requirer_candidates.len())?];
         let requirer_host = entity.fields[requirer_idx].hosts[0];
 
-        // Apply the link: provider becomes @external in requirer's subgraph;
-        // requirer gets @requires(fields: "<provider.name>") in its subgraph.
-        let provider_name = entity.fields[provider_idx].name.clone();
+        // First provider: becomes @external in requirer's subgraph.
+        let mut provider_names = vec![entity.fields[provider_idx].name.clone()];
         entity.fields[provider_idx].external_in.push(requirer_host);
+
+        // Optionally add a second provider field, owned by yet another
+        // subgraph, to produce a multi-field `@requires(fields: "f g")`.
+        // Eligibility: a different exclusive field owned by a third host
+        // that's neither the first provider's nor the requirer's.
+        if u.arbitrary::<u8>()? < cfg.multi_field_requires_chance {
+            let second_provider_candidates: Vec<usize> = exclusive_fields
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    i != provider_idx
+                        && i != requirer_idx
+                        && entity.fields[i].hosts[0] != provider_host
+                        && entity.fields[i].hosts[0] != requirer_host
+                })
+                .collect();
+            if !second_provider_candidates.is_empty() {
+                let second_provider_idx =
+                    second_provider_candidates[u.choose_index(second_provider_candidates.len())?];
+                provider_names.push(entity.fields[second_provider_idx].name.clone());
+                entity.fields[second_provider_idx]
+                    .external_in
+                    .push(requirer_host);
+            }
+        }
+
+        // Emit the (possibly multi-field) @requires link on the requirer.
+        let requires_str = provider_names.join(" ");
         entity.fields[requirer_idx]
             .requires_in
-            .push((requirer_host, provider_name));
+            .push((requirer_host, requires_str));
     }
 
     // @override augmentation. Pokes at PR #7929 territory.
