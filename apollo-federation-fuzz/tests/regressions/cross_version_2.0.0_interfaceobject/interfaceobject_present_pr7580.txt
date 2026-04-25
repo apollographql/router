@@ -1,0 +1,362 @@
+iter=819 seed=17 sha1_prefix=0a815f0afa7f
+
+=== SUBGRAPHS ===
+# s0
+schema {
+  query: Q
+}
+
+type Q {
+  qT1: T1
+  qT3: T3
+}
+
+type I0 @key(fields: "id") @interfaceObject {
+  id: ID!
+  io0: Float
+}
+
+type T0 @key(fields: "id k0") {
+  id: ID!
+  k0: Int!
+  f0_0: Int!
+  f0_1: Int @shareable
+  f0_2: Int
+}
+
+type T1 @key(fields: "id k0") {
+  id: ID!
+  k0: ID!
+  f1_0: Float!
+  f1_1: Int!
+  f1_2: ID!
+}
+
+type T3 @key(fields: "id k0") {
+  id: ID!
+  k0: ID!
+}
+
+type T4 @key(fields: "id k0") {
+  id: ID!
+  k0: String!
+  f4_0: Float!
+  f4_1: Boolean
+  f4_2: String!
+}
+
+type T5 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: ID!
+  k1: ID!
+}
+
+
+# s1
+schema {
+  query: Q
+}
+
+type Q {
+  qT2: T2
+  qI0: I0
+}
+
+interface I0 @key(fields: "id") {
+  id: ID!
+}
+
+type T2 implements I0 @key(fields: "id") {
+  id: ID!
+  f2_0: Float!
+}
+
+type T4 @key(fields: "id k0") {
+  id: ID!
+  k0: String!
+}
+
+type T5 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: ID!
+  k1: ID!
+  f5_0: Float!
+}
+
+
+# s2
+schema {
+  query: Q
+}
+
+type Q {
+  qT0: T0
+  qT4: T4
+  qT5: T5
+}
+
+type T0 @key(fields: "id k0") {
+  id: ID!
+  k0: Int!
+  f0_0: Int! @override(from: "s0")
+  f0_1: Int @shareable
+}
+
+type T3 @key(fields: "id k0") {
+  id: ID!
+  k0: ID!
+}
+
+type T4 @key(fields: "id k0") {
+  id: ID!
+  k0: String!
+}
+
+type T5 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: ID!
+  k1: ID!
+}
+
+
+
+=== SUPERGRAPH ===
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+enum join__Graph {
+  S0 @join__graph(name: "s0", url: "http://s0")
+  S1 @join__graph(name: "s1", url: "http://s1")
+  S2 @join__graph(name: "s2", url: "http://s2")
+}
+
+scalar join__FieldSet
+
+scalar join__DirectiveArguments
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+interface I0 @join__type(graph: S0, key: "id", isInterfaceObject: true) @join__type(graph: S1, key: "id") {
+  id: ID! @join__field(graph: S0) @join__field(graph: S1)
+  io0: Float @join__field(graph: S0)
+}
+
+type T0 @join__type(graph: S0, key: "id k0") @join__type(graph: S2, key: "id k0") {
+  id: ID!
+  k0: Int!
+  f0_0: Int! @join__field(graph: S2, override: "s0")
+  f0_1: Int
+  f0_2: Int @join__field(graph: S0)
+}
+
+type T1 @join__type(graph: S0, key: "id k0") {
+  id: ID!
+  k0: ID!
+  f1_0: Float!
+  f1_1: Int!
+  f1_2: ID!
+}
+
+type T3 @join__type(graph: S0, key: "id k0") @join__type(graph: S2, key: "id k0") {
+  id: ID!
+  k0: ID!
+}
+
+type T4 @join__type(graph: S0, key: "id k0") @join__type(graph: S1, key: "id k0") @join__type(graph: S2, key: "id k0") {
+  id: ID!
+  k0: String!
+  f4_0: Float! @join__field(graph: S0)
+  f4_1: Boolean @join__field(graph: S0)
+  f4_2: String! @join__field(graph: S0)
+}
+
+type T5 @join__type(graph: S0, key: "id k0 k1") @join__type(graph: S1, key: "id k0 k1") @join__type(graph: S2, key: "id k0 k1") {
+  id: ID!
+  k0: ID!
+  k1: ID!
+  f5_0: Float! @join__field(graph: S1)
+}
+
+type Query @join__type(graph: S0) @join__type(graph: S1) @join__type(graph: S2) {
+  qT1: T1 @join__field(graph: S0)
+  qT3: T3 @join__field(graph: S0)
+  qT2: T2 @join__field(graph: S1)
+  qI0: I0 @join__field(graph: S1)
+  qT0: T0 @join__field(graph: S2)
+  qT4: T4 @join__field(graph: S2)
+  qT5: T5 @join__field(graph: S2)
+}
+
+type T2 implements I0 @join__implements(graph: S1, interface: "I0") @join__type(graph: S1, key: "id") {
+  id: ID!
+  f2_0: Float!
+  io0: Float @join__field
+}
+
+=== OPERATION ===
+query($__v0: Boolean!, $__v1: Boolean!) {
+  ... on Query @include(if: $__v1) {
+    qT0 {
+      ... on T0 {
+        f0_0 @skip(if: $__v1)
+        f0_2
+        f0_1 @skip(if: $__v0)
+      }
+      ... {
+        id @skip(if: $__v0)
+        vu5: f0_1 @include(if: $__v0)
+        f0_1
+      }
+    }
+    PJeG5CcCOL6ZJsu7: qT5 {
+      ... {
+        ... {
+          ... @skip(if: $__v0) {
+            ... @skip(if: $__v1) {
+              k1
+              ... @skip(if: $__v1) {
+                iH9CsT3NQxeLfiRlVIeg8X2: f5_0
+                eqQNJKRCGiDNKAA4: k0
+                id
+                id
+                id @skip(if: $__v1)
+              }
+              id
+              id
+            }
+            id
+          }
+        }
+        id
+        id
+      }
+    }
+    qT1 @skip(if: $__v1) {
+      id
+    }
+  }
+  qT1 {
+    id
+  }
+  qT1 {
+    id
+  }
+  qT1 {
+    id
+  }
+}
+
+=== DIFF ===
+--- base
++++ head
+ {
+   "node": {
+     "Parallel": {
+       "nodes": [
+         {
+           "Condition": {
+             "condition_variable": "__v1",
+             "if_clause": {
+               "Sequence": {
+                 "nodes": [
+                   {
+                     "Fetch": {
+                       "subgraph_name": "s2",
+                       "variable_usages": [
+                         "__v0",
+                         "__v1"
+                       ],
+-                      "operation_document": "query($__v0: Boolean!, $__v1: Boolean!) { ... on Query { qT0 { __typename id k0 f0_0 @skip(if: $__v1) f0_1 @skip(if: $__v0) vu5: f0_1 @include(if: $__v0) f0_1 id @skip(if: $__v0) } PJeG5CcCOL6ZJsu7: qT5 { ... @skip(if: $__v0) { ... @skip(if: $__v1) { k1 ... @skip(if: $__v1) { __typename id k0 k1 eqQNJKRCGiDNKAA4: k0 id @skip(if: $__v1) } id } id } id } } }",
++                      "operation_document": "query($__v0: Boolean!, $__v1: Boolean!) { ... { qT0 { __typename id k0 f0_0 @skip(if: $__v1) f0_1 @skip(if: $__v0) vu5: f0_1 @include(if: $__v0) f0_1 id @skip(if: $__v0) } PJeG5CcCOL6ZJsu7: qT5 { ... @skip(if: $__v0) { ... @skip(if: $__v1) { k1 ... @skip(if: $__v1) { __typename id k0 k1 eqQNJKRCGiDNKAA4: k0 id @skip(if: $__v1) } id } id } id } } }",
+                       "operation_kind": "query",
+                       "input_rewrites": [],
+                       "output_rewrites": [],
+                       "context_rewrites": []
+                     }
+                   },
+                   {
+                     "Flatten": {
+                       "path": [
+                         {
+                           "Key": [
+                             "qT0",
+                             null
+                           ]
+                         }
+                       ],
+                       "node": {
+                         "Fetch": {
+                           "subgraph_name": "s0",
+                           "variable_usages": [],
+                           "requires": [
+                             "... on T0 { __typename id k0 }"
+                           ],
+                           "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on T0 { f0_2 } } }",
+                           "operation_kind": "query",
+                           "input_rewrites": [],
+                           "output_rewrites": [],
+                           "context_rewrites": []
+                         }
+                       }
+                     }
+                   }
+                 ]
+               }
+             }
+           }
+         },
+         {
+           "Fetch": {
+             "subgraph_name": "s0",
+             "variable_usages": [
+               "__v1"
+             ],
+-            "operation_document": "query($__v1: Boolean!) { ... on Query @include(if: $__v1) { qT1 @skip(if: $__v1) { id } } qT1 { id } }",
++            "operation_document": "query($__v1: Boolean!) { ... @include(if: $__v1) { qT1 @skip(if: $__v1) { id } } qT1 { id } }",
+             "operation_kind": "query",
+             "input_rewrites": [],
+             "output_rewrites": [],
+             "context_rewrites": []
+           }
+         }
+       ]
+     }
+   }
+ }

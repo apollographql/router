@@ -129,6 +129,15 @@ pub struct GenConfig {
     /// owner subgraph for that access path. Pokes a planner code path
     /// adjacent to but distinct from `@requires`.
     pub provides_chance: u8,
+    /// Conditional on `interface_chance` firing: probability (0..=255) that
+    /// the generated interface gets an `@interfaceObject` peer in another
+    /// subgraph. The host's interface declaration becomes
+    /// `interface I0 @key(fields: "id") { id: ID! }` and a different
+    /// subgraph emits `type I0 @key(fields: "id") @interfaceObject { id: ID!
+    /// [extra fields] }`. Composition distributes those extra fields onto
+    /// every implementer in the supergraph. Targets PR #8109 territory
+    /// (`__typename` on interface object types).
+    pub interface_object_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -147,6 +156,7 @@ impl Default for GenConfig {
             multi_field_requires_chance: 150, // ~59% of @requires sites
             compound_key_chance: 130, // ~51% of entities get a compound key
             provides_chance: 130, // ~51% of entities with eligible fields
+            interface_object_chance: 150, // ~59% of generated interfaces
         }
     }
 }
@@ -220,6 +230,25 @@ struct InterfacePlan {
     /// Indices into the entities list. All entries must have
     /// `host_subgraph` in their `hosts`.
     implementing_entities: Vec<usize>,
+    /// Optional `@interfaceObject` peer. When present, `host_subgraph`'s
+    /// interface declaration includes `@key(fields: "id")`, the listed
+    /// peer subgraph emits `type <name> @key(fields: "id") @interfaceObject
+    /// { id: ID! [extra fields] }`, and every implementing entity gets a
+    /// fallback `@key(fields: "id")` so the federation rule "matching @key
+    /// across the interface and its implementers" is satisfied even when
+    /// the implementer's primary key is compound.
+    interface_object: Option<InterfaceObjectPlan>,
+}
+
+#[derive(Debug, Clone)]
+struct InterfaceObjectPlan {
+    /// Subgraph hosting the `@interfaceObject` declaration. Distinct from
+    /// the interface's `host_subgraph`.
+    host_subgraph: usize,
+    /// Extra non-key scalar fields contributed via the interface object,
+    /// joined into every implementer of the interface in the supergraph.
+    /// Each is a `(name, type_str)` pair; `type_str` is e.g. `"Int!"`.
+    extra_fields: Vec<(String, String)>,
 }
 
 /// Produce a composition-valid set of subgraphs.
@@ -465,8 +494,54 @@ pub fn generate_federated_subgraphs(
                 name: "I0".to_string(),
                 host_subgraph: host,
                 implementing_entities,
+                interface_object: None,
             });
         }
+    }
+
+    // @interfaceObject augmentation. For each generated interface, with
+    // probability `interface_object_chance`, pick a different subgraph to
+    // host a `type I0 @key(fields: "id") @interfaceObject { id: ID! ... }`
+    // declaration. The interface's host gains `@key(fields: "id")` and
+    // every implementing entity gets a fallback `@key(fields: "id")` (in
+    // addition to whatever compound key it already has) so the federation
+    // rule "matching @key across the interface and its implementers"
+    // holds.
+    for iface in interfaces.iter_mut() {
+        if u.arbitrary::<u8>()? > cfg.interface_object_chance {
+            continue;
+        }
+        // Federation rule: a subgraph hosting `@interfaceObject I0` must
+        // *not* declare any implementation types of `I0`. Even
+        // implementers without an explicit `implements I0` clause in this
+        // subgraph still count as implementers of the supergraph type.
+        let candidates: Vec<usize> = (0..subgraph_count)
+            .filter(|s| {
+                *s != iface.host_subgraph
+                    && !iface
+                        .implementing_entities
+                        .iter()
+                        .any(|&e_idx| entities[e_idx].hosts.contains(s))
+            })
+            .collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let host_subgraph = candidates[u.choose_index(candidates.len())?];
+        // 1 (or sometimes 2) extra scalar fields contributed via the
+        // interface object. Names use the `io` prefix to avoid colliding
+        // with entity field names (`f<i>_<j>`) and key fields (`k<n>`).
+        let extra_count = if bool::arbitrary(u)? { 1 } else { 2 };
+        const IO_SCALARS: &[&str] = &["Int!", "String!", "Boolean!", "Float", "ID"];
+        let mut extra_fields = Vec::with_capacity(extra_count);
+        for k in 0..extra_count {
+            let scalar = IO_SCALARS[u.choose_index(IO_SCALARS.len())?];
+            extra_fields.push((format!("io{k}"), scalar.to_string()));
+        }
+        iface.interface_object = Some(InterfaceObjectPlan {
+            host_subgraph,
+            extra_fields,
+        });
     }
 
     // @provides augmentation. For each entity, with probability
@@ -573,8 +648,41 @@ fn emit(
         }
 
         // Interface declarations live in the interface-host subgraph only.
+        // When an `@interfaceObject` peer exists for the interface, the
+        // declaration carries `@key(fields: "id")` so the federation
+        // matching-key rule is satisfied.
         for i in &interfaces_here {
-            let _ = writeln!(sdl, "interface {} {{\n  id: ID!\n}}\n", i.name);
+            let key_clause = if i.interface_object.is_some() {
+                " @key(fields: \"id\")"
+            } else {
+                ""
+            };
+            let _ = writeln!(
+                sdl,
+                "interface {}{key_clause} {{\n  id: ID!\n}}\n",
+                i.name
+            );
+        }
+
+        // `@interfaceObject` declaration: a subgraph that did not host the
+        // interface itself emits a sibling `type <name> @key @interfaceObject`
+        // contributing extra fields that get joined into every implementer
+        // in the supergraph.
+        for i in interfaces.iter() {
+            if let Some(io) = &i.interface_object
+                && io.host_subgraph == s
+            {
+                let _ = writeln!(
+                    sdl,
+                    "type {} @key(fields: \"id\") @interfaceObject {{",
+                    i.name
+                );
+                sdl.push_str("  id: ID!\n");
+                for (n, t) in &io.extra_fields {
+                    let _ = writeln!(sdl, "  {n}: {t}");
+                }
+                sdl.push_str("}\n\n");
+            }
         }
 
         // Entity declarations: one per entity hosted by this subgraph.
@@ -598,9 +706,26 @@ fn emit(
                 key_fields_sel.push(' ');
                 key_fields_sel.push_str(n);
             }
+            // If this entity implements an interface that has an
+            // `@interfaceObject` peer, the federation rule requires a
+            // matching `@key(fields: "id")` on the implementer. We always
+            // already emit the primary key; when it's compound (e.g.
+            // `id k0`) we additionally emit a plain `@key(fields: "id")`
+            // so the match holds. With a non-compound primary key the
+            // primary key already matches, so no fallback is needed.
+            let needs_id_fallback_key = !e.extra_key_fields.is_empty()
+                && interfaces.iter().any(|i| {
+                    i.interface_object.is_some()
+                        && i.implementing_entities.contains(&e_idx)
+                });
+            let extra_id_key_clause = if needs_id_fallback_key {
+                " @key(fields: \"id\")"
+            } else {
+                ""
+            };
             let _ = writeln!(
                 sdl,
-                "type {}{implements_clause} @key(fields: \"{key_fields_sel}\") {{",
+                "type {}{implements_clause} @key(fields: \"{key_fields_sel}\"){extra_id_key_clause} {{",
                 e.name
             );
             sdl.push_str("  id: ID!\n");
