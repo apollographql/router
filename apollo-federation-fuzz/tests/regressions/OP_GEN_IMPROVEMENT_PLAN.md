@@ -116,6 +116,16 @@ Phase A → measure on a fresh sweep against (2.0.0, 2.13.1) and
 new categories or if specific bug classes (FED-251, FED-515) remain
 unreachable.
 
+> **Status (Phase A in progress):** apollo-smith is a crates.io
+> dependency (`apollo-smith = "0.15.2"`), not vendored in-tree.
+> Phase A is implemented as a post-pass on the AST smith returns —
+> same pattern as `decorate_operation` already does for `@skip` /
+> `@include` / `@defer`. No smith modification needed.
+>
+> Phase C would require either pinning a fork of smith or writing
+> a from-scratch generator using apollo-compiler. Achievable but
+> larger commitment; gated on Phase A results.
+
 Phase B is independent of A/C and can be done any time mutation
 coverage becomes a real ask.
 
