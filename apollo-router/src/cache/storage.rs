@@ -153,7 +153,7 @@ where
             .max_capacity(max_capacity.get() as u64)
             .eviction_listener(move |_key, value: V, _cause| {
                 let evicted_size = value.estimated_size().unwrap_or(0) as i64;
-                cache_estimated_storage.fetch_sub(evicted_size, Ordering::SeqCst);
+                cache_estimated_storage.fetch_sub(evicted_size, Ordering::Relaxed);
             })
             .build()
     }
@@ -166,6 +166,8 @@ where
             .i64_observable_gauge("apollo.router.cache.size")
             .with_description("Cache size")
             .with_callback(move |i| {
+                // entry_count() may lag by a few pending operations; run_pending_tasks() cannot
+                // be called here because this callback is synchronous.
                 i.observe(
                     inner_clone.entry_count() as i64,
                     &[
@@ -188,10 +190,10 @@ where
             .with_unit("bytes")
             .with_callback(move |i| {
                 // If there's no storage then don't bother updating the gauge
-                let value = cache_estimated_storage_for_gauge.load(Ordering::SeqCst);
+                let value = cache_estimated_storage_for_gauge.load(Ordering::Relaxed);
                 if value > 0 {
                     i.observe(
-                        cache_estimated_storage_for_gauge.load(Ordering::SeqCst),
+                        cache_estimated_storage_for_gauge.load(Ordering::Relaxed),
                         &[
                             KeyValue::new("kind", caller),
                             KeyValue::new("type", "memory"),
@@ -315,8 +317,7 @@ where
         let new_size = value.estimated_size().unwrap_or(0) as i64;
         self.inner.insert(key, value).await;
         self.cache_estimated_storage
-            .fetch_add(new_size, Ordering::SeqCst);
-        // Eviction listener handles subtracting evicted entry sizes
+            .fetch_add(new_size, Ordering::Relaxed);
     }
 
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
@@ -558,6 +559,86 @@ mod test {
             assert_gauge!(
                 "apollo.router.cache.storage.estimated_size",
                 37,
+                "kind" = "test",
+                "type" = "memory"
+            );
+            assert_gauge!(
+                "apollo.router.cache.size",
+                1,
+                "kind" = "test",
+                "type" = "memory"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_estimated_storage_overwrite() {
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        struct Stuff {
+            test: String,
+        }
+        impl ValueType for Stuff {
+            fn estimated_size(&self) -> Option<usize> {
+                Some(estimate_size(self))
+            }
+        }
+
+        async {
+            let cache: CacheStorage<String, Stuff> =
+                CacheStorage::new(NonZeroUsize::new(10).unwrap(), None, "test")
+                    .await
+                    .unwrap();
+            cache.activate();
+
+            cache
+                .insert(
+                    "key".to_string(),
+                    Stuff {
+                        test: "short".to_string(),
+                    },
+                )
+                .await;
+            cache.flush_pending().await;
+            let initial_size = cache
+                .inner
+                .get(&"key".to_string())
+                .await
+                .unwrap()
+                .estimated_size()
+                .unwrap() as i64;
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                initial_size,
+                "kind" = "test",
+                "type" = "memory"
+            );
+
+            // Overwrite with a larger value — estimated_size should reflect only the new value.
+            cache
+                .insert(
+                    "key".to_string(),
+                    Stuff {
+                        test: "a much longer string value".to_string(),
+                    },
+                )
+                .await;
+            cache.flush_pending().await;
+            let new_size = cache
+                .inner
+                .get(&"key".to_string())
+                .await
+                .unwrap()
+                .estimated_size()
+                .unwrap() as i64;
+            assert!(
+                new_size > initial_size,
+                "test is only meaningful when new value is larger"
+            );
+            assert_gauge!(
+                "apollo.router.cache.storage.estimated_size",
+                new_size,
                 "kind" = "test",
                 "type" = "memory"
             );
