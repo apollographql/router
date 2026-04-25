@@ -101,6 +101,13 @@ pub struct GenConfig {
     /// the emitted `@override` is "progressive" — gets a `label:` argument
     /// (`"percent(N)"`). Requires federation v2.7+ in the supergraph.
     pub progressive_override_chance: u8,
+    /// Probability (0..=255) that the generated subgraph set declares an
+    /// interface (a single `interface I0 { id: ID! }` plus 1..=3 of one
+    /// subgraph's primary entities marked `implements I0`, plus a
+    /// `qI0: I0` root field). Opens up FED-505 (`@skip`/`@include` over
+    /// interfaces) and PR #7929 (progressive `@override` on interface
+    /// implementations). Set to 0 to disable.
+    pub interface_chance: u8,
 }
 
 impl Default for GenConfig {
@@ -115,6 +122,7 @@ impl Default for GenConfig {
             renamed_root_chance: 80, // ~31% of generated sets
             override_chance: 160, // ~62% of eligible 2-host fields
             progressive_override_chance: 90, // ~35% of overrides get a label
+            interface_chance: 130, // ~51% of generated sets
         }
     }
 }
@@ -156,6 +164,22 @@ struct EntityPlan {
     /// Always one of `hosts`. Keeps Query non-shareable.
     primary: usize,
     fields: Vec<EntityField>,
+}
+
+/// One generated interface, declared in a single subgraph. Implementing
+/// entities are marked `implements I` only in that subgraph; other
+/// subgraphs hosting the same entity types are unaware of the interface
+/// (federation handles cross-subgraph stitching via `@join__implements`).
+///
+/// The interface only declares `id: ID!` so we don't have to add new fields
+/// to implementers — every entity already has that key field.
+#[derive(Debug, Clone)]
+struct InterfacePlan {
+    name: String,
+    host_subgraph: usize,
+    /// Indices into the entities list. All entries must have
+    /// `host_subgraph` in their `hosts`.
+    implementing_entities: Vec<usize>,
 }
 
 /// Produce a composition-valid set of subgraphs.
@@ -320,19 +344,66 @@ pub fn generate_federated_subgraphs(
         entity.fields[field_idx].override_in = Some((new_owner, from_name, label));
     }
 
-    Ok(emit(subgraph_count, &entities, &query_root_name))
+    // Interface augmentation. Pokes at FED-505 + PR #7929 territory.
+    //
+    // Strategy: declare a single interface in one subgraph and mark a
+    // small set of that subgraph's hosted entities as `implements I0`.
+    // The interface only declares `id: ID!`, which every entity already
+    // has as its @key — no new field surgery on implementers needed. A
+    // root field `qI0: I0` in the interface-host subgraph gives the
+    // operation generator something to query, naturally producing
+    // `... on T0 { ... }` inline fragments.
+    let mut interfaces: Vec<InterfacePlan> = Vec::new();
+    if u.arbitrary::<u8>()? < cfg.interface_chance {
+        // Pick a host subgraph with at least one hosted entity.
+        let candidate_hosts: Vec<usize> = (0..subgraph_count)
+            .filter(|&s| entities.iter().any(|e| e.hosts.contains(&s)))
+            .collect();
+        if !candidate_hosts.is_empty() {
+            let host = candidate_hosts[u.choose_index(candidate_hosts.len())?];
+            let hosted_entity_indices: Vec<usize> = entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.hosts.contains(&host))
+                .map(|(i, _)| i)
+                .collect();
+            // 1..=min(3, hosted) implementers. Picking the *first* N keeps
+            // the choice deterministic given the same Unstructured stream.
+            let max_impls = hosted_entity_indices.len().min(3);
+            let n = u.int_in_range(1..=max_impls)?;
+            let implementing_entities: Vec<usize> =
+                hosted_entity_indices.iter().take(n).copied().collect();
+            interfaces.push(InterfacePlan {
+                name: "I0".to_string(),
+                host_subgraph: host,
+                implementing_entities,
+            });
+        }
+    }
+
+    Ok(emit(subgraph_count, &entities, &query_root_name, &interfaces))
 }
 
-fn emit(subgraph_count: usize, entities: &[EntityPlan], query_root_name: &str) -> Vec<SubgraphSdl> {
+fn emit(
+    subgraph_count: usize,
+    entities: &[EntityPlan],
+    query_root_name: &str,
+    interfaces: &[InterfacePlan],
+) -> Vec<SubgraphSdl> {
     let mut out = Vec::with_capacity(subgraph_count);
     for s in 0..subgraph_count {
         let mut sdl = String::new();
 
-        // Query root: only entities for which this subgraph is the primary
-        // host appear here; this avoids needing @shareable on Query fields.
+        // Interfaces hosted by this subgraph emit a `qI0: I0` root field.
+        let interfaces_here: Vec<&InterfacePlan> =
+            interfaces.iter().filter(|i| i.host_subgraph == s).collect();
+
+        // Query root: entities for which this subgraph is the primary host,
+        // plus any interface-roots hosted here.
         let primary_for: Vec<&EntityPlan> =
             entities.iter().filter(|e| e.primary == s).collect();
-        if !primary_for.is_empty() {
+        let need_root = !primary_for.is_empty() || !interfaces_here.is_empty();
+        if need_root {
             // The `schema { query: <Name> }` declaration only makes sense
             // when this subgraph actually defines the root type. Subgraphs
             // without root fields skip both lines and the planner sees them
@@ -346,15 +417,38 @@ fn emit(subgraph_count: usize, entities: &[EntityPlan], query_root_name: &str) -
             for e in &primary_for {
                 let _ = writeln!(sdl, "  q{}: {}", e.name, e.name);
             }
+            for i in &interfaces_here {
+                let _ = writeln!(sdl, "  q{}: {}", i.name, i.name);
+            }
             sdl.push_str("}\n\n");
         }
 
+        // Interface declarations live in the interface-host subgraph only.
+        for i in &interfaces_here {
+            let _ = writeln!(sdl, "interface {} {{\n  id: ID!\n}}\n", i.name);
+        }
+
         // Entity declarations: one per entity hosted by this subgraph.
-        for e in entities {
+        for (e_idx, e) in entities.iter().enumerate() {
             if !e.hosts.contains(&s) {
                 continue;
             }
-            let _ = writeln!(sdl, "type {} @key(fields: \"id\") {{", e.name);
+            // Interfaces this entity implements *in this subgraph*.
+            let implements: Vec<&str> = interfaces
+                .iter()
+                .filter(|i| i.host_subgraph == s && i.implementing_entities.contains(&e_idx))
+                .map(|i| i.name.as_str())
+                .collect();
+            let implements_clause = if implements.is_empty() {
+                String::new()
+            } else {
+                format!(" implements {}", implements.join(" & "))
+            };
+            let _ = writeln!(
+                sdl,
+                "type {}{implements_clause} @key(fields: \"id\") {{",
+                e.name
+            );
             sdl.push_str("  id: ID!\n");
             for f in &e.fields {
                 let owned_here = f.hosts.contains(&s);
