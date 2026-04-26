@@ -1,4 +1,5 @@
 iter=30 seed=99 sha1_prefix=0252429d06a7
+summary: PR #7580 + FED-505 Condition
 
 === SUBGRAPHS ===
 # s0
@@ -38,85 +39,6 @@ type T2 @key(fields: "id") {
   f2_1: String!
 }
 
-
-
-=== SUPERGRAPH ===
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
-  query: Query
-}
-
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
-directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
-directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
-directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
-enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
-  SECURITY
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
-  EXECUTION
-}
-
-scalar link__Import
-
-enum join__Graph {
-  S0 @join__graph(name: "s0", url: "http://s0")
-  S1 @join__graph(name: "s1", url: "http://s1")
-  S2 @join__graph(name: "s2", url: "http://s2")
-}
-
-scalar join__FieldSet
-
-scalar join__DirectiveArguments
-
-scalar join__FieldValue
-
-input join__ContextArgument {
-  name: String!
-  type: String!
-  context: String!
-  selection: join__FieldValue!
-}
-
-type T0 @join__type(graph: S0, key: "id") @join__type(graph: S1, key: "id") {
-  id: ID!
-  f0_0: Float @join__field(graph: S0)
-  f0_1: Int! @join__field(graph: S0, override: "s1")
-}
-
-type Query @join__type(graph: S0) @join__type(graph: S1) @join__type(graph: S2) {
-  qT0: T0 @join__field(graph: S1)
-  qT1: T1 @join__field(graph: S2)
-  qT2: T2 @join__field(graph: S2)
-}
-
-type T1 @join__type(graph: S2, key: "id") {
-  id: ID!
-  f1_0: Float!
-  f1_1: String
-}
-
-type T2 @join__type(graph: S2, key: "id") {
-  id: ID!
-  f2_0: Boolean!
-  f2_1: String!
-}
-
 === OPERATION ===
 query($__v0: Boolean!, $__v1: Boolean!) {
   ... on Query @include(if: $__v1) {
@@ -145,49 +67,3 @@ query($__v0: Boolean!, $__v1: Boolean!) {
     id @skip(if: $__v1)
   }
 }
-
-=== DIFF ===
---- base
-+++ head
- {
-   "node": {
-     "Parallel": {
-       "nodes": [
-         {
-           "Condition": {
-             "condition_variable": "__v1",
-             "if_clause": {
-               "Fetch": {
-                 "subgraph_name": "s2",
-                 "variable_usages": [
-                   "__v1"
-                 ],
--                "operation_document": "query($__v1: Boolean!) { ... on Query { Zo4nX0: qT2 { yoGPu7OEWaWCIHhuEqyk08jw952: f2_1 } mUAPQ70KKnz7Y2: qT1 { ... @skip(if: $__v1) { C7Kh4inFcX_9uFus3: id id } id } } }",
-+                "operation_document": "query($__v1: Boolean!) { ... { Zo4nX0: qT2 { yoGPu7OEWaWCIHhuEqyk08jw952: f2_1 } mUAPQ70KKnz7Y2: qT1 { ... @skip(if: $__v1) { C7Kh4inFcX_9uFus3: id id } id } } }",
-                 "operation_kind": "query",
-                 "input_rewrites": [],
-                 "output_rewrites": [],
-                 "context_rewrites": []
-               }
-             }
-           }
-         },
-         {
-           "Fetch": {
-             "subgraph_name": "s1",
-             "variable_usages": [
-               "__v0",
-               "__v1"
-             ],
--            "operation_document": "query($__v0: Boolean!, $__v1: Boolean!) { ... on Query @include(if: $__v1) { qT0 { id } qT0 @include(if: $__v0) { id @skip(if: $__v1) } } qT0 { id @skip(if: $__v1) } }",
-+            "operation_document": "query($__v0: Boolean!, $__v1: Boolean!) { ... @include(if: $__v1) { qT0 { id } qT0 @include(if: $__v0) { id @skip(if: $__v1) } } qT0 { id @skip(if: $__v1) } }",
-             "operation_kind": "query",
-             "input_rewrites": [],
-             "output_rewrites": [],
-             "context_rewrites": []
-           }
-         }
-       ]
-     }
-   }
- }
