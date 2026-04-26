@@ -1,8 +1,29 @@
-# 10k-op pressure-test sweep — found a planner panic in HEAD
+# 10k-op pressure-test sweep — re-discovered a known active bug area
 
 After Phases I → Q saturated the directive surface against 2.5.0 → 2.13.1
 at the 1k-op scale (CROSS_VERSION_FINDINGS.md), one 10× pressure-test
-sweep at the most stressing config surfaced a real planner bug.
+sweep at the most stressing config surfaced a planner panic.
+
+> **Status check (added later).** This panic is almost certainly the
+> bug class that **PR [#9123](https://github.com/apollographql/router/pull/9123)**
+> ("fix(query-planner): restore missing defer dependencies after
+> transitive reduction") tried to fix. That PR landed on `dev` on
+> 2026-04-16 and was reverted in
+> **PR [#9250](https://github.com/apollographql/router/pull/9250)**.
+> The current in-tree planner is the post-revert state, so the panic
+> still reproduces. The assertion message ("Root nodes should have no
+> remaining nodes unhandled, but got: [N (missing: [M])]") is a
+> precise match for #9123's stated symptom.
+>
+> What the harness contributed: an *automated* trigger from random
+> generation (no human inspection of defer plan internals required) +
+> a deterministic seeded reproducer (iter=2028, seed=17). A separately
+> hand-minimized version is in
+> [`examples/minimize_panic.rs`](../../examples/minimize_panic.rs):
+> ~30 lines of SDL across 4 subgraphs + a 10-line op, no named
+> fragments, no nested `@defer`, no operation variables, no
+> `@skip`/`@include`. Useful as a test case for whatever fix lands
+> after #9123/#9250.
 
 ## Setup
 
