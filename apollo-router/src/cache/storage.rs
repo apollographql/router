@@ -273,6 +273,28 @@ where
         self.inner.clone()
     }
 
+    /// Check only the in-memory cache, bypassing Redis.
+    /// Used by `DeduplicatingCache` as a fast path on warm-cache hits.
+    ///
+    /// Emits `cache.hit.time` on a hit but intentionally emits nothing on a miss:
+    /// callers that miss here always fall through to `storage.get()`, which emits
+    /// `cache.miss.time` unconditionally. Emitting here too would double-count every
+    /// miss.
+    pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
+        let instant = Instant::now();
+        let res = self.inner.lock().await.get(key).cloned();
+        if res.is_some() {
+            f64_histogram!(
+                "apollo.router.cache.hit.time",
+                "Time to get a value from the cache in seconds",
+                instant.elapsed().as_secs_f64(),
+                kind = self.caller,
+                storage = CacheStorageName::Memory.to_string()
+            );
+        }
+        res
+    }
+
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
         self.inner.lock().await.len()
