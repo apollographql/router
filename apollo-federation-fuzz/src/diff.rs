@@ -119,7 +119,7 @@ where
 /// Normalize a serialized plan so order-insensitive nodes (e.g. `ParallelNode`)
 /// don't trigger spurious diffs. Conservative: only sorts arrays we know are
 /// semantically a set.
-fn normalize(value: &Value) -> Value {
+pub fn normalize(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
