@@ -7,6 +7,8 @@
 
 use serde_json::Value;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use crate::harness::{CommonConfig, CommonOptions, HarnessError, PlannerHarness};
 
 /// Run two planner versions against the same supergraph + operation and
@@ -28,6 +30,18 @@ pub enum DiffOutcome {
         head: Result<Value, HarnessError>,
         base: Result<Value, HarnessError>,
     },
+    /// At least one side panicked. The panic message is captured. The
+    /// non-panicking side's result, if any, is retained for context.
+    /// Captured separately from `EitherFailed` because a panic is a real
+    /// planner bug (an explicit assertion or unwrap that the planner
+    /// shouldn't be hitting on valid input) — sweep harnesses save these
+    /// as reproducers rather than skipping them silently.
+    PanickedSide {
+        head_panic: Option<String>,
+        base_panic: Option<String>,
+        head_ok: Option<Value>,
+        base_ok: Option<Value>,
+    },
 }
 
 pub fn run_diff<H, B>(
@@ -41,8 +55,47 @@ where
     H: PlannerHarness,
     B: PlannerHarness,
 {
-    let head_plan = H::build(supergraph_sdl, cfg).and_then(|p| p.plan(operation, operation_name, opts));
-    let base_plan = B::build(supergraph_sdl, cfg).and_then(|p| p.plan(operation, operation_name, opts));
+    // Wrap each planner side in `catch_unwind` so a panic on one version
+    // doesn't abort the sweep. We only catch at this layer; the planner's
+    // own internal panics (e.g. invariant assertions in
+    // `fetch_dependency_graph::process_root_nodes`) bubble up through
+    // `Result::Err` here as a payload string, captured into
+    // `PanickedSide`.
+    let head_attempt = catch_unwind(AssertUnwindSafe(|| {
+        H::build(supergraph_sdl, cfg).and_then(|p| p.plan(operation, operation_name, opts))
+    }));
+    let base_attempt = catch_unwind(AssertUnwindSafe(|| {
+        B::build(supergraph_sdl, cfg).and_then(|p| p.plan(operation, operation_name, opts))
+    }));
+
+    let panic_msg = |payload: Box<dyn std::any::Any + Send>| -> String {
+        if let Some(s) = payload.downcast_ref::<&'static str>() {
+            (*s).to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic payload>".to_string()
+        }
+    };
+
+    let (head_panic, head_plan) = match head_attempt {
+        Ok(r) => (None, Some(r)),
+        Err(p) => (Some(panic_msg(p)), None),
+    };
+    let (base_panic, base_plan) = match base_attempt {
+        Ok(r) => (None, Some(r)),
+        Err(p) => (Some(panic_msg(p)), None),
+    };
+    if head_panic.is_some() || base_panic.is_some() {
+        return DiffOutcome::PanickedSide {
+            head_panic,
+            base_panic,
+            head_ok: head_plan.and_then(Result::ok),
+            base_ok: base_plan.and_then(Result::ok),
+        };
+    }
+    let head_plan = head_plan.expect("non-panicking branch returns Some");
+    let base_plan = base_plan.expect("non-panicking branch returns Some");
 
     match (head_plan, base_plan) {
         (Ok(h), Ok(b)) => {

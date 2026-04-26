@@ -81,6 +81,9 @@ fn main() {
                 DiffOutcome::Identical { .. } => println!("Identical after normalize (suspicious)"),
                 DiffOutcome::Divergent { unified_diff, .. } => println!("{unified_diff}"),
                 DiffOutcome::EitherFailed { .. } => println!("EitherFailed"),
+                DiffOutcome::PanickedSide { head_panic, base_panic, .. } => {
+                    println!("PanickedSide head={head_panic:?} base={base_panic:?}");
+                }
             }
             return;
         }

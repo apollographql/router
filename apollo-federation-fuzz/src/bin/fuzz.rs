@@ -58,6 +58,7 @@ struct Stats {
     planned_identical: u64,
     planned_divergent: u64,
     planner_errored: u64,
+    panicked: u64,
 }
 
 fn main() {
@@ -172,6 +173,26 @@ fn main() {
                         base.is_ok()
                     );
                 }
+            }
+            DiffOutcome::PanickedSide {
+                head_panic,
+                base_panic,
+                ..
+            } => {
+                stats.panicked += 1;
+                let summary = format!(
+                    "head_panic={head_panic:?}\nbase_panic={base_panic:?}\n",
+                );
+                let id = save_regression(
+                    &args.regressions_dir,
+                    i,
+                    args.seed,
+                    subgraphs,
+                    supergraph_sdl,
+                    &op_text,
+                    &format!("=== PANIC ===\n{summary}"),
+                );
+                println!("=== PLANNER PANIC iter={i} saved={id} ===\n{summary}");
             }
         }
     }

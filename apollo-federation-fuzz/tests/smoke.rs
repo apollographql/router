@@ -42,5 +42,8 @@ fn smoke_two_subgraphs_one_query_planners_agree() {
         DiffOutcome::EitherFailed { head, base } => {
             panic!("planner errored:\nhead={head:?}\nbase={base:?}");
         }
+        DiffOutcome::PanickedSide { head_panic, base_panic, .. } => {
+            panic!("planner panicked:\nhead={head_panic:?}\nbase={base_panic:?}");
+        }
     }
 }

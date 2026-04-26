@@ -128,6 +128,7 @@ fn generated_supergraph_plans_agree_across_versions() {
                 );
             }
             DiffOutcome::EitherFailed { .. } => errored += 1,
+            DiffOutcome::PanickedSide { .. } => errored += 1,
         }
     }
 

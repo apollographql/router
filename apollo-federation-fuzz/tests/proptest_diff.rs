@@ -89,6 +89,13 @@ proptest! {
                 }
                 return Err(TestCaseError::reject("symmetric plan err"));
             }
+            DiffOutcome::PanickedSide { head_panic, base_panic, .. } => {
+                // A panic on either side is a planner bug. proptest
+                // surfaces it as a test failure; the harness sweep
+                // (`bin/fuzz`) saves the inputs as a reproducer.
+                prop_assert!(false,
+                    "planner panic: head={head_panic:?} base={base_panic:?}");
+            }
         }
     }
 }
