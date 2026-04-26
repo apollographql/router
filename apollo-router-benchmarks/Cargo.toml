@@ -8,6 +8,8 @@ publish = false
 
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
+lru = "0.18.0"
+moka = { version = "0.12", features = ["future"] }
 criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
 futures = "0.3"
 memory-stats = "1.1.0"
@@ -36,4 +38,8 @@ harness = false
 
 [[bench]]
 name = "query_plan_cache_concurrency"
+harness = false
+
+[[bench]]
+name = "query_plan_cache_eviction"
 harness = false
