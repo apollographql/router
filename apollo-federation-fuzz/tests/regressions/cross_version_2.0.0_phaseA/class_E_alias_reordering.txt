@@ -1,5 +1,6 @@
 iter=992 seed=17 sha1_prefix=9a45792926c3
 summary: (uncategorised diff — possible Class E)
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0

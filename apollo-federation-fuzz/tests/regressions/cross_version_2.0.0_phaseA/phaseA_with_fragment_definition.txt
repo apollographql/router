@@ -1,5 +1,6 @@
 iter=885 seed=17 sha1_prefix=0acde338e4d9
 summary: PR #7580 + FED-505 Condition
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0

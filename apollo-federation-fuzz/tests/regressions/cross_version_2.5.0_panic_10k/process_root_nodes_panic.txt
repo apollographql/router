@@ -1,5 +1,6 @@
 iter=2028 seed=17 sha1_prefix=b6c13cc8e739
 summary: PANIC: Root nodes should have no remaining nodes unhandled, but got: [11 (missing: [7])]
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0

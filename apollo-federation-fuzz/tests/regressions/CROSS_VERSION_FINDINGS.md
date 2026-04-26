@@ -12,7 +12,7 @@ The `harness_base.rs` adapter uses `..Default::default()` for `QueryPlanOptions`
 and falls back to `Supergraph::new` (vs `new_with_router_specs`) so it spans
 2.0.0 through HEAD without code changes.
 
-## State after Phases I → Q (>= 41000 ops swept)
+## State after Phases I → Q + 10k pressure tier (≥ 91000 ops swept)
 
 The harness now exercises the full schema/operation surface from
 `COVERAGE_GAPS.md`:
@@ -137,6 +137,35 @@ see the per-directory READMEs:
 | O     | inter-entity reference fields (multi-hop traversal)       | none       |
 | P     | op_gen Phase A: `__typename`, alias-skip, fragment defs  | **E**      |
 | Q     | multiple `@key` per entity (different key sets)           | none       |
+| R     | 10k op pressure-test, BASE=2.5.0 + defer + full surface  | **Panic class** (`process_root_nodes` invariant) |
+| S     | 4 more 10k seeds (42, 99, 1234, 7) at same config         | none new — 3 more instances of the same panic class |
+
+### Panic class (rate at scale)
+
+Across **5 seeds × 10k ops = 50k ops** at BASE=`=2.5.0` + defer +
+full surface, there were **0 plan divergences** and **4 panics**, all
+the same `process_root_nodes` assertion:
+
+    Root nodes should have no remaining nodes unhandled, but got: [N (missing: [M])]
+
+The `[N (missing: [M])]` indices vary; the assertion text and
+back-trace are identical. Estimated rate ~1 per 12,500 ops, or ~1
+per 4-seed × 10k batch.
+
+This is **almost certainly the bug class addressed by upstream
+[PR #9123](https://github.com/apollographql/router/pull/9123)
+("restore missing defer dependencies after transitive reduction"),
+which was reverted in [PR #9250](https://github.com/apollographql/router/pull/9250)**.
+The current in-tree planner is the post-revert state, so the panic
+still reproduces. The harness contributed an automated trigger from
+random generation + a hand-minimized reproducer (in
+[`examples/minimize_panic.rs`](../../examples/minimize_panic.rs))
+that's small enough to serve as a test case for whatever fix lands
+next.
+
+No new bug class emerged in 40k additional ops past the original
+seed-17 capture, which is consistent with this being the dominant
+tail-bug for the 2.5.x → 2.13.x pair under this generator's surface.
 
 ## Categories of non-algorithmic drift the normalizer ignores
 

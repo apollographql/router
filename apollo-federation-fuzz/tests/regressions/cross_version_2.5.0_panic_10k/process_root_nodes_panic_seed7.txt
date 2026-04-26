@@ -1,0 +1,257 @@
+iter=6415 seed=7 sha1_prefix=7de6ff0f6a72
+summary: PANIC: Root nodes should have no remaining nodes unhandled, but got: [6 (missing: [5])]
+summary: (no diff captured)
+
+=== SUBGRAPHS ===
+# s0
+schema {
+  query: RootQuery
+}
+
+type RootQuery {
+  qT3: T3
+}
+
+type T3 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: String!
+  k1: ID!
+  f3_0: String
+  r3_0: T1
+}
+
+type T5 @key(fields: "id k0 k1") @key(fields: "sk0") {
+  id: ID!
+  sk0: ID!
+  k0: Int!
+  k1: Int!
+  f5_0: Float!
+  f5_1: Int! @external
+  f5_2: Boolean @shareable
+  f5_3: String @shareable @requires(fields: "f5_1")
+}
+
+type T1 @key(fields: "id") {
+  id: ID!
+}
+
+
+# s1
+schema {
+  query: RootQuery
+}
+
+type RootQuery {
+  qT2: T2 @provides(fields: "f2_4 f2_3")
+  qI0: I0
+}
+
+interface I0 {
+  id: ID!
+}
+
+type T1 implements I0 @key(fields: "id") {
+  id: ID!
+  f1_0: Int!
+  r1_0: T4
+}
+
+type T2 @key(fields: "id k0 k1") @key(fields: "sk0") {
+  id: ID!
+  sk0: String!
+  k0: ID!
+  k1: ID!
+  f2_1: Int! @shareable
+  f2_2: String @override(from: "s3")
+  f2_3: ID! @external
+  f2_4: Boolean @external
+  r2_0: T1
+  r2_1: T5 @shareable
+}
+
+type T3 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: String!
+  k1: ID!
+}
+
+type T4 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: Int!
+  k1: ID!
+}
+
+type T5 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: Int!
+  k1: Int!
+}
+
+
+# s2
+schema {
+  query: RootQuery
+}
+
+type RootQuery {
+  qT1: T1
+}
+
+type T1 @key(fields: "id") {
+  id: ID!
+}
+
+type T3 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: String!
+  k1: ID!
+}
+
+type T4 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: Int!
+  k1: ID!
+  f4_0: Boolean @shareable
+  f4_1: String @shareable
+  f4_2: Float @override(from: "s3", label: "percent(32)")
+}
+
+
+# s3
+schema {
+  query: RootQuery
+}
+
+type RootQuery {
+  qT0: T0
+  qT4: T4
+  qT5: T5 @provides(fields: "f5_3")
+}
+
+type T0 @key(fields: "id") @key(fields: "sk0") {
+  id: ID!
+  sk0: ID!
+  r0_0: T4
+}
+
+type T2 @key(fields: "id k0 k1") @key(fields: "sk0") {
+  id: ID!
+  sk0: String!
+  k0: ID!
+  k1: ID!
+  f2_0: String!
+  f2_1: Int! @shareable
+  f2_2: String
+  f2_3: ID! @shareable
+  f2_4: Boolean @shareable
+  r2_1: T5 @shareable
+}
+
+type T4 @key(fields: "id k0 k1") {
+  id: ID!
+  k0: Int!
+  k1: ID!
+  f4_0: Boolean @shareable
+  f4_1: String @shareable
+  f4_2: Float
+  f4_3: Int!
+  r4_0: T0
+  r4_1: T2
+}
+
+type T5 @key(fields: "id k0 k1") @key(fields: "sk0") {
+  id: ID!
+  sk0: ID!
+  k0: Int!
+  k1: Int!
+  f5_0: Float! @override(from: "s0")
+  f5_1: Int!
+  f5_2: Boolean @shareable
+  f5_3: String @external
+}
+
+=== OPERATION ===
+query($__v0: Boolean!, $__v1: Boolean!) {
+  qT2 @include(if: $__v1) {
+    r2_1 @skip(if: $__v0) {
+      ...Frag2 @include(if: $__v0)
+      id
+      id
+      id
+      id @skip(if: $__v1)
+      __typename
+    }
+  }
+  qT3 @skip(if: $__v0) {
+    id
+  }
+  qT3 {
+    id
+    __typename
+  }
+  __typename
+}
+
+fragment Frag0 on T5 {
+  ... {
+    ... @include(if: $__v1) {
+      ... @include(if: $__v0) {
+        ... on T5 @include(if: $__v1) {
+          f5_3
+          h2tAAAAAAA7: f5_1 @skip(if: $__v1)
+          id
+          __typename
+        }
+        id
+        id
+      }
+    }
+    id
+    id @include(if: $__v0)
+    id @include(if: $__v1)
+    aS2: id @skip(if: $__v1)
+    __typename
+  }
+  id
+  aS1: id @skip(if: $__v1)
+  id
+}
+
+fragment Frag1 on T5 {
+  ... @defer {
+    RuYDBrBtuZxBz3: f5_3 @skip(if: $__v1)
+    k0
+    ... {
+      ...Frag0
+      id
+      id @include(if: $__v1)
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment Frag2 on T5 {
+  ... on T5 {
+    ... {
+      ... @defer {
+        ... {
+          uzgfHhLOT6: f5_3
+          e7a_ClftpYrO706T44Lsz25zfTN0: f5_0
+          ...Frag1
+        }
+        id @skip(if: $__v0)
+        id
+      }
+      id
+      aS0: id @skip(if: $__v1)
+      __typename
+    }
+    id @skip(if: $__v0)
+    id @include(if: $__v0)
+    id
+  }
+  id @skip(if: $__v1)
+  __typename
+}

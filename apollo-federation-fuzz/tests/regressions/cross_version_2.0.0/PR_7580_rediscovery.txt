@@ -1,5 +1,6 @@
 iter=879 seed=42 sha1_prefix=df35e0bf033f
 summary: PR #7580
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0

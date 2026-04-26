@@ -1,5 +1,6 @@
 iter=565 seed=17 sha1_prefix=0066e2f2ac61
 summary: PR #7580 + FED-505 Condition + defer sub_selection (C) + defer Field repr (D)
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0

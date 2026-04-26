@@ -139,6 +139,40 @@ duplicate reordering) fires at ~0.05% rate consistently. The single
   and the panic message. Replays deterministically with seed 17
   iter 2028 in `bin/fuzz` once `--iterations 2029` is reached.
 
+## Multi-seed 10k confirmation
+
+After the initial seed-17 capture, four more 10k sweeps were run at
+the same config (BASE=`=2.5.0`, --enable-defer, full Phase I-Q
+surface, ops-per-schema=5):
+
+| Seed | Identical | Divergent | Panicked |
+|---|---:|---:|---:|
+| 17    |  9999 | 0 | 1 |
+| 42    | 10000 | 0 | 0 |
+| 99    |  9999 | 0 | 1 |
+| 1234  | 10000 | 0 | 0 |
+| 7     |  9997 | 0 | 2 |
+| **total** | **49995** | **0** | **4** |
+
+Across 50,000 ops:
+- **0 plan divergences.** Saturation against 2.5.0 → 2.13.1
+  confirmed at 50× the original scale.
+- **4 panics, all the same `process_root_nodes` assertion.** The
+  `[N (missing: [M])]` indices vary (the fetch graph shape changes
+  per generated schema), but the assertion text is identical:
+
+      Root nodes should have no remaining nodes unhandled, but got: [...]
+
+  This is the same defer-dependency invariant violation the
+  original capture surfaced. No new bug class emerged in 40k
+  additional ops, which is consistent with this being the dominant
+  tail-bug for the 2.5.0 ↔ 2.13.1 pair.
+
+  Estimated rate: ~1 per 12,500 ops (4/50000), or roughly 1 per
+  4-seed × 10k batch. A second curated reproducer
+  (`process_root_nodes_panic_seed7.txt`) is kept alongside the
+  original to confirm the cross-seed reproducibility.
+
 ## Reproducing
 
 ```toml

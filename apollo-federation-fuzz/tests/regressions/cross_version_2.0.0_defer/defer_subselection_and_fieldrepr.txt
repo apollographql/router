@@ -1,5 +1,6 @@
 iter=52 seed=17 sha1_prefix=01bfd7cd7952
 summary: defer sub_selection (C) + defer Field repr (D)
+summary: (no diff captured)
 
 === SUBGRAPHS ===
 # s0
