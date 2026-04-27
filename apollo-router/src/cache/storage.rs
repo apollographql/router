@@ -236,15 +236,12 @@ where
                     None
                 }
             });
-        match redis_value {
-            Some(v) => {
-                self.record_cache_hit_duration(instant_redis.elapsed(), CacheStorageName::Redis);
-                Some(v.0)
-            }
-            None => {
-                self.record_cache_miss_duration(instant_redis.elapsed(), CacheStorageName::Redis);
-                None
-            }
+        if let Some(v) = redis_value {
+            self.record_cache_hit_duration(instant_redis.elapsed(), CacheStorageName::Redis);
+            Some(v.0)
+        } else {
+            self.record_cache_miss_duration(instant_redis.elapsed(), CacheStorageName::Redis);
+            None
         }
     }
 
