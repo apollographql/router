@@ -225,10 +225,12 @@ where
     /// Check only the in-memory cache, bypassing Redis.
     /// Used by `DeduplicatingCache` as a fast path on warm-cache hits.
     ///
-    /// Emits `cache.hit.time` on a hit but intentionally emits nothing on a miss:
-    /// callers that miss here always fall through to `storage.get()`, which emits
-    /// `cache.miss.time` unconditionally. Emitting here too would double-count every
-    /// miss.
+    /// Emits `cache.hit.time` on a hit but nothing on a miss. This is intentional:
+    /// the fast-path check is an implementation detail of the deduplication layer,
+    /// not a cache event visible to observers. On a miss, the caller falls through
+    /// to `storage.get()`, which emits either `cache.hit.time` or `cache.miss.time`
+    /// depending on whether another task inserted the value between this check and
+    /// `storage.get()`'s in-memory re-check.
     pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
         let instant = Instant::now();
         let res = self.inner.lock().await.get(key).cloned();
