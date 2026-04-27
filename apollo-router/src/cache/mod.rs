@@ -63,8 +63,19 @@ where
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
-    /// `init_from_redis` is called with values newly deserialized from Redis cache
-    /// if an error is returned, the value is ignored and considered a cache miss.
+    /// Look up `key` in the cache, returning an [`Entry`] that describes how to proceed:
+    ///
+    /// - **In-memory hit (fast path)**: the value is returned immediately without acquiring
+    ///   the `wait_map` mutex.
+    /// - **First waiter** ([`Entry::is_first`] returns `true`): this task missed in all cache
+    ///   layers and is responsible for computing the value. Call [`Entry::insert`] when done to
+    ///   store the result and unblock any concurrent waiters for the same key.
+    /// - **Subsequent waiter**: another task is already computing the value for this key. Call
+    ///   [`Entry::get`] to wait for the result.
+    ///
+    /// `init_from_redis` is called on values freshly deserialized from Redis. Return `Err` to
+    /// reject the entry and treat the lookup as a miss (e.g. the cached plan is no longer valid
+    /// for the current schema).
     pub(crate) async fn get(
         &self,
         key: &K,
