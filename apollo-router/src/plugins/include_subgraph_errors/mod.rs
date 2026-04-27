@@ -134,12 +134,11 @@ impl IncludeSubgraphErrors {
 
                 // 2. Service name handling
                 if effective_config.redact_service_name {
-                    if !effective_config.redact_message {
-                        if let Some(msg) =
+                    if !effective_config.redact_message
+                        && let Some(msg) =
                             no_service_message.and_then(|v| v.as_str().map(str::to_owned))
-                        {
-                            error.message = msg;
-                        }
+                    {
+                        error.message = msg;
                     }
                     // Remove pre-set service extension and skip injection below.
                     error.extensions.remove("service");
