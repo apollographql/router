@@ -5,6 +5,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use lru::LruCache;
 use opentelemetry::KeyValue;
@@ -172,25 +173,11 @@ where
 
         match res {
             Some(v) => {
-                let duration = instant_memory.elapsed();
-                f64_histogram!(
-                    "apollo.router.cache.hit.time",
-                    "Time to get a value from the cache in seconds",
-                    duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
+                self.record_cache_hit_duration(instant_memory.elapsed(), CacheStorageName::Memory);
                 Some(v)
             }
             None => {
-                let duration = instant_memory.elapsed();
-                f64_histogram!(
-                    "apollo.router.cache.miss.time",
-                    "Time to check the cache for an uncached value in seconds",
-                    duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
+                self.record_cache_miss_duration(instant_memory.elapsed(), CacheStorageName::Memory);
                 self.get_from_redis(key, init_from_redis).await
             }
         }
@@ -224,27 +211,12 @@ where
             });
         match redis_value {
             Some(v) => {
+                self.record_cache_hit_duration(instant_redis.elapsed(), CacheStorageName::Redis);
                 self.insert_in_memory(key.clone(), v.0.clone()).await;
-
-                let duration = instant_redis.elapsed();
-                f64_histogram!(
-                    "apollo.router.cache.hit.time",
-                    "Time to get a value from the cache in seconds",
-                    duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Redis.to_string()
-                );
                 Some(v.0)
             }
             None => {
-                let duration = instant_redis.elapsed();
-                f64_histogram!(
-                    "apollo.router.cache.miss.time",
-                    "Time to check the cache for an uncached value in seconds",
-                    duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Redis.to_string()
-                );
+                self.record_cache_miss_duration(instant_redis.elapsed(), CacheStorageName::Redis);
                 None
             }
         }
@@ -301,13 +273,7 @@ where
         let instant = Instant::now();
         let res = self.inner.lock().await.get(key).cloned();
         if res.is_some() {
-            f64_histogram!(
-                "apollo.router.cache.hit.time",
-                "Time to get a value from the cache in seconds",
-                instant.elapsed().as_secs_f64(),
-                kind = self.caller,
-                storage = CacheStorageName::Memory.to_string()
-            );
+            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
         }
         res
     }
@@ -328,6 +294,26 @@ where
         if let Some(redis) = &self.redis {
             redis.activate();
         }
+    }
+
+    fn record_cache_hit_duration(&self, duration: Duration, storage: CacheStorageName) {
+        f64_histogram!(
+            "apollo.router.cache.hit.time",
+            "Time to get a value from the cache in seconds",
+            duration.as_secs_f64(),
+            kind = self.caller,
+            storage = storage.to_string()
+        );
+    }
+
+    fn record_cache_miss_duration(&self, duration: Duration, storage: CacheStorageName) {
+        f64_histogram!(
+            "apollo.router.cache.miss.time",
+            "Time to check the cache for an uncached value in seconds",
+            duration.as_secs_f64(),
+            kind = self.caller,
+            storage = storage.to_string()
+        );
     }
 }
 
