@@ -170,8 +170,11 @@ where
     ) -> Option<V> {
         if let Some(v) = self.get_in_memory(key).await {
             Some(v)
+        } else if let Some(v) = self.get_from_redis(key, init_from_redis).await {
+            self.insert_in_memory(key.clone(), v.clone()).await;
+            Some(v)
         } else {
-            self.get_from_redis(key, init_from_redis).await
+            None
         }
     }
 
@@ -206,8 +209,9 @@ where
         res
     }
 
-    /// Check only Redis, inserting any hit into the in-memory cache.
-    /// Called by [`CacheStorage::get`] after an in-memory miss.
+    /// Check only Redis, returning the value without promoting it to the in-memory cache.
+    /// Called by [`CacheStorage::get`] after an in-memory miss; promotion is the caller's
+    /// responsibility.
     ///
     /// `init_from_redis` is called on values freshly deserialized from Redis. Return `Err` to
     /// reject the entry and treat the lookup as a miss.
@@ -235,7 +239,6 @@ where
         match redis_value {
             Some(v) => {
                 self.record_cache_hit_duration(instant_redis.elapsed(), CacheStorageName::Redis);
-                self.insert_in_memory(key.clone(), v.0.clone()).await;
                 Some(v.0)
             }
             None => {
