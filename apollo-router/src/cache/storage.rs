@@ -206,46 +206,47 @@ where
         key: &K,
         mut init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
     ) -> Option<V> {
-        let instant_redis = Instant::now();
-        if let Some(redis) = self.redis.as_ref() {
-            let inner_key = RedisKey(key.clone());
-            let redis_value = redis.get(inner_key).await.ok().and_then(|mut v| {
-                match init_from_redis(&mut v.0) {
-                    Ok(()) => Some(v),
-                    Err(e) => {
-                        tracing::error!("Invalid value from Redis cache: {e}");
-                        None
-                    }
-                }
-            });
-            match redis_value {
-                Some(v) => {
-                    self.insert_in_memory(key.clone(), v.0.clone()).await;
+        let Some(redis) = self.redis.as_ref() else {
+            return None;
+        };
 
-                    let duration = instant_redis.elapsed();
-                    f64_histogram!(
-                        "apollo.router.cache.hit.time",
-                        "Time to get a value from the cache in seconds",
-                        duration.as_secs_f64(),
-                        kind = self.caller,
-                        storage = CacheStorageName::Redis.to_string()
-                    );
-                    Some(v.0)
-                }
-                None => {
-                    let duration = instant_redis.elapsed();
-                    f64_histogram!(
-                        "apollo.router.cache.miss.time",
-                        "Time to check the cache for an uncached value in seconds",
-                        duration.as_secs_f64(),
-                        kind = self.caller,
-                        storage = CacheStorageName::Redis.to_string()
-                    );
+        let instant_redis = Instant::now();
+        let redis_value = redis
+            .get(RedisKey(key.clone()))
+            .await
+            .ok()
+            .and_then(|mut v| match init_from_redis(&mut v.0) {
+                Ok(()) => Some(v),
+                Err(e) => {
+                    tracing::error!("Invalid value from Redis cache: {e}");
                     None
                 }
+            });
+        match redis_value {
+            Some(v) => {
+                self.insert_in_memory(key.clone(), v.0.clone()).await;
+
+                let duration = instant_redis.elapsed();
+                f64_histogram!(
+                    "apollo.router.cache.hit.time",
+                    "Time to get a value from the cache in seconds",
+                    duration.as_secs_f64(),
+                    kind = self.caller,
+                    storage = CacheStorageName::Redis.to_string()
+                );
+                Some(v.0)
             }
-        } else {
-            None
+            None => {
+                let duration = instant_redis.elapsed();
+                f64_histogram!(
+                    "apollo.router.cache.miss.time",
+                    "Time to check the cache for an uncached value in seconds",
+                    duration.as_secs_f64(),
+                    kind = self.caller,
+                    storage = CacheStorageName::Redis.to_string()
+                );
+                None
+            }
         }
     }
 
