@@ -222,6 +222,22 @@ where
         }
     }
 
+    /// Check only the in-memory cache, bypassing Redis.
+    /// Used by `DeduplicatingCache` as a fast path on warm-cache hits.
+    ///
+    /// Emits `cache.hit.time` on a hit but intentionally emits nothing on a miss:
+    /// callers that miss here always fall through to `storage.get()`, which emits
+    /// `cache.miss.time` unconditionally. Emitting here too would double-count every
+    /// miss.
+    pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
+        let instant = Instant::now();
+        let res = self.inner.lock().await.get(key).cloned();
+        if res.is_some() {
+            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
+        }
+        res
+    }
+
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
@@ -260,22 +276,6 @@ where
 
     pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
         self.inner.clone()
-    }
-
-    /// Check only the in-memory cache, bypassing Redis.
-    /// Used by `DeduplicatingCache` as a fast path on warm-cache hits.
-    ///
-    /// Emits `cache.hit.time` on a hit but intentionally emits nothing on a miss:
-    /// callers that miss here always fall through to `storage.get()`, which emits
-    /// `cache.miss.time` unconditionally. Emitting here too would double-count every
-    /// miss.
-    pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
-        let instant = Instant::now();
-        let res = self.inner.lock().await.get(key).cloned();
-        if res.is_some() {
-            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
-        }
-        res
     }
 
     #[cfg(test)]
