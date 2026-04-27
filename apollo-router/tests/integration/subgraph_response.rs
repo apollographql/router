@@ -200,7 +200,7 @@ async fn test_valid_extensions_service_for_invalid_subgraph_response() -> Result
           "data": null,
           "errors": [
             {
-              "message": "HTTP fetch failed from 'products': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+              "message": "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
               "path": [],
               "extensions": {
                 "code": "SUBREQUEST_HTTP_ERROR",
@@ -339,7 +339,7 @@ async fn test_invalid_error_locations() -> Result<(), BoxError> {
         json!({
             "data": null,
             "errors": [{
-                "message":"service 'products' response was malformed: invalid `locations` within error: invalid type: boolean `true`, expected u32",
+                "message":"response was malformed: invalid `locations` within error: invalid type: boolean `true`, expected u32",
                 "path": [],
                 "extensions": {
                     "service": "products",

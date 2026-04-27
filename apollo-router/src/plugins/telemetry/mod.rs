@@ -3095,7 +3095,7 @@ mod tests {
                 "http.client.request.duration",
                 1,
                 "message" =
-                    "HTTP fetch failed from 'my_subgraph_name_error': cannot contact the subgraph",
+                    "HTTP fetch failed: cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );

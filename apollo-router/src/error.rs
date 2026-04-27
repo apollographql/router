@@ -63,7 +63,7 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// service '{service}' response was malformed: {reason}
+    /// response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
         service: String,
@@ -72,13 +72,13 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// service '{service}' returned a PATCH response which was not expected
+    /// subgraph returned a PATCH response which was not expected
     SubrequestUnexpectedPatchResponse {
         /// The service that returned the PATCH response.
         service: String,
     },
 
-    /// HTTP fetch failed from '{service}': {reason}
+    /// HTTP fetch failed: {reason}
     ///
     /// note that this relates to a transport error and not a GraphQL error
     SubrequestHttpError {
@@ -90,7 +90,7 @@ pub(crate) enum FetchError {
         /// The reason the fetch failed.
         reason: String,
     },
-    /// Websocket fetch failed from '{service}': {reason}
+    /// Websocket fetch failed: {reason}
     ///
     /// note that this relates to a transport error and not a GraphQL error
     SubrequestWsError {
@@ -104,7 +104,7 @@ pub(crate) enum FetchError {
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
 
-    /// Batching error for '{service}': {reason}
+    /// Batching error: {reason}
     SubrequestBatchingError {
         /// The service for which batch processing failed.
         service: String,
@@ -662,7 +662,7 @@ mod tests {
             reason: String::from("invalid request"),
         };
         let expected_gql_error = graphql::Error::builder()
-            .message("HTTP fetch failed from 'my_service': invalid request")
+            .message("HTTP fetch failed: invalid request")
             .extension_code("SUBREQUEST_HTTP_ERROR")
             .extension("reason", Value::String("invalid request".into()))
             .extension("service", Value::String("my_service".into()))

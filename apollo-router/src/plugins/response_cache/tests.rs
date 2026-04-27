@@ -2837,7 +2837,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed from 'orga': orga not found",
+          "message": "HTTP fetch failed: orga not found",
           "path": [
             "currentUser",
             "allOrganizations",
