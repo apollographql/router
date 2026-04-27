@@ -7245,6 +7245,14 @@ expression: "&schema"
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "operation_body_timeout": {
+          "default": null,
+          "description": "Maximum time allowed for the client to deliver the GraphQL operation (query and variables)\nwithin the multipart body. This timeout does not apply to reading the file contents\nthemselves. If the operation part of the request is too slow to arrive, the request is\nrejected with a `504 Gateway Timeout` error.\n\nIf not set, no operation body timeout is applied.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

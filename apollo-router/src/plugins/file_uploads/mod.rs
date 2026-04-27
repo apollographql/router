@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use http::HeaderName;
 use http::HeaderValue;
+use http::StatusCode;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use mediatype::MediaType;
@@ -22,6 +23,7 @@ use self::map_field::MapField;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
+use crate::graphql;
 use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -65,11 +67,25 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         let limits = self.limits;
+        let operation_body_timeout = limits.operation_body_timeout;
         ServiceBuilder::new()
             .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
-                    Ok(match router_layer(req, limits).await {
+                    let layer_task = router_layer(req, limits);
+                    let layer_result = if let Some(timeout) = operation_body_timeout {
+                        match tokio::time::timeout(timeout, layer_task).await {
+                            Ok(result) => result,
+                            Err(_elapsed) => {
+                                return Ok(ControlFlow::Break(operation_body_timeout_error(
+                                    context,
+                                )?));
+                            }
+                        }
+                    } else {
+                        layer_task.await
+                    };
+                    Ok(match layer_result {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
@@ -161,6 +177,21 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
         .and_then(|header| header.to_str().ok())
         .and_then(|str| MediaType::parse(str).ok())
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
+}
+
+fn operation_body_timeout_error(
+    context: crate::Context,
+) -> std::result::Result<router::Response, tower::BoxError> {
+    router::Response::error_builder()
+        .status_code(StatusCode::GATEWAY_TIMEOUT)
+        .errors(vec![
+            graphql::Error::builder()
+                .message("The file upload operation body took too long to arrive")
+                .extension_code("GATEWAY_TIMEOUT")
+                .build(),
+        ])
+        .context(context)
+        .build()
 }
 
 /// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
