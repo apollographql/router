@@ -224,6 +224,10 @@ where
         matches!(self.inner, EntryInner::First { .. })
     }
 
+    pub(crate) fn is_value(&self) -> bool {
+        matches!(self.inner, EntryInner::Value(_))
+    }
+
     pub(crate) async fn get(self) -> Result<V, EntryError<UncachedError>> {
         match self.inner {
             // there was already a value in cache
@@ -348,7 +352,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn fast_path_bypasses_wait_map_on_hit() {
+    async fn warm_cache_hit_never_returns_first() {
         let cache: DeduplicatingCache<String, String> =
             DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test")
                 .await
@@ -359,13 +363,48 @@ mod tests {
         assert!(entry.is_first());
         entry.insert("value".to_string()).await;
 
-        // All concurrent gets should hit the fast path — none should be First
+        // A warm-cache lookup should never return First — the value is found by the in-memory
+        // fast path or by storage.get()'s re-check inside the wait_map path.
         let mut tasks: FuturesUnordered<_> = (0..100)
             .map(|_| {
                 let cache = cache.clone();
                 async move {
                     let entry = cache.get(&"key".to_string(), |_| Ok(())).await;
                     assert!(!entry.is_first(), "warm-cache hit should not be First");
+                    entry.get().await.unwrap()
+                }
+            })
+            .collect();
+
+        while let Some(result) = tasks.next().await {
+            assert_eq!(result, "value");
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn fast_path_returns_value_on_warm_cache() {
+        let cache: DeduplicatingCache<String, String> =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test")
+                .await
+                .unwrap();
+
+        // Populate the cache
+        let entry = cache.get(&"key".to_string(), |_| Ok(())).await;
+        assert!(entry.is_first());
+        entry.insert("value".to_string()).await;
+
+        // With the fast path, all concurrent lookups bypass the wait_map and return Value
+        // directly. Without it, interleaving at wait_map.lock() would cause some tasks to
+        // subscribe as Receiver instead.
+        let mut tasks: FuturesUnordered<_> = (0..100)
+            .map(|_| {
+                let cache = cache.clone();
+                async move {
+                    let entry = cache.get(&"key".to_string(), |_| Ok(())).await;
+                    assert!(
+                        entry.is_value(),
+                        "warm-cache hit should return Value via fast path"
+                    );
                     entry.get().await.unwrap()
                 }
             })
