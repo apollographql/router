@@ -11,15 +11,18 @@
 //!   wait_map mutex. On a hit the value is returned immediately; the mutex is only
 //!   entered on a miss where deduplication is actually needed.
 //!
-//! Run with: `cargo bench --bench query_plan_cache_concurrency`
-
-use std::time::Instant;
+//! Run with: `cargo bench -p apollo-router-benchmarks --bench query_plan_cache_concurrency`
 
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::MockedSubgraphs;
 use apollo_router::TestHarness;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use criterion::Throughput;
 use futures::future::join_all;
 use serde_json::json;
 use tower::Service;
@@ -27,22 +30,7 @@ use tower::ServiceExt;
 
 const QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-/// Concurrency levels to sweep. Powers of two give a clean log-scale curve.
 const CONCURRENCY_LEVELS: &[usize] = &[1, 2, 4, 8, 16, 32, 64];
-
-/// Minimum total requests per concurrency level. Low-concurrency levels (c=1,
-/// c=2) get more waves to ensure enough wall time for a stable measurement.
-/// High-concurrency levels saturate quickly, so the wave count is lower.
-const MIN_REQUESTS: usize = 10_000;
-
-/// Warmup waves before timing each concurrency level. Lets the tokio thread
-/// pool and any per-level allocator state reach steady state before the clock
-/// starts.
-const WARMUP_WAVES: usize = 100;
-
-/// Repetitions per concurrency level. The median req/s is reported, which
-/// discards outlier runs caused by OS scheduler preemption.
-const REPS: usize = 3;
 
 fn build_harness() -> TestHarness<'static> {
     let account_service = MockSubgraph::builder()
@@ -137,136 +125,53 @@ fn make_request() -> router::Request {
         .build()
         .expect("valid request")
         .try_into()
-        .unwrap()
+        .expect("valid router request")
 }
 
 async fn send_request(mut svc: router::BoxCloneService) {
     svc.ready()
         .await
-        .unwrap()
+        .expect("service ready")
         .call(make_request())
         .await
-        .unwrap()
+        .expect("request succeeded")
         .next_response()
         .await
-        .unwrap()
-        .unwrap();
+        .expect("response body")
+        .expect("valid response");
 }
 
-struct Sample {
-    concurrency: usize,
-    rps: f64,
-    elapsed_secs: f64,
-    speedup: f64,
-}
-
-fn main() {
+fn bench_cache_hit_concurrency(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .unwrap();
+        .expect("tokio runtime");
 
     let router = rt.block_on(async {
-        let svc = build_harness().build_router().await.unwrap();
+        let svc = build_harness().build_router().await.expect("router built");
         // Prime the plan cache before any timing starts.
         send_request(svc.clone()).await;
         svc
     });
 
-    // Establish the serial baseline at concurrency=1 first, then reuse it as
-    // the denominator for all speedup calculations.
-    let mut baseline_rps = 0.0_f64;
-    let mut samples: Vec<Sample> = Vec::new();
-
-    for &concurrency in CONCURRENCY_LEVELS.iter() {
-        let waves = (MIN_REQUESTS + concurrency - 1) / concurrency; // ceil div
-        let total = waves * concurrency;
-
-        // Warmup: let the tokio pool and allocator reach steady state.
-        rt.block_on(async {
-            for _ in 0..WARMUP_WAVES {
-                let tasks: Vec<_> = (0..concurrency)
-                    .map(|_| tokio::spawn(send_request(router.clone())))
-                    .collect();
-                join_all(tasks).await;
-            }
-        });
-
-        // Timed repetitions — take the median req/s.
-        let mut rps_samples: Vec<f64> = (0..REPS)
-            .map(|_| {
-                let start = Instant::now();
-                rt.block_on(async {
-                    for _ in 0..waves {
-                        let tasks: Vec<_> = (0..concurrency)
-                            .map(|_| tokio::spawn(send_request(router.clone())))
-                            .collect();
-                        join_all(tasks).await;
-                    }
+    let mut group = c.benchmark_group("query_plan_cache_concurrency");
+    for &concurrency in CONCURRENCY_LEVELS {
+        group.throughput(Throughput::Elements(concurrency as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(concurrency),
+            &concurrency,
+            |b, &concurrency| {
+                b.to_async(&rt).iter(|| async {
+                    let tasks: Vec<_> = (0..concurrency)
+                        .map(|_| tokio::spawn(send_request(router.clone())))
+                        .collect();
+                    join_all(tasks).await;
                 });
-                total as f64 / start.elapsed().as_secs_f64()
-            })
-            .collect();
-        rps_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let rps = rps_samples[REPS / 2]; // median
-
-        if concurrency == 1 {
-            baseline_rps = rps;
-            samples.push(Sample {
-                concurrency,
-                rps,
-                elapsed_secs: total as f64 / rps,
-                speedup: 1.0,
-            });
-        } else {
-            samples.push(Sample {
-                concurrency,
-                rps,
-                elapsed_secs: total as f64 / rps,
-                speedup: rps / baseline_rps,
-            });
-        }
-    }
-
-    // ── Report ───────────────────────────────────────────────────────────────
-    println!("Query plan cache — concurrency sweep");
-    println!("  Same query repeated, all cache hits | min {MIN_REQUESTS} reqs/level, {REPS} reps (median reported), {WARMUP_WAVES} warmup waves");
-    println!("  Serial fraction estimate uses Amdahl's law: S = (1/speedup - 1/N) / (1 - 1/N)");
-    println!();
-    println!(
-        "  {:<12} {:>10} {:>12} {:>10} {:>14}",
-        "concurrency", "req/s", "elapsed (s)", "speedup", "serial frac."
-    );
-    println!("  {}", "-".repeat(62));
-
-    for s in &samples {
-        // Amdahl serial fraction: S = (1/speedup - 1/N) / (1 - 1/N)
-        let serial_frac = if s.concurrency == 1 {
-            1.0
-        } else {
-            let n = s.concurrency as f64;
-            (1.0 / s.speedup - 1.0 / n) / (1.0 - 1.0 / n)
-        };
-        println!(
-            "  {:<12} {:>10.0} {:>12.3} {:>9.2}× {:>13.1}%",
-            s.concurrency,
-            s.rps,
-            s.elapsed_secs,
-            s.speedup,
-            serial_frac * 100.0,
+            },
         );
     }
-
-    println!();
-    println!("  Interpretation");
-    println!("  ──────────────");
-    println!("  A flat serial-fraction column means the bottleneck is consistent");
-    println!("  across concurrency levels (Amdahl's law holds cleanly).");
-    println!("  Rising serial fraction at high concurrency signals a new contention");
-    println!("  point emerging — e.g. the in-memory LRU lock or tokio scheduler");
-    println!("  overhead — that didn't exist at lower concurrency.");
-    println!();
-    println!("  Under the old wait_map path, every cache hit serialized through");
-    println!("  the wait_map mutex, so the speedup curve would have been flat near 1×");
-    println!("  and the serial fraction near 100% regardless of concurrency level.");
+    group.finish();
 }
+
+criterion_group!(benches, bench_cache_hit_concurrency);
+criterion_main!(benches);
