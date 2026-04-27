@@ -56,9 +56,7 @@ pub(crate) fn validate_no_access_control_on_interfaces(
         REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
         POLICY_DIRECTIVE_NAME_IN_SPEC,
     ] {
-        if let Some(directive_name) =
-            federation_spec.directive_name_in_schema(schema, &directive)?
-        {
+        if let Some(directive_name) = federation_spec.directive_name_in_schema(schema, &directive) {
             let references = schema.referencers().get_directive(&directive_name);
             for interface_field in &references.interface_fields {
                 errors
@@ -129,24 +127,27 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
             );
         }
 
-        let from_context_directive_name = &subgraph
-            .metadata()
+        let from_context_directive = subgraph.metadata()
             .federation_spec_definition()
-            .from_context_directive_definition(subgraph.schema())?
-            .name;
-        let from_context_referencers = subgraph
-            .schema()
-            .referencers()
-            .get_directive(from_context_directive_name);
-        // @fromContext should only be present in the subgraphs on the object field arguments
-        // but in the supergraph it can be either on object field or interface (object) field
-        for argument in &from_context_referencers.object_field_arguments {
-            fields_with_from_context.insert(
-                ObjectOrInterfaceTypeDefinitionPosition::try_from(
-                    supergraph_schema.get_type(argument.type_name.clone())?,
-                )?
-                .field(argument.field_name.clone()),
+            .try_directive_definition(
+                subgraph.schema(),
+                &crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC
             );
+        if let Some(from_context_directive) = from_context_directive {
+            let from_context_referencers = subgraph
+                .schema()
+                .referencers()
+                .get_directive(&from_context_directive.name);
+            // @fromContext should only be present in the subgraphs on the object field arguments
+            // but in the supergraph it can be either on object field or interface (object) field
+            for argument in &from_context_referencers.object_field_arguments {
+                fields_with_from_context.insert(
+                    ObjectOrInterfaceTypeDefinitionPosition::try_from(
+                        supergraph_schema.get_type(argument.type_name.clone())?,
+                    )?
+                    .field(argument.field_name.clone()),
+                );
+            }
         }
     }
 
@@ -204,52 +205,43 @@ impl<'validator> AccessControlValidator<'validator> {
                 AUTHENTICATED_VERSIONS
                     .find(&authenticated_spec.url.version)
                     .and_then(|authenticated_definition| {
-                        authenticated_definition
-                            .directive_name_in_schema(
-                                supergraph_schema,
-                                &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
-                            )
-                            .transpose()
+                        authenticated_definition.directive_name_in_schema(
+                            supergraph_schema,
+                            &AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
+                        )
                     })
-            })
-            .transpose()?;
+            });
         let requires_scopes_directive_name = links_metadata
             .for_identity(&Identity::requires_scopes_identity())
             .and_then(|requires_scopes_spec| {
                 REQUIRES_SCOPES_VERSIONS
                     .find(&requires_scopes_spec.url.version)
                     .and_then(|requires_scopes_definition| {
-                        requires_scopes_definition
-                            .directive_name_in_schema(
-                                supergraph_schema,
-                                &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
-                            )
-                            .transpose()
+                        requires_scopes_definition.directive_name_in_schema(
+                            supergraph_schema,
+                            &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
+                        )
                     })
-            })
-            .transpose()?;
+            });
         let policy_directive_name = links_metadata
             .for_identity(&Identity::policy_identity())
             .and_then(|policy_spec| {
                 POLICY_VERSIONS
                     .find(&policy_spec.url.version)
                     .and_then(|policy_definition| {
-                        policy_definition
-                            .directive_name_in_schema(
-                                supergraph_schema,
-                                &POLICY_DIRECTIVE_NAME_IN_SPEC,
-                            )
-                            .transpose()
+                        policy_definition.directive_name_in_schema(
+                            supergraph_schema,
+                            &POLICY_DIRECTIVE_NAME_IN_SPEC,
+                        )
                     })
-            })
-            .transpose()?;
+            });
 
         let mut contexts: IndexMap<String, IndexSet<Name>> = IndexMap::default();
         if let Some(context_spec_definition) = links_metadata
             .for_identity(&Identity::context_identity())
             .and_then(|context_spec| CONTEXT_VERSIONS.find(&context_spec.url.version))
             && let Some(context_directive_name) = context_spec_definition
-                .directive_name_in_schema(supergraph_schema, &CONTEXT_DIRECTIVE_NAME)?
+                .directive_name_in_schema(supergraph_schema, &CONTEXT_DIRECTIVE_NAME)
         {
             let references = supergraph_schema
                 .referencers

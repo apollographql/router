@@ -33,7 +33,7 @@ pub(crate) fn validate_key_directives(
 ) -> Result<(), FederationError> {
     let directive_name = meta
         .federation_spec_definition()
-        .directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
         .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
 
     let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<KeyDirective>>> = vec![

@@ -136,10 +136,10 @@ impl SchemaUpgrader {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
         let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
-            key_directive_name: subgraph.key_directive_name()?.clone(),
-            requires_directive_name: subgraph.requires_directive_name()?.clone(),
-            provides_directive_name: subgraph.provides_directive_name()?.clone(),
-            extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            key_directive_name: subgraph.key_directive_name().clone(),
+            requires_directive_name: subgraph.requires_directive_name().clone(),
+            provides_directive_name: subgraph.provides_directive_name().clone(),
+            extends_directive_name: subgraph.extends_directive_name().clone(),
             metadata: subgraph.metadata().clone(),
             orphan_extension_types: orphan_extensions,
         };

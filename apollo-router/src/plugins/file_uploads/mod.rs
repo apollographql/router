@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use http::HeaderName;
 use http::HeaderValue;
+use http::StatusCode;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use mediatype::MediaType;
@@ -22,10 +23,12 @@ use self::map_field::MapField;
 use self::multipart_form_data::MultipartFormData;
 use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
+use crate::graphql;
 use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::BodyLimitControl;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -64,11 +67,25 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         let limits = self.limits;
+        let operation_body_timeout = limits.operation_body_timeout;
         ServiceBuilder::new()
             .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
-                    Ok(match router_layer(req, limits).await {
+                    let layer_task = router_layer(req, limits);
+                    let layer_result = if let Some(timeout) = operation_body_timeout {
+                        match tokio::time::timeout(timeout, layer_task).await {
+                            Ok(result) => result,
+                            Err(_elapsed) => {
+                                return Ok(ControlFlow::Break(operation_body_timeout_error(
+                                    context,
+                                )?));
+                            }
+                        }
+                    } else {
+                        layer_task.await
+                    };
+                    Ok(match layer_result {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
@@ -162,6 +179,21 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
+fn operation_body_timeout_error(
+    context: crate::Context,
+) -> std::result::Result<router::Response, tower::BoxError> {
+    router::Response::error_builder()
+        .status_code(StatusCode::GATEWAY_TIMEOUT)
+        .errors(vec![
+            graphql::Error::builder()
+                .message("The file upload operation body took too long to arrive")
+                .extension_code("GATEWAY_TIMEOUT")
+                .build(),
+        ])
+        .context(context)
+        .build()
+}
+
 /// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
 /// pipeline can understand.
 ///
@@ -196,7 +228,32 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = router::body::from_result_stream(operations_stream);
+        // Buffer the operations field so http_max_request_bytes applies to it specifically.
+        // The underlying Limited<Body> enforces the limit while we read here. Once buffered,
+        // disable the global limit so file streams aren't constrained by it; per-file size
+        // limits (max_file_size) still apply via the multer parser.
+        //
+        // Buffering is not wasteful: the downstream supergraph service reads the entire
+        // operations body into memory anyway for JSON parsing, and the operations field is
+        // bounded by http_max_request_bytes (default 2 MB), so peak memory usage is unchanged.
+        //
+        // If the operations field exceeds http_max_request_bytes, this never returns an Err:
+        // Limited<Body> stalls (returns Poll::Pending forever) and the RequestBodyLimitLayer's
+        // abort semaphore fires a 413 that cancels this future before .bytes() can resolve.
+        // The only errors that reach map_err here are genuine multer errors (bad encoding, etc.).
+        let operations_bytes = operations_stream
+            .bytes()
+            .await
+            .map_err(FileUploadError::InvalidMultipartRequest)?;
+        if let Some(control) = request_parts.extensions.get::<BodyLimitControl>() {
+            // update_limit asserts new > current, so skip if already at usize::MAX
+            // (only possible if http_max_request_bytes was explicitly set to usize::MAX).
+            if control.limit() < usize::MAX {
+                control.update_limit(usize::MAX);
+            }
+        }
+
+        let request_body = router::body::from_bytes(operations_bytes);
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,

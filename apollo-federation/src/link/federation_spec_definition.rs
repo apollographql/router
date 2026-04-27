@@ -197,11 +197,11 @@ impl FederationSpecDefinition {
         &self,
         schema: &FederationSchema,
         name_in_spec: &Name,
-    ) -> Result<Option<Name>, FederationError> {
+    ) -> Option<Name> {
         if schema.is_fed_2() {
             self.directive_name_in_schema(schema, name_in_spec)
         } else {
-            Ok(Some(name_in_spec.clone()))
+            Some(name_in_spec.clone())
         }
     }
 
@@ -215,7 +215,7 @@ impl FederationSpecDefinition {
         schema: &'schema FederationSchema,
         name_in_spec: &Name,
     ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
-        match self.federation_directive_name_in_schema(schema, name_in_spec)? {
+        match self.federation_directive_name_in_schema(schema, name_in_spec) {
             Some(name) => schema
                 .schema()
                 .directive_definitions
@@ -255,22 +255,23 @@ impl FederationSpecDefinition {
         resolvable: bool,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .federation_directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)?
+            .federation_directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_FIELDS_ARGUMENT_NAME,
+            value: Node::new(Value::String(fields.to_owned())),
+        })];
+        if !resolvable {
+            arguments.push(Node::new(Argument {
+                name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+                value: Node::new(Value::Boolean(false)),
+            }));
+        }
         Ok(Directive {
             name: name_in_schema,
-            arguments: vec![
-                Node::new(Argument {
-                    name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                    value: Node::new(Value::String(fields.to_owned())),
-                }),
-                Node::new(Argument {
-                    name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
-                    value: Node::new(Value::Boolean(resolvable)),
-                }),
-            ],
+            arguments,
         })
     }
 
@@ -320,7 +321,7 @@ impl FederationSpecDefinition {
             .into());
         }
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -345,7 +346,7 @@ impl FederationSpecDefinition {
     pub(crate) fn external_directive_name_in_schema(
         &self,
         schema: &FederationSchema,
-    ) -> Result<Option<Name>, FederationError> {
+    ) -> Option<Name> {
         self.federation_directive_name_in_schema(
             schema,
             &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
@@ -372,7 +373,7 @@ impl FederationSpecDefinition {
         reason: Option<String>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .external_directive_name_in_schema(schema)?
+            .external_directive_name_in_schema(schema)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -422,7 +423,7 @@ impl FederationSpecDefinition {
         name: String,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .federation_directive_name_in_schema(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .federation_directive_name_in_schema(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -468,7 +469,7 @@ impl FederationSpecDefinition {
             .federation_directive_name_in_schema(
                 schema,
                 &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
-            )?
+            )
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -516,7 +517,7 @@ impl FederationSpecDefinition {
             .federation_directive_name_in_schema(
                 schema,
                 &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
-            )?
+            )
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -544,7 +545,7 @@ impl FederationSpecDefinition {
     pub(crate) fn shareable_directive_name_in_schema(
         &self,
         schema: &FederationSchema,
-    ) -> Result<Option<Name>, FederationError> {
+    ) -> Option<Name> {
         self.directive_name_in_schema(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)
     }
 
@@ -565,7 +566,7 @@ impl FederationSpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .shareable_directive_name_in_schema(schema)?
+            .shareable_directive_name_in_schema(schema)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -594,7 +595,7 @@ impl FederationSpecDefinition {
         label: &Option<&str>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -647,7 +648,7 @@ impl FederationSpecDefinition {
         name: String,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -700,7 +701,7 @@ impl FederationSpecDefinition {
         name: String,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -1158,6 +1159,14 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 12,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 13,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 14,
         }));
         definitions
     });

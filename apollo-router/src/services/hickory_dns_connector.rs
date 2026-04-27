@@ -9,6 +9,7 @@ use std::task::Poll;
 
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::LookupIpStrategy;
+use hickory_resolver::net::NetError;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::connect::dns::Name;
 use tower::Service;
@@ -30,10 +31,10 @@ impl AsyncHyperResolver {
     fn new_from_system_conf(
         dns_resolution_strategy: DnsResolutionStrategy,
     ) -> Result<Self, io::Error> {
-        let mut builder = TokioResolver::builder_tokio()?;
+        let mut builder = TokioResolver::builder_tokio().map_err(convert_net_error)?;
         builder.options_mut().ip_strategy = dns_resolution_strategy.into();
 
-        Ok(Self(Arc::new(builder.build())))
+        Ok(Self(Arc::new(builder.build().map_err(convert_net_error)?)))
     }
 }
 
@@ -52,7 +53,8 @@ impl Service<Name> for AsyncHyperResolver {
         Box::pin(async move {
             Ok(resolver
                 .lookup_ip(name.as_str())
-                .await?
+                .await
+                .map_err(convert_net_error)?
                 .iter()
                 .map(|addr| (addr, 0_u16).to_socket_addrs())
                 .try_fold(Vec::new(), |mut acc, s_addr| {
@@ -82,4 +84,48 @@ pub(crate) fn new_async_http_connector(
 ) -> Result<HttpConnector<AsyncHyperResolver>, io::Error> {
     let resolver = AsyncHyperResolver::new_from_system_conf(dns_resolution_strategy)?;
     Ok(HttpConnector::new_with_resolver(resolver))
+}
+
+fn convert_net_error(err: NetError) -> io::Error {
+    match err {
+        NetError::Busy => io::Error::new(io::ErrorKind::ResourceBusy, err),
+        NetError::Io(io_err) => io::Error::new(io_err.kind(), io_err),
+        NetError::Timeout => io::Error::new(io::ErrorKind::TimedOut, err),
+        _ => io::Error::other(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::Arc;
+
+    use hickory_resolver::net::NetError;
+
+    use super::convert_net_error;
+
+    #[test]
+    fn busy_maps_to_resource_busy() {
+        let err = convert_net_error(NetError::Busy);
+        assert_eq!(err.kind(), io::ErrorKind::ResourceBusy);
+    }
+
+    #[test]
+    fn timeout_maps_to_timed_out() {
+        let err = convert_net_error(NetError::Timeout);
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn io_preserves_kind() {
+        let inner = io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
+        let err = convert_net_error(NetError::Io(Arc::new(inner)));
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+    }
+
+    #[test]
+    fn other_variants_map_to_other() {
+        let err = convert_net_error(NetError::Message("something went wrong"));
+        assert_eq!(err.kind(), io::ErrorKind::Other);
+    }
 }
