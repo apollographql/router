@@ -3094,8 +3094,7 @@ mod tests {
             assert_histogram_count!(
                 "http.client.request.duration",
                 1,
-                "message" =
-                    "HTTP fetch failed: cannot contact the subgraph",
+                "message" = "HTTP fetch failed: cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );
