@@ -156,12 +156,16 @@ where
             .build()
     }
 
-    /// `init_from_redis` is called with values newly deserialized from Redis cache
-    /// if an error is returned, the value is ignored and considered a cache miss.
+    /// Check the in-memory cache, then Redis on a miss. A Redis hit is promoted to the
+    /// in-memory cache before returning. Emits `cache.hit.time` or `cache.miss.time` for
+    /// each layer checked.
+    ///
+    /// `init_from_redis` is called on values freshly deserialized from Redis. Return `Err` to
+    /// reject the entry and treat the lookup as a miss.
     pub(crate) async fn get(
         &self,
         key: &K,
-        mut init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
+        init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
     ) -> Option<V> {
         let instant_memory = Instant::now();
         let res = self.inner.lock().await.get(key).cloned();
@@ -187,49 +191,61 @@ where
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
+                self.get_from_redis(key, init_from_redis).await
+            }
+        }
+    }
 
-                let instant_redis = Instant::now();
-                if let Some(redis) = self.redis.as_ref() {
-                    let inner_key = RedisKey(key.clone());
-                    let redis_value = redis.get(inner_key).await.ok().and_then(|mut v| {
-                        match init_from_redis(&mut v.0) {
-                            Ok(()) => Some(v),
-                            Err(e) => {
-                                tracing::error!("Invalid value from Redis cache: {e}");
-                                None
-                            }
-                        }
-                    });
-                    match redis_value {
-                        Some(v) => {
-                            self.insert_in_memory(key.clone(), v.0.clone()).await;
-
-                            let duration = instant_redis.elapsed();
-                            f64_histogram!(
-                                "apollo.router.cache.hit.time",
-                                "Time to get a value from the cache in seconds",
-                                duration.as_secs_f64(),
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
-                            Some(v.0)
-                        }
-                        None => {
-                            let duration = instant_redis.elapsed();
-                            f64_histogram!(
-                                "apollo.router.cache.miss.time",
-                                "Time to check the cache for an uncached value in seconds",
-                                duration.as_secs_f64(),
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
-                            None
-                        }
+    /// Check only Redis, inserting any hit into the in-memory cache.
+    /// Called by [`CacheStorage::get`] after an in-memory miss.
+    ///
+    /// `init_from_redis` is called on values freshly deserialized from Redis. Return `Err` to
+    /// reject the entry and treat the lookup as a miss.
+    async fn get_from_redis(
+        &self,
+        key: &K,
+        mut init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
+    ) -> Option<V> {
+        let instant_redis = Instant::now();
+        if let Some(redis) = self.redis.as_ref() {
+            let inner_key = RedisKey(key.clone());
+            let redis_value = redis.get(inner_key).await.ok().and_then(|mut v| {
+                match init_from_redis(&mut v.0) {
+                    Ok(()) => Some(v),
+                    Err(e) => {
+                        tracing::error!("Invalid value from Redis cache: {e}");
+                        None
                     }
-                } else {
+                }
+            });
+            match redis_value {
+                Some(v) => {
+                    self.insert_in_memory(key.clone(), v.0.clone()).await;
+
+                    let duration = instant_redis.elapsed();
+                    f64_histogram!(
+                        "apollo.router.cache.hit.time",
+                        "Time to get a value from the cache in seconds",
+                        duration.as_secs_f64(),
+                        kind = self.caller,
+                        storage = CacheStorageName::Redis.to_string()
+                    );
+                    Some(v.0)
+                }
+                None => {
+                    let duration = instant_redis.elapsed();
+                    f64_histogram!(
+                        "apollo.router.cache.miss.time",
+                        "Time to check the cache for an uncached value in seconds",
+                        duration.as_secs_f64(),
+                        kind = self.caller,
+                        storage = CacheStorageName::Redis.to_string()
+                    );
                     None
                 }
             }
+        } else {
+            None
         }
     }
 
