@@ -156,10 +156,7 @@ impl FetchError {
                 _ => (),
             }
             if let Some(redacted) = self.display_without_service() {
-                extensions.insert(
-                    "apollo.private.fetch.message_no_service",
-                    redacted.into(),
-                );
+                extensions.insert("apollo.private.fetch.message_no_service", redacted.into());
             }
         }
 
@@ -188,9 +185,9 @@ impl FetchError {
             FetchError::SubrequestMalformedResponse { reason, .. } => {
                 Some(format!("response was malformed: {reason}"))
             }
-            FetchError::SubrequestUnexpectedPatchResponse { .. } => Some(
-                "subgraph returned a PATCH response which was not expected".to_string(),
-            ),
+            FetchError::SubrequestUnexpectedPatchResponse { .. } => {
+                Some("subgraph returned a PATCH response which was not expected".to_string())
+            }
             FetchError::SubrequestWsError { reason, .. } => {
                 Some(format!("Websocket fetch failed: {reason}"))
             }

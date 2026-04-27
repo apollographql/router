@@ -229,9 +229,7 @@ fn subscription_with_subgraph_service(
             None => {
                 vec![
                     Error::builder()
-                        .message(
-                            "subscription mode is not configured for this subgraph",
-                        )
+                        .message("subscription mode is not configured for this subgraph")
                         .extension_code("INVALID_SUBSCRIPTION_MODE")
                         .build(),
                 ]
