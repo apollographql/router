@@ -220,11 +220,9 @@ where
         key: &K,
         mut init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
     ) -> Option<V> {
-        let Some(redis) = self.redis.as_ref() else {
-            return None;
-        };
+        let redis = self.redis.as_ref()?;
 
-        let instant_redis = Instant::now();
+        let instant = Instant::now();
         let redis_value = redis
             .get(RedisKey(key.clone()))
             .await
@@ -237,10 +235,10 @@ where
                 }
             });
         if let Some(v) = redis_value {
-            self.record_cache_hit_duration(instant_redis.elapsed(), CacheStorageName::Redis);
+            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Redis);
             Some(v.0)
         } else {
-            self.record_cache_miss_duration(instant_redis.elapsed(), CacheStorageName::Redis);
+            self.record_cache_miss_duration(instant.elapsed(), CacheStorageName::Redis);
             None
         }
     }
