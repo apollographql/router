@@ -32,6 +32,9 @@ pub(crate) enum ErrorMode {
         allow_extensions_keys: Vec<String>,
         /// redact error messages for all subgraphs
         redact_message: bool,
+        /// remove service name from error messages and extensions
+        #[serde(default)]
+        redact_service_name: bool,
     },
     /// Deny specific extension keys with required redact_message
     Deny {
@@ -39,6 +42,9 @@ pub(crate) enum ErrorMode {
         deny_extensions_keys: Vec<String>,
         /// redact error messages for all subgraphs
         redact_message: bool,
+        /// remove service name from error messages and extensions
+        #[serde(default)]
+        redact_service_name: bool,
     },
 }
 
@@ -80,6 +86,8 @@ impl<'de> Deserialize<'de> for ErrorMode {
                     allow_extensions_keys: Option<Vec<String>>,
                     deny_extensions_keys: Option<Vec<String>>,
                     redact_message: bool,
+                    #[serde(default)]
+                    redact_service_name: bool,
                 }
 
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
@@ -91,10 +99,12 @@ impl<'de> Deserialize<'de> for ErrorMode {
                     (Some(allow), None) => Ok(ErrorMode::Allow {
                         allow_extensions_keys: allow,
                         redact_message: helper.redact_message,
+                        redact_service_name: helper.redact_service_name,
                     }),
                     (None, Some(deny)) => Ok(ErrorMode::Deny {
                         deny_extensions_keys: deny,
                         redact_message: helper.redact_message,
+                        redact_service_name: helper.redact_service_name,
                     }),
                     // If neither allow nor deny is present, but redact_message is,
                     // treat it as Included(true) with the specified redaction.
@@ -124,6 +134,9 @@ pub(crate) enum SubgraphConfig {
         /// Redact error messages for a subgraph
         #[serde(skip_serializing_if = "Option::is_none")]
         redact_message: Option<bool>,
+        /// Remove service name from error messages and extensions for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_service_name: Option<bool>,
         /// Exclude specific extension keys from global allow/deny list
         #[serde(default)]
         exclude_global_keys: Vec<String>,
@@ -135,6 +148,9 @@ pub(crate) enum SubgraphConfig {
         /// Redact error messages for a subgraph
         #[serde(skip_serializing_if = "Option::is_none")]
         redact_message: Option<bool>,
+        /// Remove service name from error messages and extensions for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_service_name: Option<bool>,
         /// Exclude specific extension keys from global allow/deny list
         #[serde(default)]
         exclude_global_keys: Vec<String>,
@@ -144,6 +160,9 @@ pub(crate) enum SubgraphConfig {
         /// Redact error messages for a subgraph
         #[serde(skip_serializing_if = "Option::is_none")]
         redact_message: Option<bool>,
+        /// Remove service name from error messages and extensions for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_service_name: Option<bool>,
         /// Exclude specific extension keys from global allow/deny list
         #[serde(default)]
         exclude_global_keys: Vec<String>,
@@ -185,6 +204,7 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
                     allow_extensions_keys: Option<Vec<String>>,
                     deny_extensions_keys: Option<Vec<String>>,
                     redact_message: Option<bool>,
+                    redact_service_name: Option<bool>,
                     #[serde(default)]
                     exclude_global_keys: Vec<String>,
                 }
@@ -199,17 +219,20 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
                     (Some(allow), None) => Ok(SubgraphConfig::Allow {
                         allow_extensions_keys: allow,
                         redact_message: config.redact_message,
+                        redact_service_name: config.redact_service_name,
                         exclude_global_keys: config.exclude_global_keys,
                     }),
                     (None, Some(deny)) => Ok(SubgraphConfig::Deny {
                         deny_extensions_keys: deny,
                         redact_message: config.redact_message,
+                        redact_service_name: config.redact_service_name,
                         exclude_global_keys: config.exclude_global_keys,
                     }),
                     (None, None) => {
                         // If neither allow nor deny keys are present, it's CommonOnly
                         Ok(SubgraphConfig::CommonOnly {
                             redact_message: config.redact_message,
+                            redact_service_name: config.redact_service_name,
                             exclude_global_keys: config.exclude_global_keys,
                         })
                     }

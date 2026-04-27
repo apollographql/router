@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall:\n  deny_extensions_keys: []\n  redact_message: false\n  redact_service_name: true\n\n\nREQUEST:\n[\n  {\n    \"data\": {\n      \"topProducts\": null\n    },\n    \"errors\": [\n      {\n        \"message\": \"Authentication error\",\n        \"path\": [],\n        \"extensions\": {\n          \"test\": \"value\",\n          \"code\": \"AUTH_ERROR\"\n        }\n      }\n    ]\n  }\n]"
+expression: actual_responses
+---
+- data:
+    topProducts: ~
+  errors:
+    - message: Authentication error
+      path: []
+      extensions:
+        test: value
+        code: AUTH_ERROR

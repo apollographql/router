@@ -1,0 +1,10 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall:\n  deny_extensions_keys: []\n  redact_message: false\n  redact_service_name: true\n\n\nREQUEST:\n[\n  {\n    \"data\": null,\n    \"errors\": [\n      {\n        \"message\": \"HTTP fetch failed from 'products': 503 Service Unavailable\",\n        \"path\": [],\n        \"extensions\": {\n          \"code\": \"SUBREQUEST_HTTP_ERROR\",\n          \"service\": \"products\",\n          \"apollo.private.fetch.message_no_service\": \"HTTP fetch failed: 503 Service Unavailable\",\n          \"apollo.private.subgraph.name\": \"products\"\n        }\n      }\n    ]\n  }\n]"
+expression: actual_responses
+---
+- errors:
+    - message: "HTTP fetch failed: 503 Service Unavailable"
+      path: []
+      extensions:
+        code: SUBREQUEST_HTTP_ERROR

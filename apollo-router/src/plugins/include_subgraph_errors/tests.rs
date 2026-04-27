@@ -13,6 +13,12 @@ use crate::services::supergraph; // Required for collect
 const PRODUCT_ERROR_RESPONSE: &[&str] = &[
     r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "apollo.private.subgraph.name": "products"}}]}"#,
 ];
+// Simulates an error produced by FetchError::SubrequestHttpError::to_graphql_error():
+// the service name appears in the message, in extensions["service"], and the pre-computed
+// no-service message is stored in the private extension.
+const PRODUCT_HTTP_FETCH_ERROR_RESPONSE: &[&str] = &[
+    r#"{"data":null,"errors":[{"message":"HTTP fetch failed from 'products': 503 Service Unavailable","path":[],"extensions":{"code":"SUBREQUEST_HTTP_ERROR","service":"products","apollo.private.fetch.message_no_service":"HTTP fetch failed: 503 Service Unavailable","apollo.private.subgraph.name":"products"}}]}"#,
+];
 const ACCOUNT_ERROR_RESPONSE: &[&str] = &[
     r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "apollo.private.subgraph.name": "accounts"}}]}"#,
 ];
@@ -500,6 +506,109 @@ async fn it_processes_incremental_responses() {
         }),
         INCREMENTAL_RESPONSE,
         "incremental_response",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_redacts_service_name_in_message_and_removes_service_extension() {
+    run_test_case(
+        &json!({
+            "all": {
+                "deny_extensions_keys": [],
+                "redact_message": false,
+                "redact_service_name": true
+            }
+        }),
+        PRODUCT_HTTP_FETCH_ERROR_RESPONSE,
+        "redact_service_name_basic",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_redacts_service_name_globally_with_per_subgraph_opt_out() {
+    run_test_case(
+        &json!({
+            "all": {
+                "deny_extensions_keys": [],
+                "redact_message": false,
+                "redact_service_name": true
+            },
+            "subgraphs": {
+                "products": { "redact_service_name": false }
+            }
+        }),
+        PRODUCT_HTTP_FETCH_ERROR_RESPONSE,
+        "redact_service_name_per_subgraph_opt_out",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_redact_message_wins_over_redact_service_name() {
+    // When both redact_message and redact_service_name are true, full redaction wins
+    // and service extension is still removed.
+    run_test_case(
+        &json!({
+            "all": {
+                "deny_extensions_keys": [],
+                "redact_message": true,
+                "redact_service_name": true
+            }
+        }),
+        PRODUCT_HTTP_FETCH_ERROR_RESPONSE,
+        "redact_service_name_with_redact_message",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_removes_pre_set_service_extension_when_redacting_service_name() {
+    // The service extension is pre-set by to_graphql_error() before the plugin runs.
+    // Verify it is explicitly removed even though we did not inject it.
+    run_test_case(
+        &json!({
+            "all": {
+                "allow_extensions_keys": ["code", "service"],
+                "redact_message": false,
+                "redact_service_name": true
+            }
+        }),
+        PRODUCT_HTTP_FETCH_ERROR_RESPONSE,
+        "redact_service_name_removes_preset_service_ext",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_does_not_redact_service_name_by_default() {
+    // Default behaviour (redact_service_name: false) is unchanged — service name visible.
+    run_test_case(
+        &json!({
+            "all": {
+                "deny_extensions_keys": [],
+                "redact_message": false
+            }
+        }),
+        PRODUCT_HTTP_FETCH_ERROR_RESPONSE,
+        "redact_service_name_default_false",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_does_not_redact_service_name_for_non_subgraph_errors() {
+    run_test_case(
+        &json!({
+            "all": {
+                "deny_extensions_keys": [],
+                "redact_message": false,
+                "redact_service_name": true
+            }
+        }),
+        NON_SUBGRAPH_ERROR,
+        "redact_service_name_non_subgraph_error",
     )
     .await;
 }

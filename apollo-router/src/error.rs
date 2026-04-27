@@ -155,6 +155,12 @@ impl FetchError {
                 }
                 _ => (),
             }
+            if let Some(redacted) = self.display_without_service() {
+                extensions.insert(
+                    "apollo.private.fetch.message_no_service",
+                    redacted.into(),
+                );
+            }
         }
 
         Error::builder()
@@ -170,6 +176,28 @@ impl FetchError {
         Response {
             errors: vec![self.to_graphql_error(None)],
             ..Response::default()
+        }
+    }
+
+    /// Returns a version of the error message with the service name removed, if applicable.
+    pub(crate) fn display_without_service(&self) -> Option<String> {
+        match self {
+            FetchError::SubrequestHttpError { reason, .. } => {
+                Some(format!("HTTP fetch failed: {reason}"))
+            }
+            FetchError::SubrequestMalformedResponse { reason, .. } => {
+                Some(format!("response was malformed: {reason}"))
+            }
+            FetchError::SubrequestUnexpectedPatchResponse { .. } => Some(
+                "subgraph returned a PATCH response which was not expected".to_string(),
+            ),
+            FetchError::SubrequestWsError { reason, .. } => {
+                Some(format!("Websocket fetch failed: {reason}"))
+            }
+            FetchError::SubrequestBatchingError { reason, .. } => {
+                Some(format!("Batching error: {reason}"))
+            }
+            _ => None,
         }
     }
 }
@@ -669,6 +697,10 @@ mod tests {
             .extension(
                 "http",
                 serde_json_bytes::json!({"status": Value::Number(400.into())}),
+            )
+            .extension(
+                "apollo.private.fetch.message_no_service",
+                Value::String("HTTP fetch failed: invalid request".into()),
             )
             .build();
 

@@ -121,28 +121,46 @@ impl IncludeSubgraphErrors {
                     subgraph_name,
                     effective_config
                 );
-                // Process errors based on the effective config
+
+                // Always remove the private extension — prevents accidental leakage regardless of config.
+                let no_service_message = error
+                    .extensions
+                    .remove("apollo.private.fetch.message_no_service");
+
                 // 1. Redact message if needed
                 if effective_config.redact_message {
                     error.message = REDACTED_ERROR_MESSAGE.to_string();
                 }
 
-                // 2. Add 'service' extension (unless denied)
-                let service_key = "service".to_string();
-                let is_service_denied = effective_config
-                    .deny_extensions_keys
-                    .as_ref()
-                    .is_some_and(|deny| deny.contains(&service_key));
-                let is_service_allowed = effective_config
-                    .allow_extensions_keys
-                    .as_ref()
-                    .is_none_or(|allow| allow.contains(&service_key)); // Allowed if no allow list or if present in allow list
+                // 2. Service name handling
+                if effective_config.redact_service_name {
+                    if !effective_config.redact_message {
+                        if let Some(msg) =
+                            no_service_message.and_then(|v| v.as_str().map(str::to_owned))
+                        {
+                            error.message = msg;
+                        }
+                    }
+                    // Remove pre-set service extension and skip injection below.
+                    error.extensions.remove("service");
+                } else {
+                    // Add 'service' extension (unless denied by allow/deny lists)
+                    let service_key = "service".to_string();
+                    let is_service_denied = effective_config
+                        .deny_extensions_keys
+                        .as_ref()
+                        .is_some_and(|deny| deny.contains(&service_key));
+                    let is_service_allowed = effective_config
+                        .allow_extensions_keys
+                        .as_ref()
+                        .is_none_or(|allow| allow.contains(&service_key));
 
-                if !is_service_denied && is_service_allowed {
-                    error
-                        .extensions
-                        .entry(service_key)
-                        .or_insert(subgraph_name.clone().into());
+                    if !is_service_denied && is_service_allowed {
+                        error
+                            .extensions
+                            .entry(service_key)
+                            .or_insert(subgraph_name.clone().into());
+                    }
                 }
 
                 // 3. Filter extensions based on allow list
