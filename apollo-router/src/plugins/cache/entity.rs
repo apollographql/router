@@ -1035,12 +1035,7 @@ async fn cache_lookup_entities(
     expose_keys_in_context: bool,
     request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
-    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
-        return Ok(ControlFlow::Continue((
-            request,
-            EntityCacheResults(vec![], None),
-        )));
-    }
+    let is_no_cache = request_cache_control.is_some_and(|c| c.is_no_cache());
 
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
@@ -1055,28 +1050,37 @@ async fn cache_lookup_entities(
         private_id,
     )?;
 
-    let redis_keys = keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>();
-    let result_len = redis_keys.len();
-    let cache_result: Vec<Option<CacheEntry>> = cache
-        .get_multiple(redis_keys)
-        .await
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
-                .map(|v| match v {
-                    Err(_) => None,
-                    Ok(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
+    let keys_len = keys.len();
+    let cache_result: Vec<Option<CacheEntry>> = if is_no_cache {
+        // no-cache means bypass the cache for lookup but still fetch from the subgraph.
+        // Treat every entity as a cache miss so filter_representations includes all of them
+        // in the outgoing request. This avoids the previous early-return bug (ROUTER-1689)
+        // where an empty IntermediateResult list caused insert_entities_in_result to
+        // produce an empty _entities array, making entity fields return null.
+        vec![None; keys_len]
+    } else {
+        let redis_keys = keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>();
+        cache
+            .get_multiple(redis_keys)
+            .await
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+                    .map(|v| match v {
+                        Err(_) => None,
+                        Ok(v) => {
+                            if v.control.can_use() {
+                                Some(v)
+                            } else {
+                                None
+                            }
                         }
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or(vec![None; result_len]);
+                    })
+                    .collect()
+            })
+            .unwrap_or(vec![None; keys_len])
+    };
 
     let representations = body
         .variables
@@ -1084,8 +1088,14 @@ async fn cache_lookup_entities(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
     // remove from representations the entities we already obtained from the cache
-    let (new_representations, cache_result, cache_control) =
-        filter_representations(&name, representations, keys, cache_result, &request.context)?;
+    let (new_representations, cache_result, cache_control) = filter_representations(
+        &name,
+        representations,
+        keys,
+        cache_result,
+        &request.context,
+        !is_no_cache,
+    )?;
 
     if expose_keys_in_context {
         let mut cache_entries = Vec::with_capacity(cache_result.len());
@@ -1612,6 +1622,7 @@ fn filter_representations(
     keys: Vec<String>,
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
+    record_metrics: bool,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -1661,10 +1672,12 @@ fn filter_representations(
         });
     }
 
-    let _ = context.insert(
-        CacheMetricContextKey::new(subgraph_name.to_string()),
-        CacheSubgraph(cache_hit),
-    );
+    if record_metrics {
+        let _ = context.insert(
+            CacheMetricContextKey::new(subgraph_name.to_string()),
+            CacheSubgraph(cache_hit),
+        );
+    }
 
     Ok((new_representations, result, cache_control))
 }

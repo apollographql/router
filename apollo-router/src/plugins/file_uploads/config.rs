@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bytesize::ByteSize;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -13,6 +15,16 @@ pub(crate) struct MultipartRequestLimits {
     #[serde(deserialize_with = "bytesize::ByteSize::deserialize")]
     #[schemars(with = "String")]
     pub(crate) max_file_size: ByteSize,
+
+    /// Maximum time allowed for the client to deliver the GraphQL operation (query and variables)
+    /// within the multipart body. This timeout does not apply to reading the file contents
+    /// themselves. If the operation part of the request is too slow to arrive, the request is
+    /// rejected with a `504 Gateway Timeout` error.
+    ///
+    /// If not set, no operation body timeout is applied.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) operation_body_timeout: Option<Duration>,
 }
 
 impl Default for MultipartRequestLimits {
@@ -20,6 +32,7 @@ impl Default for MultipartRequestLimits {
         Self {
             max_files: 5,
             max_file_size: ByteSize::mb(1),
+            operation_body_timeout: None,
         }
     }
 }

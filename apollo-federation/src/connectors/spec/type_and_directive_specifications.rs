@@ -586,11 +586,11 @@ mod tests {
             .expand_links()
             .expect("expanded successfully");
         assert_snapshot!(subgraph.schema_string(), @r#"
-        schema {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.10") @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@source"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.10") @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@source"])
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -720,11 +720,11 @@ mod tests {
             .expand_links()
             .expect("expanded successfully");
         assert_snapshot!(subgraph.schema_string(), @r#"
-        schema {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source"])
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -963,11 +963,11 @@ mod tests {
             .expand_links()
             .expect("expanded successfully");
         assert_snapshot!(subgraph.schema_string(), @r#"
-        schema {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2", import: [{name: "@source", as: "@api"}, {name: "JSONSelection", as: "Mapping"}, {name: "ConnectorErrors", as: "ErrorMappings"}, "ConnectHTTP"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2", import: [{name: "@source", as: "@api"}, {name: "JSONSelection", as: "Mapping"}, {name: "ConnectorErrors", as: "ErrorMappings"}, "ConnectHTTP"])
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1104,11 +1104,11 @@ mod tests {
             .expand_links()
             .expect("expanded successfully");
         assert_snapshot!(subgraph.schema_string(), @r#"
-        schema {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2")
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.11") @link(url: "https://specs.apollo.dev/connect/v0.2")
 
         directive @connect(source: String, http: connect__ConnectHTTP!, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 

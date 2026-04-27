@@ -3,6 +3,10 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use strum::Display;
 
 pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
@@ -45,6 +49,27 @@ pub mod router;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
+
+/// Represents the steps of the pipeline that can support user-extensibility.
+#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub(crate) enum PipelineStep {
+    RouterRequest,
+    RouterResponse,
+    SupergraphRequest,
+    SupergraphResponse,
+    ExecutionRequest,
+    ExecutionResponse,
+    SubgraphRequest,
+    SubgraphResponse,
+    ConnectorRequest,
+    ConnectorResponse,
+}
+
+impl From<PipelineStep> for opentelemetry::Value {
+    fn from(val: PipelineStep) -> Self {
+        val.to_string().into()
+    }
+}
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {
