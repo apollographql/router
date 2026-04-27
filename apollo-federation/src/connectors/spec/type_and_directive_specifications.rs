@@ -332,11 +332,24 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
 //   entity: Boolean = false
 // ) repeatable on FIELD_DEFINITION
 //
-// connect/v0.2:
+// connect/v0.2 and v0.3:
 // directive @connect(
 //   source: String
 //   id: String
 //   http: ConnectHTTP!
+//   batch: ConnectBatch
+//   errors: ConnectorErrors
+//   selection: JSONSelection!
+//   entity: Boolean = false
+//   isSuccess: JSONSelection
+// ) repeatable on FIELD_DEFINITION | OBJECT
+//
+// connect/v0.4 (preview):
+// directive @connect(
+//   source: String
+//   id: String
+//   # newly nullable in v0.4, to support requestless connectors
+//   http: ConnectHTTP
 //   batch: ConnectBatch
 //   errors: ConnectorErrors
 //   selection: JSONSelection!
