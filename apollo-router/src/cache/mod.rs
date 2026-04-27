@@ -86,7 +86,7 @@ where
         // removes all wait_map contention on cache hits — the mutex is only needed for
         // miss deduplication (preventing thundering herd when multiple tasks race to
         // compute the same value). Redis-only entries still fall through to the slow path.
-        if let Some(value) = self.storage.get_in_memory(key).await {
+        if let Some(value) = self.storage.peek_in_memory(key).await {
             return Entry {
                 inner: EntryInner::Value(value),
             };

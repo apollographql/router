@@ -168,19 +168,42 @@ where
         key: &K,
         init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
     ) -> Option<V> {
-        let instant_memory = Instant::now();
-        let res = self.inner.lock().await.get(key).cloned();
-
-        match res {
-            Some(v) => {
-                self.record_cache_hit_duration(instant_memory.elapsed(), CacheStorageName::Memory);
-                Some(v)
-            }
-            None => {
-                self.record_cache_miss_duration(instant_memory.elapsed(), CacheStorageName::Memory);
-                self.get_from_redis(key, init_from_redis).await
-            }
+        if let Some(v) = self.get_in_memory(key).await {
+            Some(v)
+        } else {
+            self.get_from_redis(key, init_from_redis).await
         }
+    }
+
+    /// Check only the in-memory cache, bypassing Redis.
+    /// Emits `cache.hit.time` on a hit and `cache.miss.time` on a miss.
+    pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
+        let instant = Instant::now();
+        let res = self.inner.lock().await.get(key).cloned();
+        if res.is_some() {
+            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
+        } else {
+            self.record_cache_miss_duration(instant.elapsed(), CacheStorageName::Memory);
+        }
+        res
+    }
+
+    /// For use by [`DeduplicatingCache`] only, as the in-memory fast path that avoids
+    /// acquiring the wait_map mutex on warm-cache hits.
+    ///
+    /// Identical to [`CacheStorage::get_in_memory`] except it does not emit
+    /// `cache.miss.time` on a miss — this check is an implementation detail of the
+    /// deduplication layer, not a cache event visible to observers. On a miss, the caller
+    /// falls through to `storage.get()`, which emits either `cache.hit.time` or
+    /// `cache.miss.time` depending on whether another task inserted the value between
+    /// this check and `storage.get()`'s in-memory re-check.
+    pub(crate) async fn peek_in_memory(&self, key: &K) -> Option<V> {
+        let instant = Instant::now();
+        let res = self.inner.lock().await.get(key).cloned();
+        if res.is_some() {
+            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
+        }
+        res
     }
 
     /// Check only Redis, inserting any hit into the in-memory cache.
@@ -220,24 +243,6 @@ where
                 None
             }
         }
-    }
-
-    /// Check only the in-memory cache, bypassing Redis.
-    /// Used by `DeduplicatingCache` as a fast path on warm-cache hits.
-    ///
-    /// Emits `cache.hit.time` on a hit but nothing on a miss. This is intentional:
-    /// the fast-path check is an implementation detail of the deduplication layer,
-    /// not a cache event visible to observers. On a miss, the caller falls through
-    /// to `storage.get()`, which emits either `cache.hit.time` or `cache.miss.time`
-    /// depending on whether another task inserted the value between this check and
-    /// `storage.get()`'s in-memory re-check.
-    pub(crate) async fn get_in_memory(&self, key: &K) -> Option<V> {
-        let instant = Instant::now();
-        let res = self.inner.lock().await.get(key).cloned();
-        if res.is_some() {
-            self.record_cache_hit_duration(instant.elapsed(), CacheStorageName::Memory);
-        }
-        res
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
