@@ -1537,7 +1537,7 @@ async fn no_cache_from_request() {
         valid_schema.clone(),
         false,
         drop_tx,
-        false,
+        true,
     )
     .await
     .unwrap();
