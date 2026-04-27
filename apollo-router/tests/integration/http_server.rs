@@ -180,6 +180,10 @@ async fn test_http2_max_header_list_size_exceeded() -> Result<(), BoxError> {
         "Expected 431 Request Header Fields Too Large when header list exceeds 20MiB limit"
     );
 
+    // Drop response and client before shutdown so the h2 connection is closed and the router can
+    // drain its connections cleanly — otherwise graceful_shutdown hangs waiting for the open conn.
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -234,6 +238,8 @@ async fn test_http2_max_header_list_size_within_limit() -> Result<(), BoxError> 
         "Expected HTTP/2 to be negotiated"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -285,6 +291,8 @@ async fn test_tcp_max_header_list_size_exceeded() -> Result<(), BoxError> {
         "Expected 431 Request Header Fields Too Large when header list exceeds 20MiB limit for TCP"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -340,6 +348,8 @@ async fn test_tcp_max_header_list_size_within_limit() -> Result<(), BoxError> {
         "Expected HTTP/2 to be negotiated for TCP"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }

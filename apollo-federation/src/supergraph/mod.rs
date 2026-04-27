@@ -1,5 +1,4 @@
 mod join_directive;
-mod schema;
 mod subgraph;
 
 use std::fmt::Write;
@@ -39,7 +38,6 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use time::OffsetDateTime;
 
-pub(crate) use self::schema::new_empty_fed_2_subgraph_schema;
 use self::subgraph::FederationSubgraph;
 use self::subgraph::FederationSubgraphs;
 pub use self::subgraph::ValidFederationSubgraph;
@@ -86,6 +84,7 @@ use crate::schema::type_and_directive_specification::ObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
+use crate::subgraph::typestate::new_empty_federation_2_subgraph_schema;
 use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
@@ -220,22 +219,78 @@ pub struct SupergraphMetadata {
     abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
+pub use crate::merger::hints::HintCode;
+
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
 pub struct CompositionHint {
+    pub definition: &'static HintCodeDefinition,
     pub message: String,
-    pub code: String,
     pub locations: Locations,
 }
 
 impl CompositionHint {
     pub fn code(&self) -> &str {
-        &self.code
+        self.definition.code()
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        self.definition.level()
     }
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HintLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+impl HintLevel {
+    pub fn name(&self) -> &'static str {
+        match self {
+            HintLevel::Warn => "WARN",
+            HintLevel::Info => "INFO",
+            HintLevel::Debug => "DEBUG",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HintCodeDefinition {
+    code: String,
+    level: HintLevel,
+    description: String,
+}
+
+impl HintCodeDefinition {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        level: HintLevel,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            level,
+            description: description.into(),
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        &self.level
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
     }
 }
 
@@ -368,7 +423,7 @@ fn collect_empty_subgraphs(
         let subgraph = FederationSubgraph {
             name: graph_arguments.name.to_owned(),
             url: graph_arguments.url.to_owned(),
-            schema: new_empty_fed_2_subgraph_schema()?,
+            schema: new_empty_federation_2_subgraph_schema()?,
             graph_enum_value: enum_value_name.clone(),
         };
         let federation_link = &subgraph
@@ -1723,45 +1778,37 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
     let mut type_definition_positions: Vec<TypeDefinitionPosition> = Vec::new();
     for (type_name, type_) in schema.schema().types.iter() {
         match type_ {
-            ExtendedType::Object(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Object(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    ObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Interface(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InterfaceTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Interface(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InterfaceTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Union(type_) => {
-                if type_.members.is_empty() {
-                    type_definition_positions.push(
-                        UnionTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Union(type_) if type_.members.is_empty() => {
+                type_definition_positions.push(
+                    UnionTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::InputObject(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InputObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::InputObject(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InputObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }
@@ -1816,6 +1863,9 @@ pub(crate) const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecificatio
 pub(crate) const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: FEDERATION_SERVICE_TYPE_NAME,
     fields: |_schema| {
+        // Federation docs describe `_Service { sdl: String! }`, but the JS implementation uses
+        // nullable `sdl: String`. This Rust spec matches JS for compatibility; move the field to
+        // `Type::NonNullNamed(GRAPHQL_STRING_TYPE_NAME)` when we can align behavior safely.
         [FieldSpecification {
             name: FEDERATION_SDL_FIELD_NAME,
             ty: Type::Named(GRAPHQL_STRING_TYPE_NAME),
@@ -2991,9 +3041,9 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.14", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
-        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r###" @federation__interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"###);
+        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
     }
 }

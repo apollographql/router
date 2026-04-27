@@ -8,12 +8,12 @@ use petgraph::graph::NodeIndex;
 use tracing::debug;
 use tracing::debug_span;
 
+use crate::composition::CompositionOptions;
 use crate::composition::satisfiability::validation_context::ValidationContext;
 use crate::composition::satisfiability::validation_state::SubgraphContextKey;
 use crate::composition::satisfiability::validation_state::ValidationState;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::merger::merge::CompositionOptions;
 use crate::operation::SelectionSet;
 use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;

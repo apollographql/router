@@ -1,0 +1,21 @@
+---
+source: apollo-router/tests/integration/response_size_limits.rs
+expression: response_json
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "HTTP fetch failed from 'products': subgraph response body exceeded limit of 50 bytes",
+      "path": [],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "products",
+        "reason": "subgraph response body exceeded limit of 50 bytes",
+        "http": {
+          "status": 200
+        }
+      }
+    }
+  ]
+}

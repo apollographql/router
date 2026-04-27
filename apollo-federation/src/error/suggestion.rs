@@ -22,7 +22,7 @@ pub(crate) fn suggestion_list(
             result.push((option, distance));
         }
     }
-    result.sort_by(|x, y| x.1.cmp(&y.1));
+    result.sort_by_key(|x| x.1);
     result.into_iter().map(|(s, _)| s.to_string()).collect()
 }
 
