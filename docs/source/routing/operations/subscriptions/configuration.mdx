@@ -388,7 +388,7 @@ A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` or `SUBSCRIPTION_CONFIG
 
 ### Limit subscription lifetime
 
-By default, subscriptions can remain open indefinitely. Set a maximum duration using `max_lifetime` to have the router close the subscription and send a terminal error to the client after the configured duration:
+By default, subscriptions can remain open indefinitely. Set a maximum duration using `max_lifetime` to have Apollo Router close the subscription and send a terminal error to the client after the configured duration:
 
 ```yaml title="router.yaml"
 subscription:
@@ -416,6 +416,13 @@ When the lifetime expires, the client receives a final response payload:
 A client that receives the `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED` error code can reconnect by executing a new subscription operation.
 
 Use `max_lifetime` to enforce resource limits, rotate authentication tokens, or prevent stale long-lived connections.
+
+<Note>                                                                                                                           
+                                                                                                                               
+If [subscription deduplication](#subscription-deduplication) is enabled (the default), all clients sharing a deduplicated      
+subscription are closed when the lifetime expires, not just the first client to reach the limit.                                  
+                                                                                                                             
+</Note>
 
 ### WebSocket auth support
 

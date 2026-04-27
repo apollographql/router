@@ -130,8 +130,8 @@ impl Multipart {
         self
     }
 
-    /// Checks if the errors indicate a reload-related termination and returns the appropriate end reason
-    fn detect_reload_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
+    /// Checks if the errors indicate a router-initiated termination and returns the appropriate end reason
+    fn detect_subscription_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
         for error in errors {
             match error.extensions.get("code").and_then(|v| v.as_str()) {
                 Some(code) if code == SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE => {
@@ -321,7 +321,7 @@ impl Stream for Multipart {
                         response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
 
                     // Check for reload-related termination before errors are moved
-                    let maybe_end_reason = Self::detect_reload_end_reason(&response.errors);
+                    let maybe_end_reason = Self::detect_subscription_end_reason(&response.errors);
 
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
