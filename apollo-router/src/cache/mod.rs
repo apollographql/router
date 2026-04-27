@@ -95,9 +95,10 @@ where
         // Slow path: acquire wait_map mutex for miss deduplication.
         //
         // Note: storage.get() below will re-check the in-memory cache, so on a miss this path
-        // locks `inner` twice. The redundant check is intentional — it catches values inserted
-        // between the fast-path miss above and the wait_map lock below (TOCTOU). The overhead
-        // is nanoseconds on a path already dominated by plan computation or a Redis round-trip.
+        // locks `inner` twice. The redundant check is intentional — it closes the
+        // time-of-check/time-of-use race between the fast-path miss above and the wait_map
+        // lock below. The overhead is nanoseconds on a path already dominated by plan
+        // computation or a Redis round-trip.
         //
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
