@@ -3159,6 +3159,81 @@ mod tests {
             assert_eq!(response.data, Some(Value::String(ByteString::from("test"))));
             assert!(response.errors.is_empty());
         }
+
+        // Verifies that on a PersistedQueryNotSupported retry, the full original body is
+        // restored: the query is present, the persistedQuery extension is removed, and any
+        // other extensions are preserved. The mock server handler distinguishes the first
+        // attempt (no query) from the retry (query present) and asserts on the retry body.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_apq_not_supported_retry_restores_original_body() {
+            async fn handle(
+                request: http::Request<Body>,
+            ) -> Result<http::Response<Body>, Infallible> {
+                let bytes = router::body::into_bytes(request.into_body())
+                    .await
+                    .expect("can read request body");
+                let graphql_request: graphql::Request =
+                    serde_json::from_reader(bytes.reader()).expect("valid graphql request");
+
+                if graphql_request.query.is_none() {
+                    // First attempt: return PersistedQueryNotSupported
+                    let pqns_response = Response {
+                        errors: vec![
+                            Error::builder()
+                                .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
+                                .build(),
+                        ],
+                        ..Response::default()
+                    };
+                    return Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(serde_json::to_string(&pqns_response).unwrap().into())
+                        .unwrap());
+                }
+
+                // Second attempt: verify the retry body is the full original body
+                assert_eq!(
+                    graphql_request.query.as_deref(),
+                    Some(APQ_TEST_QUERY),
+                    "retry should send the original query string"
+                );
+                assert!(
+                    !graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                    "persistedQuery extension should be removed on retry"
+                );
+                assert!(
+                    graphql_request.extensions.contains_key("myExt"),
+                    "other extensions should be preserved on retry"
+                );
+
+                let success_response = Response {
+                    data: Some(Value::String(ByteString::from("test"))),
+                    ..Response::default()
+                };
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::OK)
+                    .body(serde_json::to_string(&success_response).unwrap().into())
+                    .unwrap())
+            }
+
+            let gql_body = graphql::Request {
+                query: Some(APQ_TEST_QUERY.to_string()),
+                operation_name: Some("MyOp".to_string()),
+                variables: serde_json_bytes::json!({"id": "42"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                extensions: serde_json_bytes::json!({"myExt": "value"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            };
+            let response = run_apq_test(gql_body, handle).await.response.into_body();
+            assert_eq!(response.data, Some(Value::String(ByteString::from("test"))));
+            assert!(response.errors.is_empty());
+        }
     }
 
     #[test]
