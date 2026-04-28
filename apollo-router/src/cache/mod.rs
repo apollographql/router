@@ -15,6 +15,7 @@ use crate::configuration::RedisCache;
 
 mod metrics;
 pub(crate) mod redis;
+mod replica_filter;
 mod size_estimation;
 pub(crate) mod storage;
 use std::convert::Infallible;
@@ -149,7 +150,7 @@ where
                     inner: EntryInner::First {
                         sender,
                         key: key.clone(),
-                        cache: self.clone(),
+                        cache: Box::new(self.clone()),
                         _drop_signal,
                     },
                 }
@@ -199,7 +200,7 @@ enum EntryInner<K: KeyType, V: ValueType, UncachedError> {
     First {
         key: K,
         sender: broadcast::Sender<Result<V, UncachedError>>,
-        cache: DeduplicatingCache<K, V, UncachedError>,
+        cache: Box<DeduplicatingCache<K, V, UncachedError>>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
