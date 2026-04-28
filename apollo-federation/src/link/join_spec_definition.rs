@@ -442,7 +442,7 @@ impl JoinSpecDefinition {
         subgraph_name: &Name,
         member_name: &str,
     ) -> Result<Directive, FederationError> {
-        let Ok(Some(name_in_schema)) =
+        let Some(name_in_schema) =
             self.directive_name_in_schema(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)
         else {
             bail!("Unexpectedly could not find unionMember directive in schema");
@@ -496,7 +496,7 @@ impl JoinSpecDefinition {
         subgraph_name: &Name,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find enumValue directive in schema".to_owned(),
             })?;
@@ -656,8 +656,7 @@ impl JoinSpecDefinition {
             }));
         }
 
-        let Some(name) =
-            self.directive_name_in_schema(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
+        let Some(name) = self.directive_name_in_schema(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)
         else {
             bail!("Unexpectedly could not find @join__type directive in schema")
         };
@@ -854,7 +853,7 @@ impl JoinSpecDefinition {
         interface: &str,
     ) -> Result<Directive, FederationError> {
         let Some(name) =
-            self.directive_name_in_schema(schema, &JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)?
+            self.directive_name_in_schema(schema, &JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)
         else {
             bail!("Unexpectedly could not find @join__implements directive in schema");
         };
@@ -1001,7 +1000,7 @@ impl JoinSpecDefinition {
         args: impl IntoIterator<Item = Node<Argument>>,
     ) -> Result<Directive, FederationError> {
         let Some(directive_name) =
-            self.directive_name_in_schema(schema, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)?
+            self.directive_name_in_schema(schema, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)
         else {
             bail!("Unexpectedly could not find @join__directive directive in schema");
         };
@@ -1083,14 +1082,14 @@ impl JoinSpecDefinition {
 
         // Get the graph directive name once (used for all enum values)
         let graph_directive_name = self
-            .directive_name_in_schema(schema, &JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Could not find graph directive name in schema".to_owned(),
             })?;
 
         // Get the graph enum name to access it directly from the schema
         let graph_enum_name = self
-            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
+            .type_name_in_schema(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Could not find graph enum name in schema".to_owned(),
             })?;

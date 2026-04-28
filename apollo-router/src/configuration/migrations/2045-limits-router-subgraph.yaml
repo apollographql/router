@@ -1,0 +1,40 @@
+description: >
+  limits config restructured: existing fields moved under `limits.router`,
+  new `limits.subgraph` section added for per-subgraph response size limits.
+actions:
+  - type: move
+    from: limits.http_max_request_bytes
+    to: limits.router.http_max_request_bytes
+  - type: move
+    from: limits.max_depth
+    to: limits.router.max_depth
+  - type: move
+    from: limits.max_height
+    to: limits.router.max_height
+  - type: move
+    from: limits.max_root_fields
+    to: limits.router.max_root_fields
+  - type: move
+    from: limits.max_aliases
+    to: limits.router.max_aliases
+  - type: move
+    from: limits.warn_only
+    to: limits.router.warn_only
+  - type: move
+    from: limits.parser_max_recursion
+    to: limits.router.parser_max_recursion
+  - type: move
+    from: limits.parser_max_tokens
+    to: limits.router.parser_max_tokens
+  - type: move
+    from: limits.http1_max_request_headers
+    to: limits.router.http1_max_request_headers
+  - type: move
+    from: limits.http1_max_request_buf_size
+    to: limits.router.http1_max_request_buf_size
+  - type: move
+    from: limits.http2_max_headers_list_bytes
+    to: limits.router.http2_max_headers_list_bytes
+  - type: move
+    from: limits.introspection_max_depth
+    to: limits.router.introspection_max_depth

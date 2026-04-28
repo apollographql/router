@@ -67,7 +67,7 @@ scalar federation__Policy
 
 scalar federation__ContextFieldValue
 
-type Product @key(fields: "sku", resolvable: true) {
+type Product @key(fields: "sku") {
   sku: String! @shareable
   name: String!
 }

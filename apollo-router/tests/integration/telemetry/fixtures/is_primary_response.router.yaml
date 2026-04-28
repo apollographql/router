@@ -1,0 +1,28 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+  instrumentation:
+    instruments:
+      supergraph:
+        is_primary_chunks:
+          type: counter
+          value: event_unit
+          unit: "chunk"
+          description: "Fires on response chunks where is_primary_response evaluates to true"
+          condition:
+            eq:
+              - is_primary_response: true
+              - true
+        deferred_chunks:
+          type: counter
+          value: event_unit
+          unit: "chunk"
+          description: "Fires on response chunks where is_primary_response evaluates to false"
+          condition:
+            eq:
+              - is_primary_response: true
+              - false
+include_subgraph_errors:
+  all: true

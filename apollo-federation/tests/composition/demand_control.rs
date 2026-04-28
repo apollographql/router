@@ -2,12 +2,13 @@ use apollo_compiler::Name;
 use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Supergraph;
-use apollo_federation::composition::compose;
 use apollo_federation::error::ErrorCode;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
 use test_log::test;
+
+use super::compose;
 
 fn check_cost_and_listsize_directives(
     result: &Supergraph<Satisfiable>,
@@ -257,7 +258,7 @@ fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
       scalarWithCost: ExpensiveInt
       objectWithCost: ExpensiveObject
     }
-    "#).unwrap().into_fed2_test_subgraph(false, false).unwrap()
+    "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
 fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
@@ -274,7 +275,7 @@ fn subgraph_with_renamed_listsize() -> Subgraph<Initial> {
       fieldWithListSize: [String!] @renamedListSize(assumedSize: 2000, requireOneSlicingArgument: false)
       fieldWithDynamicListSize(first: Int!): HasInts @renamedListSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
     }
-    "#).unwrap().into_fed2_test_subgraph(false, false).unwrap()
+    "#).unwrap().into_fed2_test_subgraph(false).unwrap()
 }
 
 fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
@@ -308,7 +309,7 @@ fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
     "#,
     )
     .unwrap()
-    .into_fed2_test_subgraph(true, false)
+    .into_fed2_test_subgraph(true)
     .unwrap()
 }
 
@@ -322,7 +323,7 @@ fn subgraph_with_listsize_from_federation_spec() -> Subgraph<Initial> {
       fieldWithListSize: [String!] @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
       fieldWithDynamicListSize(first: Int!): HasInts @listSize(slicingArguments: ["first"], sizedFields: ["ints"], requireOneSlicingArgument: true)
     }
-    "#).unwrap().into_fed2_test_subgraph(true, false).unwrap()
+    "#).unwrap().into_fed2_test_subgraph(true).unwrap()
 }
 
 fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Initial> {

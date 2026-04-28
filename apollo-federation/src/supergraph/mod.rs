@@ -219,22 +219,78 @@ pub struct SupergraphMetadata {
     abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
+pub use crate::merger::hints::HintCode;
+
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
 pub struct CompositionHint {
+    pub definition: &'static HintCodeDefinition,
     pub message: String,
-    pub code: String,
     pub locations: Locations,
 }
 
 impl CompositionHint {
     pub fn code(&self) -> &str {
-        &self.code
+        self.definition.code()
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        self.definition.level()
     }
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HintLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+impl HintLevel {
+    pub fn name(&self) -> &'static str {
+        match self {
+            HintLevel::Warn => "WARN",
+            HintLevel::Info => "INFO",
+            HintLevel::Debug => "DEBUG",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HintCodeDefinition {
+    code: String,
+    level: HintLevel,
+    description: String,
+}
+
+impl HintCodeDefinition {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        level: HintLevel,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            level,
+            description: description.into(),
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        &self.level
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
     }
 }
 
@@ -1722,45 +1778,37 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
     let mut type_definition_positions: Vec<TypeDefinitionPosition> = Vec::new();
     for (type_name, type_) in schema.schema().types.iter() {
         match type_ {
-            ExtendedType::Object(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Object(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    ObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Interface(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InterfaceTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Interface(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InterfaceTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Union(type_) => {
-                if type_.members.is_empty() {
-                    type_definition_positions.push(
-                        UnionTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Union(type_) if type_.members.is_empty() => {
+                type_definition_positions.push(
+                    UnionTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::InputObject(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InputObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::InputObject(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InputObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }

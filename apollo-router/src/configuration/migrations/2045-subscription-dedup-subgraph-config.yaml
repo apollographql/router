@@ -1,0 +1,8 @@
+description: "`subscription.deduplication` fields moved under `all` to support per-subgraph configuration"
+actions:
+  - type: move
+    from: subscription.deduplication.enabled
+    to: subscription.deduplication.all.enabled
+  - type: move
+    from: subscription.deduplication.ignored_headers
+    to: subscription.deduplication.all.ignored_headers

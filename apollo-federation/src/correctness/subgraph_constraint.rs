@@ -103,7 +103,7 @@ impl<'a> SubgraphConstraint<'a> {
                 {
                     let ground_set = subgraph_schema.possible_runtime_types(composite_type)?;
                     possible_subgraphs.insert(subgraph_name.clone());
-                    subgraph_types.extend(ground_set.into_iter());
+                    subgraph_types.extend(ground_set);
                 }
             }
         }

@@ -73,7 +73,7 @@ type Query {
   _service: _Service!
 }
 
-type Product @key(fields: "sku", resolvable: true) {
+type Product @key(fields: "sku") {
   sku: String! @shareable
   name: String! @external
 }

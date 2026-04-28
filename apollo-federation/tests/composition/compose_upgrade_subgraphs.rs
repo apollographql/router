@@ -211,3 +211,61 @@ fn fed2_uses_standard_federation_directive_definitions() {
         directive @key(fields: federation__FieldSet!) on OBJECT
     "#);
 }
+
+/// Fed1 upgrade must not add @shareable to key fields. Two subgraphs share the
+/// same entity so the upgrader's `add_shareable` logic is exercised — it should
+/// recognize key fields as already shareable and skip them.
+///
+/// This tests an error scenario where schemas include `_entities` / `_service`
+/// on Query without defining the `_Entity` / `_Service` types. Previously,
+/// during expansion, `collect_deep_references` would error on `Query` because those
+/// types don't exist yet. Without the fix, the first error aborted the loop,
+/// leaving later types' @key directives unregistered in `referencers`.
+#[test]
+fn upgrade_does_not_add_shareable_to_key_fields_in_partial_schemas() {
+    // in order to trigger @shareable logic same element has to be defined in multiple schemas
+    let s1 = Subgraph::parse(
+        "s1",
+        "http://s1",
+        r#"
+            type Query {
+                product(id: ID!): Product
+                _entities(representations: [_Any!]!): [_Entity]!
+                _service: _Service!
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                name: String
+            }
+        "#,
+    )
+    .expect("parses")
+    .expand_links()
+    .expect("expands");
+
+    let s2 = Subgraph::parse(
+        "s2",
+        "http://s2",
+        r#"
+            type Query {
+                _entities(representations: [_Any!]!): [_Entity]!
+                _service: _Service!
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                price: Float
+            }
+        "#,
+    )
+    .expect("parses")
+    .expand_links()
+    .expect("expands");
+
+    let mut upgraded = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrade succeeds");
+    upgraded.sort_by(|a, b| a.name.cmp(&b.name));
+
+    assert_snapshot!("s1", upgraded[0].schema_string());
+    assert_snapshot!("s2", upgraded[1].schema_string());
+}

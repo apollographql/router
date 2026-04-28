@@ -249,7 +249,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.limits,
-            "$.limits",
+            "$.limits.router",
             opt.operation.max_depth,
             "$[?(@.max_depth)]",
             opt.operation.max_aliases,

@@ -1,4 +1,4 @@
-### Add `max_lifetime` configuration for subscriptions ([Issue #1439](https://github.com/apollographql/router/issues/1439))
+### Add `max_lifetime` configuration for subscriptions
 
 Adds a new `max_lifetime` field to the `subscription` configuration block, allowing operators to set a maximum duration for how long a subscription can remain open. After the configured duration the subscription is closed and the client receives a terminal error with extension code `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED`.
 
@@ -13,4 +13,4 @@ subscription:
 
 By default (`max_lifetime` unset) there is no lifetime limit, preserving the existing behaviour.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/TODO
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9216
