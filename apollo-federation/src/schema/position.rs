@@ -33,6 +33,7 @@ use strum::IntoEnumIterator;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
@@ -8055,67 +8056,59 @@ impl FederationSchema {
         }
     }
 
+    /// Collects schema referencers.
     pub(crate) fn collect_deep_references(&mut self) -> Result<(), FederationError> {
-        SchemaDefinitionPosition.insert_references(
+        let mut errors = MultipleFederationErrors { errors: vec![] };
+
+        if let Err(e) = SchemaDefinitionPosition.insert_references(
             &self.schema.schema_definition,
             &self.schema,
             &mut self.referencers,
-        )?;
+        ) {
+            errors.push(e);
+        }
         for (type_name, type_) in self.schema.types.iter() {
-            match type_ {
-                ExtendedType::Scalar(type_) => {
-                    ScalarTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut self.referencers)?;
+            let result = match type_ {
+                ExtendedType::Scalar(type_) => ScalarTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
-                ExtendedType::Object(type_) => {
-                    ObjectTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(
-                        type_,
-                        &self.schema,
-                        &mut self.referencers,
-                    )?;
+                .insert_references(type_, &mut self.referencers),
+                ExtendedType::Object(type_) => ObjectTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
-                ExtendedType::Interface(type_) => {
-                    InterfaceTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(
-                        type_,
-                        &self.schema,
-                        &mut self.referencers,
-                    )?;
+                .insert_references(type_, &self.schema, &mut self.referencers),
+                ExtendedType::Interface(type_) => InterfaceTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
-                ExtendedType::Union(type_) => {
-                    UnionTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut self.referencers)?;
+                .insert_references(type_, &self.schema, &mut self.referencers),
+                ExtendedType::Union(type_) => UnionTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
-                ExtendedType::Enum(type_) => {
-                    EnumTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut self.referencers)?;
+                .insert_references(type_, &mut self.referencers),
+                ExtendedType::Enum(type_) => EnumTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
-                ExtendedType::InputObject(type_) => {
-                    InputObjectTypeDefinitionPosition {
-                        type_name: type_name.clone(),
-                    }
-                    .insert_references(type_, &mut self.referencers)?;
+                .insert_references(type_, &mut self.referencers),
+                ExtendedType::InputObject(type_) => InputObjectTypeDefinitionPosition {
+                    type_name: type_name.clone(),
                 }
+                .insert_references(type_, &mut self.referencers),
+            };
+            if let Err(e) = result {
+                errors.push(e);
             }
         }
         for (directive_name, directive) in self.schema.directive_definitions.iter() {
-            DirectiveDefinitionPosition {
+            let definition_position = DirectiveDefinitionPosition {
                 directive_name: directive_name.clone(),
+            };
+
+            if let Err(e) = definition_position.insert_references(directive, &mut self.referencers)
+            {
+                errors.push(e);
             }
-            .insert_references(directive, &mut self.referencers)?;
         }
-        Ok(())
+        errors.into_result()
     }
 }
 
