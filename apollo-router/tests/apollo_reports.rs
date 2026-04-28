@@ -5,9 +5,15 @@
 //!  - There are timings (sleeps) which work as things are implemented right now, but
 //!    may be sources of problems in the future.
 //!
-//!  - There is a global TEST lock which forces these tests to execute serially to stop router
-//!    global tracing effect from breaking the tests. DO NOT BE TEMPTED to remove this TEST lock to
-//!    try and speed things up (unless you have time and patience to re-work a lot of test code).
+//!  - These tests must execute serially across this binary AND across the
+//!    sibling `apollo_otel_traces` / `apollo_otel_http_proxy` binaries, because
+//!    they each install process-wide OpenTelemetry tracer/meter providers and
+//!    Apollo Studio mock collectors that would otherwise stomp each other.
+//!    Serialization is enforced by the `serial-apollo-telemetry-integration`
+//!    nextest test-group in `.config/nextest.toml` (an in-source mutex cannot
+//!    do this because each `tests/*.rs` is a separate binary).
+//!    DO NOT run these tests with bare `cargo test` -- only `cargo nextest`
+//!    honours the group; bare `cargo test` will race the global state.
 //!
 //!  - There are assumptions about the different ways in which traces and metrics work. The main
 //!    limitation with these tests is that you are unlikely to get a single report containing all the
@@ -51,7 +57,6 @@ mod tracing_common;
 static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(|| {
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
-static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
 async fn config(
     use_legacy_request_span: bool,
@@ -375,7 +380,6 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
         reports.clone(),
@@ -440,7 +444,6 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     request: router::Request,
     filter: T,
 ) -> u64 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
         get_batch_router_service(reports.clone(), mocked, false, false, false, None).await;

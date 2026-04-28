@@ -2152,6 +2152,12 @@ mod tests {
     //
     // See `src/plugins/telemetry/metrics/apollo/mod.rs` for the same pattern
     // applied to the apollo_metrics tests.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-prometheus-telemetry-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
     static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
         once_cell::sync::Lazy::new(Default::default);
 

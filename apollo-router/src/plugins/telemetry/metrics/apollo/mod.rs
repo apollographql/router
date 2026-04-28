@@ -344,6 +344,12 @@ mod test {
     //
     // The dragons here are ancient and very evil. Do not attempt to take
     // their treasure.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-apollo-metrics-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
     static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
     #[tokio::test(flavor = "multi_thread")]
