@@ -1120,6 +1120,118 @@ async fn it_rejects_operations_field_larger_than_http_max_request_bytes() -> Res
         .await
 }
 
+mod operation_body_timeout {
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use futures::stream::once;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use serde_json::Value;
+    use tokio::time::sleep;
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
+
+    const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
+    const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
+    const NO_TIMEOUT_CONFIG: &str = include_str!("fixtures/file_upload_no_timeout.router.yaml");
+
+    async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
+        let mut router = IntegrationTest::builder().config(config).build().await;
+        router.start().await;
+        router.assert_started().await;
+        let url = format!("http://{}", router.bind_address());
+        let response = reqwest::Client::new()
+            .post(&url)
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = response.json().await.unwrap_or_default();
+        router.graceful_shutdown().await;
+        (status, body)
+    }
+
+    fn immediate_body() -> reqwest::Body {
+        reqwest::Body::from(concat!(
+            "--test\r\n",
+            "Content-Disposition: form-data; name=\"operations\"\r\n\r\n",
+            "{\"query\":\"{ __typename }\"}\r\n",
+            "--test--\r\n"
+        ))
+    }
+
+    fn slightly_delayed_body() -> reqwest::Body {
+        // Body arrives after 2s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than the 10s operation_body_timeout in GENEROUS_CONFIG.
+        let stream = once(async {
+            sleep(Duration::from_secs(2)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
+        reqwest::Body::wrap_stream(stream)
+    }
+
+    fn slow_body() -> reqwest::Body {
+        // Body arrives after 5s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than both the 10s operation_body_timeout in GENEROUS_CONFIG and the 15s
+        // global router timeout, proving it is the operation_body_timeout that fires.
+        let stream = once(async {
+            sleep(Duration::from_secs(5)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
+        reqwest::Body::wrap_stream(stream)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_quickly() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(GENEROUS_CONFIG, immediate_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_with_delay() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(GENEROUS_CONFIG, slightly_delayed_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_with_slow_body_when_no_timeout_configured() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(NO_TIMEOUT_CONFIG, slow_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn times_out_when_body_is_slow() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, body) = run(STRICT_CONFIG, slow_body()).await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            body["errors"][0]["message"],
+            "The file upload operation body took too long to arrive"
+        );
+        Ok(())
+    }
+}
+
 mod helper {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
