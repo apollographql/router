@@ -4,9 +4,10 @@ expression: new_config
 ---
 ---
 subscription:
-  enabled: true
-  queue_capacity: 100000
-  max_opened_subscriptions: 100
   deduplication:
     all:
       enabled: true
+      ignored_headers:
+        - authorization
+        - x-user-id
+  enabled: true
