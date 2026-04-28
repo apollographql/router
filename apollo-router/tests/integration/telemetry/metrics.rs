@@ -646,3 +646,120 @@ async fn test_request_duration_selector() {
 
     router.graceful_shutdown().await;
 }
+
+/// Drives an `@defer` query against a router configured with two supergraph
+/// counters that split on `is_primary_response`. Returns the scraped
+/// Prometheus metrics text so the caller can assert on a specific series.
+///
+/// Shared by the two regression tests for the selector fix (see PR #9238).
+async fn run_is_primary_response_query() -> String {
+    use tokio_stream::StreamExt;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    // Products subgraph: returns the primary chunk's data.
+    let mock_products = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "topProducts": [
+                    {"__typename": "Product", "upc": "1", "name": "Table"},
+                    {"__typename": "Product", "upc": "2", "name": "Chair"},
+                ]
+            }
+        })))
+        .mount(&mock_products)
+        .await;
+
+    // Reviews subgraph: slow so the router defers reviews into a second chunk.
+    let mock_reviews = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(100))
+                .set_body_json(json!({
+                    "data": {
+                        "_entities": [
+                            {"reviews": [{"body": "great"}]},
+                            {"reviews": [{"body": "ok"}]},
+                        ]
+                    }
+                })),
+        )
+        .mount(&mock_reviews)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/is_primary_response.router.yaml"))
+        .subgraph_override("products", mock_products.uri())
+        .subgraph_override("reviews", mock_reviews.uri())
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+
+    let query = Query::builder()
+        .body(json!({
+            "query": "query Q { topProducts { name ... @defer { reviews { body } } } }"
+        }))
+        .header("Accept", "multipart/mixed;deferSpec=20220824")
+        .build();
+    let (_, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    // Drain the multipart stream so every chunk flows through the
+    // `response_stream.inspect(...)` closure and updates metrics.
+    let mut stream = response.bytes_stream();
+    let mut chunks = 0;
+    while let Some(Ok(_)) = stream.next().await {
+        chunks += 1;
+    }
+    assert!(
+        chunks >= 2,
+        "expected a multipart @defer response with at least 2 chunks, got {chunks}"
+    );
+
+    router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap()
+}
+
+/// Regression test for the `is_primary_response` supergraph telemetry selector.
+///
+/// Before the PR #9238 fix, the selector always evaluated to `false` at
+/// `on_response` / `on_response_event` scope because `FIRST_EVENT_CONTEXT_KEY`
+/// was never set to `Bool(true)` on the primary chunk. A counter conditioned on
+/// `is_primary_response == true` therefore never fired, even for the primary
+/// chunk of a multipart `@defer` response.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_is_primary_response_fires_on_primary_chunk() {
+    let metrics = run_is_primary_response_query().await;
+    check_metrics_contains(
+        &metrics,
+        r#"is_primary_chunks_total{otel_scope_name="apollo/router"} 1"#,
+    );
+}
+
+/// Mirror of `test_is_primary_response_fires_on_primary_chunk` that asserts
+/// the selector evaluates to `false` for deferred chunks. The exact count
+/// of deferred chunks is a query-planner property — for a defer fragment
+/// over multiple entities, the planner may emit one chunk per entity or
+/// one chunk total depending on dependency-graph reduction. We only assert
+/// the counter fires at least once, since OpenTelemetry counters that never
+/// increment are not present in the scrape output at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_is_primary_response_fires_on_deferred_chunks() {
+    let metrics = run_is_primary_response_query().await;
+    check_metrics_contains(
+        &metrics,
+        r#"deferred_chunks_total{otel_scope_name="apollo/router"}"#,
+    );
+}

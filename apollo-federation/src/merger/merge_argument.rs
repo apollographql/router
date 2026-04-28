@@ -122,7 +122,7 @@ impl Merger {
                 let arg_opt = pos.get_argument(subgraph.schema(), arg_name);
 
                 if let Some(arg) = arg_opt
-                    && let Ok(Some(from_context)) = subgraph.from_context_directive_name()
+                    && let Some(from_context) = subgraph.from_context_directive_name()
                     && arg.directives.iter().any(|d| d.name == from_context)
                 {
                     is_contextual_in_subgraph.insert(*idx, true);

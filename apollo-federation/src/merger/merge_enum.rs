@@ -20,16 +20,14 @@ use crate::schema::position::EnumValueDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum EnumExampleAst {
-    #[allow(dead_code)]
     Field(Node<FieldDefinition>),
-    #[allow(dead_code)]
     Input(Node<InputValueDefinition>),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct EnumExample {
-    #[allow(dead_code)]
     pub coordinate: String,
     #[allow(dead_code)]
     pub element_ast: Option<EnumExampleAst>,
@@ -37,15 +35,12 @@ pub(crate) struct EnumExample {
 
 #[derive(Debug, Clone)]
 pub(crate) enum EnumTypeUsage {
-    #[allow(dead_code)]
     Input {
         input_example: EnumExample,
     },
-    #[allow(dead_code)]
     Output {
         output_example: EnumExample,
     },
-    #[allow(dead_code)]
     Both {
         input_example: EnumExample,
         output_example: EnumExample,
@@ -55,7 +50,6 @@ pub(crate) enum EnumTypeUsage {
 
 impl Merger {
     /// Merge enum type from multiple subgraphs
-    #[allow(dead_code)]
     pub(crate) fn merge_enum(
         &mut self,
         sources: Sources<Node<EnumType>>,

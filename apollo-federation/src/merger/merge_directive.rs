@@ -657,10 +657,7 @@ impl Merger {
                     &POLICY_DIRECTIVE_NAME_IN_SPEC,
                 ] {
                     let directive = federation_spec
-                        .directive_name_in_schema(subgraph.schema(), access_control_directive)?
-                        .and_then(|name| {
-                            subgraph.schema().schema().directive_definitions.get(&name)
-                        });
+                        .try_directive_definition(subgraph.schema(), access_control_directive);
                     if let Some(directive) = directive {
                         let referencers = subgraph_referencers.get_directive(&directive.name);
                         for type_position in &referencers.object_types {
