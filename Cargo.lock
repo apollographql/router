@@ -468,6 +468,7 @@ dependencies = [
  "apollo-smith",
  "arbitrary",
  "criterion",
+ "futures",
  "memory-stats",
  "once_cell",
  "rhai",
