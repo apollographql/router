@@ -38,7 +38,6 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::config::MetricAggregation;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 
@@ -226,17 +225,15 @@ fn resolve_view(
     cardinality_limit: Option<NonZeroU32>,
 ) -> Option<Stream> {
     let is_histogram = instrument.kind() == InstrumentKind::Histogram;
-    let default_aggregation = is_histogram.then(|| MetricAggregation::Histogram {
-        buckets: bucket_boundaries.to_vec(),
-    });
+    let histogram_buckets = is_histogram.then(|| bucket_boundaries.to_vec());
     let user_view = user_views.get(instrument.name()).cloned();
 
-    if default_aggregation.is_none() && cardinality_limit.is_none() && user_view.is_none() {
+    if histogram_buckets.is_none() && cardinality_limit.is_none() && user_view.is_none() {
         return None;
     }
 
     let default_view =
-        MetricView::default_view(instrument.name(), default_aggregation, cardinality_limit);
+        MetricView::default_view(instrument.name(), histogram_buckets, cardinality_limit);
     let view = match user_view {
         Some(user) => default_view.merge(user),
         None => default_view,
