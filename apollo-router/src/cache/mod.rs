@@ -15,6 +15,7 @@ use crate::configuration::RedisCache;
 
 mod metrics;
 pub(crate) mod redis;
+mod replica_filter;
 mod size_estimation;
 pub(crate) mod storage;
 use std::convert::Infallible;
