@@ -179,7 +179,7 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 
 If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
 
-### Using telemetry to set operation-based limits
+### Logging current values of operations
 
 Router telemetry can help you set operation limits, especially when you have a large number of existing operations. You can measure incoming operations over a fixed duration, then use the captured data as a baseline configuration.
 
