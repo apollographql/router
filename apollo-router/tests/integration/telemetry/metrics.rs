@@ -75,6 +75,35 @@ async fn test_metrics_reloading() {
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
+
+    // Studio + Uplink metrics. The test is gated on `graph_os_enabled()`, which
+    // requires `TEST_APOLLO_KEY` and `TEST_APOLLO_GRAPH_REF`; CircleCI sets
+    // both, and the harness pipes them into the spawned router as real
+    // `APOLLO_KEY` / `APOLLO_GRAPH_REF` (see `common.rs`). So when this test
+    // executes at all, the router *is* polling Uplink and *is* attempting
+    // Studio reports, and these metric lines are expected to appear.
+    //
+    // We deliberately match prefixes only (no trailing counter value, no
+    // closing `}`) because:
+    //   * The Studio reporter batches on an internal timer; we cannot pin the
+    //     exact `_reports_total` count without forcing a flush.
+    //   * `assert_metrics_contains_multiple` line-anchors with `(?m)^` and
+    //     supports `<any>` wildcards, so a prefix is enough to confirm the
+    //     metric is being emitted with the right labels.
+    // The 30 s deadline gives the Studio batch flush enough headroom on a
+    // loaded CI runner; bump it (don't delete the assertion) if it ever
+    // flakes here.
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"apollo_router_telemetry_studio_reports_total{report_type="metrics""#,
+                r#"apollo_router_telemetry_studio_reports_total{report_type="traces""#,
+                r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License""#,
+                r#"apollo_router_uplink_fetch_count_total{query="License",status="success""#,
+            ],
+            Some(Duration::from_secs(30)),
+        )
+        .await;
 }
 
 #[track_caller]
