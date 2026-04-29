@@ -1642,8 +1642,16 @@ mod pool_idle_timeout {
 
         let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
         assert_eq!(response.http_response.status(), StatusCode::OK);
-        assert_eq!(connection_count.load(Ordering::SeqCst), 1, "first request opens one connection");
-        assert_eq!(live_connection_count.load(Ordering::SeqCst), 1, "connection is open after first request");
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            1,
+            "first request opens one connection"
+        );
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection is open after first request"
+        );
 
         // Sleep well past the 50ms idle timeout. Use a generous sleep to avoid flakiness
         // under test contention — the active eviction timer must fire before we assert.

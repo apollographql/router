@@ -136,7 +136,9 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
-                pool_idle_eviction_mode: self.pool_idle_eviction_mode.or(fallback.pool_idle_eviction_mode),
+                pool_idle_eviction_mode: self
+                    .pool_idle_eviction_mode
+                    .or(fallback.pool_idle_eviction_mode),
                 experimental_http2_keep_alive_interval: self
                     .experimental_http2_keep_alive_interval
                     .as_ref()
@@ -246,7 +248,9 @@ impl Merge for ConnectorShaping {
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
-                pool_idle_eviction_mode: self.pool_idle_eviction_mode.or(fallback.pool_idle_eviction_mode),
+                pool_idle_eviction_mode: self
+                    .pool_idle_eviction_mode
+                    .or(fallback.pool_idle_eviction_mode),
                 experimental_http2_keep_alive_interval: self
                     .experimental_http2_keep_alive_interval
                     .as_ref()
