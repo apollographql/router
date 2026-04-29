@@ -1496,14 +1496,14 @@ mod pool_idle_timeout {
     async fn serve_counting(
         listener: TcpListener,
         connection_count: Arc<AtomicUsize>,
-        live_connections: Arc<AtomicUsize>,
+        live_connection_count: Arc<AtomicUsize>,
     ) -> std::io::Result<()> {
         loop {
             let (stream, _) = listener.accept().await?;
             connection_count.fetch_add(1, Ordering::SeqCst);
-            live_connections.fetch_add(1, Ordering::SeqCst);
+            live_connection_count.fetch_add(1, Ordering::SeqCst);
             let io = TokioIo::new(stream);
-            let live = live_connections.clone();
+            let live = live_connection_count.clone();
             tokio::spawn(async move {
                 let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                     Ok::<_, Infallible>(
@@ -1615,12 +1615,12 @@ mod pool_idle_timeout {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let connection_count = Arc::new(AtomicUsize::new(0));
-        let live_connections = Arc::new(AtomicUsize::new(0));
+        let live_connection_count = Arc::new(AtomicUsize::new(0));
 
         tokio::task::spawn(serve_counting(
             listener,
             connection_count.clone(),
-            live_connections.clone(),
+            live_connection_count.clone(),
         ));
 
         let client_config = crate::configuration::shared::Client {
@@ -1643,14 +1643,14 @@ mod pool_idle_timeout {
         let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
         assert_eq!(response.http_response.status(), StatusCode::OK);
         assert_eq!(connection_count.load(Ordering::SeqCst), 1, "first request opens one connection");
-        assert_eq!(live_connections.load(Ordering::SeqCst), 1, "connection is open after first request");
+        assert_eq!(live_connection_count.load(Ordering::SeqCst), 1, "connection is open after first request");
 
         // Sleep well past the 50ms idle timeout. Use a generous sleep to avoid flakiness
         // under test contention — the active eviction timer must fire before we assert.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         assert_eq!(
-            live_connections.load(Ordering::SeqCst),
+            live_connection_count.load(Ordering::SeqCst),
             expected_live_after_sleep,
             "unexpected live connection count after sleep for {mode:?} eviction mode"
         );
