@@ -1,4 +1,4 @@
-### Add `max_reconnect_attempts` and `reconnect_delay` configuration for subscription WebSocket reconnection ([Issue #1440](https://github.com/apollographql/router/issues/1440))
+### Add `max_reconnect_attempts` and `reconnect_delay` configuration for subscription WebSocket reconnection
 
 Adds two new fields to the `subscription` configuration block that allow the router to automatically reconnect a dropped WebSocket subscription to a subgraph.
 
@@ -20,4 +20,4 @@ When the WebSocket connection to a subgraph drops and reconnection is configured
 
 Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/TODO
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9302
