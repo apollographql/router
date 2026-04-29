@@ -35,6 +35,11 @@ pub(crate) struct Client {
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
     pub(crate) pool_idle_timeout: Option<Duration>,
 
+    /// Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.
+    /// `lazy` (default): eviction happens at checkout time.
+    /// `active`: a background timer proactively drops expired connections.
+    pub(crate) pool_idle_eviction_mode: Option<PoolEvictionMode>,
+
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -50,10 +55,30 @@ pub(crate) struct Client {
     pub(crate) experimental_http2_keep_alive_timeout: Option<Duration>,
 }
 
+impl Client {
+    /// Returns the pool idle eviction mode, defaulting to `Lazy` if not explicitly configured.
+    // NB: stored as Option because buildstructor requires Option for fields with defaults.
+    pub(crate) fn pool_idle_eviction_mode(&self) -> PoolEvictionMode {
+        self.pool_idle_eviction_mode.unwrap_or_default()
+    }
+}
+
 /// Returns the hardcoded default pool idle timeout for keep-alive sockets in a client's connection
 /// pool. Useful as a default for serde deserializers or other areas where this default is needed
 pub(crate) fn default_pool_idle_timeout() -> Option<Duration> {
     Some(DEFAULT_POOL_IDLE_TIMEOUT)
+}
+
+#[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PoolEvictionMode {
+    #[default]
+    /// Connections are evicted lazily at checkout time when they exceed `pool_idle_timeout`.
+    /// Avoids background TCP closes that can disrupt connections in some network environments.
+    Lazy,
+    /// A background timer proactively evicts connections that exceed `pool_idle_timeout`.
+    /// May cause brief connection disruptions if a TCP close races with a new connection attempt.
+    Active,
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]

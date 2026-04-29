@@ -31,6 +31,7 @@ use tower::timeout::error::Elapsed;
 
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
+use crate::configuration::shared::PoolEvictionMode;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -78,6 +79,11 @@ struct Shaping {
     )]
     #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
+    /// Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.
+    /// `lazy` (default): eviction happens at checkout time.
+    /// `active`: a background timer proactively drops expired connections.
+    #[serde(default)]
+    pool_idle_eviction_mode: Option<PoolEvictionMode>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -130,6 +136,7 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
+                pool_idle_eviction_mode: self.pool_idle_eviction_mode.or(fallback.pool_idle_eviction_mode),
                 experimental_http2_keep_alive_interval: self
                     .experimental_http2_keep_alive_interval
                     .as_ref()
@@ -195,6 +202,11 @@ struct ConnectorShaping {
     )]
     #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
+    /// Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.
+    /// `lazy` (default): eviction happens at checkout time.
+    /// `active`: a background timer proactively drops expired connections.
+    #[serde(default)]
+    pool_idle_eviction_mode: Option<PoolEvictionMode>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -234,6 +246,7 @@ impl Merge for ConnectorShaping {
                     .as_ref()
                     .or(fallback.pool_idle_timeout.as_ref())
                     .cloned(),
+                pool_idle_eviction_mode: self.pool_idle_eviction_mode.or(fallback.pool_idle_eviction_mode),
                 experimental_http2_keep_alive_interval: self
                     .experimental_http2_keep_alive_interval
                     .as_ref()
@@ -582,6 +595,7 @@ impl TrafficShaping {
             experimental_http2: config.shaping.experimental_http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
             pool_idle_timeout: config.shaping.pool_idle_timeout,
+            pool_idle_eviction_mode: config.shaping.pool_idle_eviction_mode,
             experimental_http2_keep_alive_interval: config
                 .shaping
                 .experimental_http2_keep_alive_interval,
@@ -602,6 +616,7 @@ impl TrafficShaping {
                 experimental_http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
                 pool_idle_timeout: config.pool_idle_timeout,
+                pool_idle_eviction_mode: config.pool_idle_eviction_mode,
                 experimental_http2_keep_alive_interval: config
                     .experimental_http2_keep_alive_interval,
                 experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,

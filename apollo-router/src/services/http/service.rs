@@ -44,6 +44,7 @@ use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::configuration::shared::DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT;
+use crate::configuration::shared::PoolEvictionMode;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
@@ -251,6 +252,7 @@ impl HttpClientService {
             .https_or_http();
 
         let pool_idle_timeout = client_config.pool_idle_timeout;
+        let pool_idle_eviction_mode = client_config.pool_idle_eviction_mode();
         let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
         let http2_keep_alive_timeout = client_config
             .experimental_http2_keep_alive_timeout
@@ -270,10 +272,14 @@ impl HttpClientService {
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
         client_builder
             .pool_idle_timeout(pool_idle_timeout)
-            // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-            // unless you're also removing `pool_idle_timeout`
-            .pool_timer(TokioTimer::new())
             .http2_only(http2 == Http2Config::Http2Only);
+        if pool_idle_eviction_mode == PoolEvictionMode::Active {
+            // pool_timer enables a background task that proactively evicts idle connections
+            // when they exceed pool_idle_timeout. Without it, eviction is lazy: connections
+            // are only checked and dropped at checkout time. Lazy mode avoids a TCP close
+            // window that can delay new connections in some network environments.
+            client_builder.pool_timer(TokioTimer::new());
+        }
         if let Some(interval) = http2_keep_alive_interval {
             client_builder
                 // WARN: http2 keep-alive requires a timer; don't remove this
@@ -288,14 +294,19 @@ impl HttpClientService {
 
         #[cfg(unix)]
         let unix_client = {
-            let unix_client_inner =
-                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                    .pool_idle_timeout(pool_idle_timeout)
-                    // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-                    // unless you're also removing `pool_idle_timeout`
-                    .pool_timer(TokioTimer::new())
-                    .http2_only(http2 == Http2Config::Http2Only)
-                    .build(UnixConnector);
+            let mut unix_builder =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+            unix_builder
+                .pool_idle_timeout(pool_idle_timeout)
+                .http2_only(http2 == Http2Config::Http2Only);
+            if pool_idle_eviction_mode == PoolEvictionMode::Active {
+                // pool_timer enables a background task that proactively evicts idle connections
+                // when they exceed pool_idle_timeout. Without it, eviction is lazy: connections
+                // are only checked and dropped at checkout time. Lazy mode avoids a TCP close
+                // window that can delay new connections in some network environments.
+                unix_builder.pool_timer(TokioTimer::new());
+            }
+            let unix_client_inner = unix_builder.build(UnixConnector);
 
             ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
