@@ -182,7 +182,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let service_name = (*self.service).to_owned();
 
         let client_factory = self.client_factory.clone();
@@ -190,66 +190,30 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let arc_apq_enabled = self.apq.clone();
 
         let make_calls = async move {
-            // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
-            // It will normally not be super expensive? but it still does not seem great or
-            // necessary.
-
-            let SubgraphRequest {
-                subgraph_request,
-                context,
-                ..
-            } = request.clone();
-            let body = subgraph_request.into_body();
-
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_http(
-                    request,
-                    body,
-                    context,
-                    client_factory.clone(),
-                    &service_name,
-                )
-                .await;
+                return call_http(request, client_factory.clone(), &service_name).await;
             }
 
-            // Else, if APQ is enabled,
-            // Calculate the query hash and try the request with
-            // a persistedQuery instead of the whole query.
-            let graphql::Request {
-                query,
-                operation_name,
-                variables,
-                extensions,
-            } = body.clone();
+            // APQ works by sending the query hash via extensions with an empty query body.
+            // We use query.take() to save the query in case it's needed for a retry.
+            let body = request.subgraph_request.body_mut();
+            let original_query = body.query.take();
 
-            let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
+            let hash_value =
+                apq::calculate_hash_for_query(original_query.as_deref().unwrap_or_default());
+            body.extensions.insert(
+                PERSISTED_QUERY_KEY,
+                serde_json_bytes::json!({
+                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                    HASH_KEY: hash_value
+                }),
+            );
 
-            let persisted_query = serde_json_bytes::json!({
-                HASH_VERSION_KEY: HASH_VERSION_VALUE,
-                HASH_KEY: hash_value
-            });
-
-            let mut extensions_with_apq = extensions.clone();
-            extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
-
-            let mut apq_body = graphql::Request {
-                query: None,
-                operation_name,
-                variables,
-                extensions: extensions_with_apq,
-            };
-
-            let response = call_http(
-                request.clone(),
-                apq_body.clone(),
-                context.clone(),
-                client_factory.clone(),
-                &service_name,
-            )
-            .await?;
+            let response =
+                call_http(request.clone(), client_factory.clone(), &service_name).await?;
 
             // Check the error for the request with only persistedQuery.
             // If PersistedQueryNotSupported, disable APQ for this subgraph
@@ -259,25 +223,15 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    call_http(
-                        request,
-                        body,
-                        context,
-                        client_factory.clone(),
-                        &service_name,
-                    )
-                    .await
+                    let body = request.subgraph_request.body_mut();
+                    body.query = original_query;
+                    // Remove the persistedQuery extension we added for the APQ attempt.
+                    body.extensions.remove(PERSISTED_QUERY_KEY);
+                    call_http(request, client_factory.clone(), &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
-                    apq_body.query = query;
-                    call_http(
-                        request,
-                        apq_body,
-                        context,
-                        client_factory.clone(),
-                        &service_name,
-                    )
-                    .await
+                    request.subgraph_request.body_mut().query = original_query;
+                    call_http(request, client_factory.clone(), &service_name).await
                 }
                 _ => Ok(response),
             }
@@ -759,8 +713,6 @@ pub(crate) async fn process_batches(
 
 async fn call_http(
     request: SubgraphRequest,
-    body: graphql::Request,
-    context: Context,
     client_factory: HttpClientServiceFactory,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -771,7 +723,7 @@ async fn call_http(
     // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
     // we have the context extensions lock held. That would be very bad...
     // We grab the (potential) BatchQuery and then operate on it later
-    let opt_batch_query = context.extensions().with_lock(|lock| {
+    let opt_batch_query = request.context.extensions().with_lock(|lock| {
         lock.get::<Batching>()
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
             .and_then(|_| lock.get::<BatchQuery>().cloned())
@@ -782,7 +734,7 @@ async fn call_http(
     if let Some(query) = opt_batch_query {
         // Let the owning batch know that this query is ready to process, getting back the channel
         // from which we'll eventually receive our response.
-        let response_rx = query.signal_progress(client_factory, request, body).await?;
+        let response_rx = query.signal_progress(client_factory, request).await?;
 
         // Park this query until we have our response and pass it back up
         response_rx
@@ -794,19 +746,18 @@ async fn call_http(
     } else {
         tracing::debug!("we called http");
         let client = client_factory.create(service_name);
-        call_single_http(request, body, context, client, service_name).await
+        call_single_http(request, client, service_name).await
     }
 }
 
 /// call_single_http makes http calls with modified graphql::Request (body)
 pub(crate) async fn call_single_http(
     request: SubgraphRequest,
-    body: graphql::Request,
-    context: Context,
     client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
-    let subgraph_request_event = context
+    let subgraph_request_event = request
+        .context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
     let log_request_level = subgraph_request_event.and_then(|s| {
@@ -819,17 +770,17 @@ pub(crate) async fn call_single_http(
 
     let SubgraphRequest {
         subgraph_request,
+        context,
         id: subgraph_request_id,
         ..
     } = request;
 
-    let operation_name = subgraph_request
-        .body()
+    let (parts, body) = subgraph_request.into_parts();
+    let operation_name = body
         .operation_name
-        .clone()
-        .unwrap_or_default();
-
-    let (parts, _) = subgraph_request.into_parts();
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
     let mut request = http::Request::from_parts(parts, router::body::from_bytes(body));
@@ -1268,6 +1219,7 @@ mod tests {
     use super::*;
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::configuration::shared::Client as ClientConfiguration;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -3004,6 +2956,284 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
+    }
+
+    mod apq_body_preservation {
+        use super::*;
+
+        const APQ_TEST_QUERY: &str = "query MyOp($id: ID!) { thing(id: $id) { name } }";
+
+        /// Spins up a mock subgraph server with APQ enabled and drives a single request through it.
+        /// Each test supplies a `handle` function that acts as the subgraph server: it asserts on
+        /// the received body and returns an HTTP response.
+        async fn run_apq_test<Handler, Fut>(
+            gql_body: graphql::Request,
+            handle: Handler,
+        ) -> SubgraphResponse
+        where
+            Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
+            Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>>
+                + Send
+                + 'static,
+        {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+            tokio::task::spawn(serve(listener, handle));
+
+            let subgraph_service = SubgraphService::new(
+                "test",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    ClientConfiguration::default(),
+                ),
+            )
+            .expect("can create a SubgraphService");
+
+            let query = gql_body.query.clone().unwrap_or_default();
+            let subgraph_request = http::Request::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .uri(url)
+                .body(gql_body)
+                .unwrap();
+
+            subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(&query))
+                        .subgraph_request(subgraph_request)
+                        .operation_kind(OperationKind::Query)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap()
+        }
+
+        // Verifies that operation_name, variables, and custom extensions are all forwarded
+        // into the APQ body, not just the persistedQuery hash. The mock server handler
+        // asserts on the received body directly, so the test fails if any field is missing.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_apq_body_preserves_all_fields() {
+            async fn handle(
+                request: http::Request<Body>,
+            ) -> Result<http::Response<Body>, Infallible> {
+                let bytes = router::body::into_bytes(request.into_body())
+                    .await
+                    .expect("can read request body");
+                let graphql_request: graphql::Request =
+                    serde_json::from_reader(bytes.reader()).expect("valid graphql request");
+
+                assert!(
+                    graphql_request.query.is_none(),
+                    "APQ body should omit query on first attempt"
+                );
+                assert_eq!(
+                    graphql_request.operation_name.as_deref(),
+                    Some("MyOp"),
+                    "operation_name should be preserved in APQ body"
+                );
+                assert_eq!(
+                    graphql_request.variables.get("id"),
+                    Some(&serde_json_bytes::json!("42")),
+                    "variables should be preserved in APQ body"
+                );
+                assert!(
+                    graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                    "persistedQuery hash should be present"
+                );
+                assert!(
+                    graphql_request.extensions.contains_key("myExt"),
+                    "custom extensions should be preserved alongside persistedQuery"
+                );
+
+                let response = Response {
+                    data: Some(Value::String(ByteString::from("test"))),
+                    ..Response::default()
+                };
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::OK)
+                    .body(serde_json::to_string(&response).unwrap().into())
+                    .unwrap())
+            }
+
+            let gql_body = graphql::Request {
+                query: Some(APQ_TEST_QUERY.to_string()),
+                operation_name: Some("MyOp".to_string()),
+                variables: serde_json_bytes::json!({"id": "42"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                extensions: serde_json_bytes::json!({"myExt": "value"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            };
+            let response = run_apq_test(gql_body, handle).await.response.into_body();
+            assert_eq!(response.data, Some(Value::String(ByteString::from("test"))));
+            assert!(response.errors.is_empty());
+        }
+
+        // Verifies that on a PersistedQueryNotFound retry, the original query string,
+        // operation name, and variables are all sent correctly. The mock server handler
+        // distinguishes the first attempt (no query) from the retry (query present) and
+        // asserts on the retry body fields directly.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_apq_not_found_retry_preserves_original_body() {
+            async fn handle(
+                request: http::Request<Body>,
+            ) -> Result<http::Response<Body>, Infallible> {
+                let bytes = router::body::into_bytes(request.into_body())
+                    .await
+                    .expect("can read request body");
+                let graphql_request: graphql::Request =
+                    serde_json::from_reader(bytes.reader()).expect("valid graphql request");
+
+                assert!(
+                    graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                    "both attempts should include the persistedQuery hash"
+                );
+
+                if graphql_request.query.is_none() {
+                    // First attempt: return PersistedQueryNotFound
+                    let pqnf_response = Response {
+                        errors: vec![
+                            Error::builder()
+                                .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
+                                .build(),
+                        ],
+                        ..Response::default()
+                    };
+                    return Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(serde_json::to_string(&pqnf_response).unwrap().into())
+                        .unwrap());
+                }
+
+                // Second attempt: verify the retry body contains the original fields
+                assert_eq!(
+                    graphql_request.query.as_deref(),
+                    Some(APQ_TEST_QUERY),
+                    "retry should send the original query string"
+                );
+                assert_eq!(
+                    graphql_request.operation_name.as_deref(),
+                    Some("MyOp"),
+                    "operation_name should be preserved on retry"
+                );
+                assert_eq!(
+                    graphql_request.variables.get("id"),
+                    Some(&serde_json_bytes::json!("42")),
+                    "variables should be preserved on retry"
+                );
+
+                let success_response = Response {
+                    data: Some(Value::String(ByteString::from("test"))),
+                    ..Response::default()
+                };
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::OK)
+                    .body(serde_json::to_string(&success_response).unwrap().into())
+                    .unwrap())
+            }
+
+            let gql_body = graphql::Request {
+                query: Some(APQ_TEST_QUERY.to_string()),
+                operation_name: Some("MyOp".to_string()),
+                variables: serde_json_bytes::json!({"id": "42"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                extensions: serde_json_bytes::json!({"myExt": "value"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            };
+            let response = run_apq_test(gql_body, handle).await.response.into_body();
+            assert_eq!(response.data, Some(Value::String(ByteString::from("test"))));
+            assert!(response.errors.is_empty());
+        }
+
+        // Verifies that on a PersistedQueryNotSupported retry, the full original body is
+        // restored: the query is present, the persistedQuery extension is removed, and any
+        // other extensions are preserved. The mock server handler distinguishes the first
+        // attempt (no query) from the retry (query present) and asserts on the retry body.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_apq_not_supported_retry_restores_original_body() {
+            async fn handle(
+                request: http::Request<Body>,
+            ) -> Result<http::Response<Body>, Infallible> {
+                let bytes = router::body::into_bytes(request.into_body())
+                    .await
+                    .expect("can read request body");
+                let graphql_request: graphql::Request =
+                    serde_json::from_reader(bytes.reader()).expect("valid graphql request");
+
+                if graphql_request.query.is_none() {
+                    // First attempt: return PersistedQueryNotSupported
+                    let pqns_response = Response {
+                        errors: vec![
+                            Error::builder()
+                                .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
+                                .build(),
+                        ],
+                        ..Response::default()
+                    };
+                    return Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(serde_json::to_string(&pqns_response).unwrap().into())
+                        .unwrap());
+                }
+
+                // Second attempt: verify the retry body is the full original body
+                assert_eq!(
+                    graphql_request.query.as_deref(),
+                    Some(APQ_TEST_QUERY),
+                    "retry should send the original query string"
+                );
+                assert!(
+                    !graphql_request.extensions.contains_key(PERSISTED_QUERY_KEY),
+                    "persistedQuery extension should be removed on retry"
+                );
+                assert!(
+                    graphql_request.extensions.contains_key("myExt"),
+                    "other extensions should be preserved on retry"
+                );
+
+                let success_response = Response {
+                    data: Some(Value::String(ByteString::from("test"))),
+                    ..Response::default()
+                };
+                Ok(http::Response::builder()
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .status(StatusCode::OK)
+                    .body(serde_json::to_string(&success_response).unwrap().into())
+                    .unwrap())
+            }
+
+            let gql_body = graphql::Request {
+                query: Some(APQ_TEST_QUERY.to_string()),
+                operation_name: Some("MyOp".to_string()),
+                variables: serde_json_bytes::json!({"id": "42"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                extensions: serde_json_bytes::json!({"myExt": "value"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            };
+            let response = run_apq_test(gql_body, handle).await.response.into_body();
+            assert_eq!(response.data, Some(Value::String(ByteString::from("test"))));
+            assert!(response.errors.is_empty());
+        }
     }
 
     #[test]
