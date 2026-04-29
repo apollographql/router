@@ -265,6 +265,25 @@ coprocessor:
     experimental_http2: http2only
 ```
 
+#### Connection pool
+
+The router maintains a pool of HTTP connections to your coprocessor. Two options let you control how idle connections are managed.
+
+Use `pool_idle_timeout` to set how long an idle connection stays in the pool before it's eligible for eviction. The default is 15 seconds. Set it to `null` to disable idle eviction entirely.
+
+Use `pool_idle_eviction_mode` to control when expired connections are closed:
+
+- `lazy` (default): connections are only evicted at checkout time, when the router discards any idle connection that has exceeded `pool_idle_timeout` and opens a fresh one. No TCP closes are sent between requests.
+- `active`: a background timer proactively closes connections that exceed `pool_idle_timeout`, without waiting for the next request.
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://service.example.com
+  client:
+    pool_idle_timeout: 30s  # default: 15s; set to null to disable
+    pool_idle_eviction_mode: lazy  # default
+```
+
 ## Coprocessor request format
 
 The router communicates with your coprocessor via HTTP POST requests (called **coprocessor requests**). The body of each coprocessor request is a JSON object with properties that describe either the current client request or the current router response.

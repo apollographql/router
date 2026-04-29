@@ -258,6 +258,36 @@ Keep-alive pings require HTTP/2 to be active. Setting `experimental_http2: disab
 
 </Note>
 
+### Connection pool
+
+The router maintains a pool of HTTP connections to each subgraph. Two options let you control how idle connections are managed.
+
+#### Idle connection timeout
+
+Use `pool_idle_timeout` to set how long an idle connection stays in the pool before it's eligible for eviction. The default is 15 seconds. Set it to `null` to disable idle eviction entirely.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    pool_idle_timeout: 30s  # default: 15s; set to null to disable
+```
+
+#### Idle connection eviction mode
+
+Use `pool_idle_eviction_mode` to control when expired connections are actually closed:
+
+- `lazy` (default): connections are only evicted at checkout time. When the router fetches a connection from the pool to make a request, it discards any connection that has been idle longer than `pool_idle_timeout` and opens a fresh one. No TCP closes are sent between requests.
+- `active`: a background timer proactively closes connections that exceed `pool_idle_timeout`, without waiting for the next request.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    pool_idle_timeout: 30s
+    pool_idle_eviction_mode: lazy  # default
+```
+
+Both options apply under `all`, per-subgraph under `subgraphs`, and per-source under `connector.sources`.
+
 ### Ordering
 
 Traffic shaping always executes these steps in the same order, to ensure a consistent behavior. Declaration order in the configuration will not affect the runtime order:
