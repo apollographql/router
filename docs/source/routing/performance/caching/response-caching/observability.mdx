@@ -88,8 +88,8 @@ The latency metrics are marked as experimental because Apollo might change them 
   - `apollo.router.cache.redis.commands_executed`: Total number of Redis commands executed
   - `apollo.router.cache.redis.redelivery_count`: Commands retried due to connection issues
   - `apollo.router.cache.redis.errors`: Redis errors by type (auth, timeout, io, etc.)
-  - `apollo.router.cache.redis.reconnection`: Reconnect events raised by the Redis client when Redis requires client reconnection. Includes `kind` and `server` attributes.
-  - `apollo.router.cache.redis.unresponsive`: Unresponsive events raised by the Redis client when Redis becomes unresponsive. Includes `kind` and `server` attributes.
+  - `apollo.router.cache.redis.reconnection`: Reconnect events raised by Redis when Redis requires client reconnection. Includes `kind` and `server` attributes.
+  - `apollo.router.cache.redis.unresponsive`: Unresponsive events raised by Redis when Redis becomes unresponsive. Includes `kind` and `server` attributes.
 
 #### Experimental Redis performance metrics
   - `experimental.apollo.router.cache.redis.network_latency_avg`: Average network latency to Redis
