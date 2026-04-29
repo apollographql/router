@@ -1,8 +1,12 @@
 //! Router system info for support tickets and diagnostics.
 //!
 //! Provides a single source of truth for static router metadata (version, OS, arch,
-//! startup options, config/supergraph path+hash, set env var names) and shared
+//! startup options, config/supergraph path, set env var names) and shared
 //! logic for Router-relevant environment variables.
+//!
+//! Config/supergraph hashes are intentionally excluded: they change on hot reload and
+//! must be computed live from the current config/schema content (e.g. in the diagnostics
+//! plugin where the live content is available).
 
 use once_cell::sync::OnceCell;
 use serde::Serialize;
@@ -62,7 +66,9 @@ pub(crate) struct StartupOptions {
     pub(crate) anonymous_telemetry_disabled: bool,
 }
 
-/// Static router system info: version, OS, arch, build, options, config/supergraph path+hash, env names.
+/// Static router system info: version, OS, arch, build, options, config/supergraph path, env names.
+/// Config/supergraph content hashes are not stored here — they change on hot reload and
+/// must be computed live from current content where needed.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterSystemInfo {
     pub(crate) version: String,
@@ -82,11 +88,7 @@ pub(crate) struct RouterSystemInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) config_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) config_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) supergraph_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) supergraph_hash: Option<String>,
     pub(crate) startup_options: StartupOptions,
     pub(crate) set_env_var_names: Vec<String>,
 }
@@ -181,16 +183,16 @@ impl RouterSystemInfo {
             out.push_str("  APOLLO_TELEMETRY_DISABLED (set)\n");
         }
         out.push_str("Config file: ");
-        match (&self.config_path, &self.config_hash) {
-            (Some(p), Some(h)) => out.push_str(&format!("path={} hash={}\n", p, h)),
-            (Some(p), None) => out.push_str(&format!("path={} (hash not available)\n", p)),
-            (None, _) => out.push_str("(default or not from file)\n"),
+        if let Some(ref p) = self.config_path {
+            out.push_str(&format!("path={}\n", p));
+        } else {
+            out.push_str("(default or not from file)\n");
         }
         out.push_str("Supergraph: ");
-        match (&self.supergraph_source, &self.supergraph_hash) {
-            (Some(s), Some(h)) => out.push_str(&format!("source={} hash={}\n", s, h)),
-            (Some(s), None) => out.push_str(&format!("source={} (hash not available)\n", s)),
-            (None, _) => out.push_str("(not set)\n"),
+        if let Some(ref s) = self.supergraph_source {
+            out.push_str(&format!("source={}\n", s));
+        } else {
+            out.push_str("(not set)\n");
         }
         out.push_str("Environment variables set: ");
         if self.set_env_var_names.is_empty() {
@@ -202,21 +204,17 @@ impl RouterSystemInfo {
         out
     }
 
-    /// Compact format for boot log (path + hash only for config/supergraph).
+    /// Compact format for boot log.
     pub(crate) fn format_for_boot_log(&self) -> String {
         let config = self.config_path.as_deref().unwrap_or("default");
-        let config_hash = self.config_hash.as_deref().unwrap_or("-");
         let supergraph = self.supergraph_source.as_deref().unwrap_or("-");
-        let schema_hash = self.supergraph_hash.as_deref().unwrap_or("-");
         format!(
-            "router info: version={} os={} arch={} config={} config_hash={} supergraph={} schema_hash={} env_count={}",
+            "router info: version={} os={} arch={} config={} supergraph={} env_count={}",
             self.version,
             self.os,
             self.arch,
             config,
-            config_hash,
             supergraph,
-            schema_hash,
             self.set_env_var_names.len()
         )
     }

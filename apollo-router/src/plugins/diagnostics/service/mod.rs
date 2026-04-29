@@ -47,6 +47,8 @@ use http::StatusCode;
 use mime::APPLICATION_JSON;
 use mime::TEXT_HTML_UTF_8;
 use mime::TEXT_PLAIN_UTF_8;
+use serde::Serialize;
+use sha2::Digest;
 
 use super::constants;
 use super::export::Exporter;
@@ -160,22 +162,48 @@ async fn handle_dashboard() -> Response {
     }
 }
 
-/// GET /system_info - Return static router system info as JSON (no memory/CPU)
-async fn handle_router_system_info_json() -> Response {
+/// Wrapper that combines static RouterSystemInfo with live-computed config/schema hashes.
+#[derive(Serialize)]
+struct RouterSystemInfoWithHashes<'a> {
+    #[serde(flatten)]
+    info: &'a crate::info::RouterSystemInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    supergraph_hash: Option<String>,
+}
+
+fn sha256_hex(input: &str) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// GET /system_info - Return static router system info plus live config/schema hashes as JSON
+async fn handle_router_system_info_json(
+    Extension(state): Extension<DiagnosticsState>,
+) -> Response {
     match get_router_system_info() {
-        Some(info) => match serde_json::to_string_pretty(info) {
-            Ok(json) => (
-                StatusCode::OK,
-                [(http::header::CONTENT_TYPE, APPLICATION_JSON.as_ref())],
-                json,
-            )
-                .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to serialize system info: {}", e),
-            )
-                .into_response(),
-        },
+        Some(info) => {
+            let with_hashes = RouterSystemInfoWithHashes {
+                info,
+                config_hash: Some(sha256_hex(&state.router_config)),
+                supergraph_hash: Some(sha256_hex(&state.supergraph_schema)),
+            };
+            match serde_json::to_string_pretty(&with_hashes) {
+                Ok(json) => (
+                    StatusCode::OK,
+                    [(http::header::CONTENT_TYPE, APPLICATION_JSON.as_ref())],
+                    json,
+                )
+                    .into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to serialize system info: {}", e),
+                )
+                    .into_response(),
+            }
+        }
         None => (
             StatusCode::NOT_FOUND,
             "Router system info not available (router may not have completed startup)",

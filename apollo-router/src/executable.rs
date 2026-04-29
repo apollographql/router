@@ -307,14 +307,13 @@ impl Opt {
 /// Build RouterSystemInfo from Opt and optional config/schema details (for boot or CLI).
 fn build_router_system_info_from_opt(
     opt: &Opt,
+    explicit_hot_reload: bool,
     config_path: Option<String>,
-    config_hash: Option<String>,
     supergraph_source: Option<String>,
-    supergraph_hash: Option<String>,
 ) -> RouterSystemInfo {
     let startup_options = StartupOptions {
         log_level: Some(opt.log_level.clone()),
-        hot_reload: opt.hot_reload,
+        hot_reload: explicit_hot_reload,
         dev: opt.dev,
         listen_address: opt.listen_address.as_ref().map(|a| a.to_string()),
         config_path: opt
@@ -349,14 +348,12 @@ fn build_router_system_info_from_opt(
         arch: std::env::consts::ARCH.to_string(),
         target_family: std::env::consts::FAMILY.to_string(),
         build_type,
-        rust_version: std::env::var("CARGO_PKG_RUST_VERSION").ok(),
-        build_profile: std::env::var("CARGO_BUILD_PROFILE").ok(),
-        target_triple: std::env::var("CARGO_CFG_TARGET_TRIPLE").ok(),
-        optimization_level: std::env::var("CARGO_CFG_OPT_LEVEL").ok(),
+        rust_version: option_env!("CARGO_PKG_RUST_VERSION").map(|s| s.to_string()),
+        build_profile: option_env!("ROUTER_PROFILE").map(|s| s.to_string()),
+        target_triple: option_env!("ROUTER_TARGET").map(|s| s.to_string()),
+        optimization_level: option_env!("ROUTER_OPT_LEVEL").map(|s| s.to_string()),
         config_path,
-        config_hash,
         supergraph_source,
-        supergraph_hash,
         startup_options,
         set_env_var_names: set_relevant_env_var_names(),
     }
@@ -454,7 +451,7 @@ impl Executable {
         }
 
         if opt.command.as_ref() == Some(&Commands::Info) {
-            let info = build_router_system_info_from_opt(&opt, None, None, None, None);
+            let info = build_router_system_info_from_opt(&opt, opt.hot_reload, None, None);
             println!("{}", info.format_for_cli());
             return Ok(());
         }
@@ -560,6 +557,8 @@ impl Executable {
         mut opt: Opt,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
+        // Capture whether --hot-reload was explicitly passed before dev mode implies it
+        let explicit_hot_reload = opt.hot_reload;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
 
@@ -790,10 +789,9 @@ impl Executable {
         };
         let router_info = build_router_system_info_from_opt(
             &opt,
+            explicit_hot_reload,
             config_path_str,
-            None,
             supergraph_source_str,
-            None,
         );
         set_router_system_info(router_info.clone());
         tracing::info!("{}", router_info.format_for_boot_log());

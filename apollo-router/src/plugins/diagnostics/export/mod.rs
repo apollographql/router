@@ -65,6 +65,7 @@ use futures::StreamExt;
 use http::Response;
 use http::StatusCode;
 use http::header;
+use sha2::Digest;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use tower::BoxError;
@@ -198,7 +199,7 @@ impl Exporter {
         Self::add_manifest_to_archive(&mut tar, config).await?;
         Self::add_router_config_to_archive(&mut tar, router_config).await?;
         Self::add_supergraph_schema_to_archive(&mut tar, supergraph_schema).await?;
-        Self::add_system_info_to_archive(&mut tar).await?;
+        Self::add_system_info_to_archive(&mut tar, router_config, supergraph_schema).await?;
         Self::add_memory_data_to_archive(&mut tar, config).await?;
         Self::add_html_report_to_archive(&mut tar, config, router_config, supergraph_schema)
             .await?;
@@ -245,14 +246,28 @@ impl Exporter {
     /// Prepend static router system info block when available, then full collect_resources() (memory/CPU/etc.).
     async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
+        router_config: &str,
+        supergraph_schema: &str,
     ) -> DiagnosticsResult<()> {
         let full_system_info =
             crate::plugins::diagnostics::system_info::collect_resources().await?;
         let content = if let Some(router_info) = crate::info::get_router_system_info() {
+            let config_hash = {
+                let mut h = sha2::Sha256::new();
+                h.update(router_config.as_bytes());
+                format!("{:x}", h.finalize())
+            };
+            let supergraph_hash = {
+                let mut h = sha2::Sha256::new();
+                h.update(supergraph_schema.as_bytes());
+                format!("{:x}", h.finalize())
+            };
             format!(
-                "ROUTER SYSTEM INFO (static)\n{}\n{}\n\n{}",
+                "ROUTER SYSTEM INFO (static)\n{}\n{}Config hash (live): {}\nSupergraph hash (live): {}\n\n{}",
                 "----------------------------",
                 router_info.format_for_cli(),
+                config_hash,
+                supergraph_hash,
                 full_system_info
             )
         } else {

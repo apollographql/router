@@ -19,6 +19,7 @@
 
 # Cursor
 .cursor/plan-docs/
+.cursor/plans/
 .cursor/skills/
 
 # Docs

@@ -1,4 +1,4 @@
-### feat: add router system info module and diagnostics improvements ([PR #PULL_NUMBER](https://github.com/apollographql/router/pull/PULL_NUMBER))
+### feat: add router system info module and diagnostics improvements ([PR #8927](https://github.com/apollographql/router/pull/8927))
 
 Adds a single source of truth for router metadata and diagnostics:
 
@@ -6,4 +6,4 @@ Adds a single source of truth for router metadata and diagnostics:
 - **Diagnostics plugin**: System info, export, and service modules now use the shared info module; diagnostics UI and data-access logic updated to surface router info, startup options, and env vars (with safe/redacted display).
 - **Executable**: Captures and sets router system info at startup for use by diagnostics and support workflows.
 
-By [@shanemyrick](https://github.com/shanemyrick) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@shanemyrick](https://github.com/shanemyrick) in https://github.com/apollographql/router/pull/8927

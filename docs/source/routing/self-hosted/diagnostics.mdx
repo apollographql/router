@@ -3,7 +3,7 @@ title: Diagnostics
 subtitle: Debugging and profiling the router
 description: Use the experimental diagnostics plugin to inspect router configuration, system and memory information, and export diagnostic packages for troubleshooting.
 releaseStage: experimental
-minVersion: 2.13.0
+minVersion: 2.13.1
 ---
 
 <ExperimentalFeature>
@@ -110,9 +110,25 @@ The flamegraph view provides a clear way to interpret data. It shows what has be
 1. Select your base (first) and actual (second) heap profiles.
 2. Look at the peaks in the differential view. The largest peaks are likely where the leak is.
 
+<!-- TODO: Add flamegraph screenshot once captured on Linux with jemalloc -->
+{/* <img
+  class="screenshot"
+  src="../../images/diagnostics/flamegraph.png"
+  alt="Apollo Router Diagnostics: Flamegraph view showing differential heap allocation between two memory dumps"
+  width="1200"
+/> */}
+
 ### Callgraph
 
 The callgraph is harder to interpret than the flamegraph. It can help when a leak has multiple stack paths and the flamegraph does not show a single clear culprit. It shows the percentage of allocation by function. Focus on high-memory nodes; in a leak scenario they are often highlighted in red.
+
+<!-- TODO: Add callgraph screenshot once captured on Linux with jemalloc -->
+{/* <img
+  class="screenshot"
+  src="../../images/diagnostics/callgraph.png"
+  alt="Apollo Router Diagnostics: Callgraph view showing percentage of allocation by function with high-memory nodes highlighted"
+  width="1200"
+/> */}
 
 ### Next steps
 
