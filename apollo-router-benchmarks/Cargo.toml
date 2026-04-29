@@ -9,6 +9,7 @@ publish = false
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
 criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
+futures = "0.3"
 memory-stats = "1.1.0"
 once_cell.workspace = true
 rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
@@ -31,4 +32,8 @@ harness = false
 
 [[bench]]
 name = "rhai_string_interning"
+harness = false
+
+[[bench]]
+name = "query_plan_cache_concurrency"
 harness = false
