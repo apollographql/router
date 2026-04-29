@@ -1,4 +1,4 @@
-### Add `pool_idle_eviction_mode` configuration for connection pool eviction ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Add `pool_idle_eviction_mode` configuration for connection pool eviction ([PR #9308](https://github.com/apollographql/router/pull/9308))
 
 A new `pool_idle_eviction_mode` option is available in `traffic_shaping` configuration (for both subgraphs and connectors) and in the coprocessor HTTP client config.
 
@@ -16,4 +16,4 @@ traffic_shaping:
     pool_idle_eviction_mode: lazy  # default; use "active" to restore previous behavior
 ```
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/XXXX
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9308
