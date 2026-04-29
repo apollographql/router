@@ -119,16 +119,63 @@ spec:
             {{- end }}
           lifecycle:
             {{- toYaml .Values.lifecycle | nindent 12 }}
+          {{- if not (eq ((.Values.probes).liveness).enabled false) }}
           livenessProbe:
             httpGet:
               path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
-            initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
+            initialDelaySeconds: {{ ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
+            {{- if not (kindIs "invalid" ((.Values.probes).liveness).periodSeconds) }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).liveness).timeoutSeconds) }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).liveness).successThreshold) }}
+            successThreshold: {{ .Values.probes.liveness.successThreshold }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).liveness).failureThreshold) }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+            {{- end }}
+          {{- end }}
+          {{- if not (eq ((.Values.probes).readiness).enabled false) }}
           readinessProbe:
             httpGet:
-              path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
+              port: {{ (splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
+            {{- if not (kindIs "invalid" ((.Values.probes).readiness).periodSeconds) }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).readiness).timeoutSeconds) }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).readiness).successThreshold) }}
+            successThreshold: {{ .Values.probes.readiness.successThreshold }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).readiness).failureThreshold) }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            {{- end }}
+          {{- end }}
+          {{- if ((.Values.probes).startup).enabled }}
+          startupProbe:
+            httpGet:
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
+              port: {{ (splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
+            initialDelaySeconds: {{ ((.Values.probes).startup).initialDelaySeconds | default 0 }}
+            {{- if not (kindIs "invalid" ((.Values.probes).startup).periodSeconds) }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).startup).timeoutSeconds) }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).startup).successThreshold) }}
+            successThreshold: {{ .Values.probes.startup.successThreshold }}
+            {{- end }}
+            {{- if not (kindIs "invalid" ((.Values.probes).startup).failureThreshold) }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
