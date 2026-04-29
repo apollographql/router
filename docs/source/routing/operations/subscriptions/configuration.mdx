@@ -485,6 +485,29 @@ subscription are closed when the lifetime expires, not just the first client to 
                                                                                                                              
 </Note>
 
+### Reconnect on subgraph connection drop
+
+By default, if the WebSocket connection between the router and a subgraph drops unexpectedly, the subscription ends and the client receives no further events. You can configure Apollo Router to automatically reconnect to the subgraph and resume forwarding events using `max_reconnect_attempts` and `reconnect_delay`:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+  #highlight-start
+  max_reconnect_attempts: 5   # retry up to 5 times on connection drop. Default: 0 (no reconnection)
+  reconnect_delay: 2s         # wait between each attempt. Default: 1s
+  #highlight-end
+```
+
+When the subgraph WebSocket connection drops and reconnection is configured, the router re-establishes the connection and re-sends the original subscription request transparently, client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. If all retry attempts are exhausted, the subscription terminates normally and the router increments the `apollo.router.operations.subscriptions.terminated.subgraph` metric.
+
+Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
+
+<Note>
+
+Reconnection re-establishes the _subgraph_ WebSocket connection. Client connections are not interrupted during a reconnect window, but any events that the subgraph would have emitted while the connection was down are lost.
+
+</Note>
+
 ### WebSocket auth support
 
 By default, if you've configured your router to [propagate](/graphos/routing/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.

@@ -1240,6 +1240,8 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
@@ -1247,6 +1249,7 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::extract::ConnectInfo;
+    use axum::extract::State;
     use axum::extract::WebSocketUpgrade;
     use axum::extract::ws::Message;
     use axum::response::IntoResponse;
@@ -2571,6 +2574,279 @@ mod tests {
 
             // The ended counter is incremented in a spawned task after gql_stream
             // completes forwarding; yield briefly to let it run.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// WebSocket server that tracks connection count via shared atomic.
+    /// - First connection: sends one event then sends Complete (drops the stream).
+    /// - Subsequent connections: sends one event and stays open (simulates successful reconnect).
+    async fn emulate_websocket_server_with_reconnect(
+        listener: TcpListener,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        let app = Router::new()
+            .route(
+                "/ws",
+                get(
+                    |ws: WebSocketUpgrade,
+                     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+                     State(count): State<Arc<AtomicU32>>| async move {
+                        let conn_num = count.fetch_add(1, Ordering::SeqCst);
+                        ws.protocols(["graphql-transport-ws"])
+                            .on_upgrade(move |mut socket| async move {
+                                let msg = socket
+                                    .recv()
+                                    .await
+                                    .unwrap()
+                                    .unwrap()
+                                    .into_text()
+                                    .unwrap();
+                                assert!(matches!(
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    ClientMessage::ConnectionInit { .. }
+                                ));
+                                socket
+                                    .send(Message::text(
+                                        serde_json::to_string(&ServerMessage::ConnectionAck)
+                                            .unwrap(),
+                                    ))
+                                    .await
+                                    .unwrap();
+
+                                let msg = socket
+                                    .recv()
+                                    .await
+                                    .unwrap()
+                                    .unwrap()
+                                    .into_text()
+                                    .unwrap();
+                                let client_id = if let ClientMessage::Subscribe { id, .. } =
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                {
+                                    id
+                                } else {
+                                    panic!("expected Subscribe message");
+                                };
+
+                                let username =
+                                    if conn_num == 0 { "ada_lovelace" } else { "grace_hopper" };
+                                socket
+                                    .send(Message::text(
+                                        serde_json::to_string(&ServerMessage::Next {
+                                            id: client_id.clone(),
+                                            payload: graphql::Response::builder()
+                                                .data(serde_json_bytes::json!({"userWasCreated": {"username": username}}))
+                                                .build(),
+                                        })
+                                        .unwrap(),
+                                    ))
+                                    .await
+                                    .unwrap();
+
+                                if conn_num == 0 {
+                                    // Drop the stream to trigger reconnect logic.
+                                    socket
+                                        .send(Message::text(
+                                            serde_json::to_string(&ServerMessage::Complete {
+                                                id: client_id,
+                                            })
+                                            .unwrap(),
+                                        ))
+                                        .await
+                                        .unwrap();
+                                }
+                                // Subsequent connections: hold open until the test aborts the task.
+                            })
+                    },
+                ),
+            )
+            .with_state(connection_count);
+
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
+    fn subscription_config_with_reconnect(max_reconnect_attempts: u32) -> SubscriptionConfig {
+        SubscriptionConfig {
+            max_reconnect_attempts: Some(max_reconnect_attempts),
+            reconnect_delay: Some(std::time::Duration::from_millis(1)),
+            ..subscription_config()
+        }
+    }
+
+    fn with_subscription_layer_reconnect(
+        s: SubgraphService,
+        max_reconnect_attempts: u32,
+    ) -> SubscriptionSubgraphService<SubgraphService> {
+        SubscriptionSubgraphLayer::new(
+            crate::plugins::subscription::notification::Notify::builder().build(),
+            Some(Arc::new(subscription_config_with_reconnect(
+                max_reconnect_attempts,
+            ))),
+            Arc::from(s.service.to_string()),
+        )
+        .layer(s)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_succeeds() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let connection_count = Arc::new(AtomicU32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_websocket_server_with_reconnect(
+            listener,
+            connection_count.clone(),
+        ));
+
+        let subgraph_service = with_subscription_layer_reconnect(
+            SubgraphService::new(
+                "test",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+            1,
+        );
+
+        let (tx, rx) = mpsc::channel(2);
+        let mut rx_stream = ReceiverStream::new(rx);
+        let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx_stream.next().await.unwrap();
+
+        // First event comes from the initial connection.
+        let first = gql_stream.next().await.unwrap();
+        assert_eq!(
+            first,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+
+        // After the server sends Complete the router reconnects; the second event
+        // comes from the reconnected connection.
+        let second = gql_stream.next().await.unwrap();
+        assert_eq!(
+            second,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "grace_hopper"}}))
+                .build()
+        );
+
+        spawned_task.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_exhausted_increments_counter() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            // emulate_websocket_server_that_completes always sends one event then Complete,
+            // so every connection attempt (initial + reconnects) will drop the stream.
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_that_completes(listener));
+
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                1,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Event from the initial connection.
+            let first = gql_stream.next().await.unwrap();
+            assert_eq!(
+                first,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // After the 1ms reconnect delay the router reconnects; event from the second connection.
+            let second = gql_stream.next().await.unwrap();
+            assert_eq!(
+                second,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // Both attempts exhausted — let the spawned forwarding task increment the counter.
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             assert_counter!(
