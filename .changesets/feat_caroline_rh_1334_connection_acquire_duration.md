@@ -1,4 +1,4 @@
-### Add `apollo.router.connection.acquire.duration` metric for TCP/TLS connection timing ([PR #PULL_NUMBER](https://github.com/apollographql/router/pull/PULL_NUMBER))
+### Add `apollo.router.connection.acquire.duration` metric for TCP/TLS connection timing ([PR #9309](https://github.com/apollographql/router/pull/9309))
 
 Adds a new histogram metric, `apollo.router.connection.acquire.duration`, that records how long it takes to establish a new TCP or Unix socket connection to a downstream service (subgraph, connector, or coprocessor). The metric fires only when the connection pool opens a new connection — pool hits are not recorded.
 
@@ -11,4 +11,4 @@ Attributes:
 - `connector.source.name`: name of the connector source (for connector connections)
 - `coprocessor`: `true` (for coprocessor connections)
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9309
