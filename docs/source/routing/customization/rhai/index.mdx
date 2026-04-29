@@ -327,7 +327,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
 
 **About Currying and performance**: Rhai language supports [currying](https://rhai.rs/book/language/fn-curry.html), a technique that binds values into a function to produce a closure, and this has a direct performance impact in the router: curried (closure-based) callbacks are invoked **without acquiring the global `scope` mutex**, whereas non-curried callbacks lock the `scope` on every call, serializing execution across all concurrent requests. For this reason, closure-based callbacks are the recommended default.
 
-See [Curried vs. non-curried callback functions](http://localhost:3001/docs/graphos/routing/customization/rhai#curried-vs-non-curried-callback-functions) for examples.
+See [Curried vs. non-curried callback functions](https://www.apollographql.com/docs/graphos/routing/customization/rhai#curried-vs-non-curried-callback-functions) for examples.
 
 </Note>
 
