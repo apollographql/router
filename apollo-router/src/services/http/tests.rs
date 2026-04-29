@@ -1490,7 +1490,6 @@ mod pool_idle_timeout {
     use std::time::Duration;
 
     use super::*;
-    use crate::configuration::shared::PoolEvictionMode;
 
     /// Server that counts how many TCP connections are accepted and how many are currently open.
     async fn serve_counting(
@@ -1598,37 +1597,26 @@ mod pool_idle_timeout {
         );
     }
 
-    #[rstest]
-    #[case::active_eviction(
-        PoolEvictionMode::Active,
-        0, // background timer proactively closes the connection during the sleep
-    )]
-    #[case::lazy_eviction(
-        PoolEvictionMode::Lazy,
-        1, // connection stays open in the pool; only evicted at checkout time
-    )]
+    /// Regression test: the router does not proactively close idle connections between requests.
+    /// Before this fix, `pool_timer` was unconditionally set, enabling a background eviction task
+    /// that sent TCP closes between requests and caused latency spikes in some network environments.
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_pool_idle_eviction_mode(
-        #[case] mode: PoolEvictionMode,
-        #[case] expected_live_after_sleep: usize,
-    ) {
+    async fn test_idle_connections_not_proactively_closed() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
-        let connection_count = Arc::new(AtomicUsize::new(0));
         let live_connection_count = Arc::new(AtomicUsize::new(0));
 
         tokio::task::spawn(serve_counting(
             listener,
-            connection_count.clone(),
+            Arc::new(AtomicUsize::new(0)),
             live_connection_count.clone(),
         ));
 
         let client_config = crate::configuration::shared::Client {
             pool_idle_timeout: Some(Duration::from_millis(50)),
-            pool_idle_eviction_mode: Some(mode),
             ..Default::default()
         };
-        let mut service = HttpClientService::test_new(
+        let service = HttpClientService::test_new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
@@ -1643,33 +1631,19 @@ mod pool_idle_timeout {
         let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
         assert_eq!(response.http_response.status(), StatusCode::OK);
         assert_eq!(
-            connection_count.load(Ordering::SeqCst),
-            1,
-            "first request opens one connection"
-        );
-        assert_eq!(
             live_connection_count.load(Ordering::SeqCst),
             1,
             "connection is open after first request"
         );
 
-        // Sleep well past the 50ms idle timeout. Use a generous sleep to avoid flakiness
-        // under test contention — the active eviction timer must fire before we assert.
+        // Sleep well past the 50ms idle timeout. Without pool_timer, no background task fires,
+        // so the connection must still be open in the pool.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         assert_eq!(
             live_connection_count.load(Ordering::SeqCst),
-            expected_live_after_sleep,
-            "unexpected live connection count after sleep for {mode:?} eviction mode"
-        );
-
-        tower::ServiceExt::ready(&mut service).await.unwrap();
-        let response = send_request(service, url, r#"{"query":"{ b }"}"#).await;
-        assert_eq!(response.http_response.status(), StatusCode::OK);
-        assert_eq!(
-            connection_count.load(Ordering::SeqCst),
-            2,
-            "second request always opens a new connection once the idle timeout has expired"
+            1,
+            "connection must not be proactively closed between requests"
         );
     }
 }

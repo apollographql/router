@@ -982,17 +982,6 @@ expression: "&schema"
             "null"
           ]
         },
-        "pool_idle_eviction_mode": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PoolEvictionMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.\n`lazy` (default): eviction happens at checkout time.\n`active`: a background timer proactively drops expired connections."
-        },
         "pool_idle_timeout": {
           "default": {
             "nanos": 0,
@@ -2751,17 +2740,6 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
-        },
-        "pool_idle_eviction_mode": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PoolEvictionMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.\n`lazy` (default): eviction happens at checkout time.\n`active`: a background timer proactively drops expired connections."
         },
         "pool_idle_timeout": {
           "default": {
@@ -7708,20 +7686,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "PoolEvictionMode": {
-      "oneOf": [
-        {
-          "const": "lazy",
-          "description": "Connections are evicted lazily at checkout time when they exceed `pool_idle_timeout`.\nAvoids background TCP closes that can disrupt connections in some network environments.",
-          "type": "string"
-        },
-        {
-          "const": "active",
-          "description": "A background timer proactively evicts connections that exceed `pool_idle_timeout`.\nMay cause brief connection disruptions if a TCP close races with a new connection attempt.",
-          "type": "string"
-        }
-      ]
-    },
     "PrivateNetworkAccessPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -11122,17 +11086,6 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
-        },
-        "pool_idle_eviction_mode": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PoolEvictionMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Controls how idle connections are evicted from the pool when `pool_idle_timeout` is set.\n`lazy` (default): eviction happens at checkout time.\n`active`: a background timer proactively drops expired connections."
         },
         "pool_idle_timeout": {
           "default": {
