@@ -1606,7 +1606,7 @@ mod connection_timing_metrics {
     use super::*;
     use crate::metrics::FutureMetricsExt;
 
-    /// Verifies that `apollo.router.connection.acquire_duration` fires once per TCP
+    /// Verifies that `apollo.router.connection.acquire.duration` fires once per TCP
     /// connection established, not once per HTTP request.
     ///
     /// Two requests to the same server: the first creates a TCP connection (connector called →
@@ -1654,7 +1654,7 @@ mod connection_timing_metrics {
         .await;
     }
 
-    /// Verifies that `apollo.router.connection.acquire_duration` measures only connection
+    /// Verifies that `apollo.router.connection.acquire.duration` measures only connection
     /// establishment time, not total request time.
     ///
     /// The server delays its response by 200ms. The metric must be recorded before the response
