@@ -1248,6 +1248,86 @@ async fn subscription_with_callback_with_limit() {
 }
 
 #[tokio::test]
+async fn subscription_max_lifetime_exceeded() {
+    let mut notify = Notify::builder().build();
+    let (handle, _, _) = notify
+        .create_or_subscribe("TEST_TOPIC".to_string(), false, None)
+        .await
+        .unwrap();
+    let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                    "variables": {
+                        "representations":[{"__typename": "Organization", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "Organization", "id": "1", "name": "A"},
+                        { "__typename": "Organization", "id": "2", "name": "B"},
+                        { "__typename": "Organization", "id": "3", "name": "C"},
+                        ] }]
+                    },
+                    }}
+            ).build())
+        ].into_iter().collect());
+
+    let mut configuration: Configuration = serde_json::from_value(serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "subscription": {
+            "enabled": true,
+            "max_lifetime": "50ms",
+            "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}
+        },
+        "supergraph": {
+            "generate_query_fragments": false,
+        }
+    }))
+    .unwrap();
+    configuration.notify = notify.clone();
+    let service = TestHarness::builder()
+        .configuration(Arc::new(configuration))
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+    let mut stream = service.oneshot(request).await.unwrap();
+    // First response: subscription established
+    stream
+        .next_response()
+        .await
+        .expect("should receive initial response");
+    // After max_lifetime elapses, the subscription is closed with the expected error
+    let timeout_response = tokio::time::timeout(Duration::from_secs(1), stream.next_response())
+        .await
+        .expect("timed out waiting for max_lifetime close")
+        .unwrap();
+    assert!(
+        timeout_response
+            .errors
+            .iter()
+            .any(|e| e.extensions.get("code").and_then(|v| v.as_str())
+                == Some("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")),
+        "expected SUBSCRIPTION_MAX_LIFETIME_EXCEEDED error, got: {timeout_response:?}"
+    );
+}
+
+#[tokio::test]
 async fn subscription_without_header() {
     let subgraphs = MockedSubgraphs(HashMap::new());
     let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"callback": {"public_url": "http://localhost:4545/callback"}}}})).unwrap();
