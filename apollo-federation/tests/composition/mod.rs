@@ -126,7 +126,10 @@ pub(crate) mod test_helpers {
         result: &Result<Supergraph<Satisfiable>, CompositionFailure>,
         expected_errors: &[(&str, &str)],
     ) {
-        let errors = &result.as_ref().expect_err("Expected composition to fail").errors;
+        let errors = &result
+            .as_ref()
+            .expect_err("Expected composition to fail")
+            .errors;
         let error_strings: Vec<(String, String)> = errors
             .iter()
             .map(|e| (e.code().definition().code().to_string(), e.to_string()))

@@ -734,7 +734,9 @@ mod override_tests {
             "#,
         };
 
-        let errors = compose_services(&[subgraph_a, subgraph_b]).unwrap_err().errors;
+        let errors = compose_services(&[subgraph_a, subgraph_b])
+            .unwrap_err()
+            .errors;
         assert_eq!(
             errors.len(),
             1,

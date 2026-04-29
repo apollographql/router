@@ -65,20 +65,17 @@ pub fn compose(
     subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
 
     tracing::debug!("Expanding subgraphs...");
-    let expanded_subgraphs = expand_subgraphs(subgraphs).map_err(CompositionFailure::from_errors)?;
+    let expanded_subgraphs = expand_subgraphs(subgraphs)?;
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs =
-        upgrade_subgraphs_if_necessary(expanded_subgraphs).map_err(CompositionFailure::from_errors)?;
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+        .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
-    pre_merge_validations(&validated_subgraphs).map_err(CompositionFailure::from_errors)?;
+    pre_merge_validations(&validated_subgraphs)?;
     tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
     tracing::debug!("Post-merge validations...");
-    post_merge_validations(&supergraph).map_err(|errors| CompositionFailure {
-        errors,
-        hints: supergraph.hints().to_vec(),
-    })?;
+    post_merge_validations(&supergraph)?;
     tracing::debug!("Validating satisfiability...");
     validate_satisfiability(supergraph, &options)
 }
@@ -95,23 +92,20 @@ pub fn compose_with_connectors(
     // TODO: (FED-855) Call `connectors::validation`, which may change the subgraphs before upgrading.
 
     tracing::debug!("Expanding subgraphs...");
-    let expanded_subgraphs = expand_subgraphs(subgraphs).map_err(CompositionFailure::from_errors)?;
+    let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs =
-        upgrade_subgraphs_if_necessary(expanded_subgraphs).map_err(CompositionFailure::from_errors)?;
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+        .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
-    pre_merge_validations(&validated_subgraphs).map_err(CompositionFailure::from_errors)?;
+    pre_merge_validations(&validated_subgraphs)?;
 
     tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
 
     tracing::debug!("Post-merge validations...");
-    post_merge_validations(&supergraph).map_err(|errors| CompositionFailure {
-        errors,
-        hints: supergraph.hints().to_vec(),
-    })?;
+    post_merge_validations(&supergraph)?;
     // TODO: (FED-855) Call `validate_overrides`, which validates the original subgraphs for connectors after merging.
     // - Once JS-to-Rust migration is done, we may consider to move that to the pre-merge validation step.
 
@@ -124,7 +118,7 @@ pub fn compose_with_connectors(
 #[instrument(skip(subgraphs))]
 pub fn expand_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
-) -> Result<Vec<Subgraph<Expanded>>, Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Expanded>>, CompositionFailure> {
     let mut errors: Vec<CompositionError> = vec![];
     let expanded: Vec<Subgraph<Expanded>> = subgraphs
         .into_iter()
@@ -134,16 +128,14 @@ pub fn expand_subgraphs(
     if errors.is_empty() {
         Ok(expanded)
     } else {
-        Err(errors)
+        Err(CompositionFailure::from_errors(errors))
     }
 }
 
 /// Perform validations that require information about all available subgraphs.
 #[instrument(skip(subgraphs))]
-pub fn pre_merge_validations(
-    subgraphs: &[Subgraph<Validated>],
-) -> Result<(), Vec<CompositionError>> {
-    validate_consistent_root_fields(subgraphs)?;
+pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), CompositionFailure> {
+    validate_consistent_root_fields(subgraphs).map_err(CompositionFailure::from_errors)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
@@ -187,9 +179,7 @@ pub fn merge_subgraphs(
 }
 
 #[instrument(skip(_supergraph))]
-pub fn post_merge_validations(
-    _supergraph: &Supergraph<Merged>,
-) -> Result<(), Vec<CompositionError>> {
+pub fn post_merge_validations(_supergraph: &Supergraph<Merged>) -> Result<(), CompositionFailure> {
     // TODO: (FED-714) Implement any post-merge validations other than satisfiability, which is
     // checked separately.
     Ok(())
@@ -208,7 +198,9 @@ pub fn validate_satisfiability_with_connectors(
         Err(e) => {
             return Err(CompositionFailure {
                 errors: vec![CompositionError::InternalError {
-                    message: format!("Composition failed due to an internal error when expanding connectors, please report this: {e}"),
+                    message: format!(
+                        "Composition failed due to an internal error when expanding connectors, please report this: {e}"
+                    ),
                 }],
                 hints: merge_hints,
             });
