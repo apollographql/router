@@ -7,7 +7,7 @@ coprocessor:
 # set timeout to ensure coprocessor early termination
 traffic_shaping:
   router:
-    timeout: 2s
+    timeout: 100ms
 # export recorded metrics
 telemetry:
   exporters:
