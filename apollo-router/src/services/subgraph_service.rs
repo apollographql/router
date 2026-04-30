@@ -1191,10 +1191,10 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::sync::atomic::AtomicU32;
-    use std::sync::atomic::Ordering;
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
 
     use SubgraphRequest;
     use axum::Router;

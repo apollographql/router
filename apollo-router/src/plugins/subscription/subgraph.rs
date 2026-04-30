@@ -764,7 +764,11 @@ async fn reconnect_ws_gql_stream(
                 .instrument(subgraph_req_span)
                 .await
         }
-        _ => connect_async(ws_request).instrument(subgraph_req_span).await,
+        _ => {
+            connect_async(ws_request)
+                .instrument(subgraph_req_span)
+                .await
+        }
     }
     .map_err(|err| {
         let error_details = match &err {
@@ -815,7 +819,10 @@ async fn reconnect_ws_gql_stream(
         increment_subgraph_rejected_counter(service_name);
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
-            reason: format!("cannot get the GraphQL websocket stream on reconnect: {}", err.message),
+            reason: format!(
+                "cannot get the GraphQL websocket stream on reconnect: {}",
+                err.message
+            ),
         }
     })?;
 
@@ -826,7 +833,9 @@ async fn reconnect_ws_gql_stream(
             increment_subgraph_rejected_counter(service_name);
             FetchError::SubrequestWsError {
                 service: service_name.to_string(),
-                reason: format!("cannot send the subgraph request to websocket stream on reconnect: {err:?}"),
+                reason: format!(
+                    "cannot send the subgraph request to websocket stream on reconnect: {err:?}"
+                ),
             }
         })?;
 
