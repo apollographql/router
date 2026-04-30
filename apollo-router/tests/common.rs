@@ -1515,7 +1515,7 @@ impl IntegrationTest {
                 }
                 last_metrics = metrics;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         let missing: Vec<&str> = remaining.iter().map(|(t, _)| t.as_str()).collect();
         panic!("'{missing:?}' not detected in metrics\n{last_metrics}");
