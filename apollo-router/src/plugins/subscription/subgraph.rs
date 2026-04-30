@@ -6,6 +6,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::SinkExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
@@ -464,6 +465,10 @@ async fn call_websocket(
                     break 'retry;
                 }
             }
+            // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
+            // and terminates. Without this, the HandleStream waits forever when the subgraph
+            // closes the WebSocket and there are no reconnect attempts left.
+            let _ = handle_sink.close().await;
         }
         .with_current_meter_provider(),
     );
