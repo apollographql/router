@@ -605,6 +605,30 @@ When using subscriptions along with `@policy` authorization, subscription events
 
 GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes`, `@authenticated`, or `@policy` directives, they are set on the supergraph too. Whether composition uses `AND` or `OR` logic depends on how the authorization directives are used.
 
+### Authorization on root operation types
+
+To scope authorization on `Query`, `Mutation`, and `Subscription` reliably, apply `@authenticated`, `@requiresScopes`, or `@policy` to each field rather than to the root operation type itself:
+
+```graphql
+type Mutation {
+  bookHotel: BookedHotel @authenticated
+}
+```
+
+Root operation types are shared merged types in a federated graph. Every subgraph that contributes fields to `Query`, `Mutation`, or `Subscription` shares the same composed root type in the supergraph. An authorization directive applied to the root type composes into that shared root and applies to every field on it, including fields that other subgraphs contribute.
+
+The following pattern is valid composition, but produces cross-subgraph enforcement that is rarely intended:
+
+```graphql
+type Mutation @authenticated {
+  bookHotel: BookedHotel
+}
+```
+
+Every field on `Mutation` across every subgraph now requires authentication, not only `bookHotel` in the subgraph that declared the directive.
+
+Keep `@authenticated`, `@requiresScopes`, and `@policy` on individual fields in every subgraph that contributes to a root operation type, so each subgraph enforces only what it owns.
+
 ### Composed fields with different authorization directives
 
 If a shared field uses different authorization directives across subgraphs, composition merges them using `AND` logic.

@@ -447,6 +447,44 @@ The router then sends the following as a final response payload to all active su
 
 A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` or `SUBSCRIPTION_CONFIG_RELOAD` error code can reconnect by executing a new subscription operation.
 
+### Limit subscription lifetime
+
+By default, subscriptions can remain open indefinitely. Set a maximum duration using `max_lifetime` to have Apollo Router close the subscription and send a terminal error to the client after the configured duration:
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+  #highlight-start
+  max_lifetime: 10m # Accepts durations like '30s', '10m', '1h'. Default: no limit
+  #highlight-end
+```
+
+When the lifetime expires, the client receives a final response payload:
+
+```json
+{
+  "errors": [
+    {
+      "message": "subscription closed because the maximum lifetime has been reached",
+      "extensions": {
+        "code": "SUBSCRIPTION_MAX_LIFETIME_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+A client that receives the `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED` error code can reconnect by executing a new subscription operation.
+
+Use `max_lifetime` to enforce resource limits, rotate authentication tokens, or prevent stale long-lived connections.
+
+<Note>                                                                                                                           
+                                                                                                                               
+If [subscription deduplication](#subscription-deduplication) is enabled (the default), all clients sharing a deduplicated      
+subscription are closed when the lifetime expires, not just the first client to reach the limit.                                  
+                                                                                                                             
+</Note>
+
 ### WebSocket auth support
 
 By default, if you've configured your router to [propagate](/graphos/routing/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
@@ -532,6 +570,7 @@ The `apollo.subscription.end_reason` attribute can have these values:
 | `client_disconnect` | The client disconnected after receiving subscription data (not during a heartbeat). This indicates the client closed the connection mid-subscription. |
 | `schema_reload` | The subscription was terminated because Apollo Router's supergraph schema was updated. Clients can reconnect to resume the subscription. |
 | `config_reload` | The subscription was terminated because Apollo Router's configuration was updated. Clients can reconnect to resume the subscription. |
+| `max_lifetime` | The subscription was terminated because the configured [max lifetime](#limit-subscription-lifetime) was reached. Clients can reconnect to resume the subscription. |
 
 ### Tracking subgraph connection failures and closures
 
@@ -554,3 +593,4 @@ Use the `apollo.subscription.end_reason` attribute and subgraph counter metrics 
 - The `server_close` value indicates healthy subscription lifecycles where the subgraph properly signals closure.
 - A high rate of `apollo.router.operations.subscriptions.rejected` with `reason=subgraph` for a specific subgraph may indicate connectivity issues or misconfigured WebSocket endpoints.
 - The `apollo.router.operations.subscriptions.terminated.subgraph` metric helps track how often subgraphs are closing connections, which can inform capacity planning and subgraph stability monitoring.
+- A high rate of `apollo.router.operations.subscriptions.terminated.client` with `reason=max_lifetime` indicates subscriptions are routinely hitting the lifetime cap. Consider increasing `max_lifetime` or ensuring clients reconnect gracefully on `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED`.

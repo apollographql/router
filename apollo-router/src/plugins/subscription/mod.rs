@@ -37,6 +37,7 @@ pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
 pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
@@ -71,6 +72,10 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+    /// Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) max_lifetime: Option<Duration>,
 }
 
 /// Subscription deduplication configuration
@@ -113,6 +118,7 @@ impl Default for SubscriptionConfig {
             deduplication: SubgraphConfiguration::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
+            max_lifetime: None,
         }
     }
 }
@@ -1071,6 +1077,7 @@ mod tests {
         assert!(sub_config.deduplication.all.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
+        assert!(sub_config.max_lifetime.is_none());
 
         // ignore_auth_context: explicit true via global all
         let cfg_ignore_auth: SubscriptionConfig = serde_json::from_value(serde_json::json!({
@@ -1115,6 +1122,36 @@ mod tests {
         .unwrap();
         assert!(cfg_per_subgraph.deduplication.get("accounts").enabled);
         assert!(!cfg_per_subgraph.deduplication.get("article").enabled);
+    }
+
+    #[test]
+    fn it_test_subscription_config_max_lifetime() {
+        let config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "callback": {
+                    "public_url": "http://localhost:4000/subscription/callback",
+                    "path": "/subscription/callback",
+                }
+            },
+            "max_lifetime": "10m"
+        }))
+        .unwrap();
+
+        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600)));
+
+        let config_no_lifetime: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "callback": {
+                    "public_url": "http://localhost:4000/subscription/callback",
+                    "path": "/subscription/callback",
+                }
+            }
+        }))
+        .unwrap();
+
+        assert!(config_no_lifetime.max_lifetime.is_none());
     }
 }
 

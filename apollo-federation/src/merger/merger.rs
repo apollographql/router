@@ -577,9 +577,14 @@ impl Merger {
     /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be
     /// computed.
     fn validate_supergraph_schema(
-        merged: FederationSchema,
+        mut merged: FederationSchema,
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
+        // Match graphql-js `printSchema(buildSchema(...))` behavior: argument and input-field
+        // defaults that cannot be coerced to their types (for example `{}` when the input object
+        // has required fields) are removed rather than left on the composed supergraph SDL.
+        crate::compat::coerce_schema_default_values(merged.schema_mut());
+
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
         // supergraph) and don't point back to the subgraphs in any way.
@@ -2061,18 +2066,23 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 element_ast: element_ast.clone(),
             };
 
-            // Compute the new usage directly based on existing record and current position
+            // Compute the new usage directly based on existing record and current position.
+            // Once an enum reaches `Both`, it stays `Both` regardless of further observations.
             let new_usage = match self.enum_usages().get(base_type_name.as_str()) {
+                Some(EnumTypeUsage::Both {
+                    input_example,
+                    output_example,
+                }) => EnumTypeUsage::Both {
+                    input_example: input_example.clone(),
+                    output_example: output_example.clone(),
+                },
                 Some(EnumTypeUsage::Input { input_example }) if !is_input_position => {
                     EnumTypeUsage::Both {
                         input_example: input_example.clone(),
                         output_example: default_example(),
                     }
                 }
-                Some(EnumTypeUsage::Input { input_example })
-                | Some(EnumTypeUsage::Both { input_example, .. })
-                    if is_input_position =>
-                {
+                Some(EnumTypeUsage::Input { input_example }) if is_input_position => {
                     EnumTypeUsage::Input {
                         input_example: input_example.clone(),
                     }
@@ -2083,10 +2093,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         output_example: output_example.clone(),
                     }
                 }
-                Some(EnumTypeUsage::Output { output_example })
-                | Some(EnumTypeUsage::Both { output_example, .. })
-                    if !is_input_position =>
-                {
+                Some(EnumTypeUsage::Output { output_example }) if !is_input_position => {
                     EnumTypeUsage::Output {
                         output_example: output_example.clone(),
                     }
