@@ -1259,15 +1259,15 @@ macro_rules! u64_histogram_with_unit {
 #[deprecated(since = "TBD", note = "use `f64_histogram_timer_with_unit` instead")]
 macro_rules! f64_histogram_timer {
     ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, stringify!($($name).+), $description, parse_attributes!($($attrs)*))
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, stringify!($($name).+), $description, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $($attrs:tt)*) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, parse_attributes!($($attrs)*))
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, [])
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, [])
     };
 }
 
@@ -1295,15 +1295,15 @@ macro_rules! f64_histogram_timer {
 #[allow(unused_macros)]
 macro_rules! f64_histogram_timer_with_unit {
     ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, stringify!($($name).+), $description, "s", parse_attributes!($($attrs)*))
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, stringify!($($name).+), $description, "s", parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $($attrs:tt)*) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, "s", parse_attributes!($($attrs)*))
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, "s", parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal) => {
-        metric!(f64, histogram, crate::metrics::HistogramTimerGuard<f64>, $name, $description, "s", [])
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, "s", [])
     };
 }
 
@@ -1404,7 +1404,7 @@ macro_rules! metric {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                $guard::new(instrument.clone(), $value, attrs)
+                $guard::new(instrument.clone(), attrs)
             }
         }
     };
