@@ -305,6 +305,15 @@ impl IntegrationTest {
         self.env.get_or_insert_with(HashMap::new).extend(env);
     }
 
+    /// Path to the temp file holding this test's supergraph schema. Tests
+    /// that need to set `APOLLO_ROUTER_SUPERGRAPH_PATH` directly (e.g. to
+    /// pin schema source while still setting `APOLLO_GRAPH_REF` for license
+    /// reasons) can read this to construct that env var.
+    #[allow(dead_code)]
+    pub fn test_schema_location(&self) -> &PathBuf {
+        &self.test_schema_location
+    }
+
     /// Set an address placeholder using a URI, extracting the port automatically
     /// This is a convenience method for the common pattern of extracting port from a server URI
     #[allow(dead_code)]
@@ -721,6 +730,21 @@ impl IntegrationTest {
                 true
             })
             .respond_with(ResponseTemplate::new(200))
+            .mount(&apollo_otlp_server)
+            .await;
+
+        // Catch-all fallback so that other Apollo Studio reporting paths
+        // (eg. `/v1/traces` for OTLP traces, `/api/ingress/traces` for the
+        // Apollo-protocol exporter) return 200 instead of 404. Without this,
+        // any test whose router is wired up to send Studio telemetry would
+        // silently fail every report after the first non-`/v1/metrics`
+        // request, and the corresponding `apollo_router_telemetry_studio_
+        // reports_total` counter would never increment. Lower priority
+        // (higher number) than the default 5 so the body-capturing
+        // `/v1/metrics` route above still wins for that path.
+        Mock::given(method(Method::POST))
+            .respond_with(ResponseTemplate::new(200))
+            .with_priority(10)
             .mount(&apollo_otlp_server)
             .await;
 
@@ -1437,6 +1461,27 @@ impl IntegrationTest {
         panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
 
+    /// Polls the Prometheus endpoint until every pattern in `texts` is found
+    /// somewhere in the metrics output, or `duration` elapses.
+    ///
+    /// Each pattern is treated as a substring with two pieces of regex sugar:
+    /// `<any>` is replaced with `.+` (one-or-more) and `<anyopt>` with `.*`
+    /// (zero-or-more). The match is *not* line-anchored — the pattern can
+    /// appear anywhere on a line. Prometheus re-orders labels
+    /// alphabetically by name and the set of labels on a given metric grows
+    /// over time as new dimensions are added, so anchoring to start-of-line
+    /// forces every caller to know the full label list and its current
+    /// ordering. Substring semantics let callers match the labels they care
+    /// about without coupling to label-set evolution.
+    ///
+    /// Use `<anyopt>` (not `<any>`) when wildcarding *between* an opening
+    /// label brace and a label you care about, because the label you care
+    /// about may itself be the alphabetically-first label, in which case
+    /// `<any>`'s `.+` would require a phantom character that isn't there.
+    ///
+    /// `.` in Rust regex does not match `\n` by default, so each pattern
+    /// still has to fit on a single line of the Prometheus output — neither
+    /// wildcard will silently absorb a newline.
     #[allow(dead_code)]
     pub async fn assert_metrics_contains_multiple(
         &self,
@@ -1446,8 +1491,10 @@ impl IntegrationTest {
         let patterns: Vec<(String, Regex)> = texts
             .into_iter()
             .map(|t| {
-                let escaped = regex::escape(t).replace("<any>", ".+");
-                let re = Regex::new(&format!("(?m)^{escaped}")).expect("Invalid regex");
+                let escaped = regex::escape(t)
+                    .replace("<anyopt>", ".*")
+                    .replace("<any>", ".+");
+                let re = Regex::new(&escaped).expect("Invalid regex");
                 (t.to_string(), re)
             })
             .collect();
@@ -1943,18 +1990,43 @@ fn merge_overrides(
         );
     }
 
-    // Override the Apollo OTLP metrics listening address
-    if let Some(apollo_config) = config
+    // Pin every Apollo Studio reporting endpoint to the per-test wiremock at
+    // `apollo_otlp_endpoint`. This stops integration tests from making
+    // outbound HTTPS requests to `usage-reporting.api.apollographql.com` —
+    // which were both a hidden CI dependency on public-Internet reachability
+    // and a source of non-determinism (counters that "should" increment in
+    // tests only did so if the request landed within the assertion deadline).
+    //
+    // We override two distinct keys:
+    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //     (`apollo_otlp_exporter.rs`).
+    //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
+    //     (`apollo_exporter.rs`).
+    // Both default to `https://usage-reporting.api.apollographql.com/...`,
+    // and the catch-all `POST → 200` route mounted on `apollo_otlp_server`
+    // accepts whichever path the router posts to.
+    //
+    // If the user-supplied YAML has no `telemetry.apollo` block, we insert
+    // one. That has no side-effects beyond pinning the endpoints, since
+    // every other Apollo-block setting falls back to its serde default.
+    let telemetry_obj = config
         .as_object_mut()
         .and_then(|o| o.get_mut("telemetry"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("apollo"))
-        .and_then(|o| o.as_object_mut())
-    {
-        apollo_config.insert(
-            "experimental_otlp_endpoint".to_string(),
-            serde_json::Value::String(apollo_otlp_endpoint.to_string()),
-        );
+        .and_then(|o| o.as_object_mut());
+    if let Some(telemetry) = telemetry_obj {
+        let apollo_entry = telemetry
+            .entry("apollo".to_string())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if let Some(apollo_config) = apollo_entry.as_object_mut() {
+            apollo_config.insert(
+                "experimental_otlp_endpoint".to_string(),
+                serde_json::Value::String(apollo_otlp_endpoint.to_string()),
+            );
+            apollo_config.insert(
+                "endpoint".to_string(),
+                serde_json::Value::String(apollo_otlp_endpoint.to_string()),
+            );
+        }
     }
 
     // Set health check listen address to avoid port conflicts
