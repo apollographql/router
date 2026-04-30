@@ -1,10 +1,106 @@
+use std::fs;
+
 use apollo_compiler::coord;
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 use test_log::test;
 
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 use super::extract_subgraphs_from_supergraph_result;
+
+const DATA_DUMP_DIR: &str = "/Users/dkuc/Development/federation-performance-harness/data-dump";
+
+const UUIDS: &[&str] = &[
+    // Group 3.8: RS-only errors (DIRECTIVE_COMPOSITION_ERROR)
+    "042dd710-0519-49ba-ae14-df7ec0e1cbbd",
+    "054a68d1-8291-455a-9438-42ab4aa72136",
+    "07de587d-8125-4240-ba2e-c328f612d83a",
+    // Group 3.8: RS-only errors (INVALID_GRAPHQL)
+    "01113882-4687-447f-989b-4eddf97ab647",
+    "01a4a489-f18b-4318-bd21-4a380f69349f",
+    "01c782fd-6bf8-4597-b046-1c82bda460cd",
+    // Group 3.8: RS-only errors (INTERNAL)
+    "010a7788-8295-4e07-90f9-90b1d4f09cd8",
+    "02a68cc7-7403-4fa5-8216-091d374046b1",
+    "02d768d4-d47a-4f98-be40-89258a59d5d2",
+    // Group 3.8: RS-only errors (UNKNOWN_ERROR_CODE)
+    "006e2bab-3381-41a1-bd90-5ebf3f68e7e0",
+    "01603f3b-f1f1-4090-9644-35ea6deb3253",
+    "01a4b19e-4543-4569-8c55-0c47292ad4e1",
+    // Group 3.8: RS-only errors (SATISFIABILITY_ERROR)
+    "03428beb-4a30-4982-ad00-584f9643f44c",
+    "04639474-9aa2-4d7c-88d2-cfec85871d96",
+    "04be760f-2ccd-4c48-96ca-154f80e0b2a2",
+    // Group 3.9: RS file missing (crash/failure)
+    "007c5530-c001-41fa-b5ef-db232308ebb7",
+    "009a7caf-57d8-438d-b595-5836d75d4ee4",
+    "00c1b18b-573f-4a93-80bc-7b2192cf05f2",
+];
+
+fn load_subgraphs(uuid: &str) -> Vec<Subgraph<apollo_federation::subgraph::typestate::Initial>> {
+    let subgraphs_dir = format!("{DATA_DUMP_DIR}/{uuid}/subgraphs");
+    let mut subgraphs = Vec::new();
+    for entry in
+        fs::read_dir(&subgraphs_dir).unwrap_or_else(|e| panic!("cannot read {subgraphs_dir}: {e}"))
+    {
+        let entry = entry.expect("valid dir entry");
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "graphql") {
+            let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+            let sdl = fs::read_to_string(&path).expect("sdl exists");
+            let subgraph = Subgraph::parse(&name, &format!("http://{name}"), &sdl)
+                .unwrap_or_else(|e| panic!("failed to parse {name}: {e}"));
+            subgraphs.push(subgraph);
+        }
+    }
+    subgraphs
+}
+
+#[test]
+fn integration_test_for_debugging_issues() {
+    let mut passed = Vec::new();
+    let mut failed = Vec::new();
+
+    let out_dir = "/tmp/rust-supergraphs";
+    fs::create_dir_all(out_dir).unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    for uuid in UUIDS {
+        if !seen.insert(*uuid) {
+            continue;
+        }
+        let subgraphs = load_subgraphs(uuid);
+        match compose(subgraphs, Default::default()) {
+            Ok(supergraph) => {
+                passed.push(*uuid);
+                let sdl = supergraph.schema().schema().to_string();
+                fs::write(format!("{out_dir}/{uuid}.graphql"), sdl).unwrap();
+            }
+            Err(failure) => {
+                let msgs: Vec<String> = failure.errors.iter().map(|e| e.to_string()).collect();
+                eprintln!("FAIL {uuid}:\n  {}", msgs.join("\n  "));
+                failed.push(*uuid);
+            }
+        }
+    }
+
+    eprintln!("\n=== RESULTS ===");
+    eprintln!("Passed: {}/{}", passed.len(), UUIDS.len());
+    eprintln!("Failed: {}/{}", failed.len(), UUIDS.len());
+    for uuid in &failed {
+        eprintln!("  FAIL: {uuid}");
+    }
+
+    assert!(
+        failed.is_empty(),
+        "{} out of {} UUIDs failed composition: {:?}",
+        failed.len(),
+        UUIDS.len(),
+        failed
+    );
+}
 
 #[test]
 fn generates_a_valid_supergraph() {

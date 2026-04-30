@@ -5,7 +5,7 @@ mod validation_state;
 mod validation_traversal;
 
 use std::sync::Arc;
-
+use indexmap::IndexMap;
 use tracing::instrument;
 use tracing::trace;
 
@@ -13,6 +13,8 @@ use crate::api_schema;
 use crate::composition::CompositionFailure;
 use crate::composition::CompositionOptions;
 use crate::composition::satisfiability::validation_traversal::ValidationTraversal;
+use crate::connectors::Connector;
+use crate::connectors::expand::{expand_connectors, Connectors, ExpansionResult};
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::query_graph::QueryGraph;
@@ -32,18 +34,83 @@ pub fn validate_satisfiability(
     let supergraph_schema = supergraph.schema().clone();
     let mut errors = vec![];
     let mut hints = supergraph.hints_mut().drain(..).collect();
-    if let Err(e) = validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints) {
-        return Err(CompositionFailure {
-            errors: vec![CompositionError::InternalError {
-                message: e.to_string(),
-            }],
-            hints,
-        });
-    }
+
+    // TODO this extracts subgraphs and then re-runs old merge logic, we shouldn't do this
+    let expansion_result = match expand_connectors(&supergraph_schema.schema().to_string(), &Default::default()) {
+        Ok(result) => result,
+        Err(e) => {
+            return Err(CompositionFailure {
+                errors: vec![CompositionError::InternalError {
+                    message: format!(
+                        "Composition failed due to an internal error when expanding connectors, please report this: {e}"
+                    ),
+                }],
+                hints,
+            });
+        }
+    };
+
+    match expansion_result {
+        ExpansionResult::Expanded {
+            raw_sdl,
+            connectors: Connectors {
+                by_service_name, ..
+            },
+            ..
+        } => {
+            validate_connector_supergraph(&raw_sdl, by_service_name, options, &mut errors, &mut hints)
+        }
+        ExpansionResult::Unchanged => match validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                return Err(CompositionFailure {
+                    errors: vec![CompositionError::InternalError {
+                        message: e.to_string(),
+                    }],
+                    hints,
+                });
+            }
+        },
+    }?;
+
     if !errors.is_empty() {
         return Err(CompositionFailure { errors, hints });
     }
     Ok(Supergraph::<Satisfiable>::new(supergraph_schema, hints))
+}
+
+fn validate_connector_supergraph(
+    sdl: &str,
+    connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    options: &CompositionOptions,
+    errors: &mut Vec<CompositionError>,
+    hints: &mut Vec<CompositionHint>
+) -> Result<(), CompositionFailure> {
+    let expanded_supergraph = match Supergraph::parse(sdl) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(CompositionFailure {
+                errors: vec![CompositionError::InternalError {
+                    message: e.to_string(),
+                }],
+                hints: hints.clone(),
+            });
+        }
+    };
+    match validate_satisfiability_inner(expanded_supergraph, options, errors, hints) {
+        Ok(_) => Ok(()),
+        Err(failure) => {
+            for error in errors.iter_mut() {
+                sanitize_connectors_error(error, connectors_by_service_name.iter());
+            }
+            Err(CompositionFailure {
+                errors: vec![CompositionError::InternalError {
+                    message: failure.to_string(),
+                }],
+                hints: hints.clone(),
+            })
+        }
+    }
 }
 
 fn validate_satisfiability_inner(
@@ -97,6 +164,30 @@ fn validate_graph_composition(
         composition_options,
     )?
     .validate(errors, hints)
+}
+
+fn sanitize_connectors_error<'a>(
+    issue: &mut CompositionError,
+    connector_subgraphs: impl Iterator<Item = (&'a Arc<str>, &'a Connector)>,
+) {
+    match issue {
+        CompositionError::SatisfiabilityError { message } => {
+            sanitize_connectors_message(message, connector_subgraphs);
+        }
+        CompositionError::ShareableHasMismatchedRuntimeTypes { message } => {
+            sanitize_connectors_message(message, connector_subgraphs);
+        }
+        _ => {}
+    }
+}
+
+fn sanitize_connectors_message<'a>(
+    message: &mut String,
+    connector_subgraphs: impl Iterator<Item = (&'a Arc<str>, &'a Connector)>,
+) {
+    for (service_name, connector) in connector_subgraphs {
+        *message = message.replace(&**service_name, connector.id.subgraph_name.as_str());
+    }
 }
 
 #[cfg(test)]

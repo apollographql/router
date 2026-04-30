@@ -12,10 +12,8 @@ use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
-use apollo_federation::composition::CompositionFailure;
+use apollo_federation::composition::{compose, validate_satisfiability, CompositionFailure};
 use apollo_federation::composition::CompositionOptions;
-use apollo_federation::composition::compose_with_connectors;
-use apollo_federation::composition::validate_satisfiability_with_connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::error::CompositionError;
@@ -295,7 +293,7 @@ fn compose_files_inner(
         return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs, CompositionOptions::default())
+    compose(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from a Rover config YAML file.
@@ -362,7 +360,7 @@ fn compose_from_config_inner(
         return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs, CompositionOptions::default())
+    compose(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -545,7 +543,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    match validate_satisfiability_with_connectors(supergraph, &CompositionOptions::default()) {
+    match validate_satisfiability(supergraph, &CompositionOptions::default()) {
         Ok(_) => {
             println!("[SUCCESS]");
             Ok(())
