@@ -128,7 +128,10 @@ async fn test_metrics_reloading() {
     // forcing the schema to be fetched from there as well.
     let schema_path = router.test_schema_location().to_string_lossy().into_owned();
     let mut extra_env: HashMap<String, OsString> = HashMap::new();
-    extra_env.insert("APOLLO_ROUTER_SUPERGRAPH_PATH".to_string(), schema_path.into());
+    extra_env.insert(
+        "APOLLO_ROUTER_SUPERGRAPH_PATH".to_string(),
+        schema_path.into(),
+    );
     router.set_env(extra_env);
 
     router.start().await;
