@@ -335,8 +335,8 @@ impl Merger {
             has_seen_source = true;
         }
 
-        let apply_inconsistent_empty_object_default =
-            self.inconsistent_defaults_are_all_coercible_empty_objects(
+        let apply_inconsistent_empty_object_default = self
+            .inconsistent_defaults_are_all_coercible_empty_objects(
                 sources,
                 dest_default.as_ref(),
                 target_type,
