@@ -455,7 +455,7 @@ impl QueryHash {
         hasher.update(query_text);
         hasher.update(&[0xFF][..]);
         hasher.update(operation_name.unwrap_or("-"));
-        Self(hasher.finalize().as_ref().into())
+        Self(hasher.finalize().to_vec())
     }
 
     /// Return the hash as a byte slice.
