@@ -11,7 +11,6 @@ use tower::ServiceBuilder;
 use tower_service::Service;
 
 use super::*;
-use super::get_coprocessor_timer;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
