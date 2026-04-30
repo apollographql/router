@@ -751,12 +751,16 @@ mod tests {
             ))
             .unwrap();
 
-        let call_fut = http_router.call(request);
-        tokio::pin!(call_fut);
+        // `HttpService::call` already returns a `Pin<Box<dyn Future + Send>>`, so we can
+        // poll it via `.as_mut()` and explicitly drop it without `tokio::pin!` (which would
+        // shadow the binding with a `Pin<&mut _>` and make the subsequent `drop` a no-op
+        // on the underlying boxed future).
+        let mut call_fut = http_router.call(request);
 
         // First poll drives the router synchronously through `CancelHandler::new` into the
         // inner `tokio::task::spawn(task).await`, which returns `Pending`. After this point
-        // dropping the future will run `CancelHandler::Drop` with `got_first_response == false`.
+        // dropping the future will run `CancelHandler::Drop` with
+        // `got_first_response == false`.
         let first = futures::poll!(call_fut.as_mut());
         assert!(
             matches!(first, Poll::Pending),
