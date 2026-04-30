@@ -97,8 +97,6 @@ or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_dis
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled_generate_query_fragments) )
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled_list_of_list) )
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled) )
-or ( binary_id(=apollo-router) & test(=axum_factory::axum_http_server_factory::tests::request_cancel_log) )
-or ( binary_id(=apollo-router) & test(=axum_factory::axum_http_server_factory::tests::request_cancel_no_log) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_default) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_list) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_regex) )
