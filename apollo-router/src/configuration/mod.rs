@@ -1562,7 +1562,7 @@ pub(crate) enum BatchingMode {
 }
 
 /// Configuration for Batching
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
@@ -1578,29 +1578,12 @@ pub(crate) struct Batching {
     pub(crate) maximum_size: Option<usize>,
 }
 
-impl Default for Batching {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mode: BatchingMode::default(),
-            subgraph: None,
-            maximum_size: None,
-        }
-    }
-}
-
 /// Common options for configuring subgraph batching
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CommonBatchingConfig {
     /// Whether this batching config should be enabled
     pub(crate) enabled: bool,
-}
-
-impl Default for CommonBatchingConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 impl Batching {
