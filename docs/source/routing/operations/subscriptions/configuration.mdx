@@ -305,6 +305,20 @@ This example subscription only emits three events and then directly closes the c
 
 For more information on this multipart HTTP subscription protocol, see [this article](/router/executing-operations/subscription-multipart-protocol/).
 
+## Network path considerations for client connections
+
+Configure every intermediate hop between the client and the router to permit long-lived streaming responses; subscription replies are not single-shot HTTP responses, and any proxy, CDN, gateway, or firewall that buffers responses or enforces a short idle timeout closes the connection before the client receives subscription events.
+
+A subscription request from a client takes a single HTTP POST to the router, but the router holds the connection open and pushes events back as a multipart response (or over the established WebSocket, depending on the subgraph protocol). Every hop in that path needs to:
+
+- Allow streaming, unbuffered responses. A reverse proxy that buffers the full response before forwarding it (the default for many proxies) holds subscription events until the connection is forcibly closed, and the client sees a 504 with no payload.
+- Set the idle timeout long enough to cover the subscription's lifetime. If your subscriptions are long-lived, configure the idle timeout on every hop (reverse proxy, load balancer, CDN, or API gateway) to at least the value of [`max_lifetime`](#limit-subscription-lifetime). The default short idle timeouts on most of these (often 30 to 60 seconds) close client connections before any keepalive or heartbeat is delivered.
+- Permit traffic in both directions. When a corporate firewall or VPC security group restricts egress, the router still accepts the subscription request but cannot push events back. Clients see a 504 timeout with no diagnostic information at the router level. Verify that the path from the router back to the client domain is open for streaming responses.
+
+If clients receive 504 errors on subscriptions and the router's [`apollo.router.operations.subscriptions.terminated.client`](#tracking-subgraph-connection-failures-and-closures) metric does not show a corresponding event, the failure is happening in an intermediary, not the router. Check the proxy, gateway, and firewall logs first; the router cannot record a client disconnect it never observed.
+
+When all hops are configured to allow streaming responses and the idle timeouts cover the expected subscription lifetime, subscription events flow end-to-end without 504s.
+
 ## Subscription deduplication
 
 **By default, the router deduplicates identical subscriptions.** This can dramatically reduce load on both your router and your subgraphs, because the router doesn't need to open a new connection if an existing connection is already handling the exact same subscription.
