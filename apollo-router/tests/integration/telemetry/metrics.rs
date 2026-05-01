@@ -55,9 +55,19 @@ async fn test_metrics_reloading() {
     //     runs, incrementing
     //     `apollo_router_uplink_fetch_*{query="License"}`).
     //   * `APOLLO_UPLINK_ENDPOINTS` pinned to a per-test wiremock that
-    //     responds to `LicenseQuery` with `entitlement: null` →
-    //     `License::default()`, so the License state machine makes
-    //     forward progress without a real JWT.
+    //     responds to `LicenseQuery` with a `RouterEntitlementsResult`
+    //     whose `entitlement.jwt` is `TEST_LICENSE_JWT_FULL_FEATURES` —
+    //     a real HS256-signed JWT carrying no `allowedFeatures` claim
+    //     (legacy-compat → all features allowed).
+    //   * `APOLLO_TEST_INTERNAL_UPLINK_JWKS=TEST_JWKS_ENDPOINT` so the
+    //     spawned router's `License::jwks()` validates that JWT against
+    //     the bundled test JWKS instead of the production JWKS baked
+    //     into the binary. The License state machine therefore reaches
+    //     `Licensed` (with all features), not the
+    //     `Unlicensed` `License::default()` — important for any test
+    //     downstream of this harness that exercises a paid feature, but
+    //     also fine for this test, which just asserts the License
+    //     poller's success counter increments.
     //   * Both `telemetry.apollo.endpoint` and
     //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
     //     per-test `apollo_otlp_server` mock with a catch-all

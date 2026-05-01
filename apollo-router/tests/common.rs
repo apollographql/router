@@ -336,10 +336,23 @@ pub struct IntegrationTest {
     _apollo_otlp_server: wiremock::MockServer,
     /// Per-test wiremock that stands in for `uplink.api.apollographql.com`.
     /// The harness wires `APOLLO_UPLINK_ENDPOINTS` to this server's URL
-    /// whenever the spawned router is going to receive an `APOLLO_KEY`
-    /// (real or fake). See `mock_license_uplink()` for the response shape
-    /// and the state-machine reasoning behind returning
-    /// `entitlement: null`.
+    /// **only in the default-credentials branch** of `start()` —
+    /// i.e. when `with_real_studio_creds == false`. The opt-in real-creds
+    /// branch leaves `APOLLO_UPLINK_ENDPOINTS` unset so the spawned router
+    /// reaches the real `uplink.api.apollographql.com`, and the per-test
+    /// mock is left idle (still bound to a loopback ephemeral port; just
+    /// not referenced).
+    ///
+    /// See `mock_license_uplink()` for the matchers. The `LicenseQuery`
+    /// matcher returns a `RouterEntitlementsResult` whose `entitlement.jwt`
+    /// is `TEST_LICENSE_JWT_FULL_FEATURES` — a real HS256-signed JWT that
+    /// the spawned router validates against the test JWKS exposed via
+    /// `APOLLO_TEST_INTERNAL_UPLINK_JWKS=TEST_JWKS_ENDPOINT` (also set by
+    /// the default-credentials branch). The JWT carries no
+    /// `allowedFeatures` claim, which `LicenseLimits::default()`'s
+    /// legacy-compat path interprets as "all features allowed," so paid
+    /// features (federated subscriptions, coprocessors, OTLP, entity
+    /// caching, traffic shaping) are unlocked under the test license.
     _apollo_uplink_server: wiremock::MockServer,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
