@@ -568,7 +568,9 @@ fn satisfiability_validation_uses_proper_error_code() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     // This test specifically checks that the error code is SATISFIABILITY_ERROR
     // The exact error message is tested elsewhere
-    let errors = result.expect_err("Expected composition to fail due to satisfiability");
+    let errors = result
+        .expect_err("Expected composition to fail due to satisfiability")
+        .errors;
     let error_codes: Vec<String> = errors
         .iter()
         .map(|e| e.code().definition().code().to_string())

@@ -28,6 +28,7 @@ pub(crate) mod test_helpers {
     use std::iter::zip;
 
     use apollo_federation::ValidFederationSubgraphs;
+    use apollo_federation::composition::CompositionFailure;
     use apollo_federation::composition::CompositionOptions;
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
@@ -47,7 +48,7 @@ pub(crate) mod test_helpers {
     /// [`CompositionOptions::default()`], so tests don't have to spell it out.
     pub(crate) fn compose(
         subgraphs: Vec<Subgraph<Initial>>,
-    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
         apollo_federation::composition::compose(subgraphs, CompositionOptions::default())
     }
 
@@ -56,7 +57,7 @@ pub(crate) mod test_helpers {
     // PORT_NOTE: This function corresponds to `composeAsFed2Subgraphs` in JS implementation.
     pub(crate) fn compose_as_fed2_subgraphs(
         service_list: &[ServiceDefinition<'_>],
-    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
         compose_as_fed2_subgraphs_with_options(service_list, CompositionOptions::default())
     }
 
@@ -65,7 +66,7 @@ pub(crate) mod test_helpers {
     pub(crate) fn compose_as_fed2_subgraphs_with_options(
         service_list: &[ServiceDefinition<'_>],
         options: CompositionOptions,
-    ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
         let fed2_subgraphs = as_fed2_subgraphs(service_list)?;
         apollo_federation::composition::compose(fed2_subgraphs, options)
     }
@@ -122,10 +123,13 @@ pub(crate) mod test_helpers {
 
     /// Helper function to assert composition errors
     pub(crate) fn assert_composition_errors(
-        result: &Result<Supergraph<Satisfiable>, Vec<CompositionError>>,
+        result: &Result<Supergraph<Satisfiable>, CompositionFailure>,
         expected_errors: &[(&str, &str)],
     ) {
-        let errors = result.as_ref().expect_err("Expected composition to fail");
+        let errors = &result
+            .as_ref()
+            .expect_err("Expected composition to fail")
+            .errors;
         let error_strings: Vec<(String, String)> = errors
             .iter()
             .map(|e| (e.code().definition().code().to_string(), e.to_string()))

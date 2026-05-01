@@ -11360,6 +11360,14 @@ expression: "&schema"
           "description": "Enable subscription",
           "type": "boolean"
         },
+        "max_lifetime": {
+          "default": null,
+          "description": "Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "max_opened_subscriptions": {
           "default": null,
           "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",

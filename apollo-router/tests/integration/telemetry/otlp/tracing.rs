@@ -157,6 +157,7 @@ async fn test_otlp_tracing_reload() -> Result<(), BoxError> {
 
     // This config will NOT reload tracing as the config did not change
     router.update_config(&config_initial).await;
+    router.touch_config().await;
     router.assert_reloaded().await;
     router.assert_log_not_contained("OpenTelemetry trace error occurred");
 

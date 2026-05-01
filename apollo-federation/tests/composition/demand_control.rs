@@ -514,7 +514,8 @@ fn errors_when_subgraphs_use_different_names() {
         subgraph_with_default_name,
         subgraph_with_different_name,
     ])
-    .unwrap_err();
+    .unwrap_err()
+    .errors;
 
     assert_eq!(errors.len(), 1, "Expected 1 error but got {}", errors.len());
     let error = errors.first().unwrap();

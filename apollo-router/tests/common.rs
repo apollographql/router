@@ -305,6 +305,15 @@ impl IntegrationTest {
         self.env.get_or_insert_with(HashMap::new).extend(env);
     }
 
+    /// Path to the temp file holding this test's supergraph schema. Tests
+    /// that need to set `APOLLO_ROUTER_SUPERGRAPH_PATH` directly (e.g. to
+    /// pin schema source while still setting `APOLLO_GRAPH_REF` for license
+    /// reasons) can read this to construct that env var.
+    #[allow(dead_code)]
+    pub fn test_schema_location(&self) -> &PathBuf {
+        &self.test_schema_location
+    }
+
     /// Set an address placeholder using a URI, extracting the port automatically
     /// This is a convenience method for the common pattern of extracting port from a server URI
     #[allow(dead_code)]
@@ -721,6 +730,21 @@ impl IntegrationTest {
                 true
             })
             .respond_with(ResponseTemplate::new(200))
+            .mount(&apollo_otlp_server)
+            .await;
+
+        // Catch-all fallback so that other Apollo Studio reporting paths
+        // (eg. `/v1/traces` for OTLP traces, `/api/ingress/traces` for the
+        // Apollo-protocol exporter) return 200 instead of 404. Without this,
+        // any test whose router is wired up to send Studio telemetry would
+        // silently fail every report after the first non-`/v1/metrics`
+        // request, and the corresponding `apollo_router_telemetry_studio_
+        // reports_total` counter would never increment. Lower priority
+        // (higher number) than the default 5 so the body-capturing
+        // `/v1/metrics` route above still wins for that path.
+        Mock::given(method(Method::POST))
+            .respond_with(ResponseTemplate::new(200))
+            .with_priority(10)
             .mount(&apollo_otlp_server)
             .await;
 
@@ -1230,13 +1254,16 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
-            if let Ok(line) = self.stdio_rx.try_recv() {
-                self.logs.push(line.to_string());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            while let Ok(line) = self.stdio_rx.try_recv() {
+                self.logs.push(line.clone());
                 if line.contains(msg) {
                     return;
                 }
+            }
+            if Instant::now() >= deadline {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -1434,14 +1461,46 @@ impl IntegrationTest {
         panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
 
+    /// Polls the Prometheus endpoint until every pattern in `texts` is found
+    /// somewhere in the metrics output, or `duration` elapses.
+    ///
+    /// Each pattern is treated as a substring with two pieces of regex sugar:
+    /// `<any>` is replaced with `.+` (one-or-more) and `<anyopt>` with `.*`
+    /// (zero-or-more). The match is *not* line-anchored — the pattern can
+    /// appear anywhere on a line. Prometheus re-orders labels
+    /// alphabetically by name and the set of labels on a given metric grows
+    /// over time as new dimensions are added, so anchoring to start-of-line
+    /// forces every caller to know the full label list and its current
+    /// ordering. Substring semantics let callers match the labels they care
+    /// about without coupling to label-set evolution.
+    ///
+    /// Use `<anyopt>` (not `<any>`) when wildcarding *between* an opening
+    /// label brace and a label you care about, because the label you care
+    /// about may itself be the alphabetically-first label, in which case
+    /// `<any>`'s `.+` would require a phantom character that isn't there.
+    ///
+    /// `.` in Rust regex does not match `\n` by default, so each pattern
+    /// still has to fit on a single line of the Prometheus output — neither
+    /// wildcard will silently absorb a newline.
     #[allow(dead_code)]
     pub async fn assert_metrics_contains_multiple(
         &self,
-        mut texts: Vec<&str>,
+        texts: Vec<&str>,
         duration: Option<Duration>,
     ) {
+        let patterns: Vec<(String, Regex)> = texts
+            .into_iter()
+            .map(|t| {
+                let escaped = regex::escape(t)
+                    .replace("<anyopt>", ".*")
+                    .replace("<any>", ".+");
+                let re = Regex::new(&escaped).expect("Invalid regex");
+                (t.to_string(), re)
+            })
+            .collect();
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let mut remaining: Vec<&(String, Regex)> = patterns.iter().collect();
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -1450,22 +1509,16 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                let mut v = vec![];
-                for text in &texts {
-                    if !metrics.contains(text) {
-                        v.push(*text);
-                    }
-                }
-                if v.len() == texts.len() {
+                remaining.retain(|(_, re)| !re.is_match(&metrics));
+                if remaining.is_empty() {
                     return;
-                } else {
-                    texts = v;
                 }
                 last_metrics = metrics;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        panic!("'{texts:?}' not detected in metrics\n{last_metrics}");
+        let missing: Vec<&str> = remaining.iter().map(|(t, _)| t.as_str()).collect();
+        panic!("'{missing:?}' not detected in metrics\n{last_metrics}");
     }
 
     #[allow(dead_code)]
@@ -1560,9 +1613,26 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
+        // Budget must cover:
+        //   1. The harness's injected `connection_shutdown_timeout` default
+        //      (currently 5 s, set in `merge_overrides`), which bounds how
+        //      long the router's per-connection tasks wait before forcibly
+        //      closing a straggler connection.
+        //   2. The longest intentionally-in-flight subgraph delay any
+        //      integration test induces before calling `graceful_shutdown()`.
+        //      `integration::lifecycle::test_graceful_shutdown` is the
+        //      binding case at 2 s.
+        //   3. CI scheduling slack between the router process draining its
+        //      connections and the OS actually reaping the process.
+        //
+        // Previously 3 s. Raised to 10 s when the harness began injecting
+        // a `connection_shutdown_timeout` default to prevent the 60 s
+        // production default from hanging tests that hold HTTP/2 client
+        // connections open past the response (see `merge_overrides` and
+        // flaky-test-phases/blog-details.md Arc 2a for the full story).
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(3) {
+        while now.elapsed() < Duration::from_secs(10) {
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
@@ -1817,6 +1887,45 @@ fn merge_overrides(
 
     // Override the listening address always since we spawn the router on a
     // random port. However, don't override Unix socket paths.
+    //
+    // Also inject a bounded `connection_shutdown_timeout` default for every
+    // integration test. The production default is 60 s (see
+    // `default_connection_shutdown_timeout` in src/configuration/mod.rs),
+    // which is safe for long-lived production connections but dangerous for
+    // tests: `assert_shutdown` in this harness only allows a bounded
+    // wall-clock window for the router process to exit after SIGTERM. If a
+    // hyper HTTP/2 client keeps its pooled TCP connection open at the moment
+    // `graceful_shutdown()` is called, the per-connection task in
+    // `handle_connection!` (src/axum_factory/listeners.rs) flips into the
+    // `connection_shutdown.cancelled()` branch and waits up to
+    // `connection_shutdown_timeout` for the connection to actually terminate.
+    // 60 s >> `assert_shutdown`'s budget -> assertion panics with
+    // "unable to shutdown router, this probably means a hang".
+    //
+    // This race is latent in any test that makes an HTTP request and then
+    // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
+    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6 and
+    // flaky-test-phases/blog-details.md Arc 2a for the full story). Rather
+    // than patch each vulnerable fixture individually, inject a 5 s default
+    // at the harness layer, paired with a widened `assert_shutdown` budget
+    // (see that helper for the matching constant).
+    //
+    // The 5 s value is a trade-off:
+    // - Must be long enough that intentionally-in-flight requests finish
+    //   gracefully. `integration::lifecycle::test_graceful_shutdown` is the
+    //   binding constraint: it issues a request with a 2 s subgraph delay
+    //   and expects the response to arrive intact before the router exits.
+    //   5 s covers that 2 s delay plus generous CI scheduling slack.
+    // - Must be short enough to beat `assert_shutdown`'s budget with enough
+    //   headroom that CI stall between "connection task exits" and
+    //   "process exits" doesn't trigger a false positive. With
+    //   `assert_shutdown` at 10 s and this at 5 s, there's 5 s of slack.
+    //
+    // Tests that explicitly set `supergraph.connection_shutdown_timeout` in
+    // their YAML fixture (eg. integration::lifecycle's
+    // small_connection_shutdown_timeout tests that exercise the feature
+    // itself) keep their configured value.
+    const HARNESS_CONNECTION_SHUTDOWN_TIMEOUT: &str = "5s";
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("supergraph"))
@@ -1828,6 +1937,7 @@ fn merge_overrides(
                     "supergraph".to_string(),
                     serde_json::json!({
                         "listen": bind_addr.to_string(),
+                        "connection_shutdown_timeout": HARNESS_CONNECTION_SHUTDOWN_TIMEOUT,
                     }),
                 );
             }
@@ -1845,6 +1955,17 @@ fn merge_overrides(
                 supergraph_conf.insert(
                     "listen".to_string(),
                     serde_json::Value::String(bind_addr.to_string()),
+                );
+            }
+
+            // Only inject the shutdown timeout if the fixture hasn't set one.
+            // Tests in integration::lifecycle deliberately configure this
+            // setting to exercise its behavior and must not have their value
+            // clobbered.
+            if !supergraph_conf.contains_key("connection_shutdown_timeout") {
+                supergraph_conf.insert(
+                    "connection_shutdown_timeout".to_string(),
+                    serde_json::Value::String(HARNESS_CONNECTION_SHUTDOWN_TIMEOUT.to_string()),
                 );
             }
         }
@@ -1869,18 +1990,43 @@ fn merge_overrides(
         );
     }
 
-    // Override the Apollo OTLP metrics listening address
-    if let Some(apollo_config) = config
+    // Pin every Apollo Studio reporting endpoint to the per-test wiremock at
+    // `apollo_otlp_endpoint`. This stops integration tests from making
+    // outbound HTTPS requests to `usage-reporting.api.apollographql.com` —
+    // which were both a hidden CI dependency on public-Internet reachability
+    // and a source of non-determinism (counters that "should" increment in
+    // tests only did so if the request landed within the assertion deadline).
+    //
+    // We override two distinct keys:
+    //   * `experimental_otlp_endpoint` is consumed by the OTLP exporter
+    //     (`apollo_otlp_exporter.rs`).
+    //   * `endpoint` is consumed by the legacy Apollo-protocol exporter
+    //     (`apollo_exporter.rs`).
+    // Both default to `https://usage-reporting.api.apollographql.com/...`,
+    // and the catch-all `POST → 200` route mounted on `apollo_otlp_server`
+    // accepts whichever path the router posts to.
+    //
+    // If the user-supplied YAML has no `telemetry.apollo` block, we insert
+    // one. That has no side-effects beyond pinning the endpoints, since
+    // every other Apollo-block setting falls back to its serde default.
+    let telemetry_obj = config
         .as_object_mut()
         .and_then(|o| o.get_mut("telemetry"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("apollo"))
-        .and_then(|o| o.as_object_mut())
-    {
-        apollo_config.insert(
-            "experimental_otlp_endpoint".to_string(),
-            serde_json::Value::String(apollo_otlp_endpoint.to_string()),
-        );
+        .and_then(|o| o.as_object_mut());
+    if let Some(telemetry) = telemetry_obj {
+        let apollo_entry = telemetry
+            .entry("apollo".to_string())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if let Some(apollo_config) = apollo_entry.as_object_mut() {
+            apollo_config.insert(
+                "experimental_otlp_endpoint".to_string(),
+                serde_json::Value::String(apollo_otlp_endpoint.to_string()),
+            );
+            apollo_config.insert(
+                "endpoint".to_string(),
+                serde_json::Value::String(apollo_otlp_endpoint.to_string()),
+            );
+        }
     }
 
     // Set health check listen address to avoid port conflicts
@@ -1899,13 +2045,20 @@ fn merge_overrides(
     };
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
+    insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
+    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    if let Some(response_cache_per_subgraph) = config
-        .pointer_mut("/response_cache/subgraph/subgraphs")
-        .and_then(|o| o.as_object_mut())
-    {
-        for subgraph_config in response_cache_per_subgraph.values_mut() {
-            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
+    for per_subgraph_path in [
+        "/response_cache/subgraph/subgraphs",
+        "/preview_entity_cache/subgraph/subgraphs",
+    ] {
+        if let Some(subgraphs) = config
+            .pointer_mut(per_subgraph_path)
+            .and_then(|o| o.as_object_mut())
+        {
+            for subgraph_config in subgraphs.values_mut() {
+                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
+            }
         }
     }
 
@@ -1913,7 +2066,7 @@ fn merge_overrides(
 }
 
 /// Extract Redis URLs from config. This assumes that caches will share a redis instance; it just
-/// returns the first URLs found from: query plan, response cache all, response cache subgraphs
+/// returns the first URLs found from any known Redis config path.
 fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let convert_urls = |urls: &Vec<Value>| {
         urls.iter()
@@ -1921,26 +2074,25 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
             .collect()
     };
 
-    if let Some(urls) = config
-        .pointer("/supergraph/query_planning/cache/redis/urls")
-        .and_then(|o| o.as_array())
-    {
-        return Some(convert_urls(urls));
-    }
-
-    if let Some(response_cache_config) = config.pointer("/response_cache/subgraph") {
-        if let Some(urls) = response_cache_config
-            .pointer("/all/redis/urls")
-            .and_then(|o| o.as_array())
-        {
+    let top_level_paths = [
+        "/supergraph/query_planning/cache/redis/urls",
+        "/apq/router/cache/redis/urls",
+        "/preview_entity_cache/subgraph/all/redis/urls",
+        "/response_cache/subgraph/all/redis/urls",
+    ];
+    for path in top_level_paths {
+        if let Some(urls) = config.pointer(path).and_then(|o| o.as_array()) {
             return Some(convert_urls(urls));
         }
+    }
 
-        if let Some(subgraphs) = response_cache_config
-            .get("subgraphs")
-            .and_then(|o| o.as_object())
-        {
-            for (_, subgraph_config) in subgraphs.iter() {
+    let per_subgraph_sections = [
+        "/response_cache/subgraph/subgraphs",
+        "/preview_entity_cache/subgraph/subgraphs",
+    ];
+    for section in per_subgraph_sections {
+        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
+            for subgraph_config in subgraphs.values() {
                 if let Some(urls) = subgraph_config
                     .pointer("/redis/urls")
                     .and_then(|o| o.as_array())

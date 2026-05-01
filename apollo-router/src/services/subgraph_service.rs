@@ -1968,6 +1968,7 @@ mod tests {
             deduplication: SubgraphConfiguration::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
+            max_lifetime: None,
         }
     }
 

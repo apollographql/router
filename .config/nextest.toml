@@ -14,35 +14,6 @@ retries = 2
 filter = '''
    ( binary_id(=apollo-router-benchmarks) & test(=tests::test) )
 or ( binary_id(=apollo-router::integration_tests) & test(#integration::subscriptions::ws_passthrough::*) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=connector_error) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=non_defer) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_batch_send_header) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_batch_trace_id) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_client_name) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_client_version) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_condition_else) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_condition_if) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_send_header) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_send_variable_value) )
-or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_trace_id) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=non_defer) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_batch_send_header) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_batch_stats) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_batch_trace_id) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_client_name) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_client_version) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_condition_else) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_condition_if) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_demand_control_stats) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_demand_control_trace_batched) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_demand_control_trace) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_features_disabled) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_features_enabled) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_new_field_stats) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_send_header) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_send_variable_value) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_stats) )
-or ( binary_id(=apollo-router::apollo_reports) & test(=test_trace_id) )
 or ( binary_id(=apollo-router::integration_tests) & test(=api_schema_hides_field) )
 or ( binary_id(=apollo-router::integration_tests) & test(=automated_persisted_queries) )
 or ( binary_id(=apollo-router::integration_tests) & test(=defer_default_variable) )
@@ -119,49 +90,6 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback_pure_error_payload) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::supergraph::test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_connector_request_emits_histogram) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_execution_layer_error_emits_metric) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_failed_connector_request_emits_histogram) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_failed_subgraph_request_emits_histogram) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_include_subgraph_error_disabled_does_not_redact_error_metrics) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_router_layer_error_emits_metric) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_subgraph_http_error_emits_metric) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_basic) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_priority_sampling_no_parent_propagated) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resource_mapping_default) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resource_mapping_override) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_resources) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_span_metrics) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::datadog::test_with_parent_span) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::events::test_custom_events) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::events::test_events_with_request_header_condition) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_decimal_trace_id) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_default_operation) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_local_root) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_reload) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_remote_root) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_selected_operation) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_span_attributes) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json_promote_span_attributes) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json_sampler_off) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json_uuid_format) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_text_sampler_off) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_text) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_bad_queries) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_graphql_metrics) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_metrics_bad_query) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_metrics_reloading) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_subgraph_auth_metrics) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_basic) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_plugin_overridden_client_name_is_included_in_telemetry) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_priority_sampling_propagated) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_trace_error) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_untraced_request_no_sample_datadog_agent) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::otlp::test_untraced_request_sample_datadog_agent_unsampled) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::propagation::test_trace_id_via_header) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::zipkin::test_basic) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::traffic_shaping::test_router_rate_limit) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::traffic_shaping::test_router_timeout_operation_name_in_tracing) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::traffic_shaping::test_router_timeout) )
@@ -235,14 +163,6 @@ or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::i
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_redacts_all_subgraphs_implicit_redact) )
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_returns_valid_response) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::instruments::tests::test_instruments) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::router_overhead::tracker::tests::test_sequential_subgraph_requests) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_enabled) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_for_subscription_error) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_multiple_operations) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_parse_failure) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_unknown_operation) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_validation_failure) )
-or ( binary_id(=apollo-router) & test(=plugins::telemetry::tests::it_test_prometheus_metrics) )
 or ( binary_id(=apollo-router) & test(=protocols::websocket::tests::test_ws_connection_new_proto_with_heartbeat) )
 or ( binary_id(=apollo-router) & test(=router::tests::basic_event_stream_test) )
 or ( binary_id(=apollo-router) & test(=router::tests::schema_update_test) )
@@ -281,3 +201,63 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = 'test(/^apollo-router::/)'
 threads-required = 4
+
+# ---------------------------------------------------------------------------
+# Test groups: serialize tests that mutate process-wide state.
+#
+# Test groups are profile-independent and apply to every profile (default, ci,
+# coverage, etc.).  Each group caps concurrent execution of its members; we use
+# `max-threads = 1` to mean "run these tests one at a time across the entire
+# nextest run, including across separate `tests/*.rs` integration binaries".
+#
+# Why groups instead of per-file `static TEST: Mutex<()>` locks:
+#   * Each `tests/*.rs` integration test compiles to its own binary, so an
+#     intra-binary mutex cannot serialize across binaries.  The Apollo OTLP
+#     trio (`apollo_reports`, `apollo_otel_traces`, `apollo_otel_http_proxy`)
+#     all install process-wide OpenTelemetry tracer/meter providers and were
+#     stomping each other when nextest scheduled them concurrently.
+#   * Groups also let us drop the blanket `threads-required = 4` for these
+#     binaries (which previously starved CI by reserving the whole 4-vCPU
+#     runner per test), allowing other apollo-router tests to fill the box.
+#
+# We *keep* the in-source `static TEST` mutex inside `apollo-router`'s lib
+# unit tests (`plugins::telemetry::*`) because contributors running plain
+# `cargo test -p apollo-router` (without nextest) still need that path to be
+# safe -- `cargo test` does not honour these test-groups.
+# ---------------------------------------------------------------------------
+[test-groups]
+# Apollo telemetry integration binaries that share OTel global state and
+# Apollo Studio mock collectors.
+serial-apollo-telemetry-integration = { max-threads = 1 }
+# In-process Apollo metrics unit tests that clobber the global meter provider.
+serial-apollo-metrics-unit = { max-threads = 1 }
+# Prometheus telemetry unit tests that race on the global Prometheus registry
+# pointer and the global tracer provider via `Telemetry::activate()`.
+serial-prometheus-telemetry-unit = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = '''
+   binary_id(=apollo-router::apollo_reports)
+or binary_id(=apollo-router::apollo_otel_traces)
+or binary_id(=apollo-router::apollo_otel_http_proxy)
+'''
+test-group = 'serial-apollo-telemetry-integration'
+
+[[profile.default.overrides]]
+filter = 'binary_id(=apollo-router) & test(/^plugins::telemetry::metrics::apollo::test::apollo_metrics_/)'
+test-group = 'serial-apollo-metrics-unit'
+
+[[profile.default.overrides]]
+filter = 'binary_id(=apollo-router) & test(/^plugins::telemetry::tests::it_test_prometheus_metrics/)'
+test-group = 'serial-prometheus-telemetry-unit'
+
+# Drop `threads-required = 4` (inherited from the apollo-router::* override
+# above) for the telemetry integration binaries.  The group caps concurrency
+# globally to 1, so reserving 4 threads per test only wastes capacity.
+[[profile.ci.overrides]]
+filter = '''
+   binary_id(=apollo-router::apollo_reports)
+or binary_id(=apollo-router::apollo_otel_traces)
+or binary_id(=apollo-router::apollo_otel_http_proxy)
+'''
+threads-required = 1
