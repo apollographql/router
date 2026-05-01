@@ -7,4 +7,4 @@ As a result of this change:
 - The `mode` field now has an explicit default of `batch_http_link` (the only supported mode), so it is no longer required in YAML configuration. Existing configurations that specify `mode: batch_http_link` are unaffected.
 - The `subgraph` batching configuration now rejects unknown fields, consistent with the rest of the router configuration.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9314
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9315
