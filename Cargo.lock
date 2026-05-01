@@ -229,7 +229,7 @@ dependencies = [
  "line-col",
  "mime",
  "multi_try",
- "multimap 0.10.1",
+ "multimap",
  "nom 8.0.0",
  "nom_locate",
  "parking_lot",
@@ -363,7 +363,7 @@ dependencies = [
  "mime",
  "mockall",
  "multer",
- "multimap 0.9.1",
+ "multimap",
  "notify",
  "nu-ansi-term",
  "num-traits",
@@ -2504,7 +2504,7 @@ dependencies = [
  "futures",
  "http 1.4.0",
  "http-body-util",
- "multimap 0.9.1",
+ "multimap",
  "schemars",
  "serde",
  "serde_json",
@@ -4380,15 +4380,6 @@ checksum = "b42256e8ab5f19108cf42e2762786052ae4660635f6fe76134d2cab37068ee8a"
 
 [[package]]
 name = "multimap"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1a5d38b9b352dbd913288736af36af41c48d61b1a8cd34bcecd727561b7d511"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
@@ -5393,7 +5384,7 @@ dependencies = [
  "heck",
  "itertools 0.14.0",
  "log",
- "multimap 0.10.1",
+ "multimap",
  "petgraph",
  "prettyplease",
  "prost",
