@@ -138,7 +138,12 @@ fn apply_trim(
         TrimMode::End => s.trim_end(),
     };
 
-    (Some(JSON::String(trimmed.to_string().into())), vec![])
+    let output = if trimmed.len() == s.len() {
+        input_str.clone()
+    } else {
+        trimmed.to_string().into()
+    };
+    (Some(JSON::String(output)), vec![])
 }
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
