@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/mapping_only_wrong_spec_version.graphql
+---
+[
+    Message {
+        code: HttpOmittedRequiresV0_4,
+        message: "`@connect` on `Query.me` omits `http:` which requires connect spec v0.4 or later. Either add `http:` or use `@link(url: \"https://specs.apollo.dev/connect/v0.4\")`.",
+        locations: [
+            10:5..14:6,
+        ],
+    },
+]
