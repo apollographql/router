@@ -67,8 +67,8 @@ fn split_method(
     let (separator_opt, sep_errors) = separator_arg.apply_to_path(data, vars, input_path, spec);
     errors.extend(sep_errors);
 
-    let separator = match separator_opt.as_ref() {
-        Some(JSON::String(s)) => s.as_str().to_string(),
+    let separator: &str = match separator_opt.as_ref() {
+        Some(JSON::String(s)) => s.as_str(),
         Some(other) => {
             return (
                 None,
@@ -185,7 +185,7 @@ fn split_method(
             .map(|(i, c)| &s[i..i + c.len_utf8()])
             .collect()
     } else {
-        s.split(&separator).collect()
+        s.split(separator).collect()
     };
 
     // Apply limit if provided
