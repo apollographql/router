@@ -1087,8 +1087,40 @@ async fn test_alpn_falls_back_to_http1_when_server_only_supports_http1() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socket_addr = listener.local_addr().unwrap();
 
+<<<<<<< HEAD
     let negotiated_protocol = NegotiatedProtocolTracker::new();
     let negotiated_clone = negotiated_protocol.clone();
+=======
+    /// Server that counts how many TCP connections are accepted and how many are currently open.
+    async fn serve_counting(
+        listener: TcpListener,
+        connection_count: Arc<AtomicUsize>,
+        live_connection_count: Arc<AtomicUsize>,
+    ) -> std::io::Result<()> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            connection_count.fetch_add(1, Ordering::SeqCst);
+            live_connection_count.fetch_add(1, Ordering::SeqCst);
+            let io = TokioIo::new(stream);
+            let live = live_connection_count.clone();
+            tokio::spawn(async move {
+                let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
+                    Ok::<_, Infallible>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(r#"{"data":null}"#.into())
+                            .unwrap(),
+                    )
+                });
+                let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, svc)
+                    .await;
+                live.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    }
+>>>>>>> d13285eb (fix(traffic_shaping): use lazy pool eviction to avoid inter-request TCP closes (#9308))
 
     tokio::task::spawn(tls_server(
         listener,
@@ -1109,6 +1141,7 @@ async fn test_alpn_falls_back_to_http1_when_server_only_supports_http1() {
         },
     );
 
+<<<<<<< HEAD
     let subgraph_service = HttpClientService::from_config_for_subgraph(
         "test",
         &config,
@@ -1119,6 +1152,13 @@ async fn test_alpn_falls_back_to_http1_when_server_only_supports_http1() {
             .build(),
     )
     .unwrap();
+=======
+        tokio::task::spawn(serve_counting(
+            listener,
+            connection_count.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
+>>>>>>> d13285eb (fix(traffic_shaping): use lazy pool eviction to avoid inter-request TCP closes (#9308))
 
     let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
     let response = subgraph_service
@@ -1141,11 +1181,75 @@ async fn test_alpn_falls_back_to_http1_when_server_only_supports_http1() {
 
     assert_eq!(response.http_response.status(), StatusCode::OK);
 
+<<<<<<< HEAD
     let body_bytes = router::body::into_bytes(response.http_response.into_parts().1)
         .await
         .unwrap();
     let body = std::str::from_utf8(&body_bytes).unwrap();
     assert_eq!(body, r#"{"data": null}"#);
+=======
+        tokio::time::sleep(sleep_between).await;
+
+        tower::ServiceExt::ready(&mut service).await.unwrap();
+        let response = send_request(service, url, r#"{"query":"{ b }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            expected_connections,
+            "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
+        );
+    }
+
+    /// Regression test: the router does not proactively close idle connections between requests.
+    /// Before this fix, `pool_timer` was unconditionally set, enabling a background eviction task
+    /// that sent TCP closes between requests and caused latency spikes in some network environments.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_idle_connections_not_proactively_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let live_connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(
+            listener,
+            Arc::new(AtomicUsize::new(0)),
+            live_connection_count.clone(),
+        ));
+
+        let client_config = crate::configuration::shared::Client {
+            pool_idle_timeout: Some(Duration::from_millis(50)),
+            ..Default::default()
+        };
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            client_config,
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection is open after first request"
+        );
+
+        // Sleep well past the 50ms idle timeout. Without pool_timer, no background task fires,
+        // so the connection must still be open in the pool.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection must not be proactively closed between requests"
+        );
+    }
+>>>>>>> d13285eb (fix(traffic_shaping): use lazy pool eviction to avoid inter-request TCP closes (#9308))
 }
 
 #[tokio::test(flavor = "multi_thread")]

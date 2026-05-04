@@ -101,6 +101,110 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
+<<<<<<< HEAD
+=======
+    /// Test-wrapper for HttpClientService::new()
+    ///
+    /// NOTE: this separation is primarily to keep us from exposing `new()`
+    /// when we don't need to
+    #[cfg_attr(test, allow(unreachable_pub))]
+    pub(crate) fn test_new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        Self::new(service, tls_config, client_config)
+    }
+
+    /// Create a new HttpClientService using:
+    ///
+    /// - the service's name (eg, connector name, hardcoded "coprocessor", or the subgraph's name) for
+    ///   use in errors and potentially signing requests
+    /// - the tls config to be used in setting tls; though, this is actually rustls's and hyper
+    ///   figuring out which parts of a broader config to use for tls
+    /// - the client's config, which is _our_ set of options from the router config for use in
+    ///   enabling/disabling features like http/2
+    fn new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http();
+
+        let pool_idle_timeout = client_config.pool_idle_timeout;
+        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
+        let http2_keep_alive_timeout = client_config
+            .experimental_http2_keep_alive_timeout
+            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
+
+        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = match http2 {
+            Http2Config::Enable => builder
+                .enable_http1()
+                .enable_http2()
+                .wrap_connector(http_connector),
+            Http2Config::Disable => builder.enable_http1().wrap_connector(http_connector),
+            Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
+        };
+
+        let mut client_builder =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        // NOTE: pool_timer is intentionally not set. pool_timer enables a background task that
+        // proactively closes idle connections when they exceed pool_idle_timeout. Without it,
+        // eviction is lazy: connections are checked and dropped at checkout time only. Lazy
+        // eviction avoids a TCP close window that can delay new connections in some network
+        // environments.
+        client_builder
+            .pool_idle_timeout(pool_idle_timeout)
+            .http2_only(http2 == Http2Config::Http2Only);
+        if let Some(interval) = http2_keep_alive_interval {
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
+        }
+        let http_client = client_builder.build(connector);
+
+        #[cfg(unix)]
+        let unix_client = {
+            // NOTE: pool_timer is intentionally not set; see comment on client_builder above.
+            let unix_client_inner =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(pool_idle_timeout)
+                    .http2_only(http2 == Http2Config::Http2Only)
+                    .build(UnixConnector);
+
+            ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(unix_client_inner)
+        };
+
+        Ok(Self {
+            http_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .layer(WireBodySizeLayer)
+                .service(http_client),
+            #[cfg(unix)]
+            unix_client,
+            service: Arc::new(service.into()),
+        })
+    }
+
+    /// Creates a client for talking to subgraphs
+>>>>>>> d13285eb (fix(traffic_shaping): use lazy pool eviction to avoid inter-request TCP closes (#9308))
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
