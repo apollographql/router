@@ -2488,7 +2488,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3254,10 +3254,17 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "hickory-proto"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8a6fe56c0038198998a6f217ca4e7ef3a5e51f46163bd6dd60b5c71ca6c6502"
+=======
+name = "hickory-net"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2295ed2f9c31e471e1428a8f88a3f0e1f4b27c15049592138d1eebe9c35b183"
+>>>>>>> 494714a6 (chore: update hickory to 0.26.1 (RUSTSEC-2026-0119, RUSTSEC-2026-0120) (#9321))
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -3279,10 +3286,37 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "hickory-resolver"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc62a9a99b0bfb44d2ab95a7208ac952d31060efc16241c87eaf36406fecf87a"
+=======
+name = "hickory-proto"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bab31817bfb44672a252e97fe81cd0c18d1b2cf892108922f6818820df8c643"
+dependencies = [
+ "data-encoding",
+ "idna",
+ "ipnet",
+ "jni",
+ "once_cell",
+ "prefix-trie",
+ "rand 0.10.1",
+ "ring",
+ "thiserror 2.0.18",
+ "tinyvec",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-resolver"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0d58d28879ceecde6607729660c2667a081ccdc082e082675042793960f178c"
+>>>>>>> 494714a6 (chore: update hickory to 0.26.1 (RUSTSEC-2026-0119, RUSTSEC-2026-0120) (#9321))
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -5962,7 +5996,11 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
+<<<<<<< HEAD
  "windows-sys 0.60.2",
+=======
+ "windows-sys 0.59.0",
+>>>>>>> 494714a6 (chore: update hickory to 0.26.1 (RUSTSEC-2026-0119, RUSTSEC-2026-0120) (#9321))
 ]
 
 [[package]]
@@ -6442,7 +6480,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
 dependencies = [
  "libc",
+<<<<<<< HEAD
  "windows-sys 0.59.0",
+=======
+ "windows-sys 0.61.0",
+>>>>>>> 494714a6 (chore: update hickory to 0.26.1 (RUSTSEC-2026-0119, RUSTSEC-2026-0120) (#9321))
 ]
 
 [[package]]
@@ -6655,7 +6697,11 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
+<<<<<<< HEAD
  "windows-sys 0.61.0",
+=======
+ "windows-sys 0.59.0",
+>>>>>>> 494714a6 (chore: update hickory to 0.26.1 (RUSTSEC-2026-0119, RUSTSEC-2026-0120) (#9321))
 ]
 
 [[package]]
@@ -7743,7 +7789,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
