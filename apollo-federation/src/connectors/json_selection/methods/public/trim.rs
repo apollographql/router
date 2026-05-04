@@ -100,16 +100,13 @@ fn apply_trim(
     input_path: &InputPath<JSON>,
     spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(args) = method_args
-        && !args.args.is_empty()
-    {
+    if method_args.is_some() {
         return (
             None,
             vec![ApplyToError::new(
                 format!(
-                    "Method ->{} does not accept any arguments, but {} were provided",
-                    method_name.as_ref(),
-                    args.args.len()
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
                 ),
                 input_path.to_vec(),
                 method_name.range(),
@@ -154,12 +151,11 @@ fn trim_shape(
 ) -> Shape {
     let location = method_name.shape_location(context.source_id());
 
-    let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
-    if arg_count > 0 {
+    if method_args.is_some() {
         return Shape::error(
             format!(
-                "Method ->{} does not accept any arguments, but {arg_count} were provided",
-                method_name.as_ref(),
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
             ),
             location,
         );
@@ -329,39 +325,23 @@ mod tests {
 
     // --- Errors: unexpected arguments ---
 
-    #[test]
-    fn trim_errors_on_any_argument() {
-        let result = selection!("$->trim('x')").apply_to(&json!("  hi  "));
+    #[rstest::rstest]
+    #[case("$->trim('x')")]
+    #[case("$->trim()")]
+    #[case("$->trimStart('x')")]
+    #[case("$->trimStart()")]
+    #[case("$->trimEnd('x')")]
+    #[case("$->trimEnd()")]
+    fn trim_errors_on_any_argument(#[case] expr: &str) {
+        let result = selection!(expr).apply_to(&json!("  hi  "));
         assert!(result.0.is_none());
         assert_eq!(result.1.len(), 1);
         assert!(
             result.1[0]
                 .message()
-                .contains("does not accept any arguments")
-        );
-    }
-
-    #[test]
-    fn trim_start_errors_on_any_argument() {
-        let result = selection!("$->trimStart('x')").apply_to(&json!("  hi  "));
-        assert!(result.0.is_none());
-        assert_eq!(result.1.len(), 1);
-        assert!(
-            result.1[0]
-                .message()
-                .contains("does not accept any arguments")
-        );
-    }
-
-    #[test]
-    fn trim_end_errors_on_any_argument() {
-        let result = selection!("$->trimEnd('x')").apply_to(&json!("  hi  "));
-        assert!(result.0.is_none());
-        assert_eq!(result.1.len(), 1);
-        assert!(
-            result.1[0]
-                .message()
-                .contains("does not accept any arguments")
+                .contains("does not take any arguments"),
+            "actual: {}",
+            result.1[0].message()
         );
     }
 
