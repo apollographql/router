@@ -244,6 +244,14 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 </Note>
 
+## Connections
+
+- `apollo.router.connection.acquire.duration` - Time in seconds to establish a new TCP or Unix socket connection to a downstream service. Recorded only when the connection pool opens a new connection — pool hits are not recorded. Attributes:
+  - `network.transport`: `tcp` for HTTP connections, `unix` for Unix socket connections
+  - `subgraph.name`: name of the subgraph (subgraph connections only)
+  - `connector.source.name`: name of the connector source (connector connections only)
+  - `coprocessor`: `true` (coprocessor connections only)
+
 ## Subscriptions
 
 <Tip>
