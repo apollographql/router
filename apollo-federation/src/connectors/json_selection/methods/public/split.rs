@@ -70,19 +70,17 @@ fn split_method(
     let separator: &str = match separator_opt.as_ref() {
         Some(JSON::String(s)) => s.as_str(),
         Some(other) => {
-            return (
-                None,
-                vec![ApplyToError::new(
-                    format!(
-                        "Method ->{} requires a string separator, got {}",
-                        method_name.as_ref(),
-                        json_type_name(other)
-                    ),
-                    input_path.to_vec(),
-                    method_name.range(),
-                    spec,
-                )],
-            );
+            errors.push(ApplyToError::new(
+                format!(
+                    "Method ->{} requires a string separator, got {}",
+                    method_name.as_ref(),
+                    json_type_name(other)
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+                spec,
+            ));
+            return (None, errors);
         }
         None => {
             errors.push(ApplyToError::new(
@@ -106,34 +104,30 @@ fn split_method(
             Some(JSON::Number(n)) => match n.as_u64() {
                 Some(n) => Some(n as usize),
                 None => {
-                    return (
-                        None,
-                        vec![ApplyToError::new(
-                            format!(
-                                "Method ->{} limit argument must be a non-negative integer, got {n}",
-                                method_name.as_ref(),
-                            ),
-                            input_path.to_vec(),
-                            method_name.range(),
-                            spec,
-                        )],
-                    );
-                }
-            },
-            Some(other) => {
-                return (
-                    None,
-                    vec![ApplyToError::new(
+                    errors.push(ApplyToError::new(
                         format!(
-                            "Method ->{} limit argument must be a non-negative integer, got {}",
+                            "Method ->{} limit argument must be a non-negative integer, got {n}",
                             method_name.as_ref(),
-                            json_type_name(&other)
                         ),
                         input_path.to_vec(),
                         method_name.range(),
                         spec,
-                    )],
-                );
+                    ));
+                    return (None, errors);
+                }
+            },
+            Some(other) => {
+                errors.push(ApplyToError::new(
+                    format!(
+                        "Method ->{} limit argument must be a non-negative integer, got {}",
+                        method_name.as_ref(),
+                        json_type_name(&other)
+                    ),
+                    input_path.to_vec(),
+                    method_name.range(),
+                    spec,
+                ));
+                return (None, errors);
             }
             None => None,
         }
@@ -143,36 +137,32 @@ fn split_method(
 
     // Validate no extra arguments
     if args.len() > 2 {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!(
-                    "Method ->{} accepts at most 2 arguments (separator, limit), got {}",
-                    method_name.as_ref(),
-                    args.len()
-                ),
-                input_path.to_vec(),
-                method_name.range(),
-                spec,
-            )],
-        );
+        errors.push(ApplyToError::new(
+            format!(
+                "Method ->{} accepts at most 2 arguments (separator, limit), got {}",
+                method_name.as_ref(),
+                args.len()
+            ),
+            input_path.to_vec(),
+            method_name.range(),
+            spec,
+        ));
+        return (None, errors);
     }
 
     // Input must be a string
     let JSON::String(input_str) = data else {
-        return (
-            None,
-            vec![ApplyToError::new(
-                format!(
-                    "Method ->{} requires a string input, got {}",
-                    method_name.as_ref(),
-                    json_type_name(data)
-                ),
-                input_path.to_vec(),
-                method_name.range(),
-                spec,
-            )],
-        );
+        errors.push(ApplyToError::new(
+            format!(
+                "Method ->{} requires a string input, got {}",
+                method_name.as_ref(),
+                json_type_name(data)
+            ),
+            input_path.to_vec(),
+            method_name.range(),
+            spec,
+        ));
+        return (None, errors);
     };
 
     let s = input_str.as_str();
