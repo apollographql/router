@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/mapping_only_with_selection.graphql
+---
+[]
