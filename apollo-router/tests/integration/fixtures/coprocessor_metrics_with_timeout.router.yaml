@@ -1,4 +1,4 @@
-# This coprocessor doesn't point to anything
+# This coprocessor url will be updated to a test-scoped mock server
 coprocessor:
   url: "<replace>"
   router:
