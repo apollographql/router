@@ -724,11 +724,12 @@ impl ErrorReporter {
                 .keys()
                 .map(|d| format!("@{d}")),
         );
+        let suggestion = did_you_mean(words);
+        let separator = if suggestion.is_empty() { "" } else { " " };
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\". {}",
+                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\".{separator}{suggestion}",
                 subgraph.name,
-                did_you_mean(words),
             ),
         });
     }
