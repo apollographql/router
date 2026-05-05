@@ -126,7 +126,7 @@ fn invalid_context_name_shouldnt_throw() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -176,7 +176,7 @@ fn forbid_default_values_on_contextual_arguments() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -230,7 +230,7 @@ fn forbid_contextual_arguments_on_interfaces() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -282,7 +282,7 @@ fn contextual_argument_on_directive_definition_argument() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -415,7 +415,7 @@ fn contextual_argument_is_present_in_multiple_subgraphs_not_nullable_no_default(
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -506,7 +506,7 @@ fn context_selection_references_interface_object() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -556,7 +556,7 @@ fn context_selection_contains_query_directive() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -604,7 +604,7 @@ fn context_name_is_invalid() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 2, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -652,7 +652,7 @@ fn context_selection_contains_an_alias() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -703,7 +703,7 @@ fn at_least_one_key_on_object_with_context_must_be_resolvable() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -796,7 +796,7 @@ fn selection_contains_more_than_one_value() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -892,7 +892,7 @@ fn context_fails_on_union_when_type_is_missing_prop() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -1037,7 +1037,7 @@ fn type_matches_no_type_conditions() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -1086,7 +1086,7 @@ fn context_variable_does_not_appear_in_selection() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(
         errors.len(),
         1,
@@ -1143,7 +1143,7 @@ fn resolved_field_is_not_available_in_context() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -1193,7 +1193,7 @@ fn context_is_never_set() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -1300,7 +1300,7 @@ fn setcontext_with_multiple_contexts_duck_typing_type_mismatch() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
@@ -1395,7 +1395,7 @@ fn nullability_mismatch_is_not_ok_if_argument_is_non_nullable() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();

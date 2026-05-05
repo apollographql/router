@@ -85,11 +85,15 @@ pub(crate) mod plugins {
 static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(|| {
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
-// All tests in this file must run serially: each test installs a process-wide
-// tracing subscriber and mutates process-wide environment variables.  Note:
-// each tests/*.rs file compiles as a separate binary, so this mutex is NOT
-// shared with apollo_otel_traces.rs or any other test file.
-static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
+// All tests in this file must run serially across this binary AND across the
+// sibling `apollo_reports` / `apollo_otel_traces` binaries, because each
+// installs a process-wide tracing subscriber and mutates process-wide
+// environment variables (e.g. HTTP_PROXY) that the other binaries read.
+// Serialization is enforced by the `serial-apollo-telemetry-integration`
+// nextest test-group in `.config/nextest.toml` (an in-source mutex cannot do
+// this because each `tests/*.rs` is a separate binary).
+// DO NOT run this test with bare `cargo test` -- only `cargo nextest` honours
+// the group; bare `cargo test` will race the global state.
 
 // ---------------------------------------------------------------------------
 // Mock OTLP backend
@@ -323,8 +327,6 @@ async fn setup(
 /// - The backend decoded a valid `ExportTraceServiceRequest` with resource spans.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_http_traces_through_proxy() {
-    let _guard = TEST.lock().await;
-
     let reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>> = Arc::new(Mutex::new(vec![]));
     let intercepted_uris: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
 
