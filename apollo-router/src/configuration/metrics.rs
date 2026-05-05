@@ -470,7 +470,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.experimental_chaos,
-            "$.experimental_chaos[?(@.enabled==true)]"
+            "$.experimental_chaos[?(@.force_schema_reload || @.force_config_reload)]"
         );
 
         populate_config_instrument!(
@@ -510,7 +510,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.experimental_prewarm_query_plan_cache,
-            "$.persisted_queries.experimental_prewarm_query_plan_cache[?(@.enabled==true)]"
+            "$.persisted_queries.experimental_prewarm_query_plan_cache[?(@.on_startup==true)]"
         );
 
         populate_config_instrument!(

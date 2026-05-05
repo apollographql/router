@@ -5,7 +5,7 @@ experimental_hoist_orphan_errors:
     enabled: true
 
 experimental_chaos:
-  enabled: true
+  force_schema_reload: 10s
 
 supergraph:
   experimental_log_on_broken_pipe: true
@@ -19,7 +19,7 @@ supergraph:
 persisted_queries:
   enabled: true
   experimental_prewarm_query_plan_cache:
-    enabled: true
+    on_startup: true
 
 telemetry:
   apollo:
