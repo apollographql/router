@@ -1120,6 +1120,192 @@ async fn it_rejects_operations_field_larger_than_http_max_request_bytes() -> Res
         .await
 }
 
+mod body_limits {
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+
+    use axum::Router;
+    use bytes::Bytes;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use rstest::rstest;
+    use serde_json::Value;
+    use tokio::net::TcpListener;
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
+
+    const CONFIG: &str = include_str!("../fixtures/file_upload/small_body_limit.router.yaml");
+    const BOUNDARY: &str = "testboundary";
+
+    fn build_multipart_body(operations: &str, file_data: &[u8]) -> Vec<u8> {
+        let map = r#"{"0":["variables.file"]}"#;
+        let mut body = Vec::new();
+        for (name, content) in [
+            ("operations", operations.as_bytes()),
+            ("map", map.as_bytes()),
+        ] {
+            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(content);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"0\"; filename=\"test.bin\"\r\n\r\n",
+        );
+        body.extend_from_slice(file_data);
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+        body
+    }
+
+    /// Send `body_bytes` to a router backed by a real subgraph handler.
+    /// `chunk_size` controls HTTP chunking: `None` sends the entire body as one frame
+    /// (reproducing curl's default chunked-upload behavior), `Some(n)` splits into n-byte chunks.
+    async fn run(body_bytes: Vec<u8>, chunk_size: Option<usize>) -> (StatusCode, Value) {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let bound = TcpListener::bind(addr).await.unwrap();
+        let bound_url = format!("http://{}", bound.local_addr().unwrap());
+
+        let mut router = IntegrationTest::builder()
+            .config(CONFIG)
+            .subgraph_overrides([("uploads".to_string(), format!("{bound_url}/"))].into())
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "file_upload",
+                "schema.graphql",
+            ]))
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let handler = Router::new().route(
+            "/",
+            axum::routing::post(crate::integration::file_upload::helper::echo_single_file),
+        );
+        tokio::spawn(async {
+            axum::serve(bound, handler.into_make_service())
+                .with_graceful_shutdown(async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+                .unwrap()
+        });
+
+        let body: reqwest::Body = match chunk_size {
+            None => reqwest::Body::wrap_stream(tokio_stream::once(Ok::<_, std::io::Error>(
+                Bytes::from(body_bytes),
+            ))),
+            Some(n) => {
+                let chunks: Vec<Result<Bytes, std::io::Error>> = body_bytes
+                    .chunks(n)
+                    .map(|c| Ok(Bytes::copy_from_slice(c)))
+                    .collect();
+                reqwest::Body::wrap_stream(tokio_stream::iter(chunks))
+            }
+        };
+
+        let url = format!("http://{}", router.bind_address());
+        let response = reqwest::Client::new()
+            .post(url)
+            .header(
+                CONTENT_TYPE,
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+
+        let status = response.status();
+        let body = response.json().await.unwrap_or_default();
+        shutdown_tx.send(()).unwrap();
+        router.graceful_shutdown().await;
+        (status, body)
+    }
+
+    const OPS: &str = r#"{"query":"mutation ($file: Upload) { file0: singleUpload(file: $file) { filename body } }","variables":{"file":null}}"#;
+
+    /// A file larger than http_max_request_bytes but within max_file_size should succeed,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_file_larger_than_http_limit(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body(OPS, &vec![0xBBu8; 500]);
+        let (status, body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["errors"].is_null());
+
+        Ok(())
+    }
+
+    /// A file larger than max_file_size should be rejected with a GraphQL error,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_file_exceeding_max_file_size(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body(OPS, &vec![0xBBu8; 2000]);
+        let (status, body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["errors"].is_null());
+
+        assert!(
+            body["errors"][0].is_object(),
+            "expected an error for oversized file but got: {body}"
+        );
+
+        Ok(())
+    }
+
+    /// An operations field larger than http_max_request_bytes should be rejected with 413,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_oversized_operations_field(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Operations content that exceeds http_max_request_bytes = 500
+        let large_ops = format!(
+            r#"{{"query":"mutation ($file: Upload) {{ file0: singleUpload(file: $file) {{ filename body }} }}","variables":{{"file":null,"pad":"{}"}}}}"#,
+            "x".repeat(600),
+        );
+        let body_bytes = build_multipart_body(&large_ops, b"tiny");
+        let (status, _body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+        Ok(())
+    }
+}
+
 mod operation_body_timeout {
     use std::time::Duration;
 
