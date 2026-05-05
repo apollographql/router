@@ -1239,7 +1239,8 @@ impl Merger {
                 result.set_override_with_unknown_target(idx);
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
-                let default_range = LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
+                let default_range =
+                    LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
