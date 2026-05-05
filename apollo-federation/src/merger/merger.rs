@@ -1238,11 +1238,10 @@ impl Merger {
                 result.set_override_with_unknown_target(idx);
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
-                let separator = if extra_msg.is_empty() { "" } else { " " };
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
-                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist.{separator}{extra_msg}",
+                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist.{extra_msg}",
                         source_subgraph_name, dest, subgraph_name
                     ),
                     locations: Default::default(),

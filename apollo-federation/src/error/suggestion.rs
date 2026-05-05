@@ -31,7 +31,7 @@ const MAX_SUGGESTIONS: usize = 5;
 /// Given [ A, B ], returns "Did you mean A or B?".
 /// Given [ A, B, C ], returns "Did you mean A, B, or C?".
 pub(crate) fn did_you_mean(suggestions: impl IntoIterator<Item = String>) -> String {
-    const MESSAGE: &str = "Did you mean ";
+    const MESSAGE: &str = " Did you mean ";
     let suggestions = suggestions
         .into_iter()
         .take(MAX_SUGGESTIONS)
@@ -70,7 +70,7 @@ mod tests {
     fn did_you_mean_with_one_suggestion() {
         assert_eq!(
             did_you_mean(vec!["foo".to_string()]),
-            r#"Did you mean "foo"?"#
+            r#" Did you mean "foo"?"#
         );
     }
 
@@ -78,7 +78,7 @@ mod tests {
     fn did_you_mean_with_two_suggestions() {
         assert_eq!(
             did_you_mean(vec!["foo".to_string(), "bar".to_string()]),
-            r#"Did you mean "foo" or "bar"?"#
+            r#" Did you mean "foo" or "bar"?"#
         );
     }
 
@@ -90,7 +90,7 @@ mod tests {
                 "bar".to_string(),
                 "baz".to_string()
             ]),
-            r#"Did you mean "foo", "bar", or "baz"?"#
+            r#" Did you mean "foo", "bar", or "baz"?"#
         );
     }
 }
