@@ -290,7 +290,7 @@ where
         payload
             .call(http_client, &coprocessor_url, Context::new())
             .await
-        // _timer is dropped here — elapsed time is recorded
+        // elapsed time is recorded
     };
     *executed = true;
 
@@ -472,7 +472,7 @@ where
         payload
             .call(http_client, &coprocessor_url, Context::new())
             .await
-        // _timer is dropped here — elapsed time is recorded
+        // elapsed time is recorded
     };
     *executed = true;
 

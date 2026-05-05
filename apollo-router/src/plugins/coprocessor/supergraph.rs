@@ -249,7 +249,7 @@ where
         payload
             .call(http_client, &coprocessor_url, Context::new())
             .await
-        // _timer is dropped here — elapsed time is recorded
+        // elapsed time is recorded
     };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
@@ -410,7 +410,7 @@ where
         payload
             .call(http_client.clone(), &coprocessor_url, Context::new())
             .await
-        // _timer is dropped here — elapsed time is recorded
+        // elapsed time is recorded
     };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
