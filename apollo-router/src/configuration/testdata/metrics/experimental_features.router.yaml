@@ -1,0 +1,31 @@
+experimental_type_conditioned_fetching: true
+
+experimental_hoist_orphan_errors:
+  all:
+    enabled: true
+
+experimental_chaos:
+  enabled: true
+
+supergraph:
+  experimental_log_on_broken_pipe: true
+  query_planning:
+    experimental_plans_limit: 10
+    experimental_paths_limit: 10
+    experimental_reuse_query_plans: true
+    experimental_cooperative_cancellation:
+      enabled: true
+
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache:
+    enabled: true
+
+telemetry:
+  apollo:
+    experimental_local_field_metrics: true
+    experimental_otlp_endpoint: "https://custom.example.com/otlp"
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
