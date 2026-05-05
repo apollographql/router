@@ -479,9 +479,11 @@ pub(crate) enum NamingPrefix {
     // an actual ... token, the OffsetRange will be Some(token_range).
     Spread(OffsetRange),
     // A named spread like ...TypeName references a @mapping directive.
-    // The name is the type name, and the range covers the full "...TypeName" span.
+    // The name is the type name, and the range covers the full "...TypeName(...)" span.
+    // If the spread has arguments (e.g., ...User(count: 5)), they are stored in `args`.
     SpreadNamed {
         name: WithRange<String>,
+        args: Option<SpreadArgs>,
         range: OffsetRange,
     },
     // When there is no Alias or ... spread token, and the path is not inlined
@@ -873,30 +875,37 @@ impl NamedSelection {
         } else {
             // First, try to parse ...TypeName (named spread for @mapping references)
             // This must be attempted before the generic spread parser
-            if let Ok((after_spaces, _)) = spaces_or_comments(input.clone()) {
-                if let Ok((after_spread, spread_token)) = ranged_span("...")(after_spaces.clone()) {
-                    // Try to parse a type name (identifier) immediately after ...
-                    // The identifier must start with an uppercase letter to distinguish
-                    // from anonymous spread paths
-                    if let Ok((remainder, type_name)) =
-                        Self::parse_spread_type_name(after_spread.clone())
-                    {
-                        let spread_range = spread_token.range();
-                        let name_range = type_name.range();
-                        let full_range = merge_ranges(spread_range.clone(), name_range.clone());
-                        return Ok((
-                            remainder,
-                            Self {
-                                prefix: NamingPrefix::SpreadNamed {
-                                    name: type_name,
-                                    range: full_range,
-                                },
-                                // Empty path for named spreads - the mapping defines the selection
-                                path: PathSelection::empty(),
-                            },
-                        ));
-                    }
-                }
+            if let Ok((after_spaces, _)) = spaces_or_comments(input.clone())
+                && let Ok((after_spread, spread_token)) =
+                    ranged_span("...")(after_spaces.clone())
+                && let Ok((remainder, type_name)) =
+                    Self::parse_spread_type_name(after_spread.clone())
+            {
+                // Try to parse optional arguments: ...TypeName(arg: value, ...)
+                let (remainder, args) = match SpreadArgs::parse(remainder.clone()) {
+                    Ok((r, a)) => (r, Some(a)),
+                    Err(_) => (remainder, None),
+                };
+
+                let spread_range = spread_token.range();
+                let name_range = type_name.range();
+                let end_range = args
+                    .as_ref()
+                    .and_then(|a| a.range.clone())
+                    .or_else(|| name_range.clone());
+                let full_range = merge_ranges(spread_range, end_range);
+                return Ok((
+                    remainder,
+                    Self {
+                        prefix: NamingPrefix::SpreadNamed {
+                            name: type_name,
+                            args,
+                            range: full_range,
+                        },
+                        // Empty path for named spreads - the mapping defines the selection
+                        path: PathSelection::empty(),
+                    },
+                ));
             }
 
             // Fall through to regular spread/path parsing (same as V0_4)
@@ -1901,8 +1910,8 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub(crate) struct MethodArgs {
-    pub(super) args: Vec<WithRange<LitExpr>>,
-    pub(super) range: OffsetRange,
+    pub(crate) args: Vec<WithRange<LitExpr>>,
+    pub(crate) range: OffsetRange,
 }
 
 impl Ranged for MethodArgs {
@@ -1942,6 +1951,69 @@ impl MethodArgs {
 
         let range = merge_ranges(open_paren.range(), close_paren.range());
         Ok((input, Self { args, range }))
+    }
+}
+
+/// A single named argument in a spread invocation: `name: value`
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct SpreadArg {
+    pub(crate) name: WithRange<String>,
+    pub(crate) value: WithRange<LitExpr>,
+}
+
+/// Named arguments for a spread invocation: `...TypeName(arg1: value1, arg2: value2)`
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub(crate) struct SpreadArgs {
+    pub(crate) args: Vec<SpreadArg>,
+    pub(crate) range: OffsetRange,
+}
+
+impl Ranged for SpreadArgs {
+    fn range(&self) -> OffsetRange {
+        self.range.clone()
+    }
+}
+
+impl SpreadArgs {
+    /// Parse named arguments: `(name1: value1, name2: value2)`
+    fn parse(input: Span) -> ParseResult<Self> {
+        let (mut input, open_paren) = ranged_span("(")(input)?;
+        input = spaces_or_comments(input)?.0;
+
+        let mut args = Vec::new();
+
+        // Try to parse first argument: `name: value`
+        if let Ok((remainder, arg)) = Self::parse_single_arg(input.clone()) {
+            args.push(arg);
+            input = remainder;
+
+            // Parse additional comma-separated arguments
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
+                input = spaces_or_comments(remainder)?.0;
+                if let Ok((remainder, arg)) = Self::parse_single_arg(input.clone()) {
+                    args.push(arg);
+                    input = remainder;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        input = spaces_or_comments(input)?.0;
+        let (input, close_paren) = ranged_span(")")(input)?;
+
+        let range = merge_ranges(open_paren.range(), close_paren.range());
+        Ok((input, Self { args, range }))
+    }
+
+    /// Parse a single `name: value` argument pair
+    fn parse_single_arg(input: Span) -> ParseResult<SpreadArg> {
+        let (input, name) = parse_identifier(input)?;
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, _) = char(':')(input)?;
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, value) = LitExpr::parse(input)?;
+        Ok((input, SpreadArg { name, value }))
     }
 }
 

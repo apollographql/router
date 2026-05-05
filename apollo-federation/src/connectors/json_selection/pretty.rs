@@ -380,9 +380,25 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str("... ");
                 }
             }
-            NamingPrefix::SpreadNamed { name, .. } => {
+            NamingPrefix::SpreadNamed { name, args, .. } => {
                 result.push_str("...");
                 result.push_str(name.as_str());
+                if let Some(spread_args) = args {
+                    result.push('(');
+                    for (i, arg) in spread_args.args.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(arg.name.as_str());
+                        result.push_str(": ");
+                        result.push_str(
+                            &arg.value
+                                .as_ref()
+                                .pretty_print_with_indentation(true, 0),
+                        );
+                    }
+                    result.push(')');
+                }
             }
         };
 

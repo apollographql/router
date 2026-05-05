@@ -11,9 +11,10 @@ mod selection_set;
 mod selection_trie;
 
 pub use apply_to::*;
+pub(crate) use known_var::KnownVariable;
+pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
 pub(crate) use location::WithRange;
-pub(crate) use lit_expr::LitExpr;
 pub use parser::*;
 #[cfg(test)]
 pub(crate) use pretty::*;

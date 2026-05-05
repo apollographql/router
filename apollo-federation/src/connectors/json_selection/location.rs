@@ -248,10 +248,23 @@ pub(crate) mod strip_ranges {
                     NamingPrefix::None => NamingPrefix::None,
                     NamingPrefix::Alias(alias) => NamingPrefix::Alias(alias.strip_ranges()),
                     NamingPrefix::Spread(_) => NamingPrefix::Spread(None),
-                    NamingPrefix::SpreadNamed { name, .. } => NamingPrefix::SpreadNamed {
-                        name: name.strip_ranges(),
-                        range: None,
-                    },
+                    NamingPrefix::SpreadNamed { name, args, .. } => {
+                        NamingPrefix::SpreadNamed {
+                            name: name.strip_ranges(),
+                            args: args.as_ref().map(|a| SpreadArgs {
+                                args: a
+                                    .args
+                                    .iter()
+                                    .map(|arg| SpreadArg {
+                                        name: arg.name.strip_ranges(),
+                                        value: arg.value.strip_ranges(),
+                                    })
+                                    .collect(),
+                                range: None,
+                            }),
+                            range: None,
+                        }
+                    }
                 },
                 path: self.path.strip_ranges(),
             }

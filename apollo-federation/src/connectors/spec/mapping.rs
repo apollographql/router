@@ -170,6 +170,29 @@ fn extract_single_mapping(
                     "`as` argument in `@mapping` directive on type `{type_name}` is not a string"
                 ))
             })?;
+            // Validate that the alias matches SpreadNamed grammar:
+            // must start with uppercase ASCII letter, then ASCII alphanumeric or '_'
+            let mut chars = as_value.chars();
+            if let Some(first) = chars.next() {
+                if !first.is_ascii_uppercase() {
+                    return Err(FederationError::internal(format!(
+                        "`as` value `{as_value}` in `@mapping` directive on type `{type_name}` \
+                         must start with an uppercase ASCII letter to be referenceable \
+                         via `...{as_value}` spread syntax."
+                    )));
+                }
+                if let Some(bad) = chars.find(|c| !c.is_ascii_alphanumeric() && *c != '_') {
+                    return Err(FederationError::internal(format!(
+                        "`as` value `{as_value}` in `@mapping` directive on type `{type_name}` \
+                         contains invalid character `{bad}`. Only ASCII letters, digits, \
+                         and underscores are allowed."
+                    )));
+                }
+            } else {
+                return Err(FederationError::internal(format!(
+                    "`as` argument in `@mapping` directive on type `{type_name}` is empty."
+                )));
+            }
             alias = Some(Name::new(as_value)?);
         } else if arg_name == "selection" {
             // Fix #2: Hard error for non-string selection
@@ -183,8 +206,15 @@ fn extract_single_mapping(
         // Unknown arguments are silently ignored (schema validation catches these)
     }
 
-    // If no alias provided, use the type name
+    // If no alias provided, use the type name — but validate it matches SpreadNamed grammar
     let alias = alias.unwrap_or_else(|| type_name.clone());
+    if !alias.as_str().starts_with(|c: char| c.is_ascii_uppercase()) {
+        return Err(FederationError::internal(format!(
+            "@mapping on type `{type_name}` results in alias `{alias}` which does not start \
+             with an uppercase ASCII letter. Mapping aliases must be referenceable via \
+             `...{alias}` spread syntax. Use `as:` to provide a valid alias."
+        )));
+    }
 
     Ok(MappingDirectiveArguments {
         type_name,
@@ -494,5 +524,54 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("union"));
         assert!(err.contains("SearchResult"));
+    }
+
+    #[test]
+    fn test_lowercase_as_alias_rejected() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE
+
+            type User @mapping(selection: "id name", as: "basicUser") {
+                id: ID!
+                name: String!
+            }
+            type Query { user: User }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let result = extract_mapping_directive_arguments(&schema, &name!(mapping));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("basicUser"));
+        assert!(err.contains("uppercase"));
+    }
+
+    #[test]
+    fn test_uppercase_as_alias_accepted() {
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE
+
+            type User @mapping(selection: "id name", as: "BasicUser") {
+                id: ID!
+                name: String!
+            }
+            type Query { user: User }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let mappings = extract_mapping_directive_arguments(&schema, &name!(mapping)).unwrap();
+        assert_eq!(mappings[0].alias, name!(BasicUser));
     }
 }

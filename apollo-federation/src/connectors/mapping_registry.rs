@@ -3,6 +3,7 @@
 //! This module provides the `MappingRegistry` which stores parsed mapping definitions
 //! and can expand `...TypeName` spread syntax in JSONSelection strings.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 /// Maximum depth for mapping expansion to prevent stack overflow on deeply nested chains.
@@ -15,18 +16,23 @@ use indexmap::IndexMap;
 
 use super::ConnectSpec;
 use super::JSONSelection;
-use super::json_selection::NamingPrefix;
+use super::json_selection::KnownVariable;
+use super::json_selection::LitExpr;
+use super::json_selection::MethodArgs;
 use super::json_selection::NamedSelection;
+use super::json_selection::NamingPrefix;
 use super::json_selection::PathList;
 use super::json_selection::PathSelection;
 use super::json_selection::Ranged;
+use super::json_selection::SpreadArgs;
 use super::json_selection::SubSelection;
 use super::json_selection::TopLevelSelection;
-use super::json_selection::LitExpr;
+use super::json_selection::VarPaths;
 use super::json_selection::WithRange;
 use super::spec::ConnectLink;
 use super::spec::MappingDirectiveArguments;
 use super::spec::extract_mapping_directive_arguments;
+use super::variable::Namespace;
 use crate::error::FederationError;
 
 /// A parsed mapping definition from a `@mapping` directive
@@ -36,6 +42,9 @@ pub struct MappingDefinition {
     pub(crate) selection: TopLevelSelection,
     /// The original GraphQL type this mapping is defined on
     pub source_type: Name,
+    /// Parameter names inferred from the selection (external variables that are
+    /// NOT known runtime namespaces like $this, $args, etc.)
+    pub(crate) parameters: HashSet<String>,
 }
 
 /// Registry of all @mapping definitions in a schema
@@ -99,10 +108,39 @@ impl MappingRegistry {
             Self::generate_auto_map_selection(&args.type_name, &args.field_names, spec)?
         };
 
+        let parameters = Self::compute_parameters(&selection);
+
         Ok(MappingDefinition {
             selection,
             source_type: args.type_name.clone(),
+            parameters,
         })
+    }
+
+    /// Compute the set of parameter names from a mapping's selection.
+    /// Parameters are external variables ($name) that are NOT known runtime namespaces.
+    fn compute_parameters(selection: &TopLevelSelection) -> HashSet<String> {
+        use std::str::FromStr;
+
+        let var_paths = match selection {
+            TopLevelSelection::Named(sub) => sub.var_paths(),
+            TopLevelSelection::Path(path) => path.var_paths(),
+        };
+
+        var_paths
+            .into_iter()
+            .filter_map(|var_path| {
+                if let PathList::Var(known_var, _) = var_path.path.as_ref()
+                    && let KnownVariable::External(name) = known_var.as_ref()
+                    && Namespace::from_str(name).is_err()
+                {
+                    // Strip the leading '$' for the parameter name
+                    Some(name.trim_start_matches('$').to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Generate an auto-map selection from field names.
@@ -165,12 +203,119 @@ impl MappingRegistry {
         selection: &JSONSelection,
     ) -> Result<JSONSelection, FederationError> {
         let mut expanding: HashSet<String> = HashSet::new();
-        let expanded_inner = self.expand_top_level(&selection.inner, &mut expanding, 0)?;
+        let no_subs = HashMap::new();
+        let expanded_inner =
+            self.expand_top_level(&selection.inner, &mut expanding, 0, &no_subs)?;
 
         Ok(JSONSelection {
             inner: expanded_inner,
             spec: selection.spec,
         })
+    }
+
+    /// Validate spread arguments against a mapping's parameters and build substitution map.
+    fn build_substitutions(
+        &self,
+        mapping_name: &str,
+        args: Option<&SpreadArgs>,
+        parameters: &HashSet<String>,
+    ) -> Result<HashMap<String, LitExpr>, FederationError> {
+        let mut subs = HashMap::new();
+
+        if parameters.is_empty() {
+            // Mapping has no parameters; error if args are provided
+            if let Some(args) = args
+                && !args.args.is_empty()
+            {
+                return Err(FederationError::internal(format!(
+                    "Spread `...{mapping_name}(...)` passes arguments, \
+                     but mapping `{mapping_name}` has no parameters."
+                )));
+            }
+            return Ok(subs);
+        }
+
+        let provided_args = args.map(|a| &a.args[..]).unwrap_or(&[]);
+
+        // Check for duplicate arg names
+        let mut seen: HashSet<&str> = HashSet::new();
+        for arg in provided_args {
+            let name = arg.name.as_ref().as_str();
+            if !seen.insert(name) {
+                return Err(FederationError::internal(format!(
+                    "Spread `...{mapping_name}(...)` provides duplicate argument `{name}`."
+                )));
+            }
+        }
+
+        // Check for reserved name conflicts and unknown args; build subs map
+        for arg in provided_args {
+            let name = arg.name.as_ref().as_str();
+
+            // Check if arg name conflicts with a runtime variable namespace
+            if std::str::FromStr::from_str(&format!("${name}"))
+                .is_ok_and(|_: Namespace| true)
+            {
+                return Err(FederationError::internal(format!(
+                    "Spread argument name `{name}` conflicts with reserved \
+                     runtime variable `${name}`."
+                )));
+            }
+
+            if !parameters.contains(name) {
+                let available: Vec<_> = parameters.iter().map(|s| s.as_str()).collect();
+                return Err(FederationError::internal(format!(
+                    "Spread `...{mapping_name}({name}: ...)` passes unknown argument `{name}`. \
+                     Available parameters: {}",
+                    available.join(", ")
+                )));
+            }
+
+            // v1 restriction: spread arguments must be simple literals only.
+            // Variables ($name), paths, objects, arrays, and expressions are not allowed.
+            Self::validate_literal_value(mapping_name, name, arg.value.as_ref())?;
+
+            // Store with the `$` prefix to match how variables appear in the AST
+            subs.insert(format!("${name}"), arg.value.as_ref().clone());
+        }
+
+        // Check for missing required args (all params are required in v1)
+        for param in parameters {
+            if !subs.contains_key(&format!("${param}")) {
+                return Err(FederationError::internal(format!(
+                    "Spread `...{mapping_name}` is missing required argument `{param}`."
+                )));
+            }
+        }
+
+        Ok(subs)
+    }
+
+    /// Validate that a spread argument value is a simple literal (v1 restriction).
+    /// Rejects variables ($name), paths, objects, arrays, and operator expressions.
+    fn validate_literal_value(
+        mapping_name: &str,
+        arg_name: &str,
+        value: &LitExpr,
+    ) -> Result<(), FederationError> {
+        match value {
+            LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => Ok(()),
+            LitExpr::Path(_) => Err(FederationError::internal(format!(
+                "Spread `...{mapping_name}({arg_name}: ...)` uses a variable/path as argument value. \
+                 In v1, spread arguments must be literals (integer, float, string, boolean, null). \
+                 Inline the selection or use separate mappings."
+            ))),
+            LitExpr::Object(_) | LitExpr::Array(_) => Err(FederationError::internal(format!(
+                "Spread `...{mapping_name}({arg_name}: ...)` uses a complex value as argument. \
+                 In v1, spread arguments must be literals (integer, float, string, boolean, null)."
+            ))),
+            LitExpr::LitPath(_, _) | LitExpr::OpChain(_, _) => {
+                Err(FederationError::internal(format!(
+                    "Spread `...{mapping_name}({arg_name}: ...)` uses an expression as argument value. \
+                     In v1, spread arguments must be literals (integer, float, string, boolean, null)."
+                )))
+            }
+        }
     }
 
     /// Expand a TopLevelSelection
@@ -179,6 +324,7 @@ impl MappingRegistry {
         top_level: &TopLevelSelection,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<TopLevelSelection, FederationError> {
         if depth > MAX_EXPANSION_DEPTH {
             return Err(FederationError::internal(format!(
@@ -190,17 +336,19 @@ impl MappingRegistry {
 
         match top_level {
             TopLevelSelection::Named(sub) => {
-                let expanded = self.expand_sub_selection(sub, expanding, depth)?;
-                if expanded.selections.len() == 1 {
-                    let only = &expanded.selections[0];
-                    if only.is_anonymous() || matches!(only.prefix, NamingPrefix::Spread(None)) {
-                        return Ok(TopLevelSelection::Path(only.path.clone()));
-                    }
+                let expanded =
+                    self.expand_sub_selection(sub, expanding, depth, substitutions)?;
+                if let [only] = expanded.selections.as_slice()
+                    && (only.is_anonymous()
+                        || matches!(only.prefix, NamingPrefix::Spread(None)))
+                {
+                    return Ok(TopLevelSelection::Path(only.path.clone()));
                 }
                 Ok(TopLevelSelection::Named(expanded))
             }
             TopLevelSelection::Path(path) => {
-                let expanded = self.expand_path_selection(path, expanding, depth)?;
+                let expanded =
+                    self.expand_path_selection(path, expanding, depth, substitutions)?;
                 Ok(TopLevelSelection::Path(expanded))
             }
         }
@@ -212,12 +360,13 @@ impl MappingRegistry {
         sub: &SubSelection,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<SubSelection, FederationError> {
         let mut new_selections = Vec::new();
 
         for named in &sub.selections {
             match &named.prefix {
-                NamingPrefix::SpreadNamed { name, .. } => {
+                NamingPrefix::SpreadNamed { name, args, .. } => {
                     let type_name = name.as_ref();
 
                     // Check for circular reference
@@ -230,6 +379,13 @@ impl MappingRegistry {
 
                     // Look up the mapping
                     if let Some(mapping) = self.get_mapping(type_name) {
+                        // Build substitution map from spread args
+                        let subs = self.build_substitutions(
+                            type_name,
+                            args.as_ref(),
+                            &mapping.parameters,
+                        )?;
+
                         // Depth check before recursing into the referenced mapping.
                         let next_depth = depth + 1;
                         if next_depth > MAX_EXPANSION_DEPTH {
@@ -247,14 +403,16 @@ impl MappingRegistry {
 
                         match &mapping.selection {
                             TopLevelSelection::Named(sub) => {
-                                let result =
-                                    self.expand_sub_selection(sub, expanding, next_depth);
+                                let result = self.expand_sub_selection(
+                                    sub, expanding, next_depth, &subs,
+                                );
                                 expanding.remove(type_name);
                                 new_selections.extend(result?.selections);
                             }
                             TopLevelSelection::Path(path) => {
-                                let result =
-                                    self.expand_path_selection(path, expanding, next_depth);
+                                let result = self.expand_path_selection(
+                                    path, expanding, next_depth, &subs,
+                                );
                                 expanding.remove(type_name);
                                 let expanded_path = result?;
 
@@ -283,7 +441,8 @@ impl MappingRegistry {
                 }
                 _ => {
                     // Recursively expand any nested selections
-                    let expanded_named = self.expand_named_selection(named, expanding, depth)?;
+                    let expanded_named =
+                        self.expand_named_selection(named, expanding, depth, substitutions)?;
                     new_selections.push(expanded_named);
                 }
             }
@@ -309,8 +468,10 @@ impl MappingRegistry {
         named: &NamedSelection,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<NamedSelection, FederationError> {
-        let expanded_path = self.expand_path_selection(&named.path, expanding, depth)?;
+        let expanded_path =
+            self.expand_path_selection(&named.path, expanding, depth, substitutions)?;
 
         Ok(NamedSelection {
             prefix: named.prefix.clone(),
@@ -324,58 +485,109 @@ impl MappingRegistry {
         path: &PathSelection,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<PathSelection, FederationError> {
-        let expanded_path_list = self.expand_path_list(path.path.as_ref(), expanding, depth)?;
+        let expanded_path_list =
+            self.expand_path_list(path.path.as_ref(), expanding, depth, substitutions)?;
 
         Ok(PathSelection {
             path: WithRange::new(expanded_path_list, path.path.range()),
         })
     }
 
-    /// Expand a PathList, recursively expanding any nested SubSelections
+    /// Expand a PathList, recursively expanding any nested SubSelections.
+    /// Also performs parameter substitution when `substitutions` is non-empty.
     fn expand_path_list(
         &self,
         path_list: &PathList,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<PathList, FederationError> {
         match path_list {
             PathList::Selection(sub) => {
-                let expanded = self.expand_sub_selection(sub, expanding, depth)?;
+                let expanded =
+                    self.expand_sub_selection(sub, expanding, depth, substitutions)?;
                 Ok(PathList::Selection(expanded))
             }
             PathList::Key(key, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
+                let expanded_tail =
+                    self.expand_path_list(tail.as_ref(), expanding, depth, substitutions)?;
                 Ok(PathList::Key(
                     key.clone(),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Var(var, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
+                // Check if this variable is a parameter that should be substituted
+                if let KnownVariable::External(name) = var.as_ref()
+                    && let Some(replacement) = substitutions.get(name.as_str())
+                {
+                    // Substitute: replace the variable with the literal value.
+                    // The tail is expanded with substitutions in case there's more.
+                    let expanded_tail = self.expand_path_list(
+                        tail.as_ref(),
+                        expanding,
+                        depth,
+                        substitutions,
+                    )?;
+                    return Ok(PathList::Expr(
+                        WithRange::new(replacement.clone(), var.range()),
+                        WithRange::new(expanded_tail, tail.range()),
+                    ));
+                }
+                let expanded_tail =
+                    self.expand_path_list(tail.as_ref(), expanding, depth, substitutions)?;
                 Ok(PathList::Var(
                     var.clone(),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Method(method, args, tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
+                // Expand method arguments (may contain parameter references)
+                let expanded_args = match args {
+                    Some(a) if !substitutions.is_empty() => {
+                        let expanded = a
+                            .args
+                            .iter()
+                            .map(|arg| {
+                                let expanded_expr = self.expand_lit_expr(
+                                    arg.as_ref(),
+                                    expanding,
+                                    depth,
+                                    substitutions,
+                                )?;
+                                Ok(WithRange::new(expanded_expr, arg.range()))
+                            })
+                            .collect::<Result<Vec<_>, FederationError>>()?;
+                        Some(MethodArgs {
+                            args: expanded,
+                            range: a.range.clone(),
+                        })
+                    }
+                    other => other.clone(),
+                };
+                let expanded_tail =
+                    self.expand_path_list(tail.as_ref(), expanding, depth, substitutions)?;
                 Ok(PathList::Method(
                     method.clone(),
-                    args.clone(),
+                    expanded_args,
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Expr(expr, tail) => {
-                let expanded_expr = self.expand_lit_expr(expr.as_ref(), expanding, depth)?;
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
+                let expanded_expr =
+                    self.expand_lit_expr(expr.as_ref(), expanding, depth, substitutions)?;
+                let expanded_tail =
+                    self.expand_path_list(tail.as_ref(), expanding, depth, substitutions)?;
                 Ok(PathList::Expr(
                     WithRange::new(expanded_expr, expr.range()),
                     WithRange::new(expanded_tail, tail.range()),
                 ))
             }
             PathList::Question(tail) => {
-                let expanded_tail = self.expand_path_list(tail.as_ref(), expanding, depth)?;
+                let expanded_tail =
+                    self.expand_path_list(tail.as_ref(), expanding, depth, substitutions)?;
                 Ok(PathList::Question(WithRange::new(
                     expanded_tail,
                     tail.range(),
@@ -386,11 +598,13 @@ impl MappingRegistry {
     }
 
     /// Expand path selections nested inside literal expressions.
+    /// Also performs parameter substitution for `LitExpr::Path` nodes.
     fn expand_lit_expr(
         &self,
         lit_expr: &LitExpr,
         expanding: &mut HashSet<String>,
         depth: usize,
+        substitutions: &HashMap<String, LitExpr>,
     ) -> Result<LitExpr, FederationError> {
         match lit_expr {
             LitExpr::String(_)
@@ -400,7 +614,8 @@ impl MappingRegistry {
             LitExpr::Object(obj) => {
                 let mut expanded_obj = apollo_compiler::collections::IndexMap::default();
                 for (key, value) in obj {
-                    let expanded_value = self.expand_lit_expr(value.as_ref(), expanding, depth)?;
+                    let expanded_value =
+                        self.expand_lit_expr(value.as_ref(), expanding, depth, substitutions)?;
                     expanded_obj.insert(
                         key.clone(),
                         WithRange::new(expanded_value, value.range()),
@@ -411,18 +626,32 @@ impl MappingRegistry {
             LitExpr::Array(arr) => {
                 let mut expanded_arr = Vec::with_capacity(arr.len());
                 for value in arr {
-                    let expanded_value = self.expand_lit_expr(value.as_ref(), expanding, depth)?;
+                    let expanded_value =
+                        self.expand_lit_expr(value.as_ref(), expanding, depth, substitutions)?;
                     expanded_arr.push(WithRange::new(expanded_value, value.range()));
                 }
                 Ok(LitExpr::Array(expanded_arr))
             }
             LitExpr::Path(path) => {
-                let expanded_path = self.expand_path_selection(path, expanding, depth)?;
+                // Check if this is a bare parameter variable (e.g., $count with no
+                // trailing path). If so, substitute directly as a LitExpr to avoid
+                // wrapping in $(...) syntax.
+                if let PathList::Var(var, tail) = path.path.as_ref()
+                    && let KnownVariable::External(name) = var.as_ref()
+                    && matches!(tail.as_ref(), PathList::Empty)
+                    && let Some(replacement) = substitutions.get(name.as_str())
+                {
+                    return Ok(replacement.clone());
+                }
+                let expanded_path =
+                    self.expand_path_selection(path, expanding, depth, substitutions)?;
                 Ok(LitExpr::Path(expanded_path))
             }
             LitExpr::LitPath(literal, subpath) => {
-                let expanded_literal = self.expand_lit_expr(literal.as_ref(), expanding, depth)?;
-                let expanded_subpath = self.expand_path_list(subpath.as_ref(), expanding, depth)?;
+                let expanded_literal =
+                    self.expand_lit_expr(literal.as_ref(), expanding, depth, substitutions)?;
+                let expanded_subpath =
+                    self.expand_path_list(subpath.as_ref(), expanding, depth, substitutions)?;
                 Ok(LitExpr::LitPath(
                     WithRange::new(expanded_literal, literal.range()),
                     WithRange::new(expanded_subpath, subpath.range()),
@@ -431,7 +660,8 @@ impl MappingRegistry {
             LitExpr::OpChain(op, operands) => {
                 let mut expanded_operands = Vec::with_capacity(operands.len());
                 for operand in operands {
-                    let expanded_operand = self.expand_lit_expr(operand.as_ref(), expanding, depth)?;
+                    let expanded_operand =
+                        self.expand_lit_expr(operand.as_ref(), expanding, depth, substitutions)?;
                     expanded_operands.push(WithRange::new(expanded_operand, operand.range()));
                 }
                 Ok(LitExpr::OpChain(op.clone(), expanded_operands))
@@ -530,6 +760,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -556,6 +787,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -589,6 +821,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(UserA),
+                parameters: HashSet::new(),
             },
         );
 
@@ -601,6 +834,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(UserB),
+                parameters: HashSet::new(),
             },
         );
 
@@ -628,6 +862,7 @@ mod tests {
             MappingDefinition {
                 selection: map_a_selection.inner,
                 source_type: name!(TypeA),
+                parameters: HashSet::new(),
             },
         );
 
@@ -638,6 +873,7 @@ mod tests {
             MappingDefinition {
                 selection: map_b_selection.inner,
                 source_type: name!(TypeB),
+                parameters: HashSet::new(),
             },
         );
 
@@ -680,6 +916,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(Address),
+                parameters: HashSet::new(),
             },
         );
 
@@ -693,6 +930,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -724,6 +962,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -749,6 +988,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -787,6 +1027,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -818,6 +1059,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -829,6 +1071,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -975,6 +1218,7 @@ mod tests {
             MappingDefinition {
                 selection: mapping_selection.inner,
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -998,6 +1242,7 @@ mod tests {
             MappingDefinition {
                 selection: mapping_selection.inner,
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1022,6 +1267,7 @@ mod tests {
             MappingDefinition {
                 selection: mapping_selection.inner,
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1046,6 +1292,7 @@ mod tests {
             MappingDefinition {
                 selection: mapping_selection.inner,
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1069,6 +1316,7 @@ mod tests {
             MappingDefinition {
                 selection: inner_selection.inner,
                 source_type: name!(Inner),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1079,6 +1327,7 @@ mod tests {
             MappingDefinition {
                 selection: outer_selection.inner,
                 source_type: name!(Outer),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1105,6 +1354,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1116,6 +1366,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(Admin),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1171,6 +1422,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1182,6 +1434,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(Address),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1231,6 +1484,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1260,6 +1514,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(Address),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1275,6 +1530,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(sub),
                 source_type: name!(User),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1327,6 +1583,7 @@ mod tests {
                 MappingDefinition {
                     selection: TopLevelSelection::Named(sub),
                     source_type: this_name,
+                    parameters: HashSet::new(),
                 },
             );
         }
@@ -1365,6 +1622,7 @@ mod tests {
             MappingDefinition {
                 selection: TopLevelSelection::Named(bad_sub),
                 source_type: name!(Bad),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1376,6 +1634,7 @@ mod tests {
             MappingDefinition {
                 selection: good_selection.inner,
                 source_type: name!(Good),
+                parameters: HashSet::new(),
             },
         );
 
@@ -1388,6 +1647,592 @@ mod tests {
         assert!(
             registry.expand_selection(&sel_good).is_ok(),
             "Expanding ...Good should succeed after ...Bad failed"
+        );
+    }
+
+    // =========================================================================
+    // @mapping arguments (parameterized spreads) tests
+    // =========================================================================
+
+    #[test]
+    fn test_basic_parameter_substitution() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        // Mapping with a parameter: friends->slice(0, $count)
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "id name friends: friends->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: params,
+            },
+        );
+
+        // Spread with argument: ...User(count: 5)
+        let selection =
+            JSONSelection::parse_with_spec("...User(count: 5)", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let pretty = expanded.pretty_print();
+        assert!(
+            pretty.contains("friends: friends->slice(0, 5)"),
+            "Expected substitution of $count with 5, got: {}",
+            pretty
+        );
+    }
+
+    #[test]
+    fn test_multiple_parameters() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "items: items->slice($offset, $limit)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("offset".to_string());
+        params.insert("limit".to_string());
+        registry.mappings.insert(
+            name!(Paginated),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Paginated),
+                parameters: params,
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec(
+            "...Paginated(offset: 0, limit: 10)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let pretty = expanded.pretty_print();
+        assert!(
+            pretty.contains("items: items->slice(0, 10)"),
+            "Expected substitution of both params, got: {}",
+            pretty
+        );
+    }
+
+    #[test]
+    fn test_missing_required_argument_error() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "friends: friends->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: params,
+            },
+        );
+
+        // Spread without required argument
+        let selection =
+            JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("missing required argument"),
+            "Expected missing arg error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_unknown_argument_error() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection =
+            JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: HashSet::new(),
+            },
+        );
+
+        // Spread passes arguments on a parameterless mapping
+        let selection =
+            JSONSelection::parse_with_spec("...User(count: 5)", ConnectSpec::V0_5).unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("has no parameters"),
+            "Expected no-params error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_duplicate_argument_error() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "friends: friends->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: params,
+            },
+        );
+
+        // Spread with duplicate argument
+        let selection = JSONSelection::parse_with_spec(
+            "...User(count: 5, count: 10)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("duplicate argument"),
+            "Expected duplicate arg error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_runtime_variables_pass_through() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        // Mapping with both runtime vars ($this) and parameters ($count)
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "name: $this.displayName friends: friends->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: params,
+            },
+        );
+
+        let selection =
+            JSONSelection::parse_with_spec("...User(count: 5)", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let pretty = expanded.pretty_print();
+        // $this should remain untouched
+        assert!(
+            pretty.contains("$this"),
+            "Expected $this to pass through, got: {}",
+            pretty
+        );
+        // $count should be substituted
+        assert!(
+            !pretty.contains("$count"),
+            "Expected $count to be substituted away, got: {}",
+            pretty
+        );
+        assert!(
+            pretty.contains("->slice(0, 5)"),
+            "Expected ->slice(0, 5), got: {}",
+            pretty
+        );
+    }
+
+    #[test]
+    fn test_no_args_on_parameterless_mapping() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection =
+            JSONSelection::parse_with_spec("id name", ConnectSpec::V0_5).unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        registry.mappings.insert(
+            name!(User),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(User),
+                parameters: HashSet::new(),
+            },
+        );
+
+        // Spread without args on parameterless mapping - should work fine
+        let selection =
+            JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+        assert_eq!(expanded.pretty_print(), "id\nname");
+    }
+
+    #[test]
+    fn test_compute_parameters_from_selection() {
+        // Test that compute_parameters correctly identifies non-runtime $vars
+        let selection = JSONSelection::parse_with_spec(
+            "name: $this.displayName items: items->slice($offset, $limit) config: $config.key",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+
+        let params = MappingRegistry::compute_parameters(&selection.inner);
+
+        // $this and $config are runtime variables - should NOT be parameters
+        assert!(!params.contains("this"));
+        assert!(!params.contains("config"));
+        // $offset and $limit are not runtime variables - should be parameters
+        assert!(params.contains("offset"));
+        assert!(params.contains("limit"));
+    }
+
+    #[test]
+    fn test_string_argument_substitution() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "result: data->echo($msg)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("msg".to_string());
+        registry.mappings.insert(
+            name!(Echo),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Echo),
+                parameters: params,
+            },
+        );
+
+        let selection = JSONSelection::parse_with_spec(
+            "...Echo(msg: \"hello world\")",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let pretty = expanded.pretty_print();
+        assert!(
+            pretty.contains("\"hello world\""),
+            "Expected string literal in expansion, got: {}",
+            pretty
+        );
+    }
+
+    #[test]
+    fn test_nested_spreads_with_different_args() {
+        use apollo_compiler::name;
+
+        let mut registry = MappingRegistry::new();
+
+        // Inner mapping with parameter
+        let inner_selection = JSONSelection::parse_with_spec(
+            "items: items->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = inner_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut inner_params = HashSet::new();
+        inner_params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(Inner),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Inner),
+                parameters: inner_params,
+            },
+        );
+
+        // Outer mapping references Inner with literal args
+        let outer_selection = JSONSelection::parse_with_spec(
+            "id ...Inner(count: 3)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = outer_selection.inner else {
+            panic!("expected Named selection")
+        };
+        registry.mappings.insert(
+            name!(Outer),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Outer),
+                parameters: HashSet::new(),
+            },
+        );
+
+        // Expand Outer
+        let selection =
+            JSONSelection::parse_with_spec("...Outer", ConnectSpec::V0_5).unwrap();
+        let expanded = registry.expand_selection(&selection).unwrap();
+
+        let pretty = expanded.pretty_print();
+        assert!(
+            pretty.contains("items: items->slice(0, 3)"),
+            "Expected nested expansion with count=3, got: {}",
+            pretty
+        );
+    }
+
+    #[test]
+    fn test_spread_args_parse_round_trip() {
+        // Test that ...User(count: 5) parses and pretty-prints correctly
+        let selection = JSONSelection::parse_with_spec(
+            "...User(count: 5)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+
+        let pretty = selection.pretty_print();
+        assert_eq!(pretty, "...User(count: 5)");
+    }
+
+    #[test]
+    fn test_spread_args_multiple_values_round_trip() {
+        let selection = JSONSelection::parse_with_spec(
+            "...Paginated(offset: 0, limit: 10)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+
+        let pretty = selection.pretty_print();
+        assert_eq!(pretty, "...Paginated(offset: 0, limit: 10)");
+    }
+
+    #[test]
+    fn test_spread_no_args_unchanged() {
+        // Existing behavior: ...User without parens still works
+        let selection =
+            JSONSelection::parse_with_spec("...User", ConnectSpec::V0_5).unwrap();
+        let pretty = selection.pretty_print();
+        assert_eq!(pretty, "...User");
+    }
+
+    #[test]
+    fn test_nested_forwarding_rejected() {
+        use apollo_compiler::name;
+
+        // v1 restriction: spread args must be literals, not $variable references.
+        // ...Inner(count: $count) is not allowed — it would require nested forwarding.
+        let mut registry = MappingRegistry::new();
+
+        let inner_selection = JSONSelection::parse_with_spec(
+            "items: items->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = inner_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut inner_params = HashSet::new();
+        inner_params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(Inner),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Inner),
+                parameters: inner_params,
+            },
+        );
+
+        // Outer tries to forward $count to Inner — this must fail
+        let outer_selection = JSONSelection::parse_with_spec(
+            "id ...Inner(count: $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = outer_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut outer_params = HashSet::new();
+        outer_params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(Outer),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Outer),
+                parameters: outer_params,
+            },
+        );
+
+        // Expanding ...Outer(count: 5) should fail because Outer's selection
+        // uses $count as a spread arg value (nested forwarding not allowed in v1)
+        let selection = JSONSelection::parse_with_spec(
+            "...Outer(count: 5)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("variable/path as argument value"),
+            "Expected nested forwarding rejection, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_dynamic_spread_arg_rejected() {
+        use apollo_compiler::name;
+
+        // $args.limit as a spread arg value is not allowed in v1
+        let mut registry = MappingRegistry::new();
+
+        let mapping_selection = JSONSelection::parse_with_spec(
+            "items: items->slice(0, $count)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let TopLevelSelection::Named(sub) = mapping_selection.inner else {
+            panic!("expected Named selection")
+        };
+        let mut params = HashSet::new();
+        params.insert("count".to_string());
+        registry.mappings.insert(
+            name!(Items),
+            MappingDefinition {
+                selection: TopLevelSelection::Named(sub),
+                source_type: name!(Items),
+                parameters: params,
+            },
+        );
+
+        // ...Items(count: $args.limit) — dynamic arg, should be rejected
+        let selection = JSONSelection::parse_with_spec(
+            "...Items(count: $args.limit)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let result = registry.expand_selection(&selection);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("variable/path as argument value"),
+            "Expected rejection of dynamic arg, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_from_schema_infers_parameters_and_expands() {
+        use apollo_compiler::Schema;
+
+        // Integration test: verify that from_schema() correctly infers parameters
+        // from @mapping selection and that expansion with @connect selection works.
+        let schema = Schema::parse(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+            directive @link(url: String, import: [link__Import]) repeatable on SCHEMA
+            scalar link__Import
+            directive @mapping(selection: String, as: String) repeatable on OBJECT | INTERFACE
+
+            type User @mapping(selection: "id name friends: friends->slice(0, $count)") {
+                id: ID!
+                name: String!
+                friends: [User!]!
+            }
+
+            type Query {
+                users: [User]
+            }
+            "#,
+            "test.graphql",
+        )
+        .unwrap();
+
+        let registry = MappingRegistry::from_schema(&schema).unwrap();
+
+        // Verify parameters were inferred
+        let mapping = registry.get_mapping("User").unwrap();
+        assert!(
+            mapping.parameters.contains("count"),
+            "Expected 'count' parameter to be inferred, got: {:?}",
+            mapping.parameters
+        );
+
+        // Verify expansion works
+        let connect_selection = JSONSelection::parse_with_spec(
+            "...User(count: 5)",
+            ConnectSpec::V0_5,
+        )
+        .unwrap();
+        let expanded = registry.expand_selection(&connect_selection).unwrap();
+        let pretty = expanded.pretty_print();
+        assert!(
+            pretty.contains("friends: friends->slice(0, 5)"),
+            "Expected expanded selection with count=5, got: {}",
+            pretty
         );
     }
 }

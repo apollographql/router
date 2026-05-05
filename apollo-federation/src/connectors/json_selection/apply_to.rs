@@ -6497,6 +6497,7 @@ mod tests {
 
     #[test]
     fn expanded_spread_named_only_outputs_mapped_fields() {
+        use std::collections::HashSet;
         use crate::connectors::mapping_registry::MappingDefinition;
         use crate::connectors::mapping_registry::MappingRegistry;
         use apollo_compiler::name;
@@ -6511,6 +6512,7 @@ mod tests {
                 MappingDefinition {
                     selection: TopLevelSelection::Named(sub),
                     source_type: name!(User),
+                    parameters: HashSet::new(),
                 },
             );
         }
@@ -6587,6 +6589,7 @@ mod tests {
 
     #[test]
     fn expand_replaces_spread_named_in_subselection() {
+        use std::collections::HashSet;
         use crate::connectors::mapping_registry::MappingDefinition;
         use crate::connectors::mapping_registry::MappingRegistry;
         use crate::connectors::json_selection::PrettyPrintable;
@@ -6602,6 +6605,7 @@ mod tests {
                 MappingDefinition {
                     selection: TopLevelSelection::Named(sub),
                     source_type: name!(Address),
+                    parameters: HashSet::new(),
                 },
             );
         }

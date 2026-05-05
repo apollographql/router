@@ -1,0 +1,572 @@
+---
+title: Reusable mappings with @mapping
+subtitle: Define reusable selection mappings for Apollo Connectors
+description: Use @mapping to define reusable JSONSelection mappings and reference them with ...TypeName in @connect selections.
+minVersion: Router v2.0.0
+---
+
+## Overview
+
+The `@mapping` directive lets you define a reusable JSONSelection mapping on a GraphQL object or interface type. You can then reference that mapping in any `@connect` selection using `...TypeName` syntax. This reduces duplication and helps keep connector mappings consistent.
+
+> `@mapping` is available only with the Connect spec **v0.5+**.
+
+## Basic example
+
+```graphql
+extend schema @link(url: "https://specs.apollo.dev/connect/v0.5", import: ["@mapping"])
+
+type User @mapping(
+  selection: """
+    id
+    name
+    email: emailAddress
+  """
+) {
+  id: ID!
+  name: String!
+  email: String!
+}
+
+type Query {
+  user: User @connect(selection: "...User") # Expands to: id name email: emailAddress
+  users: [User] @connect(selection: "...User")
+}
+```
+
+## Directive arguments
+
+- `selection` (JSONSelection, optional): The mapping to apply. If omitted, the mapping auto-selects all fields on the type by name.
+- `as` (String, optional): Alias used to reference the mapping. Defaults to the type name.
+
+## Multiple mappings per type
+
+You can apply `@mapping` more than once to the same type (the directive is **repeatable**). This lets you define multiple reusable variants for the same type.
+
+```graphql
+type Tax
+  @mapping(
+    selection: "amount rate",
+    as: "Tax"
+  )
+  @mapping(
+    selection: "amount: tax_amount rate: tax_rate_percentage",
+    as: "TaxV2"
+  )
+{
+  amount: Float!
+  rate: Float!
+}
+
+type Query {
+  tax: Tax
+    @connect(selection: "...Tax") # Expands to: amount rate
+  taxV2: Tax
+    @connect(selection: "...TaxV2") # Expands to: amount: tax_amount rate: tax_rate_percentage
+}
+```
+
+Example with alias:
+
+```graphql
+type Product @mapping(
+  selection: 
+    """
+    sku: product_sku
+    title: product_title
+    """,
+  as: "ProductV2"
+) {
+  sku: ID!
+  title: String!
+}
+
+type Query {
+  product: Product @connect(selection: "...ProductV2") # Expands to: sku: product_sku title: product_title
+}
+```
+
+## Rules and validation
+
+- `@mapping` is valid only in **connect/v0.5+**.
+- `@mapping` is valid on **OBJECT** and **INTERFACE** types.
+- `selection` supports the full **JSONSelection** syntax (including paths and methods).
+- `selection` and `as` must be **strings** when provided.
+- Mapping aliases must be **unique** across the schema.
+- Circular references (e.g. `...User` → `...Admin` → `...User`) are errors.
+
+Example with methods:
+
+```graphql
+type User @mapping(
+  selection:
+    """
+    id
+    shortName: name->slice(0, 20)
+    """,
+) {
+  id: ID!
+  shortName: String!
+}
+```
+
+## Interface mappings
+
+You can apply `@mapping` to interfaces as well as object types:
+
+```graphql
+interface Node @mapping(selection: "id") {
+  id: ID!
+}
+
+type User implements Node {
+  id: ID!
+  name: String!
+}
+
+type Query {
+  node: Node @connect(selection: "...Node") # Expands to: id
+}
+```
+
+Nested interface usage example:
+
+```graphql
+interface Node @mapping(selection: "id") {
+  id: ID!
+}
+
+type User implements Node {
+  id: ID!
+  name: String!
+}
+
+type Query {
+  user: User @connect(selection: "user { ...Node name }") # Expands to: user { id name }
+}
+```
+
+## Parameterized mappings
+
+You can define mappings that accept parameters, allowing the same mapping to be reused with different values. Parameters are any `$variable` in the selection that is not a reserved runtime namespace (see full list below).
+
+```graphql
+type User @mapping(
+  selection: """
+    id
+    friends->slice(0, $count)
+  """
+) {
+  id: ID!
+  friends: [User!]!
+}
+
+type Query {
+  recentFriends: User
+    @connect(selection: "...User(count: 3)")
+  allFriends: User
+    @connect(selection: "...User(count: 50)")
+}
+```
+
+### How parameters work
+
+- Parameters are **inferred** from the mapping's selection. Any `$variable` that is not a reserved runtime namespace is treated as a parameter. Reserved namespaces: `$this`, `$args`, `$config`, `$status`, `$context`, `$request`, `$response`, `$env`, `$batch`.
+- Parameters are **required**: every spread site must provide all parameters.
+- Substitution happens at **schema load time**, not per request.
+
+### Argument constraints (v1)
+
+- Arguments must be **literals only**: strings, numbers, booleans, or null.
+- Objects, arrays, paths, and expressions are **not allowed** as argument values.
+- You **cannot forward** a parameter from one mapping to another (e.g., `...Inner(count: $count)` inside a mapping is rejected).
+
+```graphql
+# Valid:
+@connect(selection: "...User(count: 5)")
+@connect(selection: "...User(count: 100)")
+@connect(selection: '...Greeting(msg: "hello")')
+
+# Invalid — object literal not allowed:
+@connect(selection: '...User(filter: { active: true })')
+
+# Invalid — nested forwarding not allowed:
+type Outer @mapping(selection: "...Inner(count: $count)") { ... }
+```
+
+### Errors
+
+- **Missing argument**: `Spread '...User' is missing required argument 'count'.`
+- **Unknown argument**: `Spread '...User(unknown: ...)' passes unknown argument 'unknown'. Available parameters: count`
+- **Duplicate argument**: `Spread '...User(...)' provides duplicate argument 'count'.`
+- **Non-literal argument (variable/path)**: `Spread '...User(count: ...)' uses a variable/path as argument value. In v1, spread arguments must be literals (integer, float, string, boolean, null).`
+- **Non-literal argument (object/array)**: `Spread '...User(filter: ...)' uses a complex value as argument. In v1, spread arguments must be literals (integer, float, string, boolean, null).`
+- **Args on parameterless mapping**: `Spread '...User(...)' passes arguments, but mapping 'User' has no parameters.`
+- **Reserved name conflict**: `Spread argument name 'this' conflicts with reserved runtime variable '$this'.`
+
+## Syntax details
+
+- Named mapping spreads use `...TypeName` (the type name must start with an uppercase ASCII letter).
+- Named spreads are expanded at schema load time; the runtime sees only the expanded selection.
+- You cannot call a method directly on a named spread (e.g. `...User->first()` is invalid).
+
+### Disambiguating spreads
+
+There are **two different** `...` forms in JSONSelection:
+
+**1) Anonymous path spread (v0.4+)**  
+Spreads the **result of a path** into the current object.
+
+```graphql
+...metadata { id name }
+...$({ extra: $('value') })
+```
+
+**2) Named mapping spread (v0.5+)**  
+Expands a **named @mapping** into the current selection.
+
+```graphql
+...User
+...ProductV2
+```
+
+If you see `...TypeName`, it is a mapping reference (not a path). If you want to spread a path, use a lowercase or path‑like expression (for example, `...metadata` or `...$.data.items`).
+
+### Design note: Mapping spread syntax
+
+The `...TypeName` syntax was chosen after considering alternatives (`...@TypeName`, `... on TypeName`). The uppercase convention provides clear disambiguation from anonymous path spreads while keeping the syntax concise.
+
+### Path-based mappings and placement rules
+
+If a mapping’s `selection` is a **path** (for example `$.data.user`), it expands to that path exactly as if you had written it inline. That means it must appear only in positions where a path selection is valid:
+
+- At the **top level** as the sole selection, or
+- As a **single anonymous selection** at a given selection level.
+
+Path selections that include a **subselection** (for example `$.data.user { id }`) behave like inline spreads: they merge object properties into the parent result and can be mixed with sibling fields.
+
+```graphql
+type User @mapping(selection: "$.data.user { id }") { id: ID! name: String }
+type Query {
+  user: User @connect(selection: "...User name") # Expands to: $.data.user { id } name
+}
+```
+
+If you place a **path mapping without a subselection** alongside sibling fields at the same level, it will error the same way an inline path would.
+
+## Auto-map mode
+
+If `selection` is omitted, the mapping auto-selects all fields on the type by name:
+
+```graphql
+type Address @mapping {
+  street: String!
+  city: String!
+  zipCode: String!
+}
+
+type Query {
+  address: Address @connect(selection: "...Address") # Expands to: street city zipCode
+}
+```
+
+### Auto-map behavior
+
+- Auto-map **does not** add subselections for nested object, interface, or union fields. It only selects the field name.
+- Field order follows the type's field order in the schema.
+- Field names with underscores are preserved as-is.
+
+Example (nested objects are not expanded):
+
+```graphql
+# Note: type does not have a @mapping associated with it
+type Location {
+  lat: Float!
+  lon: Float!
+}
+
+type Address @mapping {
+  street: String!
+  city: String!
+  location: Location!
+}
+
+type Query {
+  address: Address
+    @connect(selection: "...Address") # Expands to: street city location
+}
+```
+
+Note: This selection leaves nested object fields unresolved (for example `Location.lat` / `Location.lon`), so validation will error unless those fields are resolved by their own `@connect` directives or by using a mapping with a nested subselection.
+
+## How mappings are generated
+
+The router generates mappings in one of two ways:
+
+1) **Explicit mapping**: If you provide `selection`, the router parses that JSONSelection and uses it as the mapping.
+2) **Auto-map**: If you omit `selection`, the router builds a selection string from the type's field names (for example, `id name email`), then parses that into the mapping.
+
+Mappings are expanded at schema load time, so runtime execution uses only the expanded selections.
+
+## Common errors
+
+**Using @mapping with connect/v0.4 or earlier**
+
+```graphql
+extend schema @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@mapping"])
+type User @mapping { id: ID! }
+```
+Error: `@mapping directive on type 'TypeName' requires connect spec v0.5 or later, but schema uses v{version}`.
+Fix: Update your link to `https://specs.apollo.dev/connect/v0.5` (or later), or remove the directive.
+
+**Duplicate alias**
+
+```graphql
+type User @mapping(as: "SharedAlias") { id: ID! }
+type Post @mapping(as: "SharedAlias") { id: ID! }
+```
+Error: `Duplicate @mapping alias 'SharedAlias'. Each mapping must have a unique alias.`
+Fix: Rename one of the aliases, or remove the alias to use the type name instead.
+
+**Path mapping used alongside siblings (invalid)**
+
+```graphql
+type User @mapping(selection: "$.data.user") { id: ID! }
+type Query { user: User @connect(selection: "...User name") }
+```
+Error: `Path selections cannot be combined with other selections at the same level. Use the path selection alone, or add a subselection like '$.path { ... }'.`
+Fix: Use the path mapping alone, or add a subselection so it merges like a spread (for example `$.data.user { id }`).
+
+Note: A path mapping **with a subselection** (for example `$.data.user { id }`) merges object properties into the parent result, so it can be mixed with sibling fields.
+
+**Path selection nesting too deep**
+
+Error: `Path selection exceeds maximum nesting depth`.
+Fix: Reduce path nesting depth. The parser enforces a maximum of **64** path levels.
+
+**Mapping expansion chain too deep**
+
+Error: `Mapping expansion exceeded maximum depth of 32`.
+Fix: Reduce the depth of transitive mapping chains (e.g., `...A` references `...B` references `...C`). The router enforces a maximum expansion depth of **32** levels.
+
+**Circular references**
+
+```graphql
+type User @mapping(selection: "...Admin") { id: ID! }
+type Admin @mapping(selection: "...User") { id: ID! }
+```
+Error: `Circular reference detected in @mapping: ...{TypeName} references itself`.
+Fix: Break the cycle by inlining one mapping or refactoring the shared selection into a third mapping that doesn't reference back.
+
+**Auto-map leaves nested fields unresolved**
+
+```graphql
+type Address @mapping {
+  street: String!
+  city: String!
+  location: Location!
+}
+
+type Query {
+  address: Address @connect(selection: "...Address")
+}
+```
+
+Error: Nested object fields (for example `Location.lat` / `Location.lon`) are not resolved by auto-map alone.  
+Fix: Add `@connect` directives for nested fields, or use a mapping with a nested subselection (for example `location { lat lon }`).
+
+## How it works internally
+
+At startup, the router builds a **mapping registry** from the schema:
+
+1) It reads every `@mapping` directive on object and interface types.  
+2) It parses each mapping’s `selection` (or auto-generated field list) into a JSONSelection AST.  
+3) It stores the result in a registry keyed by the mapping name (the `as` alias or the type name).
+
+When connectors are built, the router expands any `...TypeName` spreads in each `@connect` selection by looking up the mapping in the registry and inlining its selection. This expansion is done **once at schema load time**, and it includes circular-reference detection.
+
+At request time, the router applies the **expanded** JSONSelection only—there’s no additional mapping lookup in the hot path.
+
+### Internal safety invariant
+
+Named spreads (`...TypeName`) must be expanded before evaluation. If evaluation ever sees an unexpanded named spread, the router returns an explicit internal error:
+
+- `BUG: unexpanded ...{TypeName} spread reached evaluation. All SpreadNamed nodes must be expanded by MappingRegistry before apply_to is called.`
+
+This protects against silent data leakage from evaluating an empty fallback path. If you see this error, treat it as an implementation bug and report it.
+
+### Why expansion happens at schema load time
+
+The router expands mappings when the schema is loaded to keep request execution fast and deterministic. This gives three concrete benefits:
+
+- **Zero runtime overhead**: no lookups or recursive expansion during request handling.
+- **Clearer errors**: invalid mappings (unknown aliases, cycles) fail fast during schema load rather than surfacing per request.
+- **Stable behavior**: all `@connect` selections are normalized once, so every request executes against the same expanded shape.
+
+There are also operational tradeoffs:
+
+- **Startup cost**: expansion adds a small, one‑time cost when loading or hot‑reloading the schema.
+- **Memory footprint**: expanded selections can be larger than their original form, which increases in‑memory size modestly.
+- **Simpler hot path**: runtime code stays leaner and easier to reason about.
+
+### Alternative approaches (and tradeoffs)
+
+**1) Expand at parse time (schema‑aware parser)**  
+Pros: One phase; no separate expansion step; fewer intermediate objects.  
+Cons: Parser must depend on schema context, making parsing harder to reuse and test; errors become less localized to schema validation; tighter coupling increases implementation complexity.
+
+**2) Expand at runtime (lazy expansion)**  
+Pros: Minimal load‑time cost; mappings could be swapped dynamically.  
+Cons: Adds overhead to every request; makes errors intermittent; increases hot‑path complexity; increases runtime memory churn.
+
+**3) Expand into a selection trie**  
+Pros: Fast expansion and potential deduplication of fields; efficient for very large schemas.  
+Cons: More complex data structures; harder to debug; higher implementation complexity; usually unnecessary at current scale.
+
+### Internal flow (sequence)
+
+<img width="800" src="../images/connectors-mapping-flow.svg" alt="Flow diagram for mapping registry build and expansion" />
+
+```text
+Schema parse
+   |
+   v
+ConnectLink (spec version)
+   |
+   v
+Extract @mapping directives
+   |
+   v
+Parse selection / auto-map fields
+   |
+   v
+MappingRegistry (alias -> selection AST)
+   |
+   v
+Build connectors (@connect)
+   |
+   v
+Expand ...TypeName using registry
+   |
+   v
+Expanded JSONSelection (runtime)
+```
+
+## More JSONSelection examples in mappings
+
+Optional chaining and array access:
+
+```graphql
+type User @mapping(
+  selection:
+    """
+    id
+    city: address?.city
+    firstTodoTitle: todos[0].title
+    """,
+) {
+  id: ID!
+  city: String
+  firstTodoTitle: String
+}
+```
+
+Methods and literals:
+
+```graphql
+type Post @mapping(
+  selection:
+    """
+    id
+    title
+    titleStr: title->toString
+    summary: title->slice(0, 40)
+    isShort: title->size->lt(40)
+    """,
+) {
+  id: ID!
+  title: String!
+  titleStr: String!
+  summary: String!
+  isShort: Boolean!
+}
+```
+
+Path mapping with subselection (mixes with siblings):
+
+```graphql
+type User @mapping(
+  selection:
+    """
+    $.data.user { id }
+    """,
+) {
+  id: ID!
+}
+
+type Query {
+  user: User
+    @connect(selection: "...User name") # Expands to: $.data.user { id } name
+}
+```
+
+## Full connector example (JSONPlaceholder)
+
+This example shows reusable mappings for both users and posts, and uses them from `@connect` selections:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.5",
+    import: ["@connect", "@mapping"]
+  )
+
+type User @mapping(
+  selection:
+    """
+    id
+    name
+    email
+    city: address.city
+    """,
+) {
+  id: ID!
+  name: String!
+  email: String!
+  city: String
+}
+
+type Post @mapping(
+  selection:
+    """
+    id
+    userId
+    title
+    shortTitle: title->slice(0, 24)
+    """,
+) {
+  id: ID!
+  userId: ID!
+  title: String!
+  shortTitle: String!
+}
+
+type Query {
+  users: [User]
+    @connect(
+      http: { GET: "https://jsonplaceholder.typicode.com/users" }
+      selection: "...User"
+    ) # Expands to: id name email city: address.city
+
+  posts: [Post]
+    @connect(
+      http: { GET: "https://jsonplaceholder.typicode.com/posts" }
+      selection: "...Post"
+    ) # Expands to: id userId title shortTitle: title->slice(0, 24)
+}
+```
+
+## Notes
+
+- `@mapping` is intended for **reuse**. It doesn’t change the GraphQL schema; it only affects connector selections.
+- `...TypeName` is distinct from the anonymous spread syntax (`...path`) used in JSONSelection.
