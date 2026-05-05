@@ -31,12 +31,15 @@ const MAX_SUGGESTIONS: usize = 5;
 /// Given [ A, B ], returns "Did you mean A or B?".
 /// Given [ A, B, C ], returns "Did you mean A, B, or C?".
 pub(crate) fn did_you_mean(suggestions: impl IntoIterator<Item = String>) -> String {
-    const MESSAGE: &str = "Did you mean ";
+    const MESSAGE: &str = " Did you mean ";
     let suggestions = suggestions
         .into_iter()
         .take(MAX_SUGGESTIONS)
         .map(|s| format!("\"{s}\""))
         .collect_vec();
+    if suggestions.is_empty() {
+        return String::new();
+    }
     let last_separator = if suggestions.len() > 2 {
         Some(", or ")
     } else {
@@ -52,4 +55,42 @@ pub(crate) fn did_you_mean(suggestions: impl IntoIterator<Item = String>) -> Str
         },
     );
     format!("{MESSAGE}{suggestion_str}?")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn did_you_mean_returns_empty_string_for_no_suggestions() {
+        assert_eq!(did_you_mean(Vec::<String>::new()), "");
+    }
+
+    #[test]
+    fn did_you_mean_with_one_suggestion() {
+        assert_eq!(
+            did_you_mean(vec!["foo".to_string()]),
+            r#" Did you mean "foo"?"#
+        );
+    }
+
+    #[test]
+    fn did_you_mean_with_two_suggestions() {
+        assert_eq!(
+            did_you_mean(vec!["foo".to_string(), "bar".to_string()]),
+            r#" Did you mean "foo" or "bar"?"#
+        );
+    }
+
+    #[test]
+    fn did_you_mean_with_three_suggestions() {
+        assert_eq!(
+            did_you_mean(vec![
+                "foo".to_string(),
+                "bar".to_string(),
+                "baz".to_string()
+            ]),
+            r#" Did you mean "foo", "bar", or "baz"?"#
+        );
+    }
 }

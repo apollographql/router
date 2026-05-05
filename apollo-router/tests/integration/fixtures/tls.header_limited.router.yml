@@ -1,5 +1,16 @@
 supergraph:
   listen: 127.0.0.1:0
+  # Belt-and-suspenders override. The integration test harness
+  # (apollo-router/tests/common.rs::merge_overrides) injects a 5 s
+  # `connection_shutdown_timeout` default for every test, which is
+  # already sufficient to beat `assert_shutdown`'s 10 s budget even
+  # when a hyper HTTP/2 client keeps its pooled TCP connection open
+  # past the 431 response these tests intentionally trigger. We keep
+  # this explicit fixture-level value so the test remains robust if
+  # the harness default ever shifts higher, and to document why this
+  # particular fixture is shutdown-sensitive. See
+  # `handle_connection!` in src/axum_factory/listeners.rs.
+  connection_shutdown_timeout: 1s
 
 limits:
   http1_max_request_headers: 100

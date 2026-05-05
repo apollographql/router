@@ -527,22 +527,30 @@ mod tests {
         let (_, body, _) = fake_manifest();
         let id = "5678".to_string();
 
-        let manifest_manager = PersistedQueryManifestPoller::new(
-            Configuration::fake_builder()
-                .apq(Apq::fake_new(Some(false)))
-                .persisted_query(
-                    PersistedQueries::builder()
-                        .enabled(true)
-                        .local_manifests(vec![
-                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
-                        ])
-                        .hot_reload(true)
-                        .build(),
-                )
-                .build()
-                .unwrap(),
+        // Bound the initial load so a hang surfaces with a clear diagnostic message
+        // instead of being silently killed by nextest's slow-timeout (120 s) with no
+        // output. Locally this test completes in ~30 ms; 30 s leaves generous headroom
+        // for CI while staying under the first slow-timeout warning.
+        let manifest_manager = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            PersistedQueryManifestPoller::new(
+                Configuration::fake_builder()
+                    .apq(Apq::fake_new(Some(false)))
+                    .persisted_query(
+                        PersistedQueries::builder()
+                            .enabled(true)
+                            .local_manifests(vec![
+                                "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                            ])
+                            .hot_reload(true)
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            ),
         )
         .await
+        .expect("PersistedQueryManifestPoller::new did not complete within 30s")
         .unwrap();
         assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body));
     }

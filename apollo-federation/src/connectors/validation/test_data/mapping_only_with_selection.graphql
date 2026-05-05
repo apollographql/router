@@ -1,0 +1,45 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v1", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+  me: User
+    @connect(
+      selection: """
+        id: "user-123"
+      """
+    )
+}
+
+type Mutation {
+  user: UserMutations
+    @connect(selection: "$({})")
+}
+
+type UserMutations {
+  updateName(name: String): String
+    @connect(
+      source: "v1"
+      http: { POST: "/users/name", body: "$args" }
+      selection: """
+        name
+      """
+    )
+}
+
+type User
+  @connect(
+    source: "v1"
+    http: { GET: "/users/{$this.id}" }
+    selection: """
+      id
+      name
+    """
+  )
+{
+  id: ID!
+  name: String
+}

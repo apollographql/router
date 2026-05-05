@@ -434,6 +434,11 @@ impl SchemaUpgrader {
                         args.fields,
                         false,
                     )? {
+                        // We only consider "top-level" fields, the one of the type on which
+                        // the key is, because that's what fed1 does.
+                        if TypeDefinitionPosition::from(field.parent()) != *ty {
+                            continue;
+                        }
                         let external =
                             field.get_applied_directives(schema, &external_directive.name);
                         if !external.is_empty() {
@@ -1154,6 +1159,63 @@ mod tests {
 
         scalar link__Import
         "###
+        );
+    }
+
+    #[test]
+    fn preserves_external_on_nested_key_fields() {
+        // When a type extension uses a composite @key that traverses into another
+        // type (e.g. @key(fields: "profile { id }")), the upgrader should only
+        // strip @external from the top-level fields on the extension itself, not
+        // from nested fields on other types.
+        let s1 = Subgraph::parse(
+            "subgraphA",
+            "",
+            r#"
+            extend type Entity @key(fields: "profile { id }") {
+              profile: Profile @external
+              value: Int
+            }
+
+            type Profile {
+              id: ID! @external
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse(
+            "subgraphB",
+            "",
+            r#"
+            type Entity @key(fields: "profile { id }") {
+              profile: Profile
+              name: String
+            }
+
+            type Profile {
+              id: ID!
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        let s1_schema = s1.schema().schema();
+        let profile_id = coord!(Profile.id)
+            .lookup_field(s1_schema)
+            .expect("Profile.id field exists");
+        assert!(
+            profile_id.directives.has("external"),
+            "Profile.id should retain @external after upgrade"
         );
     }
 
