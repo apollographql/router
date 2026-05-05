@@ -72,6 +72,7 @@ impl PluginPrivate for FileUploadsPlugin {
                         Ok(req) => ControlFlow::Continue(req),
                         Err(err) => ControlFlow::Break(
                             router::Response::error_builder()
+                                .status_code(err.http_status_code())
                                 .errors(vec![err.into()])
                                 .context(context)
                                 .build()?,
@@ -179,7 +180,28 @@ async fn router_layer(
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
 
-        let mut multipart = MultipartRequest::new(request_body, boundary, limits);
+        // Disable the global stream-level limit before multer reads anything.
+        // limited::poll_frame fires when a single HTTP frame exceeds the remaining budget, but
+        // hyper can deliver large frames on the first read (e.g. the entire multipart body). That
+        // would trigger a spurious 413 before multer has extracted the small operations field.
+        // Instead, we enforce http_max_request_bytes via multer's per-field SizeLimit on the
+        // "operations" field (passed as operations_size_limit below), which counts content bytes
+        // incrementally during streaming.
+        let operations_size_limit = request_parts
+            .extensions
+            .get::<BodyLimitControl>()
+            .and_then(|control| {
+                let limit = control.limit();
+                // update_limit asserts new > current, so skip if already at usize::MAX.
+                if limit < usize::MAX {
+                    control.update_limit(usize::MAX);
+                }
+                u64::try_from(limit).ok()
+            })
+            .unwrap_or(u64::MAX);
+
+        let mut multipart =
+            MultipartRequest::new(request_body, boundary, limits, operations_size_limit);
         let operations_stream = multipart.operations_field().await?;
 
         req.context
@@ -196,7 +218,16 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
+<<<<<<< HEAD
         let request_body = router::body::from_result_stream(operations_stream);
+=======
+        let operations_bytes = operations_stream
+            .bytes()
+            .await
+            .map_err(FileUploadError::InvalidMultipartRequest)?;
+
+        let request_body = router::body::from_bytes(operations_bytes);
+>>>>>>> 496dd0ab (fix(file_uploads): enforce http_max_request_bytes on operations field via multer SizeLimit (#9327))
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,
