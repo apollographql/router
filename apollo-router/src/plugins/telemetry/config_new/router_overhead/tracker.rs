@@ -128,13 +128,13 @@ mod tests {
 
         let result = tracker.calculate_overhead();
 
-        // Overhead should be roughly 50ms (the time not spent in subgraph)
-        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
-        // We're testing the logic is correct, not that thread::sleep is precise
+        // Overhead should be roughly 50ms (the time not spent in subgraph).
+        // Bounds are intentionally loose to survive CI scheduler stalls; see
+        // test_sequential_subgraph_requests for the detailed rationale.
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(30)
-                && result.overhead <= Duration::from_millis(200),
+            result.overhead >= Duration::from_millis(1)
+                && result.overhead <= Duration::from_millis(500),
             "overhead was {:?}",
             result.overhead
         );
@@ -161,12 +161,23 @@ mod tests {
 
         let result = tracker.calculate_overhead();
 
-        // Overhead should be roughly 20ms (the time between subgraph requests)
-        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
+        // Overhead should be roughly 20ms (the time between subgraph requests).
+        // On overloaded CI systems, `thread::sleep` can take substantially longer
+        // than requested, and the OS can preempt between the guard drop and the
+        // next `Instant::now()` read, so both the lower and upper bounds need
+        // large margins. We're testing the logic (overhead = total - subgraph),
+        // not that `thread::sleep` is precise.
+        //
+        // The original bounds of 5ms..=100ms were too tight: a loaded macOS
+        // CircleCI executor can stall the inter-guard `thread::sleep(20ms)` to
+        // well over 100ms, pushing `overhead` above the upper bound; conversely,
+        // a `thread::sleep(50ms)` inside a guard that overshoots by >15ms pulls
+        // `accumulated_subgraph_time` above `total_elapsed`, causing
+        // `saturating_sub` to return 0 and breaking the lower bound.
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(5)
-                && result.overhead <= Duration::from_millis(100),
+            result.overhead >= Duration::from_millis(1)
+                && result.overhead <= Duration::from_millis(500),
             "overhead was {:?}",
             result.overhead
         );
@@ -195,11 +206,12 @@ mod tests {
         // Total time: ~160ms
         // Subgraph time: 100ms (guard1) + 50ms (only guard2) = 150ms
         // Overhead: ~10ms initial + some processing = ~10-20ms
-        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
+        // Bounds are intentionally loose to survive CI scheduler stalls; see
+        // test_sequential_subgraph_requests for the detailed rationale.
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(3)
-                && result.overhead <= Duration::from_millis(100),
+            result.overhead >= Duration::from_millis(1)
+                && result.overhead <= Duration::from_millis(500),
             "overhead was {:?}",
             result.overhead
         );

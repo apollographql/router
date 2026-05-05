@@ -1,4 +1,4 @@
-use apollo_federation::error::CompositionError;
+use apollo_federation::composition::CompositionFailure;
 use apollo_federation::subgraph::test_utils::remove_indentation;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
@@ -11,7 +11,7 @@ use super::extract_subgraphs_from_supergraph_result;
 
 fn compose_services(
     service_list: &[ServiceDefinition<'_>],
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
     for service in service_list {
@@ -30,7 +30,7 @@ fn compose_services(
         }
     }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(CompositionFailure::from_errors(errors));
     }
 
     compose(subgraphs)
@@ -734,7 +734,9 @@ mod override_tests {
             "#,
         };
 
-        let errors = compose_services(&[subgraph_a, subgraph_b]).unwrap_err();
+        let errors = compose_services(&[subgraph_a, subgraph_b])
+            .unwrap_err()
+            .errors;
         assert_eq!(
             errors.len(),
             1,
