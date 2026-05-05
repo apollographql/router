@@ -1241,7 +1241,7 @@ impl Merger {
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
-                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
+                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist.{extra_msg}",
                         source_subgraph_name, dest, subgraph_name
                     ),
                     locations: Default::default(),
@@ -1744,8 +1744,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     fn add_missing_interface_object_fields_to_implementations(
         &mut self,
     ) -> Result<(), FederationError> {
-        let mut fields_to_insert: HashMap<ObjectFieldDefinitionPosition, FieldDefinition> =
-            HashMap::new();
+        let mut fields_to_insert: IndexMap<ObjectFieldDefinitionPosition, FieldDefinition> =
+            IndexMap::default();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
