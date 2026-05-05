@@ -546,3 +546,51 @@ fn override_from_nonexistent_subgraph_hint_has_no_empty_did_you_mean() {
         "Hint message should end with 'does not exist.', got: {message}"
     );
 }
+
+#[test]
+fn override_from_nonexistent_subgraph_hint_has_subgraph_location() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          product: Product
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @override(from: "nonExistent") @shareable
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    let from_subgraph_hints: Vec<_> = supergraph
+        .hints()
+        .iter()
+        .filter(|h| h.code() == "FROM_SUBGRAPH_DOES_NOT_EXIST")
+        .collect();
+
+    assert_eq!(from_subgraph_hints.len(), 1);
+    let hint = &from_subgraph_hints[0];
+    assert_eq!(
+        hint.locations.len(),
+        1,
+        "Hint should have exactly one location"
+    );
+    assert_eq!(
+        hint.locations[0].subgraph, "subgraphA",
+        "Hint location should reference the subgraph with @override"
+    );
+}
