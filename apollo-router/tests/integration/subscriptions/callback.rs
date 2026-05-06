@@ -74,7 +74,12 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     // latency — under CI load the +1000ms buffer was not always
     // enough. Poll the callback receiver until the expected count
     // arrives, with a generous deadline.
-    wait_for_callbacks(&callback_state, nb_events + 1, tokio::time::Duration::from_secs(30)).await;
+    wait_for_callbacks(
+        &callback_state,
+        nb_events + 1,
+        tokio::time::Duration::from_secs(30),
+    )
+    .await;
 
     // Verify callbacks were received - expect default user events
     let expected_user_events = vec![
@@ -122,9 +127,7 @@ async fn wait_for_callbacks(
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
     }
     let count = callback_state.received_callbacks.lock().len();
-    panic!(
-        "expected {expected_count} callbacks within {deadline:?}, got {count}"
-    );
+    panic!("expected {expected_count} callbacks within {deadline:?}, got {count}");
 }
 
 async fn verify_callback_events(
