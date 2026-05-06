@@ -801,6 +801,18 @@ async fn test_connector_request_emits_histogram() {
     let expected_operation_type = "query";
     let expected_connector_source = "jsonPlaceholder";
 
+    // The `connectors.sources` stanza is required for the `IntegrationTest` harness to
+    // auto-inject `override_url` pointing at the local wiremock subgraph (see
+    // `merge_overrides` in `tests/common.rs`: the override is only inserted if the
+    // config already declares `connectors.sources`). Without it the connector falls
+    // through to the schema's `https://jsonplaceholder.typicode.com/` baseURL and makes
+    // a real network request — which on CircleCI's amd_linux_test / arm_linux_test
+    // executors hangs past the router's 30 s subgraph timeout. The router then emits
+    // an `apollo.router.operations.fetch.duration` datapoint without the `has_errors`
+    // attribute the assertion expects (the early
+    // `apollo.operation.id`-stamped datapoint is the only one that lands within the
+    // poll window). That was the `test_connector_request_emits_histogram` flake on
+    // PR #9339's CircleCI build 366174.
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp { endpoint: None })
         .config(
@@ -815,6 +827,8 @@ async fn test_connector_request_emits_histogram() {
                 subgraph_metrics: true
             include_subgraph_errors:
               all: true
+            connectors:
+              sources: {}
         "#,
         )
         .supergraph(PathBuf::from_iter([
@@ -846,24 +860,20 @@ async fn test_connector_request_emits_histogram() {
         )
         .await;
 
-    let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
-        .await;
+    let expected = Metric::builder()
+        .name("apollo.router.operations.fetch.duration".to_string())
+        .attribute("graphql.operation.name", expected_operation_name)
+        .attribute("apollo.client.name", expected_client_name)
+        .attribute("apollo.client.version", expected_client_version)
+        .attribute("subgraph.name", expected_service)
+        .attribute("graphql.operation.type", expected_operation_type)
+        .attribute("has_errors", false)
+        .attribute("connector.source", expected_connector_source)
+        .count(1)
+        .build();
+    let metrics = wait_for_metric_match(&mut router, &expected, Duration::from_secs(5)).await;
     assert!(!metrics.is_empty());
-    assert_metrics_contain(
-        &metrics,
-        Metric::builder()
-            .name("apollo.router.operations.fetch.duration".to_string())
-            .attribute("graphql.operation.name", expected_operation_name)
-            .attribute("apollo.client.name", expected_client_name)
-            .attribute("apollo.client.version", expected_client_version)
-            .attribute("subgraph.name", expected_service)
-            .attribute("graphql.operation.type", expected_operation_type)
-            .attribute("has_errors", false)
-            .attribute("connector.source", expected_connector_source)
-            .count(1)
-            .build(),
-    );
+    assert_metrics_contain(&metrics, expected);
     router.graceful_shutdown().await;
 }
 
@@ -926,35 +936,54 @@ async fn test_failed_connector_request_emits_histogram() {
         )
         .await;
 
-    let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_secs(2))
-        .await;
+    let expected = Metric::builder()
+        .name("apollo.router.operations.fetch.duration".to_string())
+        .attribute("graphql.operation.name", expected_operation_name)
+        .attribute("apollo.client.name", expected_client_name)
+        .attribute("apollo.client.version", expected_client_version)
+        .attribute("subgraph.name", expected_service)
+        .attribute("graphql.operation.type", expected_operation_type)
+        .attribute("has_errors", true)
+        .attribute("connector.source", expected_connector_source)
+        .count(1)
+        .build();
+    let metrics = wait_for_metric_match(&mut router, &expected, Duration::from_secs(5)).await;
     assert!(!metrics.is_empty());
-    assert_metrics_contain(
-        &metrics,
-        Metric::builder()
-            .name("apollo.router.operations.fetch.duration".to_string())
-            .attribute("graphql.operation.name", expected_operation_name)
-            .attribute("apollo.client.name", expected_client_name)
-            .attribute("apollo.client.version", expected_client_version)
-            .attribute("subgraph.name", expected_service)
-            .attribute("graphql.operation.type", expected_operation_type)
-            .attribute("has_errors", true)
-            .attribute("connector.source", expected_connector_source)
-            .count(1)
-            .build(),
-    );
+    assert_metrics_contain(&metrics, expected);
     router.graceful_shutdown().await;
 }
 
 /// Assert that the given metric exists in the list of Otel requests. This is a crude attempt at
 /// replicating _some_ assert_counter!() functionality since that test util can't be accessed here.
 fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expected_metric: Metric) {
-    let expected_name = &expected_metric.name.clone();
-    let actual_metric = find_metric(expected_name, actual_metrics)
-        .unwrap_or_else(|| panic!("Metric '{expected_name}' not found"));
+    let (metric_found, observed) = metrics_contain_and_observed(actual_metrics, &expected_metric);
 
-    let actual_metrics: Vec<Metric> = match &actual_metric.data {
+    assert!(
+        metric_found,
+        "Expected metric '{}' but no matching datapoint was found.\nInstead, actual metrics with matching name were:\n{}",
+        expected_metric,
+        observed
+            .iter()
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// Check whether `actual_metrics` contains a datapoint matching `expected_metric`. Returns
+/// `(found, observed_datapoints_for_that_metric_name)` so callers can either assert with a
+/// detailed message (see `assert_metrics_contain`) or loop polling for the metric to land
+/// (see `wait_for_metric_match`).
+fn metrics_contain_and_observed(
+    actual_metrics: &[ExportMetricsServiceRequest],
+    expected_metric: &Metric,
+) -> (bool, Vec<Metric>) {
+    let expected_name = &expected_metric.name;
+    let Some(actual_metric) = find_metric(expected_name, actual_metrics) else {
+        return (false, Vec::new());
+    };
+
+    let observed: Vec<Metric> = match &actual_metric.data {
         Some(metric::Data::Sum(sum)) => sum
             .data_points
             .iter()
@@ -968,7 +997,7 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
         _ => panic!("Metric type for '{expected_name}' is not yet implemented"),
     };
 
-    let metric_found = actual_metrics.iter().any(|m| {
+    let metric_found = observed.iter().any(|m| {
         // Only match values and attributes that are explicitly set
         expected_metric.value.is_none_or(|v| Some(v) == m.value)
             && expected_metric.sum.is_none_or(|s| Some(s) == m.sum)
@@ -976,16 +1005,43 @@ fn assert_metrics_contain(actual_metrics: &[ExportMetricsServiceRequest], expect
             && m.attributes_contain(&expected_metric.attributes)
     });
 
-    assert!(
-        metric_found,
-        "Expected metric '{}' but no matching datapoint was found.\nInstead, actual metrics with matching name were:\n{}",
-        expected_metric,
-        actual_metrics
-            .iter()
-            .map(|m| m.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    (metric_found, observed)
+}
+
+/// Deadline-bounded poll for a metric matching `expected_metric`.
+///
+/// `IntegrationTest::wait_for_emitted_otel_metrics` returns the first batch of metrics it
+/// receives — but for connector subgraph fetches the router emits more than one batch
+/// for `apollo.router.operations.fetch.duration`: an early datapoint stamped with
+/// `apollo.operation.id` (no `has_errors` yet), and a subsequent datapoint with the
+/// `has_errors` enrichment that the assertion expects. Returning on the first batch races
+/// with the second batch arriving and explains the
+/// `test_connector_request_emits_histogram` flake on PR #9339's CircleCI build 366174
+/// (no datapoint matched the expected attribute set).
+///
+/// Same shape as the deadline-bounded poll Phase 1 applied to
+/// `verifier.rs::validate_*` and `apollo_otel_traces::get_traces` (PR #9257), and the
+/// `events.rs::EventTest::capture_logged_events` poll added in PR #9340 — keep draining
+/// batches into an accumulator until either the expected metric arrives or the deadline
+/// expires. `tests/common.rs::wait_for_emitted_otel_metrics` is owned by the
+/// multi-agent coordinator and intentionally not modified here; the fix lives at the
+/// call site.
+async fn wait_for_metric_match(
+    router: &mut IntegrationTest,
+    expected_metric: &Metric,
+    deadline: Duration,
+) -> Vec<ExportMetricsServiceRequest> {
+    let start = std::time::Instant::now();
+    let per_iter = Duration::from_millis(500);
+    let mut accumulated: Vec<ExportMetricsServiceRequest> = Vec::new();
+    loop {
+        let batch = router.wait_for_emitted_otel_metrics(per_iter).await;
+        accumulated.extend(batch);
+        let (found, _) = metrics_contain_and_observed(&accumulated, expected_metric);
+        if found || start.elapsed() >= deadline {
+            return accumulated;
+        }
+    }
 }
 
 fn find_metric<'a>(
