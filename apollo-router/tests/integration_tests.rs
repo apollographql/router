@@ -105,13 +105,12 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = {
-        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
-        (
-            query_with_router(router, get_request).await,
-            counting_registry,
-        )
-    };
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({}),
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
+    )
+    .await;
+    let actual = query_with_router(router, get_request).await;
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
@@ -210,7 +209,12 @@ async fn queries_should_work_with_compression() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({}),
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
+    )
+    .await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -232,75 +236,15 @@ async fn queries_should_work_over_post() {
         "accounts".to_string()=>1,
     };
 
-    let mocks = {
-        let mut s = MockedSubgraphs::default();
-        s.insert(
-            "products",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json!({"query": "{ topProducts { __typename upc name } }"}),
-                    serde_json::json!({"data": {
-                        "topProducts": [
-                            {"__typename": "Product", "upc": "1", "name": "Table"},
-                            {"__typename": "Product", "upc": "2", "name": "Couch"},
-                        ]
-                    }}),
-                )
-                .with_json(
-                    serde_json::json!({
-                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
-                        "variables": {"representations": [{"__typename": "Product", "upc": "1"}]}
-                    }),
-                    serde_json::json!({"data": {"_entities": [{"name": "Table"}]}}),
-                )
-                .build(),
-        );
-        s.insert("inventory", MockSubgraph::builder().build());
-        s.insert(
-            "reviews",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json!({
-                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { id product { __typename upc } author { __typename id } } } } }",
-                        "variables": {"representations": [
-                            {"__typename": "Product", "upc": "1"},
-                            {"__typename": "Product", "upc": "2"},
-                        ]}
-                    }),
-                    serde_json::json!({"data": {"_entities": [
-                        {"reviews": [
-                            {"id": "r1", "product": {"__typename": "Product", "upc": "1"}, "author": {"__typename": "User", "id": "1"}}
-                        ]},
-                        {"reviews": []}
-                    ]}}),
-                )
-                .build(),
-        );
-        s.insert(
-            "accounts",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json!({
-                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
-                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
-                    }),
-                    serde_json::json!({"data": {"_entities": [{"name": "Ada"}]}}),
-                )
-                .build(),
-        );
-        s
-    };
-
     let (router, registry) = setup_sandboxed_router_and_registry(
         serde_json::json!({
             "telemetry":{
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            },
-            "include_subgraph_errors": {"all": true}
+            }
         }),
-        mocks,
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
     )
     .await;
     let actual = query_with_router(router, request.try_into().unwrap()).await;
@@ -1379,6 +1323,72 @@ fn starstuff_mocks_empty() -> MockedSubgraphs {
     s.insert("inventory", MockSubgraph::builder().build());
     s.insert("products", MockSubgraph::builder().build());
     s.insert("reviews", MockSubgraph::builder().build());
+    s
+}
+
+// Mocks for the query
+// `{ topProducts { upc name reviews { id product { name } author { id name } } } }`.
+// Shared by `queries_should_work_over_post`, `queries_should_work_over_get`,
+// and `queries_should_work_with_compression` — all three issue the same
+// GraphQL operation, so the planner emits the same four subgraph
+// queries, and the tests assert identical hit totals
+// (`{products: 2, reviews: 1, accounts: 1}`).
+fn starstuff_mocks_for_top_products_with_reviews_and_authors() -> MockedSubgraphs {
+    let mut s = MockedSubgraphs::default();
+    s.insert(
+        "products",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({"query": "{ topProducts { __typename upc name } }"}),
+                serde_json::json!({"data": {
+                    "topProducts": [
+                        {"__typename": "Product", "upc": "1", "name": "Table"},
+                        {"__typename": "Product", "upc": "2", "name": "Couch"},
+                    ]
+                }}),
+            )
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
+                    "variables": {"representations": [{"__typename": "Product", "upc": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Table"}]}}),
+            )
+            .build(),
+    );
+    s.insert("inventory", MockSubgraph::builder().build());
+    s.insert(
+        "reviews",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { id product { __typename upc } author { __typename id } } } } }",
+                    "variables": {"representations": [
+                        {"__typename": "Product", "upc": "1"},
+                        {"__typename": "Product", "upc": "2"},
+                    ]}
+                }),
+                serde_json::json!({"data": {"_entities": [
+                    {"reviews": [
+                        {"id": "r1", "product": {"__typename": "Product", "upc": "1"}, "author": {"__typename": "User", "id": "1"}}
+                    ]},
+                    {"reviews": []}
+                ]}}),
+            )
+            .build(),
+    );
+    s.insert(
+        "accounts",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                    "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Ada"}]}}),
+            )
+            .build(),
+    );
     s
 }
 
