@@ -2864,7 +2864,10 @@ mod tests {
 
         // The abnormal close produces an error item before the reconnect fires.
         let error_item = gql_stream.next().await.unwrap();
-        assert!(!error_item.errors.is_empty(), "expected error from abnormal close");
+        assert!(
+            !error_item.errors.is_empty(),
+            "expected error from abnormal close"
+        );
 
         // After reconnect the router delivers an event from the new connection.
         let second = gql_stream.next().await.unwrap();
@@ -2886,8 +2889,7 @@ mod tests {
             let socket_addr = listener.local_addr().unwrap();
             // emulate_websocket_server_that_drops sends one event then an abnormal close frame
             // on every connection, so every attempt (initial + reconnects) triggers reconnect logic.
-            let spawned_task =
-                tokio::task::spawn(emulate_websocket_server_that_drops(listener));
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new(
@@ -2941,7 +2943,10 @@ mod tests {
 
             // The abnormal close produces an error item before the reconnect fires.
             let error_item_1 = gql_stream.next().await.unwrap();
-            assert!(!error_item_1.errors.is_empty(), "expected error from abnormal close");
+            assert!(
+                !error_item_1.errors.is_empty(),
+                "expected error from abnormal close"
+            );
 
             // Reconnect attempt 1: another event from the second connection.
             let second = gql_stream.next().await.unwrap();
@@ -2955,7 +2960,10 @@ mod tests {
 
             // Error from the second abnormal close before attempts are exhausted.
             let error_item_2 = gql_stream.next().await.unwrap();
-            assert!(!error_item_2.errors.is_empty(), "expected error from second abnormal close");
+            assert!(
+                !error_item_2.errors.is_empty(),
+                "expected error from second abnormal close"
+            );
 
             // Both attempts exhausted — let the spawned forwarding task increment the counter.
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

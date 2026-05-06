@@ -778,9 +778,7 @@ async fn reconnect_ws_gql_stream(
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(
-                serde_json::to_string(&body).unwrap_or_default().into(),
-            ),
+            opentelemetry::Value::String(serde_json::to_string(&body).unwrap_or_default().into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("subgraph.name"),
