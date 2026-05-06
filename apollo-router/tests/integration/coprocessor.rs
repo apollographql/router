@@ -1003,8 +1003,13 @@ async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxE
         }
     });
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS sockets are already bound and ready to queue connections — both
+    // `UnixListener::bind` calls above returned synchronously, which is the
+    // moment the kernel starts accepting incoming connections into the listen
+    // backlog. The accept loops in the spawned tasks just drain that backlog.
+    // The previous fixed 100 ms sleep here was a defensive pause with no race
+    // to defend against (and a sibling UDS coprocessor test above does not use
+    // it). Removing the sleep eliminates the slow-CI flake risk.
 
     // Configure router with per-stage Unix socket URLs
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1145,8 +1150,11 @@ async fn test_coprocessor_mixed_http_and_unix_socket_urls() -> Result<(), tower:
         .mount(&supergraph_mock_server)
         .await;
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound and accepting connections from the
+    // moment `UnixListener::bind` returned above; the wiremock HTTP mock
+    // server is similarly ready to serve the moment `MockServer::start` has
+    // returned. The previous fixed 100 ms sleep was a defensive pause with no
+    // race to defend against. Removing it eliminates the slow-CI flake risk.
 
     // Configure router with MIXED transports: Unix socket for router, HTTP for supergraph
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1291,8 +1299,11 @@ async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), B
         }
     });
 
-    // Wait for server to be ready
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound from the synchronous `UnixListener::bind`
+    // above — the kernel queues incoming connections into the listen backlog
+    // until the spawned task accepts them. The previous fixed 100 ms sleep was
+    // a defensive pause with no race to defend against; removing it
+    // eliminates the slow-CI flake risk.
 
     let uds_url = format!("unix://{}", sock_path.display());
     let config = format!(
