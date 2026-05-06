@@ -1,6 +1,9 @@
 //! Implements WebSocket _client_ protocols for GraphQL subscriptions.
 
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -309,7 +312,7 @@ where
         mut self,
         request: graphql::Request,
         heartbeat_interval: Option<tokio::time::Duration>,
-    ) -> Result<SubscriptionStream<S>, graphql::Error> {
+    ) -> Result<(SubscriptionStream<S>, Arc<AtomicBool>), graphql::Error> {
         self.stream
             .send(self.protocol.subscribe(self.id.to_string(), request))
             .await
@@ -429,8 +432,9 @@ where
         id: String,
         protocol: WebSocketProtocol,
         heartbeat_interval: Option<tokio::time::Duration>,
-    ) -> Self {
-        let (mut sink, inner_stream) = InnerStream::new(stream, id, protocol).split();
+    ) -> (Self, Arc<AtomicBool>) {
+        let (inner, completed_normally) = InnerStream::new(stream, id, protocol);
+        let (mut sink, inner_stream) = inner.split();
         let (close_signal, close_sentinel) = tokio::sync::oneshot::channel::<()>();
 
         tokio::task::spawn(async move {
@@ -468,10 +472,13 @@ where
             }
         });
 
-        Self {
-            inner_stream,
-            close_signal: Some(close_signal),
-        }
+        (
+            Self {
+                inner_stream,
+                close_signal: Some(close_signal),
+            },
+            completed_normally,
+        )
     }
 }
 
@@ -514,6 +521,9 @@ pin_project! {
         terminated: bool,
         // When the websocket stream is closed (!= graphql sub protocol)
         closed: bool,
+        // Set to true when the server sends a protocol-level Complete message, as opposed to an
+        // unexpected connection drop. Used by the reconnect logic to avoid spurious reconnects.
+        completed_normally: Arc<AtomicBool>,
     }
 }
 
@@ -521,15 +531,20 @@ impl<S> InnerStream<S>
 where
     S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage> + std::marker::Unpin,
 {
-    fn new(stream: S, id: String, protocol: WebSocketProtocol) -> Self {
-        Self {
-            stream,
-            id,
-            protocol,
-            completed: false,
-            terminated: false,
-            closed: false,
-        }
+    fn new(stream: S, id: String, protocol: WebSocketProtocol) -> (Self, Arc<AtomicBool>) {
+        let completed_normally = Arc::new(AtomicBool::new(false));
+        (
+            Self {
+                stream,
+                id,
+                protocol,
+                completed: false,
+                terminated: false,
+                closed: false,
+                completed_normally: Arc::clone(&completed_normally),
+            },
+            completed_normally,
+        )
     }
 }
 
@@ -568,7 +583,10 @@ where
                             .poll(cx);
                         }
                         match server_message.into_graphql_response() {
-                            (None, true) => Poll::Ready(None),
+                            (None, true) => {
+                                this.completed_normally.store(true, Ordering::Relaxed);
+                                Poll::Ready(None)
+                            }
                             // For ignored message like ACK, Ping, Pong, etc...
                             (None, false) => self.poll_next(cx),
                             (Some(resp), _) => Poll::Ready(Some(resp)),
@@ -992,7 +1010,7 @@ mod tests {
             .unwrap();
 
             let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-            let mut gql_read_stream = gql_socket
+            let (mut gql_read_stream, _completed_normally) = gql_socket
                 .into_subscription(
                     graphql::Request::builder().query(sub).build(),
                     heartbeat_interval,
@@ -1155,7 +1173,7 @@ mod tests {
             .unwrap();
 
             let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-            let mut gql_read_stream = gql_socket
+            let (mut gql_read_stream, _completed_normally) = gql_socket
                 .into_subscription(graphql::Request::builder().query(sub).build(), None)
                 .await
                 .unwrap();

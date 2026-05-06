@@ -961,7 +961,7 @@ impl CacheService {
                 value.as_str().map(|s| {
                     let mut digest = Sha256::new();
                     digest.update(s);
-                    hex::encode(&*digest.finalize())
+                    hex::encode(digest.finalize().as_slice())
                 })
             })
         })
@@ -1391,7 +1391,7 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
         }
     }
 
-    hex::encode(&*digest.finalize())
+    hex::encode(digest.finalize().as_slice())
 }
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
@@ -1403,7 +1403,7 @@ pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> Str
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
 
-    hex::encode(&*digest.finalize())
+    hex::encode(digest.finalize().as_slice())
 }
 
 pub(crate) fn hash_additional_data(
@@ -1437,7 +1437,7 @@ pub(crate) fn hash_additional_data(
         }
     }
 
-    hex::encode(&*digest.finalize())
+    hex::encode(digest.finalize().as_slice())
 }
 
 // build a cache key for the root operation
@@ -1636,7 +1636,7 @@ fn hash_representation_inner(
 
     let mut digest = Sha256::new();
     hash_object(&mut digest, representation, selection_set);
-    hex::encode(&*digest.finalize())
+    hex::encode(digest.finalize().as_slice())
 }
 
 // Hash the whole representation

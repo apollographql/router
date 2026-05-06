@@ -1202,6 +1202,7 @@ mod tests {
     use axum::extract::ConnectInfo;
     use axum::extract::State;
     use axum::extract::WebSocketUpgrade;
+    use axum::extract::ws::CloseFrame;
     use axum::extract::ws::Message;
     use axum::response::IntoResponse;
     use axum::routing::get;
@@ -2540,8 +2541,92 @@ mod tests {
         .await;
     }
 
+    /// Verifies that a server-sent Complete message does NOT trigger reconnection, even when
+    /// max_reconnect_attempts > 0. The completed_normally flag prevents spurious reconnects.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_complete_does_not_reconnect() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_that_completes(listener));
+
+            // Configure reconnect — the Complete should suppress it entirely.
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                5,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // One event from the server before Complete.
+            let first = gql_stream.next().await.unwrap();
+            assert_eq!(
+                first,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // Stream ends cleanly — no reconnect attempt, no second event.
+            assert!(gql_stream.next().await.is_none());
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+            // Reconnect counter must remain zero.
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.reconnect",
+                u64,
+                "subgraph.service.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
     /// WebSocket server that tracks connection count via shared atomic.
-    /// - First connection: sends one event then sends Complete (drops the stream).
+    /// - First connection: sends one event then drops with an abnormal close (triggers reconnect).
     /// - Subsequent connections: sends one event and stays open (simulates successful reconnect).
     async fn emulate_websocket_server_with_reconnect(
         listener: TcpListener,
@@ -2607,14 +2692,14 @@ mod tests {
                                     .unwrap();
 
                                 if conn_num == 0 {
-                                    // Drop the stream to trigger reconnect logic.
+                                    // Simulate unexpected connection drop with an abnormal close
+                                    // frame (code 1011). A Normal close or Complete would set
+                                    // completed_normally=true and suppress reconnection.
                                     socket
-                                        .send(Message::text(
-                                            serde_json::to_string(&ServerMessage::Complete {
-                                                id: client_id,
-                                            })
-                                            .unwrap(),
-                                        ))
+                                        .send(Message::Close(Some(CloseFrame {
+                                            code: 1011,
+                                            reason: "unexpected termination".into(),
+                                        })))
                                         .await
                                         .unwrap();
                                 }
@@ -2625,6 +2710,69 @@ mod tests {
             )
             .with_state(connection_count);
 
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
+    /// Like `emulate_websocket_server_that_completes` but simulates an unexpected connection drop
+    /// (abnormal close frame) instead of a protocol-level Complete. Used to test reconnect logic
+    /// without triggering the completed_normally guard.
+    async fn emulate_websocket_server_that_drops(listener: TcpListener) {
+        async fn ws_handler(
+            ws: WebSocketUpgrade,
+            ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            let res = ws
+                .protocols(["graphql-transport-ws"])
+                .on_upgrade(move |mut socket| async move {
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    assert!(matches!(
+                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                        ClientMessage::ConnectionInit { .. }
+                    ));
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let client_id =
+                        if let ClientMessage::Subscribe { id, .. } =
+                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                        {
+                            id
+                        } else {
+                            panic!("expected Subscribe message");
+                        };
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::Next {
+                                id: client_id,
+                                payload: graphql::Response::builder()
+                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                    .build(),
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    // Abnormal close — triggers reconnect logic, does not set completed_normally.
+                    socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: 1011,
+                            reason: "unexpected termination".into(),
+                        })))
+                        .await
+                        .unwrap();
+                });
+            Ok(res)
+        }
+
+        let app = Router::new().route("/ws", get(ws_handler));
         let server = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -2714,8 +2862,11 @@ mod tests {
                 .build()
         );
 
-        // After the server sends Complete the router reconnects; the second event
-        // comes from the reconnected connection.
+        // The abnormal close produces an error item before the reconnect fires.
+        let error_item = gql_stream.next().await.unwrap();
+        assert!(!error_item.errors.is_empty(), "expected error from abnormal close");
+
+        // After reconnect the router delivers an event from the new connection.
         let second = gql_stream.next().await.unwrap();
         assert_eq!(
             second,
@@ -2733,10 +2884,10 @@ mod tests {
         async {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let socket_addr = listener.local_addr().unwrap();
-            // emulate_websocket_server_that_completes always sends one event then Complete,
-            // so every connection attempt (initial + reconnects) will drop the stream.
+            // emulate_websocket_server_that_drops sends one event then an abnormal close frame
+            // on every connection, so every attempt (initial + reconnects) triggers reconnect logic.
             let spawned_task =
-                tokio::task::spawn(emulate_websocket_server_that_completes(listener));
+                tokio::task::spawn(emulate_websocket_server_that_drops(listener));
 
             let subgraph_service = with_subscription_layer_reconnect(
                 SubgraphService::new(
@@ -2788,7 +2939,11 @@ mod tests {
                     .build()
             );
 
-            // After the 1ms reconnect delay the router reconnects; event from the second connection.
+            // The abnormal close produces an error item before the reconnect fires.
+            let error_item_1 = gql_stream.next().await.unwrap();
+            assert!(!error_item_1.errors.is_empty(), "expected error from abnormal close");
+
+            // Reconnect attempt 1: another event from the second connection.
             let second = gql_stream.next().await.unwrap();
             assert_eq!(
                 second,
@@ -2797,6 +2952,10 @@ mod tests {
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
+
+            // Error from the second abnormal close before attempts are exhausted.
+            let error_item_2 = gql_stream.next().await.unwrap();
+            assert!(!error_item_2.errors.is_empty(), "expected error from second abnormal close");
 
             // Both attempts exhausted — let the spawned forwarding task increment the counter.
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

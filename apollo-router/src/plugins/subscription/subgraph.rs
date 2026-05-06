@@ -4,6 +4,8 @@
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use futures::SinkExt;
@@ -35,6 +37,7 @@ use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
+use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
@@ -365,7 +368,7 @@ async fn call_websocket(
         }
     })?;
 
-    let gql_stream = gql_socket
+    let (gql_stream, completed_normally) = gql_socket
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| {
@@ -390,6 +393,7 @@ async fn call_websocket(
     tokio::task::spawn(
         async move {
             let mut gql_stream: BoxGqlStream = Box::pin(gql_stream);
+            let mut stream_completed_normally = completed_normally;
             let mut attempt = 0u32;
 
             'retry: loop {
@@ -398,16 +402,10 @@ async fn call_websocket(
                     select! {
                         // We prefer to specify the order of checks within the select
                         biased;
-                        // This branch handles subscription termination signals. Unlike callback
-                        // mode, passthrough mode maintains persistent connections that require
-                        // explicit cleanup. We don't increment any metrics here because the
-                        // subscription was ended by all clients disconnecting.
-                        _ = subscription_closing_signal.recv() => {
-                            tracing::debug!("subscription_closing_signal triggered");
-                            break 'retry;
-                        },
                         // gql_stream is the stream opened from router to subgraph to receive events.
                         // handle_sink broadcasts those events to all subscribed router clients.
+                        // This arm is checked first so that buffered items are drained before
+                        // acting on a closing signal that arrived simultaneously.
                         item = gql_stream.next() => {
                             match item {
                                 Some(val) => {
@@ -420,49 +418,74 @@ async fn call_websocket(
                                     }
                                 }
                                 None => {
-                                    // The subgraph closed the WebSocket connection. Break the
-                                    // inner loop to attempt a reconnect if configured.
+                                    if stream_completed_normally.load(Ordering::Relaxed) {
+                                        // Server sent a protocol-level complete — this is a normal
+                                        // subscription end, not a connection drop. Don't reconnect.
+                                        tracing::debug!("gql_stream completed normally");
+                                        increment_subgraph_ended_counter(&service_name_for_task);
+                                        break 'retry;
+                                    }
+                                    // Unexpected connection drop — break inner loop to attempt reconnect.
                                     tracing::debug!("gql_stream empty");
                                     break;
                                 }
                             }
                         },
+                        // This branch handles subscription termination signals. Unlike callback
+                        // mode, passthrough mode maintains persistent connections that require
+                        // explicit cleanup. We don't increment any metrics here because the
+                        // subscription was ended by all clients disconnecting.
+                        _ = subscription_closing_signal.recv() => {
+                            tracing::debug!("subscription_closing_signal triggered");
+                            break 'retry;
+                        },
                     }
                 }
 
                 // The subgraph connection dropped. Reconnect if we have attempts remaining.
-                if attempt < max_reconnect_attempts {
-                    attempt += 1;
-                    tracing::debug!(
-                        attempt,
-                        max_reconnect_attempts,
-                        "subscription WebSocket connection dropped, reconnecting"
-                    );
-                    tokio::time::sleep(reconnect_delay).await;
-                    match reconnect_ws_gql_stream(
-                        &service_name_for_task,
-                        retry_subgraph_request.clone(),
-                        retry_connection_params.clone(),
-                        retry_signing_params.clone(),
-                        &retry_subgraph_cfg,
-                        retry_subscription_hash.clone(),
-                    )
-                    .await
-                    {
-                        Ok(new_stream) => {
-                            gql_stream = new_stream;
+                // Loop until reconnect succeeds or attempts are exhausted.
+                'reconnect: loop {
+                    if attempt < max_reconnect_attempts {
+                        attempt += 1;
+                        u64_counter!(
+                            "apollo.router.operations.subscriptions.reconnect",
+                            "Number of subscription WebSocket reconnect attempts",
+                            1,
+                            subgraph.service.name = service_name_for_task.clone()
+                        );
+                        tracing::debug!(
+                            attempt,
+                            max_reconnect_attempts,
+                            "subscription WebSocket connection dropped, reconnecting"
+                        );
+                        tokio::time::sleep(reconnect_delay).await;
+                        match reconnect_ws_gql_stream(
+                            &service_name_for_task,
+                            retry_subgraph_request.clone(),
+                            retry_connection_params.clone(),
+                            retry_signing_params.clone(),
+                            &retry_subgraph_cfg,
+                            retry_subscription_hash.clone(),
+                            log_request_level,
+                        )
+                        .await
+                        {
+                            Ok((new_stream, new_completed_normally)) => {
+                                gql_stream = new_stream;
+                                stream_completed_normally = new_completed_normally;
+                                break 'reconnect;
+                            }
+                            Err(err) => {
+                                tracing::error!(
+                                    "failed to reconnect subscription WebSocket (attempt {attempt}/{max_reconnect_attempts}): {err}"
+                                );
+                                // Continue to next attempt rather than giving up immediately.
+                            }
                         }
-                        Err(err) => {
-                            tracing::error!(
-                                "failed to reconnect subscription WebSocket (attempt {attempt}/{max_reconnect_attempts}): {err}"
-                            );
-                            increment_subgraph_ended_counter(&service_name_for_task);
-                            break 'retry;
-                        }
+                    } else {
+                        increment_subgraph_ended_counter(&service_name_for_task);
+                        break 'retry;
                     }
-                } else {
-                    increment_subgraph_ended_counter(&service_name_for_task);
-                    break 'retry;
                 }
             }
             // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
@@ -728,7 +751,8 @@ async fn reconnect_ws_gql_stream(
     signing_params: Option<Arc<SigningParamsConfig>>,
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
-) -> Result<BoxGqlStream, BoxError> {
+    log_request_level: Option<EventLevel>,
+) -> Result<(BoxGqlStream, Arc<AtomicBool>), BoxError> {
     let (parts, body) = request.into_parts();
     let ws_request = get_websocket_request(service_name, parts, subgraph_cfg)?;
 
@@ -737,6 +761,38 @@ async fn reconnect_ws_gql_stream(
     } else {
         ws_request
     };
+
+    if let Some(level) = log_request_level {
+        let mut attrs = Vec::with_capacity(5);
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.headers"),
+            opentelemetry::Value::String(format!("{:?}", ws_request.headers()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.method"),
+            opentelemetry::Value::String(format!("{}", ws_request.method()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.version"),
+            opentelemetry::Value::String(format!("{:?}", ws_request.version()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.body"),
+            opentelemetry::Value::String(
+                serde_json::to_string(&body).unwrap_or_default().into(),
+            ),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.to_string().into()),
+        ));
+        log_event(
+            level,
+            "subgraph.request",
+            attrs,
+            &format!("Websocket request body to subgraph {service_name:?}"),
+        );
+    }
 
     let uri = ws_request.uri();
     let path = uri.path();
@@ -831,7 +887,7 @@ async fn reconnect_ws_gql_stream(
         }
     })?;
 
-    let gql_stream = gql_socket
+    let (gql_stream, completed_normally) = gql_socket
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| {
@@ -844,7 +900,7 @@ async fn reconnect_ws_gql_stream(
             }
         })?;
 
-    Ok(Box::pin(gql_stream))
+    Ok((Box::pin(gql_stream), completed_normally))
 }
 
 fn increment_subgraph_rejected_counter(service_name: &str) {
