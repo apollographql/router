@@ -399,7 +399,21 @@ async fn mutation_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
-    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query Query__accounts__0 { me { name } }", "operationName": "Query__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"name": "Ada"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) =
+        setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
 
     let persisted = json!({
         "version" : 1u8,
@@ -511,7 +525,26 @@ async fn persisted_queries() {
 
     let mut config: Configuration = serde_json::from_value(config).unwrap();
     config.uplink = Some(uplink_config);
-    let (router, registry) = setup_router_and_registry_with_config(config).await.unwrap();
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query GetMyName__accounts__0 { me { name } }", "operationName": "GetMyName__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"name": "Ada Lovelace"}}}),
+                )
+                .with_json(
+                    serde_json::json!({"query": "query GetYourName__accounts__0 { you: me { name } }", "operationName": "GetYourName__accounts__0"}),
+                    serde_json::json!({"data": {"you": {"name": "Ada Lovelace"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) = setup_sandboxed_router_and_registry_with_config(config, mocks)
+        .await
+        .unwrap();
 
     // Successfully run a persisted query.
     let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID)).await;
@@ -1433,6 +1466,23 @@ fn starstuff_mocks_for_top_products_with_reviews_and_authors() -> MockedSubgraph
 // the test does not depend on the public demo deployment being reachable.
 // See `flaky-test-phases/workers/cross-cutting-subgraph-url-sandboxing/`
 // for the C10 work item this helper enables.
+async fn setup_sandboxed_router_and_registry_with_config(
+    config: Configuration,
+    mocks: MockedSubgraphs,
+) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
+    let counting_registry = CountingServiceRegistry::new();
+    // See `setup_sandboxed_router_and_registry` for the plugin-order
+    // rationale (counting first / outer, mocks second / inner).
+    let router = apollo_router::TestHarness::builder()
+        .configuration(Arc::new(config))
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(mocks)
+        .build_router()
+        .await?;
+    Ok((router, counting_registry))
+}
+
 async fn setup_sandboxed_router_and_registry(
     config: serde_json::Value,
     mocks: MockedSubgraphs,
