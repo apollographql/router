@@ -15,10 +15,10 @@ use apollo_router::graphql::Error;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::test_harness::MockedSubgraphs;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use apollo_router::test_harness::MockedSubgraphs;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use futures::StreamExt;
 use http::HeaderValue;
@@ -386,11 +386,8 @@ async fn mutation_should_work_over_post() {
         );
         s
     };
-    let (router, registry) = setup_sandboxed_router_and_registry(
-        serde_json::json!({}),
-        mocks,
-    )
-    .await;
+    let (router, registry) =
+        setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
     let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
@@ -965,11 +962,8 @@ async fn normal_query_with_defer_accept_header() {
         s
     };
     let (mut response, _registry) = {
-        let (router, counting_registry) = setup_sandboxed_router_and_registry(
-            serde_json::json!({}),
-            mocks,
-        )
-        .await;
+        let (router, counting_registry) =
+            setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
         (
             router
                 .oneshot(request.try_into().unwrap())
@@ -1195,11 +1189,9 @@ async fn defer_empty_primary_response() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_sandboxed_router_and_registry(
-        config,
-        starstuff_mocks_for_me_id_then_deferred_name(),
-    )
-    .await;
+    let (router, _) =
+        setup_sandboxed_router_and_registry(config, starstuff_mocks_for_me_id_then_deferred_name())
+            .await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
