@@ -14,6 +14,8 @@ use apollo_router::graphql;
 use apollo_router::graphql::Error;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
+use apollo_router::plugin::test::MockSubgraph;
+use apollo_router::test_harness::MockedSubgraphs;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
@@ -230,7 +232,78 @@ async fn queries_should_work_over_post() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let mocks = {
+        let mut s = MockedSubgraphs::default();
+        s.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "{ topProducts { __typename upc name } }"}),
+                    serde_json::json!({"data": {
+                        "topProducts": [
+                            {"__typename": "Product", "upc": "1", "name": "Table"},
+                            {"__typename": "Product", "upc": "2", "name": "Couch"},
+                        ]
+                    }}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
+                        "variables": {"representations": [{"__typename": "Product", "upc": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Table"}]}}),
+                )
+                .build(),
+        );
+        s.insert("inventory", MockSubgraph::builder().build());
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { id product { __typename upc } author { __typename id } } } } }",
+                        "variables": {"representations": [
+                            {"__typename": "Product", "upc": "1"},
+                            {"__typename": "Product", "upc": "2"},
+                        ]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [
+                        {"reviews": [
+                            {"id": "r1", "product": {"__typename": "Product", "upc": "1"}, "author": {"__typename": "User", "id": "1"}}
+                        ]},
+                        {"reviews": []}
+                    ]}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Ada"}]}}),
+                )
+                .build(),
+        );
+        s
+    };
+
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            },
+            "include_subgraph_errors": {"all": true}
+        }),
+        mocks,
+    )
+    .await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -1293,6 +1366,49 @@ async fn query_rust_with_config(
         query_with_router(router, request.try_into().unwrap()).await,
         counting_registry,
     )
+}
+
+// Build a MockedSubgraphs with empty entries for each starstuff subgraph.
+// Empty entries cause MockSubgraph to emit a FETCH_ERROR whose message
+// includes the actual query string the planner sent — useful for
+// discovering the queries to mock when migrating a test to the sandboxed
+// path. See `setup_sandboxed_router_and_registry`.
+fn starstuff_mocks_empty() -> MockedSubgraphs {
+    let mut s = MockedSubgraphs::default();
+    s.insert("accounts", MockSubgraph::builder().build());
+    s.insert("inventory", MockSubgraph::builder().build());
+    s.insert("products", MockSubgraph::builder().build());
+    s.insert("reviews", MockSubgraph::builder().build());
+    s
+}
+
+// Sandboxed counterpart of `setup_router_and_registry`. Replaces the
+// public starstuff subgraph URLs with in-process MockSubgraph services so
+// the test does not depend on the public demo deployment being reachable.
+// See `flaky-test-phases/workers/cross-cutting-subgraph-url-sandboxing/`
+// for the C10 work item this helper enables.
+async fn setup_sandboxed_router_and_registry(
+    config: serde_json::Value,
+    mocks: MockedSubgraphs,
+) -> (router::BoxCloneService, CountingServiceRegistry) {
+    let counting_registry = CountingServiceRegistry::new();
+    // Plugin order matters here. `SubgraphServiceFactory::new` folds
+    // `plugins.iter().rev()` over the inner service, so the plugin added
+    // EARLIER becomes the OUTER layer of the resulting service. We want
+    // counting to run on every request *before* dispatching to the mock
+    // (so that totals reflect the call), and we want the mock to be the
+    // leaf that produces the response. Hence: counting first, mocks
+    // second.
+    let router = apollo_router::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(mocks)
+        .build_router()
+        .await
+        .unwrap();
+    (router, counting_registry)
 }
 
 async fn fallible_setup_router_and_registry(
