@@ -80,6 +80,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=query_just_at_recursio
 or ( binary_id(=apollo-router::integration_tests) & test(=query_just_at_token_limit) )
 or ( binary_id(=apollo-router::integration_tests) & test(=query_just_under_recursion_limit) )
 or ( binary_id(=apollo-router::integration_tests) & test(=query_just_under_token_limit) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/connectors-debugging) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_default) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_list) )
 or ( binary_id(=apollo-router) & test(=axum_factory::tests::cors_origin_regex) )
