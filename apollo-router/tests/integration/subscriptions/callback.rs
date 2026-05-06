@@ -67,11 +67,14 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
         response.status()
     );
 
-    // Wait for callbacks to be sent
-    tokio::time::sleep(tokio::time::Duration::from_millis(
-        (nb_events as u64 * interval_ms) + 1000,
-    ))
-    .await;
+    // Wait until the router has dispatched all `nb_events` "next"
+    // callbacks plus the trailing "complete" callback. Previously this
+    // was a fixed-formula sleep `(nb_events * interval_ms) + 1000`,
+    // which mixed event-spacing math with a buffer for delivery
+    // latency — under CI load the +1000ms buffer was not always
+    // enough. Poll the callback receiver until the expected count
+    // arrives, with a generous deadline.
+    wait_for_callbacks(&callback_state, nb_events + 1, tokio::time::Duration::from_secs(30)).await;
 
     // Verify callbacks were received - expect default user events
     let expected_user_events = vec![
@@ -100,6 +103,28 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     router.assert_no_error_logs();
 
     Ok(())
+}
+
+/// Poll the callback receiver until the router has delivered
+/// `expected_count` callbacks (counting both `next` and `complete`),
+/// with a hard `deadline`. Replaces the prior formula-based sleep.
+async fn wait_for_callbacks(
+    callback_state: &CallbackTestState,
+    expected_count: usize,
+    deadline: tokio::time::Duration,
+) {
+    let start = tokio::time::Instant::now();
+    while start.elapsed() < deadline {
+        let count = callback_state.received_callbacks.lock().len();
+        if count >= expected_count {
+            return;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    }
+    let count = callback_state.received_callbacks.lock().len();
+    panic!(
+        "expected {expected_count} callbacks within {deadline:?}, got {count}"
+    );
 }
 
 async fn verify_callback_events(
@@ -370,10 +395,15 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         response.status()
     );
 
-    // Wait for callbacks to be sent
-    tokio::time::sleep(tokio::time::Duration::from_millis(
-        (custom_payloads.len() as u64 * interval_ms) + 1000,
-    ))
+    // Poll callbacks instead of formula sleep — see
+    // `wait_for_callbacks` doc above. `+1` accounts for the trailing
+    // `complete` callback.
+    let _ = interval_ms;
+    wait_for_callbacks(
+        &callback_state,
+        custom_payloads.len() + 1,
+        tokio::time::Duration::from_secs(30),
+    )
     .await;
 
     // Verify callbacks were received - expect the exact user events from custom payloads
@@ -476,10 +506,15 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
         response.status()
     );
 
-    // Wait for callbacks to be sent
-    tokio::time::sleep(tokio::time::Duration::from_millis(
-        (custom_payloads.len() as u64 * interval_ms) + 1000,
-    ))
+    // Poll callbacks instead of formula sleep — see
+    // `wait_for_callbacks` doc above. `+1` accounts for the trailing
+    // `complete` callback.
+    let _ = interval_ms;
+    wait_for_callbacks(
+        &callback_state,
+        custom_payloads.len() + 1,
+        tokio::time::Duration::from_secs(30),
+    )
     .await;
 
     // Verify callbacks were received - expect only 1 user event since second callback has no userWasCreated data
