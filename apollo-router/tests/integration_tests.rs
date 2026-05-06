@@ -355,7 +355,43 @@ async fn mutation_should_work_over_post() {
         "reviews".to_string()=>2,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let mocks = {
+        let mut s = MockedSubgraphs::default();
+        s.insert("accounts", MockSubgraph::builder().build());
+        s.insert("inventory", MockSubgraph::builder().build());
+        s.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "mutation { createProduct(name: \"Bob\", upc: \"8\") { __typename upc name } }"}),
+                    serde_json::json!({"data": {"createProduct": {"__typename": "Product", "upc": "8", "name": "Bob"}}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "mutation { createReview(body: \"Bif\", id: \"100\", upc: \"8\") { id body } }"}),
+                    serde_json::json!({"data": {"createReview": {"id": "100", "body": "Bif"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }",
+                        "variables": {"representations": [{"__typename": "Product", "upc": "8"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"reviews": []}]}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({}),
+        mocks,
+    )
+    .await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
