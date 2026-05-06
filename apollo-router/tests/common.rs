@@ -104,10 +104,12 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
 /// licenses via `LicenseSource::Env` precedence.
 ///
 /// JWT lifetime caveat: `warnAt` / `haltAt` are pinned at unix epoch
-/// 1787000000 (~2026-08-22). When this approaches, mint a fresh JWT
-/// with the same JWKS using `mint-jwt.sh` in the repo root — see
-/// `flaky-test-phases/workers/phase-2-uplink-lift/BLOG-NOTES.md` for
-/// the rotation runbook.
+/// 1787000000 (= 2026-08-17 20:53:20 UTC). When this approaches, mint
+/// a fresh JWT with the same JWKS using `mint-jwt.sh` in the repo root
+/// — see `flaky-test-phases/workers/phase-2-uplink-lift/BLOG-NOTES.md`
+/// for the rotation runbook. (The same pinned `haltAt` is used by 7
+/// JWTs in `tests/integration/allowed_features.rs`; tokio's ~1-year
+/// `Instant` scheduler cap rules out moving the pin to 2030+.)
 const TEST_LICENSE_JWT_FULL_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.LPNJgPY20DH054mXgrzaxEFiME656ZJ-ge5y9Zh3kkc"; // gitleaks:allow
 
 /// Stand up a per-test wiremock that stands in for
@@ -138,20 +140,22 @@ const TEST_LICENSE_JWT_FULL_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVC
 ///    `LicenseSource::Registry`, so the Uplink mock is bypassed for
 ///    those tests.
 ///
-/// 2. `SupergraphSdlQuery` (priority 5) returns `Unchanged`. Tests
-///    whose configuration activates `SchemaSource::Registry` (because
-///    `APOLLO_GRAPH_REF` is set without `--supergraph` winning at the
-///    CLI) won't hang waiting for an initial schema fetch. The
-///    harness's typical behaviour pins schema via `--supergraph`, so
-///    this is belt-and-suspenders for tests that intentionally
-///    exercise the Registry path.
+/// 2. Catch-all `POST → 200 {"data": null}` (priority 10) for any
+///    other Uplink operation a router version might issue (eg.
+///    `SupergraphSdlQuery` if a test exercises
+///    `SchemaSource::Registry`, or `PersistedQueriesManifestQuery`
+///    when `APOLLO_GRAPH_REF` is set during PQ tests). Returns 200
+///    with an empty data envelope rather than 404, so the polling
+///    loop doesn't enter an error path that pollutes test logs.
 ///
-/// 3. Catch-all `POST → 200 {"data": null}` (priority 10) for any
-///    other Uplink operation a future router version might add (eg.
-///    `PersistedQueriesManifestQuery` if a test happens to set
-///    `APOLLO_GRAPH_REF` while exercising PQs). Returns 200 with an
-///    empty data envelope rather than 404, so the polling loop
-///    doesn't enter an error path that pollutes test logs.
+/// Note: the harness does NOT bootstrap `SchemaSource::Registry`. The
+/// typical path pins schema via `--supergraph` at the CLI; tests that
+/// would activate Registry (`APOLLO_GRAPH_REF` set in `self.env`
+/// without `--supergraph`) will hang in Startup because the catch-all
+/// returns no useful payload and `UplinkResponse::Unchanged` cannot
+/// bootstrap a missing baseline. If a future test needs Registry-source
+/// schema, the mock has to return a real `supergraphSdl` body (mirror
+/// the License JWT pattern above).
 ///
 /// Lifted into the harness from a per-test helper that originally
 /// lived in `tests/integration/telemetry/metrics.rs::test_metrics_reloading`
@@ -171,21 +175,6 @@ async fn mock_license_uplink() -> wiremock::MockServer {
                     "entitlement": {
                         "jwt": TEST_LICENSE_JWT_FULL_FEATURES,
                     },
-                }
-            }
-        })))
-        .with_priority(5)
-        .mount(&server)
-        .await;
-
-    Mock::given(method(Method::POST))
-        .and(body_string_contains("SupergraphSdlQuery"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": {
-                "routerConfig": {
-                    "__typename": "Unchanged",
-                    "id": "test-schema-id",
-                    "minDelaySeconds": 1,
                 }
             }
         })))
@@ -376,12 +365,26 @@ pub struct IntegrationTest {
     /// When `true`, the harness forwards the host's `TEST_APOLLO_KEY`
     /// and `TEST_APOLLO_GRAPH_REF` (real Studio credentials) into the
     /// spawned router as `APOLLO_KEY` / `APOLLO_GRAPH_REF`, and does
-    /// **not** override `APOLLO_UPLINK_ENDPOINTS`. The router will
-    /// therefore reach the real `uplink.api.apollographql.com` and
-    /// `usage-reporting.api.apollographql.com`. Reserve this for the
-    /// rare end-to-end test that genuinely needs production Apollo —
-    /// every other test should accept the default (fake credentials,
-    /// per-test mock Uplink, per-test mock Studio) so that the suite
+    /// **not** override `APOLLO_UPLINK_ENDPOINTS` or set
+    /// `APOLLO_TELEMETRY_DISABLED=true`. So the spawned router will
+    /// reach **real Uplink** (`uplink.api.apollographql.com`) and
+    /// **real orbiter** (`router.apollo.dev/telemetry`).
+    ///
+    /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
+    /// is NOT reached even in the opt-in branch. `merge_overrides()`
+    /// unconditionally pins `telemetry.apollo.endpoint` and
+    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// to the per-test `apollo_otlp_server` mock, regardless of this
+    /// flag. That pinning is load-bearing for keeping CI off the
+    /// public Internet (see the egress-block invariant in
+    /// `HARNESS-CONTRACT.md` C2). If a future test genuinely needs
+    /// real Studio reporting, that change has to also amend
+    /// `merge_overrides()` and re-evaluate the egress-block contract.
+    ///
+    /// Reserve this for the rare end-to-end test that genuinely needs
+    /// to talk to production Apollo's License + Uplink + orbiter; every
+    /// other test should accept the default (fake credentials, per-test
+    /// mock Uplink, per-test mock Studio reporting) so that the suite
     /// passes on runners with restricted egress. See
     /// `flaky-test-phases/blog-details.md` Arc 4.7 for the design
     /// discussion.
@@ -1038,6 +1041,18 @@ impl IntegrationTest {
                 "APOLLO_TEST_INTERNAL_UPLINK_JWKS",
                 TEST_JWKS_ENDPOINT.as_os_str(),
             );
+            // Strip any inherited license-source env vars so a developer
+            // who happens to have a real production-signed
+            // `APOLLO_ROUTER_LICENSE` exported in their shell doesn't
+            // see `LicenseSource::Env` win, fail signature verification
+            // against the test HS256 JWKS we just pinned above, and
+            // then hang in `Startup` because the license stream emits
+            // no `UpdateLicense` event on parse error. Tests that need a
+            // license reach through `.jwt(...)` (which sets
+            // `APOLLO_ROUTER_LICENSE` after this strip), or via the
+            // mocked Uplink response below.
+            router.env_remove("APOLLO_ROUTER_LICENSE");
+            router.env_remove("APOLLO_ROUTER_LICENSE_PATH");
             // Disable the "orbiter" anonymous-usage telemetry, which
             // otherwise POSTs to `https://router.apollo.dev/telemetry`
             // unconditionally on every router boot — independent of
