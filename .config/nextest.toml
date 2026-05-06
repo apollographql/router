@@ -101,6 +101,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=query_just_under_recur
 or ( binary_id(=apollo-router::integration_tests) & test(=query_just_under_token_limit) )
 or ( binary_id(=apollo-router::samples) & test(=/basic/interface-object) )
 or ( binary_id(=apollo-router::samples) & test(=/core/defer) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/connectors-debugging) )
 or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/defer) )
 or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/invalidation-subgraph-name) )
 or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/invalidation-subgraph-type) )
