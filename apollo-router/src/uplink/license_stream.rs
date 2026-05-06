@@ -461,9 +461,20 @@ mod test {
         assert_eq!(events, &[SimpleEvent::UpdateLicense]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn license_expander_claim_no_claim() {
         // Licenses with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
+        //
+        // Use paused virtual time so that the warn/halt boundaries (10ms in the future at the
+        // moment of claim arrival) cannot fire prematurely between the time we enqueue them and
+        // the time the consumer polls `checks.poll_expired`. Under real time, scheduler jitter
+        // could push the boundaries into the past before the upstream `no_claim()` was polled,
+        // taking the early-return branches in `reset_checks_for_licenses` and producing a
+        // different event ordering than the snapshot. Anchoring `to_positive_instant` to
+        // `tokio::time::Instant::now()` (see refactor in this file) means the queue's deadlines
+        // and `Instant::now()` share the same paused clock here, so deadlines only advance when
+        // the test driver decides — `collect::<Vec<_>>().await` auto-advances paused time when
+        // the runtime is otherwise idle, which deterministically fires the warn/halt entries.
         let events_stream =
             futures::stream::iter(vec![license_with_claim(10, 10), license_with_no_claim()])
                 .interleave_pending()
