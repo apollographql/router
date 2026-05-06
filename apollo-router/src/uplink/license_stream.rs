@@ -9,7 +9,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
-use std::time::Instant;
 use std::time::SystemTime;
 
 use futures::Stream;
@@ -22,6 +21,7 @@ use futures::stream::Zip;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
 use strum::IntoEnumIterator;
+use tokio::time::Instant;
 use tokio_util::time::DelayQueue;
 
 use super::license_enforcement::LicenseLimits;
@@ -221,7 +221,7 @@ fn reset_checks_for_licenses(
             Event::UpdateLicense(Arc::new(LicenseState::LicensedHalt {
                 limits: limits.clone(),
             })),
-            (halt_at).into(),
+            halt_at,
         );
     } else {
         return Poll::Ready(Some(Event::UpdateLicense(Arc::new(
@@ -237,7 +237,7 @@ fn reset_checks_for_licenses(
             Event::UpdateLicense(Arc::new(LicenseState::LicensedWarn {
                 limits: limits.clone(),
             })),
-            (warn_at).into(),
+            warn_at,
         );
     } else {
         return Poll::Ready(Some(Event::UpdateLicense(Arc::new(
@@ -257,8 +257,16 @@ fn reset_checks_for_licenses(
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
 /// The generated instant is only approximate.
 /// Subtracting from instants is not supported on all platforms, so if the calculated instant was in the past we just return now as we don't care about how long ago the instant was, just that it happened already.
+///
+/// Returns a `tokio::time::Instant` (rather than `std::time::Instant`) so that scheduling
+/// respects `tokio::time::pause()` / `tokio::time::advance()` in tests. The downstream
+/// `DelayQueue` reads `tokio::time::Instant::now()` to decide when entries fire; using a
+/// `tokio::time::Instant` here keeps the "now" reference consistent with the queue's clock,
+/// which is required for deterministic virtual-time tests.
 fn to_positive_instant(system_time: SystemTime) -> Instant {
-    // This is approximate as there is no real conversion between SystemTime and Instant
+    // This is approximate as there is no real conversion between SystemTime and Instant.
+    // We use `tokio::time::Instant::now()` so the returned instant is anchored to the same
+    // clock as `DelayQueue`'s scheduler (this clock is virtualized under `tokio::time::pause()`).
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
@@ -335,11 +343,11 @@ impl<T: Stream<Item = License>> LicenseStreamExt for T {}
 mod test {
     use std::future::ready;
     use std::time::Duration;
-    use std::time::Instant;
     use std::time::SystemTime;
 
     use futures::StreamExt;
     use futures_test::stream::StreamTestExt;
+    use tokio::time::Instant;
     use tracing::instrument::WithSubscriber;
 
     use crate::assert_snapshot_subscriber;
@@ -453,9 +461,20 @@ mod test {
         assert_eq!(events, &[SimpleEvent::UpdateLicense]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn license_expander_claim_no_claim() {
         // Licenses with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
+        //
+        // Use paused virtual time so that the warn/halt boundaries (10ms in the future at the
+        // moment of claim arrival) cannot fire prematurely between the time we enqueue them and
+        // the time the consumer polls `checks.poll_expired`. Under real time, scheduler jitter
+        // could push the boundaries into the past before the upstream `no_claim()` was polled,
+        // taking the early-return branches in `reset_checks_for_licenses` and producing a
+        // different event ordering than the snapshot. Anchoring `to_positive_instant` to
+        // `tokio::time::Instant::now()` (see refactor in this file) means the queue's deadlines
+        // and `Instant::now()` share the same paused clock here, so deadlines only advance when
+        // the test driver decides — `collect::<Vec<_>>().await` auto-advances paused time when
+        // the runtime is otherwise idle, which deterministically fires the warn/halt entries.
         let events_stream =
             futures::stream::iter(vec![license_with_claim(10, 10), license_with_no_claim()])
                 .interleave_pending()
