@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/metrics.rs
+assertion_line: 698
 expression: "& metrics.non_zero()"
 ---
 - name: apollo.router.config.apollo_telemetry_options
@@ -32,6 +33,11 @@ expression: "& metrics.non_zero()"
       - value: 1
         attributes: {}
 - name: apollo.router.config.experimental_hoist_orphan_errors
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2
   data:
     datapoints:
       - value: 1
@@ -89,3 +95,15 @@ expression: "& metrics.non_zero()"
           opt.log_unknown: false
           opt.safelist.enabled: false
           opt.safelist.require_id: false
+- name: apollo.router.config.traffic_shaping
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.router.rate_limit: false
+          opt.router.timeout: false
+          opt.subgraph.compression: false
+          opt.subgraph.deduplicate_query: false
+          opt.subgraph.http2: true
+          opt.subgraph.rate_limit: false
+          opt.subgraph.timeout: false

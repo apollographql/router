@@ -528,6 +528,11 @@ impl InstrumentData {
             "$.telemetry.apollo.experimental_otlp_endpoint"
         );
 
+        populate_config_instrument!(
+            apollo.router.config.experimental_http2,
+            "$.traffic_shaping[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]"
+        );
+
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) =

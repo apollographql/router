@@ -7,6 +7,10 @@ experimental_hoist_orphan_errors:
 experimental_chaos:
   force_schema_reload: 10s
 
+traffic_shaping:
+  all:
+    experimental_http2: enable
+
 supergraph:
   experimental_log_on_broken_pipe: true
   query_planning:
