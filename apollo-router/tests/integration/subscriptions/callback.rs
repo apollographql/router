@@ -401,7 +401,6 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     // Poll callbacks instead of formula sleep — see
     // `wait_for_callbacks` doc above. `+1` accounts for the trailing
     // `complete` callback.
-    let _ = interval_ms;
     wait_for_callbacks(
         &callback_state,
         custom_payloads.len() + 1,
@@ -512,7 +511,6 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
     // Poll callbacks instead of formula sleep — see
     // `wait_for_callbacks` doc above. `+1` accounts for the trailing
     // `complete` callback.
-    let _ = interval_ms;
     wait_for_callbacks(
         &callback_state,
         custom_payloads.len() + 1,
