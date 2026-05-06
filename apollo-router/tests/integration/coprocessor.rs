@@ -1464,6 +1464,17 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
         .mount(&mock_coprocessor)
         .await;
 
+    // The `connectors.sources.connectors.jsonPlaceholder` stanza is required for the
+    // `IntegrationTest` harness to auto-inject an `override_url` pointing at the local
+    // wiremock subgraph (see `merge_overrides` in `tests/common.rs`: the override is
+    // only inserted if the config already declares `connectors.sources`). Without it
+    // the connector falls through to the schema's `https://jsonplaceholder.typicode.com/`
+    // baseURL and makes a real network request — which on CircleCI's amd_linux_test /
+    // arm_linux_test executors hangs past the router's 30 s subgraph timeout and the
+    // request returns `504 GATEWAY_TIMEOUT`. That was the
+    // `test_connector_coprocessor_request_response` flake on PR #9339's CircleCI build
+    // 366174 (`assertion left == right; left: 504; right: 200`). An empty stanza is
+    // enough — the harness fills in `override_url` per-source.
     let config = format!(
         r#"
         include_subgraph_errors:
@@ -1480,6 +1491,8 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
                         body: true
                         headers: true
                         status_code: true
+        connectors:
+            sources: {{}}
         "#,
         mock_coprocessor.uri()
     );
