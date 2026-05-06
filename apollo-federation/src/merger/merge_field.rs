@@ -915,7 +915,8 @@ impl Merger {
         // Skip if no join__field directive is required for this field.
         trace!("Checking if join__field is needed for field {dest}");
         match self.needs_join_field(sources, &parent_name, all_types_equal, merge_context) {
-            Ok(needs) if !needs => {
+            Ok(true) => {} // needs join field, continue
+            Ok(false) => {
                 trace!("Field {dest} does not need join__field");
                 return Ok(());
             } // No join__field needed, exit early
@@ -923,7 +924,6 @@ impl Merger {
                 trace!("Error implies parent of {dest} does not exist, skipping join__field");
                 return Ok(());
             } // Skip on error - invalid parent name
-            Ok(_) => {} // needs join field, continue
         }
 
         // Filter source fields by override usage and override label presence.
@@ -1044,7 +1044,6 @@ impl Merger {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn needs_join_field<T>(
         &self,
         sources: &Sources<T>,
@@ -1066,27 +1065,6 @@ impl Merger {
         }
 
         let sources = map_sources(sources, |source| source.clone().map(|s| s.into()));
-
-        // Check if any field has @override directive
-        for (&idx, source_opt) in &sources {
-            if let Some(source_pos) = source_opt
-                && let Some(subgraph) = self.subgraphs.get(idx)
-                && let Some(override_directive_name) = subgraph.override_directive_name()
-            {
-                let has_override = match source_pos {
-                    DirectiveTargetPosition::ObjectField(pos) => !pos
-                        .get_applied_directives(subgraph.schema(), &override_directive_name)
-                        .is_empty(),
-                    DirectiveTargetPosition::InterfaceField(pos) => !pos
-                        .get_applied_directives(subgraph.schema(), &override_directive_name)
-                        .is_empty(),
-                    _ => false,
-                };
-                if has_override {
-                    return Ok(true);
-                }
-            }
-        }
 
         // Check if any field has @fromContext directive
         for source in sources.values().flatten() {
@@ -1114,61 +1092,44 @@ impl Merger {
             }
         }
 
-        // Check if any subgraph defines this type as an @interfaceObject
-        // If so, we need @join__field directives to distinguish which subgraphs provide which fields
-        let has_interface_object = self.subgraphs.iter().any(|subgraph| {
-            let obj_pos = ObjectTypeDefinitionPosition {
-                type_name: parent_name.clone(),
-            };
-            subgraph.is_interface_object_type(&obj_pos.into())
-        });
-        if has_interface_object {
-            return Ok(true);
-        }
-
         // We can avoid the join__field if:
         //   1) the field exists in all sources having the field parent type,
         //   2) none of the field instance has a @requires or @provides.
         //   3) none of the field is @external.
         for (&idx, source_opt) in &sources {
             let subgraph = &self.subgraphs[idx];
-            let provides_directive_name = subgraph.provides_directive_name();
-            let requires_directive_name = subgraph.requires_directive_name();
             let overridden = merge_context.is_unused_overridden(idx);
-            match source_opt {
-                Some(source_pos) => {
-                    if !overridden {
-                        // Check if field is external
-                        let is_external = match source_pos {
-                            DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
-                                idx,
-                                &FieldDefinitionPosition::Object(pos.clone()),
-                            ),
-                            DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
-                                idx,
-                                &FieldDefinitionPosition::Interface(pos.clone()),
-                            ),
-                            _ => false, // Non-field positions can't be external
-                        };
-                        if is_external {
-                            return Ok(true);
-                        }
+            match (source_opt, !overridden) {
+                (Some(source_pos), true) => {
+                    // Check if field is external
+                    let is_external = match source_pos {
+                        DirectiveTargetPosition::ObjectField(pos) => self
+                            .is_field_external(idx, &FieldDefinitionPosition::Object(pos.clone())),
+                        DirectiveTargetPosition::InterfaceField(pos) => self.is_field_external(
+                            idx,
+                            &FieldDefinitionPosition::Interface(pos.clone()),
+                        ),
+                        _ => false, // Non-field positions can't be external
+                    };
+                    if is_external {
+                        return Ok(true);
+                    }
 
-                        // Check for requires and provides directives using subgraph-specific metadata
-                        if provides_directive_name.is_some_and(|provides| {
-                            !source_pos
-                                .get_applied_directives(subgraph.schema(), &provides)
-                                .is_empty()
-                        }) {
-                            return Ok(true);
-                        }
-                        if requires_directive_name.is_some_and(|requires| {
-                            !source_pos
-                                .get_applied_directives(subgraph.schema(), &requires)
-                                .is_empty()
-                        }) {
-                            return Ok(true);
-                        }
+                    // Check for requires and provides directives using subgraph-specific metadata
+                    if subgraph.provides_directive_name().is_some_and(|provides| {
+                        !source_pos
+                            .get_applied_directives(subgraph.schema(), &provides)
+                            .is_empty()
+                    }) {
+                        return Ok(true);
+                    }
+
+                    if subgraph.requires_directive_name().is_some_and(|requires| {
+                        !source_pos
+                            .get_applied_directives(subgraph.schema(), &requires)
+                            .is_empty()
+                    }) {
+                        return Ok(true);
                     }
 
                     let field_name = match source_pos {
@@ -1198,7 +1159,7 @@ impl Merger {
                 // TODO(FED-883): Now that the block above checks for a field's existence in all
                 // subgraphs (without relying on this explicit None being set), we should be able
                 // to switch `Sources` to be `IndexMap<usize, T>` instead of holding `Option<T>`.
-                None => {
+                _ => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
                     if subgraph
                         .schema()
@@ -1214,7 +1175,6 @@ impl Merger {
         Ok(false)
     }
 
-    #[allow(dead_code)]
     fn extract_context_arguments(
         &self,
         idx: usize,
@@ -1271,7 +1231,6 @@ impl Merger {
     }
 
     /// Extract field set from directive
-    #[allow(dead_code)]
     fn get_field_set(
         &self,
         field_def: &JoinableField,
@@ -1288,7 +1247,6 @@ impl Merger {
     }
 
     /// Extract override "from" argument
-    #[allow(dead_code)]
     fn get_override_from(
         &self,
         field_def: &JoinableField,
@@ -1308,12 +1266,10 @@ impl Merger {
 }
 
 /// Simple builder for join__field directives (minimal version for compatibility)
-#[allow(dead_code)]
 pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }
 
-#[allow(dead_code)]
 impl JoinFieldBuilder {
     pub(crate) fn new() -> Self {
         Self {

@@ -733,6 +733,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +745,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +996,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {
@@ -2041,6 +2039,11 @@ expression: "&schema"
         "enabled": {
           "default": false,
           "description": "Enable or disable the response caching feature",
+          "type": "boolean"
+        },
+        "include_cache_control_header_on_router_response": {
+          "default": true,
+          "description": "Whether to include a Cache-Control header in the supergraph response sent to clients.\nWhen set to false, the router will not set a Cache-Control header on the client response,\nwhile all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.\nDefaults to true for backward compatibility.",
           "type": "boolean"
         },
         "invalidation": {
@@ -3265,6 +3268,11 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.\n(default: true)",
+          "type": "boolean"
+        },
+        "ignore_auth_context": {
+          "default": false,
+          "description": "When true, JWT claims from the authorization context are excluded from the deduplication key.\nUse this when your subgraph data does not vary by user identity and you want authenticated\nusers to share a single subgraph WebSocket connection.\n\nSecurity note: with this enabled, a user may receive events from a connection originally\nopened by a different user.  Only enable this when subgraph subscription data is truly\nnon-personalized.\n(default: false)",
           "type": "boolean"
         },
         "ignored_headers": {
@@ -7334,6 +7342,14 @@ expression: "&schema"
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "operation_body_timeout": {
+          "default": null,
+          "description": "Maximum time allowed for the client to deliver the GraphQL operation (query and variables)\nwithin the multipart body. This timeout does not apply to reading the file contents\nthemselves. If the operation part of the request is too slow to arrive, the request is\nrejected with a `504 Gateway Timeout` error.\n\nIf not set, no operation body timeout is applied.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -10176,6 +10192,33 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphDeduplicationConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeduplicationConfig"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "ignore_auth_context": false,
+            "ignored_headers": []
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DeduplicationConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphErrorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -11419,12 +11462,16 @@ expression: "&schema"
         "deduplication": {
           "allOf": [
             {
-              "$ref": "#/definitions/DeduplicationConfig"
+              "$ref": "#/definitions/SubgraphDeduplicationConfigConfiguration"
             }
           ],
           "default": {
-            "enabled": true,
-            "ignored_headers": []
+            "all": {
+              "enabled": true,
+              "ignore_auth_context": false,
+              "ignored_headers": []
+            },
+            "subgraphs": {}
           },
           "description": "Configure subgraph subscription deduplication"
         },
@@ -11432,6 +11479,14 @@ expression: "&schema"
           "default": true,
           "description": "Enable subscription",
           "type": "boolean"
+        },
+        "max_lifetime": {
+          "default": null,
+          "description": "Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "max_opened_subscriptions": {
           "default": null,

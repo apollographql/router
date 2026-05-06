@@ -17,6 +17,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ComponentOrigin;
@@ -173,7 +174,6 @@ pub(crate) struct Merger {
         FallibleOnceCell<HashMap<String, AdditionalDirectiveSources>>,
 }
 
-#[allow(dead_code)]
 impl Merger {
     pub(crate) fn new(
         subgraphs: Vec<Subgraph<Validated>>,
@@ -384,6 +384,7 @@ impl Merger {
     }
 
     /// Get access to the error reporter
+    #[allow(dead_code)]
     pub(crate) fn error_reporter(&self) -> &ErrorReporter {
         &self.error_reporter
     }
@@ -394,6 +395,7 @@ impl Merger {
     }
 
     /// Get access to the subgraph names
+    #[allow(dead_code)]
     pub(crate) fn subgraph_names(&self) -> &[String] {
         &self.names
     }
@@ -409,16 +411,19 @@ impl Merger {
     }
 
     /// Check if there are any errors
+    #[allow(dead_code)]
     pub(crate) fn has_errors(&self) -> bool {
         self.error_reporter.has_errors()
     }
 
     /// Check if there are any hints
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         self.error_reporter.has_hints()
     }
 
     /// Get enum usage for a specific enum type
+    #[allow(dead_code)]
     pub(crate) fn get_enum_usage(&self, enum_name: &str) -> Option<&EnumTypeUsage> {
         self.enum_usages.get(enum_name)
     }
@@ -573,9 +578,14 @@ impl Merger {
     /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be
     /// computed.
     fn validate_supergraph_schema(
-        merged: FederationSchema,
+        mut merged: FederationSchema,
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
+        // Match graphql-js `printSchema(buildSchema(...))` behavior: argument and input-field
+        // defaults that cannot be coerced to their types (for example `{}` when the input object
+        // has required fields) are removed rather than left on the composed supergraph SDL.
+        crate::compat::coerce_schema_default_values(merged.schema_mut());
+
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned
         // supergraph) and don't point back to the subgraphs in any way.
@@ -1122,6 +1132,7 @@ impl Merger {
         // Structure to hold mapped information about each source
         struct MappedValue {
             idx: usize,
+            #[allow(dead_code)]
             name: String,
             is_interface_field: bool,
             is_interface_object: bool,
@@ -1228,13 +1239,18 @@ impl Merger {
                 result.set_override_with_unknown_target(idx);
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
+                let default_range =
+                    LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
-                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
+                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist.{extra_msg}",
                         source_subgraph_name, dest, subgraph_name
                     ),
-                    locations: Default::default(),
+                    locations: vec![SubgraphLocation {
+                        subgraph: subgraph_name.clone(),
+                        range: default_range,
+                    }],
                 });
             } else if source_subgraph_name == *subgraph_name {
                 // error: source and destination are the same
@@ -1734,8 +1750,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     fn add_missing_interface_object_fields_to_implementations(
         &mut self,
     ) -> Result<(), FederationError> {
-        let mut fields_to_insert: HashMap<ObjectFieldDefinitionPosition, FieldDefinition> =
-            HashMap::new();
+        let mut fields_to_insert: IndexMap<ObjectFieldDefinitionPosition, FieldDefinition> =
+            IndexMap::default();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
@@ -1870,6 +1886,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_field_provided_by_an_interface_object(&self, field_name: &Name, itf_name: &Name) -> bool {
         self.subgraphs.iter().any(|subgraph| {
             let obj_pos = ObjectTypeDefinitionPosition {
@@ -2055,18 +2072,23 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 element_ast: element_ast.clone(),
             };
 
-            // Compute the new usage directly based on existing record and current position
+            // Compute the new usage directly based on existing record and current position.
+            // Once an enum reaches `Both`, it stays `Both` regardless of further observations.
             let new_usage = match self.enum_usages().get(base_type_name.as_str()) {
+                Some(EnumTypeUsage::Both {
+                    input_example,
+                    output_example,
+                }) => EnumTypeUsage::Both {
+                    input_example: input_example.clone(),
+                    output_example: output_example.clone(),
+                },
                 Some(EnumTypeUsage::Input { input_example }) if !is_input_position => {
                     EnumTypeUsage::Both {
                         input_example: input_example.clone(),
                         output_example: default_example(),
                     }
                 }
-                Some(EnumTypeUsage::Input { input_example })
-                | Some(EnumTypeUsage::Both { input_example, .. })
-                    if is_input_position =>
-                {
+                Some(EnumTypeUsage::Input { input_example }) if is_input_position => {
                     EnumTypeUsage::Input {
                         input_example: input_example.clone(),
                     }
@@ -2077,10 +2099,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         output_example: output_example.clone(),
                     }
                 }
-                Some(EnumTypeUsage::Output { output_example })
-                | Some(EnumTypeUsage::Both { output_example, .. })
-                    if !is_input_position =>
-                {
+                Some(EnumTypeUsage::Output { output_example }) if !is_input_position => {
                     EnumTypeUsage::Output {
                         output_example: output_example.clone(),
                     }

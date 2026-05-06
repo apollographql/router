@@ -210,7 +210,7 @@ mod federation_directives {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -258,7 +258,7 @@ mod federation_directives {
 
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -303,7 +303,7 @@ mod federation_directives {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -382,7 +382,7 @@ mod inconsistent_feature_versions {
             r#"@foo(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -640,7 +640,7 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -880,7 +880,7 @@ mod inconsistent_imports {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -910,7 +910,7 @@ mod inconsistent_imports {
             r#"@bar(name: "b")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -940,7 +940,7 @@ mod inconsistent_imports {
             r#"@foo(name: "a")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -970,7 +970,7 @@ mod inconsistent_imports {
             r#"@foo(name: "a")"#,
         );
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1015,7 +1015,7 @@ mod inconsistent_imports {
             }
         "#).unwrap();
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1073,7 +1073,7 @@ mod validation {
         let subgraph_a = generate_subgraph("subgraphA", "", compose_text, "", "");
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1097,7 +1097,7 @@ mod validation {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(
@@ -1139,7 +1139,7 @@ mod validation {
         );
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
-        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
         assert_eq!(result.len(), 1);
         let error = result.first().unwrap();
         assert_eq!(

@@ -63,6 +63,10 @@ pub(super) enum ArrowMethod {
     Mod,
     KeysToCamelCase,
     KeysToCamelCaseDeep,
+    Split,
+    Trim,
+    TrimStart,
+    TrimEnd,
 
     // Future methods:
     TypeOf,
@@ -180,6 +184,10 @@ impl std::ops::Deref for ArrowMethod {
             Self::Mod => &public::ModMethod,
             Self::KeysToCamelCase => &public::KeysToCamelCaseMethod,
             Self::KeysToCamelCaseDeep => &public::KeysToCamelCaseDeepMethod,
+            Self::Split => &public::SplitMethod,
+            Self::Trim => &public::TrimMethod,
+            Self::TrimStart => &public::TrimStartMethod,
+            Self::TrimEnd => &public::TrimEndMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -240,6 +248,10 @@ impl ArrowMethod {
             "parseInt" => Some(Self::ParseInt),
             "keysToCamelCase" => Some(Self::KeysToCamelCase),
             "keysToCamelCaseDeep" => Some(Self::KeysToCamelCaseDeep),
+            "split" => Some(Self::Split),
+            "trim" => Some(Self::Trim),
+            "trimStart" => Some(Self::TrimStart),
+            "trimEnd" => Some(Self::TrimEnd),
             _ => None,
         };
 
@@ -290,6 +302,10 @@ impl ArrowMethod {
                 | Self::Mod
                 | Self::KeysToCamelCase
                 | Self::KeysToCamelCaseDeep
+                | Self::Split
+                | Self::Trim
+                | Self::TrimStart
+                | Self::TrimEnd
         )
     }
 }

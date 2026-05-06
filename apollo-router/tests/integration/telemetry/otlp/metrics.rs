@@ -63,49 +63,80 @@ where
 }
 
 /// Executes a query and validates that updown counter metrics are present and correct.
+///
+/// The poll loop deliberately checks for *metric content*, not just *batch
+/// arrival*. The previous implementation broke out of the loop as soon as any
+/// `/metrics` request landed and then asserted on its contents — but a single
+/// batch is not guaranteed to contain every UpDownCounter we expect. Under
+/// `temporality: delta`, an UpDownCounter only emits a data point when its
+/// value changes since the last export, so the very first batch after
+/// `execute_default_query()` may carry `apollo.router.pipelines` but not
+/// `apollo.router.open_connections` if the test client's connection opens and
+/// closes inside one export window. We must keep accumulating batches until
+/// either the metric appears or the deadline passes.
 async fn execute_and_validate_metrics(
     router: &mut IntegrationTest,
     mock_server: &wiremock::MockServer,
     iteration: &str,
 ) -> Result<(), BoxError> {
-    // Execute a query to create pipeline and connection handles
     router.execute_default_query().await;
 
-    // Wait a bit for metrics to be exported
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let expected_metrics = ["apollo.router.pipelines", "apollo.router.open_connections"];
 
-    // Get the metrics requests from the mock server
-    let requests = mock_server
-        .received_requests()
-        .await
-        .expect("Could not get otlp requests");
+    let mut last_seen_metrics: Vec<String> = Vec::new();
+    let mut last_batch_count: usize;
+    loop {
+        let requests = mock_server
+            .received_requests()
+            .await
+            .expect("Could not get otlp requests");
 
-    let metrics_requests: Vec<_> = requests
-        .iter()
-        .filter(|r| r.url.path().ends_with("/metrics"))
-        .collect();
+        let metrics_requests: Vec<_> = requests
+            .into_iter()
+            .filter(|r| r.url.path().ends_with("/metrics"))
+            .collect();
+        last_batch_count = metrics_requests.len();
 
-    assert!(
-        !metrics_requests.is_empty(),
-        "No metrics requests received on iteration {}",
-        iteration
+        if !metrics_requests.is_empty() {
+            let request_bodies: Vec<_> = metrics_requests.iter().map(|r| &r.body).collect();
+
+            last_seen_metrics = metrics_requests
+                .iter()
+                .flat_map(|r| {
+                    opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest::decode(
+                        bytes::Bytes::copy_from_slice(&r.body),
+                    )
+                    .ok()
+                })
+                .flat_map(|m| m.resource_metrics)
+                .flat_map(|rm| rm.scope_metrics)
+                .flat_map(|sm| sm.metrics)
+                .map(|m| m.name)
+                .collect();
+
+            let all_found = expected_metrics
+                .iter()
+                .all(|name| find_and_validate_metric(name, &request_bodies, iteration));
+            if all_found {
+                return Ok(());
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!(
+        "expected updown counter metrics {expected:?} not all present in OTLP exports \
+         on iteration {iteration} (saw {batches} batch(es), distinct metric names: {seen:?})",
+        expected = expected_metrics,
+        iteration = iteration,
+        batches = last_batch_count,
+        seen = last_seen_metrics,
     );
-
-    // Validate expected updown counter metrics
-    let request_bodies: Vec<_> = metrics_requests.iter().map(|r| &r.body).collect();
-
-    assert!(
-        find_and_validate_metric("apollo.router.pipelines", &request_bodies, iteration),
-        "apollo.router.pipelines metric not found in OTLP export on iteration {}",
-        iteration
-    );
-    assert!(
-        find_and_validate_metric("apollo.router.open_connections", &request_bodies, iteration),
-        "apollo.router.open_connections metric not found in OTLP export on iteration {}",
-        iteration
-    );
-
-    Ok(())
 }
 
 /// Helper function to test that updown counters always use cumulative temporality

@@ -6,6 +6,7 @@ use std::error::Error;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
+pub(crate) use layer::BodyLimitControl;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -771,11 +772,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),

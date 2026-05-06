@@ -723,6 +723,11 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
     assert_eq!(cache_keys, expected);
 
+    // Shut down the wiremock coprocessor before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    drop(mock_server);
+
     router.graceful_shutdown().await;
 
     Ok(())
@@ -825,7 +830,7 @@ async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::Bo
     let uds = UnixListener::bind(&sock_path).expect("bind uds");
     let expected_path_owned = expected_path.to_string();
 
-    tokio::spawn(async move {
+    let coprocessor_handle = tokio::spawn(async move {
         loop {
             let (stream, _) = uds.accept().await.expect("accept");
             let io = TokioIo::new(stream);
@@ -891,6 +896,17 @@ async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::Bo
     // if we get a 200 it's because we've hit the target path; see above for how this works, but
     // any path _not_ explicitly the one we've set (/api/v1/coprocessor) will return a 500
     assert_eq!(response.status(), 200);
+
+    // The response body is never read, so the Response struct still pins an open TCP
+    // connection to the router.  Drop it before shutdown so the router's drain can complete
+    // within the assert_shutdown budget.
+    drop(response);
+
+    // Shut down the coprocessor accept loop before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    // Aborting the task drops the UnixListener and any in-flight serve_connection futures.
+    coprocessor_handle.abort();
 
     router.graceful_shutdown().await;
     Ok(())
@@ -1426,6 +1442,11 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
         called_stages.contains(&"ConnectorResponse".to_string()),
         "ConnectorResponse stage should have been called, got: {called_stages:?}"
     );
+
+    // Shut down the wiremock coprocessor before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    drop(mock_coprocessor);
 
     router.graceful_shutdown().await;
     Ok(())

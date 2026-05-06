@@ -294,6 +294,9 @@ to protect against unbounded memory consumption.
 This limit is checked before JSON parsing.
 Both the GraphQL document and associated variables count toward it.
 
+For [multipart file upload](/graphos/routing/operations/file-upload) requests, this limit applies only to the GraphQL operations field (the query and variables), not to the uploaded file data.
+Limit file data separately with `preview_file_uploads.protocols.multipart.limits.max_file_size`.
+
 The default value is `2000000` bytes, 2 MB.
 
 Before increasing this limit significantly consider testing performance

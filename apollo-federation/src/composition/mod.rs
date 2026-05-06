@@ -18,9 +18,31 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
+pub use crate::supergraph::CompositionHint;
 pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
+
+#[derive(Debug)]
+pub struct CompositionFailure {
+    pub errors: Vec<CompositionError>,
+    pub hints: Vec<CompositionHint>,
+}
+
+impl CompositionFailure {
+    pub fn from_errors(errors: Vec<CompositionError>) -> Self {
+        Self {
+            errors,
+            hints: Vec::new(),
+        }
+    }
+}
+
+impl From<Vec<CompositionError>> for CompositionFailure {
+    fn from(errors: Vec<CompositionError>) -> Self {
+        Self::from_errors(errors)
+    }
+}
 
 /// Options that configure composition. Mirrors the JS `CompositionOptions` interface
 /// (see `composition-js/src/compose.ts`). Most fields are not yet ported — add them here
@@ -36,7 +58,7 @@ pub struct CompositionOptions {
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
     options: CompositionOptions,
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     // explicitly sort subgraphs by their names
     // this was done automatically in JS as Subgraphs class stored subgraphs in OrderedMap (by name)
     let mut subgraphs = subgraphs;
@@ -45,7 +67,8 @@ pub fn compose(
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+        .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
@@ -61,7 +84,7 @@ pub fn compose(
 pub fn compose_with_connectors(
     subgraphs: Vec<Subgraph<Initial>>,
     options: CompositionOptions,
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     // Pre-expand validation
     // - These were supposed to be pre-merge validations, but historically FBP performed these
     //   Rust-based validation, before JS composition.
@@ -72,7 +95,8 @@ pub fn compose_with_connectors(
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 
     tracing::debug!("Upgrading subgraphs...");
-    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    let validated_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)
+        .map_err(CompositionFailure::from_errors)?;
 
     tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
@@ -94,7 +118,7 @@ pub fn compose_with_connectors(
 #[instrument(skip(subgraphs))]
 pub fn expand_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
-) -> Result<Vec<Subgraph<Expanded>>, Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Expanded>>, CompositionFailure> {
     let mut errors: Vec<CompositionError> = vec![];
     let expanded: Vec<Subgraph<Expanded>> = subgraphs
         .into_iter()
@@ -104,16 +128,14 @@ pub fn expand_subgraphs(
     if errors.is_empty() {
         Ok(expanded)
     } else {
-        Err(errors)
+        Err(CompositionFailure::from_errors(errors))
     }
 }
 
 /// Perform validations that require information about all available subgraphs.
 #[instrument(skip(subgraphs))]
-pub fn pre_merge_validations(
-    subgraphs: &[Subgraph<Validated>],
-) -> Result<(), Vec<CompositionError>> {
-    validate_consistent_root_fields(subgraphs)?;
+pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), CompositionFailure> {
+    validate_consistent_root_fields(subgraphs).map_err(CompositionFailure::from_errors)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
@@ -122,16 +144,16 @@ pub fn pre_merge_validations(
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
     options: &CompositionOptions,
-) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
+) -> Result<Supergraph<Merged>, CompositionFailure> {
     let merger = Merger::new(subgraphs, options.clone()).map_err(|e| {
-        vec![CompositionError::InternalError {
+        CompositionFailure::from_errors(vec![CompositionError::InternalError {
             message: e.to_string(),
-        }]
+        }])
     })?;
     let result = merger.merge().map_err(|e| {
-        vec![CompositionError::InternalError {
+        CompositionFailure::from_errors(vec![CompositionError::InternalError {
             message: e.to_string(),
-        }]
+        }])
     })?;
     tracing::trace!(
         "Merge has {} errors and {} hints",
@@ -140,21 +162,24 @@ pub fn merge_subgraphs(
     );
     if result.errors.is_empty() {
         let Some(supergraph_schema) = result.supergraph else {
-            return Err(vec![CompositionError::InternalError {
-                message: "Merge completed with no supergraph schema".to_string(),
-            }]);
+            return Err(CompositionFailure::from_errors(vec![
+                CompositionError::InternalError {
+                    message: "Merge completed with no supergraph schema".to_string(),
+                },
+            ]));
         };
         let supergraph = Supergraph::with_hints(supergraph_schema, result.hints);
         Ok(supergraph)
     } else {
-        Err(result.errors)
+        Err(CompositionFailure {
+            errors: result.errors,
+            hints: result.hints,
+        })
     }
 }
 
 #[instrument(skip(_supergraph))]
-pub fn post_merge_validations(
-    _supergraph: &Supergraph<Merged>,
-) -> Result<(), Vec<CompositionError>> {
+pub fn post_merge_validations(_supergraph: &Supergraph<Merged>) -> Result<(), CompositionFailure> {
     // TODO: (FED-714) Implement any post-merge validations other than satisfiability, which is
     // checked separately.
     Ok(())
@@ -165,15 +190,23 @@ pub fn post_merge_validations(
 pub fn validate_satisfiability_with_connectors(
     supergraph: Supergraph<Merged>,
     options: &CompositionOptions,
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
-    // Expand connectors for satisfiability validation.
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+    let merge_hints = supergraph.hints().to_vec();
     let supergraph_str = supergraph.schema().schema().to_string();
-    let expansion_result = expand_connectors(&supergraph_str, &Default::default())
-        .map_err(|e| vec![CompositionError::InternalError {
-            message: format!("Composition failed due to an internal error when expanding connectors, please report this: {e}"),
-        }])?;
+    let expansion_result = match expand_connectors(&supergraph_str, &Default::default()) {
+        Ok(result) => result,
+        Err(e) => {
+            return Err(CompositionFailure {
+                errors: vec![CompositionError::InternalError {
+                    message: format!(
+                        "Composition failed due to an internal error when expanding connectors, please report this: {e}"
+                    ),
+                }],
+                hints: merge_hints,
+            });
+        }
+    };
 
-    // Verify satisfiability
     match expansion_result {
         ExpansionResult::Expanded {
             raw_sdl,
@@ -182,27 +215,35 @@ pub fn validate_satisfiability_with_connectors(
             },
             ..
         } => {
-            let supergraph = Supergraph::parse(&raw_sdl).map_err(|e| {
-                vec![CompositionError::InternalError {
-                    message: e.to_string(),
-                }]
-            })?;
-            let mut result = validate_satisfiability(supergraph, options);
-
-            // Sanitize connectors subgraph names in errors and hints.
-            match &mut result {
-                Ok(supergraph) => {
+            let expanded_supergraph = match Supergraph::parse(&raw_sdl) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Err(CompositionFailure {
+                        errors: vec![CompositionError::InternalError {
+                            message: e.to_string(),
+                        }],
+                        hints: merge_hints,
+                    });
+                }
+            };
+            match validate_satisfiability(expanded_supergraph, options) {
+                Ok(mut supergraph) => {
                     for hint in supergraph.hints_mut() {
                         sanitize_connectors_message(&mut hint.message, by_service_name.iter());
                     }
+                    Ok(supergraph)
                 }
-                Err(issues) => {
-                    for issue in issues.iter_mut() {
-                        sanitize_connectors_error(issue, by_service_name.iter());
+                Err(mut failure) => {
+                    failure.hints.extend(merge_hints);
+                    for error in failure.errors.iter_mut() {
+                        sanitize_connectors_error(error, by_service_name.iter());
                     }
+                    for hint in failure.hints.iter_mut() {
+                        sanitize_connectors_message(&mut hint.message, by_service_name.iter());
+                    }
+                    Err(failure)
                 }
             }
-            result
         }
         ExpansionResult::Unchanged => validate_satisfiability(supergraph, options),
     }

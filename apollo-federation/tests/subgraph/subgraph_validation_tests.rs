@@ -883,7 +883,7 @@ mod custom_error_message_for_misnamed_directives {
    │                            ─────────┬─────────
    │                                     ╰─────────── directive not defined
 ───╯
-Did you mean "@key"?"#,
+ Did you mean "@key"?"#,
                     ),
                     (
                         "INVALID_GRAPHQL",
@@ -905,7 +905,7 @@ Did you mean "@key"?"#,
    │                                     ────┬────
    │                                         ╰────── directive not defined
 ───╯
-Did you mean "@shareable"?{}"#,
+ Did you mean "@shareable"?{}"#,
                             fed_ver.extra_msg
                         ),
                     ),
