@@ -1698,7 +1698,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                         "Setting supergraph root {} to type named {} (from subgraph {})",
                         root_kind, root_type, subgraph.name
                     );
-                    dest.set_root_type(&mut self.merged, root_kind, root_type.clone())?;
+                    let root_type = ComponentName::from(root_type.name.clone());
+                    dest.set_root_type(&mut self.merged, root_kind, root_type)?;
                     break;
                 }
             }
