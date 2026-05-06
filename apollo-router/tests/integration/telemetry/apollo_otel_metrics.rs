@@ -979,23 +979,42 @@ fn metrics_contain_and_observed(
     expected_metric: &Metric,
 ) -> (bool, Vec<Metric>) {
     let expected_name = &expected_metric.name;
-    let Some(actual_metric) = find_metric(expected_name, actual_metrics) else {
-        return (false, Vec::new());
-    };
 
-    let observed: Vec<Metric> = match &actual_metric.data {
-        Some(metric::Data::Sum(sum)) => sum
-            .data_points
-            .iter()
-            .map(|dp| Metric::from_number_datapoint(expected_name, dp))
-            .collect(),
-        Some(metric::Data::Histogram(histogram)) => histogram
-            .data_points
-            .iter()
-            .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
-            .collect(),
-        _ => panic!("Metric type for '{expected_name}' is not yet implemented"),
-    };
+    // Aggregate `data_points` across **all** `Metric` protos with this
+    // name across all accumulated batches. Earlier code used a `.find()`
+    // short-circuit that returned only the first matching proto, so
+    // when the same metric name appeared in two separate
+    // `ExportMetricsServiceRequest` batches (an early datapoint
+    // without `has_errors`, a later one with), `wait_for_metric_match`
+    // would re-evaluate the first batch's data points on every
+    // iteration and never observe the later batch's enrichment — the
+    // exact multi-batch case the helper exists to handle.
+    let observed: Vec<Metric> = actual_metrics
+        .iter()
+        .flat_map(|req| &req.resource_metrics)
+        .flat_map(|rm| &rm.scope_metrics)
+        .flat_map(|sm| &sm.metrics)
+        .filter(|m| m.name.as_str() == expected_name.as_str())
+        .flat_map(|m| -> Vec<Metric> {
+            match &m.data {
+                Some(metric::Data::Sum(sum)) => sum
+                    .data_points
+                    .iter()
+                    .map(|dp| Metric::from_number_datapoint(expected_name, dp))
+                    .collect(),
+                Some(metric::Data::Histogram(histogram)) => histogram
+                    .data_points
+                    .iter()
+                    .map(|dp| Metric::from_histogram_datapoint(expected_name, dp))
+                    .collect(),
+                _ => panic!("Metric type for '{expected_name}' is not yet implemented"),
+            }
+        })
+        .collect();
+
+    if observed.is_empty() {
+        return (false, observed);
+    }
 
     let metric_found = observed.iter().any(|m| {
         // Only match values and attributes that are explicitly set
@@ -1042,18 +1061,6 @@ async fn wait_for_metric_match(
             return accumulated;
         }
     }
-}
-
-fn find_metric<'a>(
-    name: &str,
-    metrics: &'a [ExportMetricsServiceRequest],
-) -> Option<&'a opentelemetry_proto::tonic::metrics::v1::Metric> {
-    metrics
-        .iter()
-        .flat_map(|req| &req.resource_metrics)
-        .flat_map(|rm| &rm.scope_metrics)
-        .flat_map(|sm| &sm.metrics)
-        .find(|m| m.name == name)
 }
 
 #[derive(Display, Clone, Debug)]
