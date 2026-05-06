@@ -1527,6 +1527,43 @@ mod non_repeatable_directive_arguments {
             "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"Replaced by field 'b'\"} (from subgraphs \"Subgraph2\" and \"Subgraph4\"), but found arguments {reason: \"because\"} in subgraph \"Subgraph1\" and no arguments in subgraph \"Subgraph3\".",
         );
     }
+
+    #[test]
+    fn includes_subgraphs_without_directive_in_mismatch_hint() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "because")
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "Replaced by field 'b'")
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS",
+            "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"because\"} (from subgraph \"Subgraph1\"), but found arguments {reason: \"Replaced by field 'b'\"} in subgraph \"Subgraph2\" and  in subgraph \"Subgraph3\".",
+        );
+    }
 }
 
 mod shareable_runtime_types {
