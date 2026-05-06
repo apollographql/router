@@ -921,8 +921,55 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "{ me { __typename id } }"}),
+                    serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { reviews { author { reviews { author { __typename id } } } } } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [
+                        {"reviews": [
+                            {"author": {"reviews": [
+                                {"author": {"__typename": "User", "id": "1"}},
+                                {"author": {"__typename": "User", "id": "1"}}
+                            ]}},
+                            {"author": {"reviews": [
+                                {"author": {"__typename": "User", "id": "1"}},
+                                {"author": {"__typename": "User", "id": "1"}}
+                            ]}}
+                        ]}
+                    ]}}),
+                )
+                .build(),
+        );
+        s
+    };
     let (mut response, _registry) = {
-        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        let (router, counting_registry) = setup_sandboxed_router_and_registry(
+            serde_json::json!({}),
+            mocks,
+        )
+        .await;
         (
             router
                 .oneshot(request.try_into().unwrap())
@@ -962,7 +1009,9 @@ async fn defer_path_with_disabled_config() {
         .build()
         .expect("expecting failure due to disabled config defer support");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // No subgraph traffic: defer is disabled, so the request fails
+    // validation before the plan runs. Empty mocks suffice.
+    let (router, _) = setup_sandboxed_router_and_registry(config, starstuff_mocks_empty()).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -997,7 +1046,8 @@ async fn defer_path() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let mocks = starstuff_mocks_for_me_id_then_deferred_name();
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1038,7 +1088,44 @@ async fn defer_path_in_array() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "{ me { __typename id } }"}),
+                    serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { reviews { id author { __typename id } } } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [
+                        {"reviews": [
+                            {"id": "1", "author": {"__typename": "User", "id": "1"}},
+                            {"id": "2", "author": {"__typename": "User", "id": "1"}}
+                        ]}
+                    ]}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1079,7 +1166,8 @@ async fn defer_query_without_accept() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // Errors with DEFER_BAD_HEADER before plan execution; no subgraphs hit.
+    let (router, _) = setup_sandboxed_router_and_registry(config, starstuff_mocks_empty()).await;
 
     let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
     let first = stream.next_response().await.unwrap().unwrap();
@@ -1107,7 +1195,11 @@ async fn defer_empty_primary_response() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let (router, _) = setup_sandboxed_router_and_registry(
+        config,
+        starstuff_mocks_for_me_id_then_deferred_name(),
+    )
+    .await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1144,7 +1236,11 @@ async fn defer_default_variable() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config.clone()).await;
+    let (router, _) = setup_sandboxed_router_and_registry(
+        config.clone(),
+        starstuff_mocks_for_me_id_then_deferred_name(),
+    )
+    .await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1164,7 +1260,22 @@ async fn defer_default_variable() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // Second branch: `if: false` ⇒ no defer, single accounts query for
+    // `me { id name }`.
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query X__accounts__0 { me { id name } }", "operationName": "X__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"id": "1", "name": "Ada Lovelace"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1392,6 +1503,37 @@ fn starstuff_mocks_empty() -> MockedSubgraphs {
     s.insert("inventory", MockSubgraph::builder().build());
     s.insert("products", MockSubgraph::builder().build());
     s.insert("reviews", MockSubgraph::builder().build());
+    s
+}
+
+// Mocks for `{ me { id } }` followed by a deferred entity-lookup on
+// `User { name }`. Used by `defer_path` (and any other test whose
+// deferred chunks request these two pieces of accounts data with the
+// `Ada Lovelace` snapshot fixture). Initial chunk asserts
+// `{me: {id: "1"}}`; deferred chunk asserts `{name: "Ada Lovelace"}`
+// via path `["me"]`.
+fn starstuff_mocks_for_me_id_then_deferred_name() -> MockedSubgraphs {
+    let mut s = starstuff_mocks_empty();
+    s.insert(
+        "accounts",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({"query": "{ me { id } }"}),
+                serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+            )
+            .with_json(
+                serde_json::json!({"query": "{ me { __typename id } }"}),
+                serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+            )
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                    "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+            )
+            .build(),
+    );
     s
 }
 
