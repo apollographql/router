@@ -358,7 +358,14 @@ impl EventTest {
         let deadline = Duration::from_secs(5);
         let quiet = Duration::from_millis(200);
         let start = Instant::now();
-        let mut last_event = Instant::now();
+        // `last_event` is `None` until at least one event has been
+        // observed. Initializing it as `Some(Instant::now())` at function
+        // entry would make the `last_event.elapsed() >= quiet` check fire
+        // at T+200 ms relative to entry whenever no events have arrived
+        // yet — which would convert the 5 s deadline into an unreachable
+        // upper bound for the cold-start case (the exact scenario this
+        // function exists to handle).
+        let mut last_event: Option<Instant> = None;
         let mut events: Vec<EventLog> = Vec::new();
         loop {
             let new = self
@@ -366,9 +373,10 @@ impl EventTest {
                 .capture_logs(|s| serde_json::from_str::<EventLog>(&s).ok());
             if !new.is_empty() {
                 events.extend(new);
-                last_event = Instant::now();
+                last_event = Some(Instant::now());
             }
-            if last_event.elapsed() >= quiet || start.elapsed() >= deadline {
+            let quiet_reached = last_event.is_some_and(|t| t.elapsed() >= quiet);
+            if quiet_reached || start.elapsed() >= deadline {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
