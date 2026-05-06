@@ -136,7 +136,6 @@ or ( binary_id(=apollo-router) & test(=plugins::connectors::tests::test_entity_r
 or ( binary_id(=apollo-router) & test(=plugins::connectors::tests::test_interface_object) )
 or ( binary_id(=apollo-router) & test(=plugins::expose_query_plan::tests::it_expose_query_plan) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::instruments::tests::test_instruments) )
-or ( binary_id(=apollo-router) & test(=protocols::websocket::tests::test_ws_connection_new_proto_with_heartbeat) )
 or ( binary_id(=apollo-router) & test(=router::tests::basic_event_stream_test) )
 or ( binary_id(=apollo-router) & test(=router::tests::schema_update_test) )
 or ( binary_id(=apollo-router) & test(=services::layers::persisted_queries::tests::pq_layer_freeform_graphql_with_safelist_log_unknown_true) )
