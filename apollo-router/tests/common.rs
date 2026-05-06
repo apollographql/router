@@ -1016,10 +1016,7 @@ impl IntegrationTest {
         if !self.with_real_studio_creds {
             router.env("APOLLO_KEY", "test-mocked-key");
             router.env("APOLLO_GRAPH_REF", "test-mocked-graph@current");
-            router.env(
-                "APOLLO_UPLINK_ENDPOINTS",
-                self._apollo_uplink_server.uri(),
-            );
+            router.env("APOLLO_UPLINK_ENDPOINTS", self._apollo_uplink_server.uri());
             // Point the spawned router's `License::jwks()` lookup at the
             // test JWKS (HS256 secret bundled in
             // `apollo-router/src/uplink/testdata/license.jwks.json`) so it
