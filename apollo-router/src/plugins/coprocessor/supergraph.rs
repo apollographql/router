@@ -357,6 +357,10 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
+    // Evaluate HTTP-level conditions before moving response.response — after into_parts() the
+    // response is partially moved and can no longer be borrowed as a whole.
+    let response_condition_matches = response_config.condition.evaluate_response(&response);
+
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
@@ -372,13 +376,12 @@ where
 
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    // Evaluate the condition against the first chunk. For on_graphql_error this inspects the
-    // chunk directly rather than reading the sticky context flag, so it fires only when this
-    // specific chunk contains errors.
-    let new_body = if response_config
+    // The first chunk should call the coprocessor if either the HTTP-level condition (status,
+    // headers) or the chunk-level condition (on_graphql_error) matches.
+    let chunk_condition_matches = response_config
         .condition
-        .evaluate_event_response(&first, &response.context)
-    {
+        .evaluate_event_response(&first, &response.context);
+    let new_body = if response_condition_matches || chunk_condition_matches {
         // Now we process our first chunk of response
         // Encode headers, body, status, context, sdl to create a payload
         let headers_to_send = response_config
