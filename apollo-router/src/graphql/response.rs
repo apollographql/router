@@ -270,8 +270,14 @@ impl From<ExecutionResponse> for Response {
 }
 
 impl Response {
+    pub(crate) fn all_errors(&self) -> impl Iterator<Item = &Error> {
+        self.errors
+            .iter()
+            .chain(self.incremental.iter().flat_map(|r| r.errors.iter()))
+    }
+
     pub(crate) fn contains_errors(&self) -> bool {
-        !self.errors.is_empty() || self.incremental.iter().any(|r| !r.errors.is_empty())
+        self.all_errors().next().is_some()
     }
 }
 
