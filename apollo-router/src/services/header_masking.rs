@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use http::HeaderMap;
 use http::HeaderValue;
@@ -16,8 +17,11 @@ pub(crate) struct HeaderMaskingRules {
 }
 
 impl HeaderMaskingRules {
-    /// Create masking rules from configuration
+    /// Create masking rules from configuration. Returns empty rules when `enabled: false`.
     pub(crate) fn from_config(config: &HeaderMaskingConfig) -> Self {
+        if !config.enabled {
+            return Self::default();
+        }
         let sensitive_headers = config
             .sensitive_headers
             .iter()
@@ -85,6 +89,35 @@ impl HeaderMaskingRules {
         }
 
         format!("{{{}}}", parts.join(", "))
+    }
+}
+
+/// A write-once masking rules map stored in the request context.
+///
+/// Inserted by the headers plugin at router-service time so all stages (router,
+/// supergraph, subgraph, connector) read a consistent, immutable snapshot.
+/// Per-subgraph overrides are included; callers look up by name.
+pub(crate) struct MaskingRulesMap {
+    global: Arc<HeaderMaskingRules>,
+    per_subgraph: HashMap<String, Arc<HeaderMaskingRules>>,
+}
+
+impl MaskingRulesMap {
+    pub(crate) fn new(
+        global: Arc<HeaderMaskingRules>,
+        per_subgraph: HashMap<String, Arc<HeaderMaskingRules>>,
+    ) -> Self {
+        Self {
+            global,
+            per_subgraph,
+        }
+    }
+
+    /// Returns the subgraph-specific rules when present, otherwise the global rules.
+    pub(crate) fn get(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
+        subgraph_name
+            .and_then(|n| self.per_subgraph.get(n))
+            .unwrap_or(&self.global)
     }
 }
 

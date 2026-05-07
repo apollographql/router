@@ -214,8 +214,13 @@ impl Selector for ConnectorSelector {
                     (Some(_), Some(_)) => Some("***MASKED***".to_string()),
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(connector_request_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| {
+                                    m.get(Some(
+                                        request.connector.id.subgraph_name.as_str(),
+                                    ))
+                                    .should_mask(connector_request_header)
+                                })
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -316,8 +321,8 @@ impl Selector for ConnectorSelector {
                         // If redact is None, check global rules
                         (None, Some(_)) => {
                             let should_mask = response.context.extensions().with_lock(|lock| {
-                                lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                    .map(|rules| rules.should_mask(connector_response_header))
+                                lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                    .map(|m| m.get(None).should_mask(connector_response_header))
                                     .unwrap_or(false)
                             });
                             if should_mask {
@@ -791,7 +796,7 @@ mod tests {
     #[test]
     fn connector_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
@@ -802,8 +807,9 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let request = connector_request(http_request_with_header(), Some(context), None);
         assert_eq!(Some("***MASKED***".into()), selector.on_request(&request));
     }
@@ -811,7 +817,7 @@ mod tests {
     #[test]
     fn connector_request_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
@@ -822,8 +828,9 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let request = connector_request(http_request_with_header(), Some(context), None);
         assert_eq!(
             Some(TEST_HEADER_VALUE.into()),
@@ -834,7 +841,7 @@ mod tests {
     #[test]
     fn connector_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
@@ -845,18 +852,19 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let response = connector_response_with_header();
         response
             .context
             .extensions()
-            .with_lock(|lock| lock.insert(rules));
+            .with_lock(|lock| lock.insert(map));
         assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
     }
 
     #[test]
     fn connector_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
@@ -867,11 +875,12 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let response = connector_response_with_header();
         response
             .context
             .extensions()
-            .with_lock(|lock| lock.insert(rules));
+            .with_lock(|lock| lock.insert(map));
         assert_eq!(
             Some(TEST_HEADER_VALUE.into()),
             selector.on_response(&response)

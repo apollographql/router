@@ -19,8 +19,6 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
-#[cfg(not(test))]
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::router;
 
 #[derive(Clone)]
@@ -80,8 +78,8 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                 {
                     let headers = response.response.headers();
                     response.context.extensions().with_lock(|lock| {
-                        if let Some(rules) = lock.get::<Arc<HeaderMaskingRules>>() {
-                            rules.mask_headers_debug(headers)
+                        if let Some(m) = lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>() {
+                            m.get(None).mask_headers_debug(headers)
                         } else {
                             format!("{headers:?}")
                         }

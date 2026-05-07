@@ -212,17 +212,13 @@ struct ConnectorHeadersConfiguration {
     sources: HashMap<String, ConnectorHeadersLocation>,
 }
 
-/// Global configuration with request and response sections
+/// Per-location (request) configuration with operations and masking
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct GlobalHeadersConfiguration {
     /// Request configuration (operations and masking)
     #[serde(default)]
     request: Option<HeadersLocation>,
-
-    /// Response configuration (operations and masking)
-    #[serde(default)]
-    response: Option<HeadersLocation>,
 }
 
 /// Configuration for header propagation and masking
@@ -249,15 +245,7 @@ struct Headers {
     all_connector_operations: Arc<Vec<Operation>>,
     connector_source_operations: HashMap<String, Arc<Vec<Operation>>>,
 
-    // Global masking rules (from headers.all)
-    global_request_masking: Arc<crate::services::header_masking::HeaderMaskingRules>,
-    global_response_masking: Arc<crate::services::header_masking::HeaderMaskingRules>,
-
-    // Per-subgraph masking rules (from headers.subgraphs.{name})
-    subgraph_request_masking:
-        HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
-    subgraph_response_masking:
-        HashMap<String, Arc<crate::services::header_masking::HeaderMaskingRules>>,
+    masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
 }
 
 #[async_trait::async_trait]
@@ -311,7 +299,6 @@ impl PluginPrivate for Headers {
             })
             .collect();
 
-        // Build global request masking rules (from headers.all.request.masking)
         let global_request_masking = init
             .config
             .all
@@ -321,18 +308,7 @@ impl PluginPrivate for Headers {
             .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
             .unwrap_or_else(|| Arc::new(HeaderMaskingRules::default()));
 
-        // Build global response masking rules (from headers.all.response.masking)
-        let global_response_masking = init
-            .config
-            .all
-            .as_ref()
-            .and_then(|a| a.response.as_ref())
-            .and_then(|r| r.masking.as_ref())
-            .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
-            .unwrap_or_else(|| Arc::new(HeaderMaskingRules::default()));
-
-        // Build per-subgraph request masking rules (from headers.subgraphs.{name}.request.masking)
-        let subgraph_request_masking = init
+        let per_subgraph_request_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
             .config
             .subgraphs
             .iter()
@@ -350,34 +326,17 @@ impl PluginPrivate for Headers {
             })
             .collect();
 
-        // Build per-subgraph response masking rules (from headers.subgraphs.{name}.response.masking)
-        let subgraph_response_masking = init
-            .config
-            .subgraphs
-            .iter()
-            .filter_map(|(name, sg_config)| {
-                sg_config
-                    .response
-                    .as_ref()
-                    .and_then(|r| r.masking.as_ref())
-                    .map(|masking_config| {
-                        (
-                            name.clone(),
-                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
-                        )
-                    })
-            })
-            .collect();
+        let masking_rules_map = Arc::new(crate::services::header_masking::MaskingRulesMap::new(
+            global_request_masking,
+            per_subgraph_request_masking,
+        ));
 
         Ok(Headers {
             all_operations: Arc::new(operations),
             all_connector_operations: Arc::new(all_connector_operations),
             subgraph_operations,
             connector_source_operations,
-            global_request_masking,
-            global_response_masking,
-            subgraph_request_masking,
-            subgraph_response_masking,
+            masking_rules_map,
         })
     }
 
@@ -390,25 +349,8 @@ impl PluginPrivate for Headers {
             .unwrap_or_else(|| self.all_operations.clone());
 
         // Get request masking rules for this subgraph (fallback to global)
-        let request_masking = self
-            .subgraph_request_masking
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| self.global_request_masking.clone());
-
-        // Get response masking rules for this subgraph (fallback to global)
-        let response_masking = self
-            .subgraph_response_masking
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| self.global_response_masking.clone());
-
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(
-                operations,
-                request_masking,
-                response_masking,
-            ))
+            .layer(HeadersLayer::new(operations))
             .service(service)
             .boxed()
     }
@@ -418,49 +360,25 @@ impl PluginPrivate for Headers {
         service: crate::services::connector::request_service::BoxService,
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
-        // Extract subgraph name from "subgraph.connector" format
-        let subgraph_name = source_name.split('.').next().unwrap_or("");
-
-        // Get operations for this connector (fallback to global connector operations)
         let operations = self
             .connector_source_operations
             .get(&source_name)
             .cloned()
             .unwrap_or_else(|| self.all_connector_operations.clone());
 
-        // Get request masking rules: inherit from parent subgraph, fallback to global
-        let request_masking = self
-            .subgraph_request_masking
-            .get(subgraph_name)
-            .cloned()
-            .unwrap_or_else(|| self.global_request_masking.clone());
-
-        // Get response masking rules: inherit from parent subgraph, fallback to global
-        let response_masking = self
-            .subgraph_response_masking
-            .get(subgraph_name)
-            .cloned()
-            .unwrap_or_else(|| self.global_response_masking.clone());
-
         ServiceBuilder::new()
-            .layer(HeadersLayer::new(
-                operations,
-                request_masking,
-                response_masking,
-            ))
+            .layer(HeadersLayer::new(operations))
             .service(service)
             .boxed()
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        // Inject global masking rules at router level for router/supergraph telemetry
-        let request_masking = self.global_request_masking.clone();
+        let masking_rules_map = self.masking_rules_map.clone();
 
         ServiceBuilder::new()
             .map_request(move |req: router::Request| {
-                // Store global masking rules in context for router/supergraph telemetry
                 req.context.extensions().with_lock(|lock| {
-                    lock.insert(request_masking.clone());
+                    lock.insert(masking_rules_map.clone());
                 });
                 req
             })
@@ -471,21 +389,11 @@ impl PluginPrivate for Headers {
 
 struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
-    request_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
-    response_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
 }
 
 impl HeadersLayer {
-    fn new(
-        operations: Arc<Vec<Operation>>,
-        request_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
-        response_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
-    ) -> Self {
-        Self {
-            operations,
-            request_masking_rules,
-            response_masking_rules,
-        }
+    fn new(operations: Arc<Vec<Operation>>) -> Self {
+        Self { operations }
     }
 }
 
@@ -496,8 +404,6 @@ impl<S> Layer<S> for HeadersLayer {
         HeadersService {
             inner,
             operations: self.operations.clone(),
-            request_masking_rules: self.request_masking_rules.clone(),
-            response_masking_rules: self.response_masking_rules.clone(),
         }
     }
 }
@@ -505,10 +411,6 @@ impl<S> Layer<S> for HeadersLayer {
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
-    request_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
-    // Reserved for future response header masking support
-    #[allow(dead_code)]
-    response_masking_rules: Arc<crate::services::header_masking::HeaderMaskingRules>,
 }
 
 // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
@@ -546,11 +448,6 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        // Store masking rules in context for telemetry to use
-        req.context.extensions().with_lock(|lock| {
-            lock.insert(self.request_masking_rules.clone());
-        });
-
         self.modify_subgraph_request(&mut req);
         self.inner.call(req)
     }
@@ -569,11 +466,6 @@ where
     }
 
     fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
-        // Store masking rules in context for telemetry to use
-        req.context.extensions().with_lock(|lock| {
-            lock.insert(self.request_masking_rules.clone());
-        });
-
         self.modify_connector_request(&mut req);
         self.inner.call(req)
     }
@@ -987,9 +879,6 @@ mod test {
                 enabled: true
                 sensitive_headers:
                   - authorization
-            response:
-              masking:
-                enabled: false
         "#,
         )
         .unwrap();
@@ -1055,8 +944,6 @@ mod test {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1084,8 +971,6 @@ mod test {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1119,8 +1004,6 @@ mod test {
                     from_context: "my_key".to_string(),
                 },
             ))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1150,8 +1033,6 @@ mod test {
                     from_context: "my_key".to_string(),
                 },
             ))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1184,8 +1065,6 @@ mod test {
                 path: JsonPathInst::from_str("$.operationName").unwrap(),
                 default: None,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1214,8 +1093,6 @@ mod test {
                 path: JsonPathInst::from_str("$.myCoolField").unwrap(),
                 default: None,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1248,8 +1125,6 @@ mod test {
                 path: JsonPathInst::from_str(".operationName").unwrap(),
                 default: None,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1279,8 +1154,6 @@ mod test {
                 path: JsonPathInst::from_str(".myCoolField").unwrap(),
                 default: None,
             }))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1302,8 +1175,6 @@ mod test {
 
         let mut service = HeadersLayer::new(
             Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1321,8 +1192,6 @@ mod test {
 
         let mut service = HeadersLayer::new(
             Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1383,8 +1252,6 @@ mod test {
 
         let mut service = HeadersLayer::new(
             Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1408,8 +1275,6 @@ mod test {
             Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
                 "a[ab]",
             )?))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1429,8 +1294,6 @@ mod test {
             Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
                 "a[ab]",
             )?))]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1463,8 +1326,6 @@ mod test {
             Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1493,8 +1354,6 @@ mod test {
             Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1527,8 +1386,6 @@ mod test {
                 rename: None,
                 default: None,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1557,8 +1414,6 @@ mod test {
                 rename: None,
                 default: None,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1591,8 +1446,6 @@ mod test {
                 rename: Some("ea".try_into()?),
                 default: None,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1621,8 +1474,6 @@ mod test {
                 rename: Some("ea".try_into()?),
                 default: None,
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1669,8 +1520,6 @@ mod test {
                     default: None,
                 }),
             ]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1713,8 +1562,6 @@ mod test {
                     default: None,
                 }),
             ]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1747,8 +1594,6 @@ mod test {
                 rename: None,
                 default: Some("defaulted".try_into()?),
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1777,8 +1622,6 @@ mod test {
                 rename: None,
                 default: Some("defaulted".try_into()?),
             })]),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
-            Arc::new(crate::services::header_masking::HeaderMaskingRules::default()),
         )
         .layer(mock);
 
@@ -1797,12 +1640,6 @@ mod test {
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
-            request_masking_rules: Arc::new(
-                crate::services::header_masking::HeaderMaskingRules::default(),
-            ),
-            response_masking_rules: Arc::new(
-                crate::services::header_masking::HeaderMaskingRules::default(),
-            ),
         };
 
         let mut request = SubgraphRequest {
@@ -1885,12 +1722,6 @@ mod test {
                     matching: Regex::from_str("dc")?,
                 }),
             ]),
-            request_masking_rules: Arc::new(
-                crate::services::header_masking::HeaderMaskingRules::default(),
-            ),
-            response_masking_rules: Arc::new(
-                crate::services::header_masking::HeaderMaskingRules::default(),
-            ),
         };
 
         let mut request = SubgraphRequest {

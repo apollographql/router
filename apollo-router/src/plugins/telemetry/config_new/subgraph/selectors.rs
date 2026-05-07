@@ -436,8 +436,11 @@ impl Selector for SubgraphSelector {
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(subgraph_request_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| {
+                                    m.get(Some(request.subgraph_name.as_str()))
+                                        .should_mask(subgraph_request_header)
+                                })
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -474,8 +477,11 @@ impl Selector for SubgraphSelector {
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(supergraph_request_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| {
+                                    m.get(Some(request.subgraph_name.as_str()))
+                                        .should_mask(supergraph_request_header)
+                                })
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -569,8 +575,11 @@ impl Selector for SubgraphSelector {
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(subgraph_response_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| {
+                                    m.get(Some(response.subgraph_name.as_str()))
+                                        .should_mask(subgraph_response_header)
+                                })
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -1216,7 +1225,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = SubgraphSelector::SubgraphRequestHeader {
             subgraph_request_header: "authorization".to_string(),
@@ -1227,8 +1236,9 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -1247,7 +1257,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_request_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = SubgraphSelector::SubgraphRequestHeader {
             subgraph_request_header: "authorization".to_string(),
@@ -1258,8 +1268,9 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -1278,7 +1289,7 @@ mod test {
     #[test]
     fn subgraph_supergraph_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = SubgraphSelector::SupergraphRequestHeader {
             supergraph_request_header: "authorization".to_string(),
@@ -1289,8 +1300,9 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
             .supergraph_request(Arc::new(
                 http::Request::builder()
@@ -1309,7 +1321,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = SubgraphSelector::SubgraphResponseHeader {
             subgraph_response_header: "set-cookie".to_string(),
@@ -1320,8 +1332,9 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::SubgraphResponse::fake2_builder()
             .header("set-cookie", "session=abc123")
             .context(context)
@@ -1336,7 +1349,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
         let selector = SubgraphSelector::SubgraphResponseHeader {
             subgraph_response_header: "set-cookie".to_string(),
@@ -1347,8 +1360,9 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|lock| lock.insert(rules));
+        context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::SubgraphResponse::fake2_builder()
             .header("set-cookie", "session=abc123")
             .context(context)

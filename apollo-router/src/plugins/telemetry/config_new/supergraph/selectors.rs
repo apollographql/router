@@ -279,8 +279,8 @@ impl Selector for SupergraphSelector {
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(request_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| m.get(None).should_mask(request_header))
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -392,8 +392,8 @@ impl Selector for SupergraphSelector {
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::HeaderMaskingRules>>()
-                                .map(|rules| rules.should_mask(response_header))
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| m.get(None).should_mask(response_header))
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -1325,25 +1325,23 @@ mod test {
     #[test]
     fn test_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create a selector for authorization header (no explicit redact setting)
         let selector = SupergraphSelector::RequestHeader {
             request_header: "authorization".to_string(),
             redact: None,
             default: None,
         };
 
-        // Create masking rules
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
-        // Create request with authorization header
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         let request = SupergraphRequest::fake_builder()
@@ -1364,24 +1362,23 @@ mod test {
     #[test]
     fn test_request_header_no_masking_when_not_sensitive() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create a selector for a non-sensitive header
         let selector = SupergraphSelector::RequestHeader {
             request_header: "user-agent".to_string(),
             redact: None,
             default: None,
         };
 
-        // Create masking rules (authorization is sensitive, but user-agent is not)
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         let request = SupergraphRequest::fake_builder()
@@ -1402,24 +1399,23 @@ mod test {
     #[test]
     fn test_request_header_redact_allow_overrides_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create a selector with redact: "allow" - this should override global masking
         let selector = SupergraphSelector::RequestHeader {
             request_header: "authorization".to_string(),
             redact: Some("allow".to_string()),
             default: None,
         };
 
-        // Create masking rules that would normally mask authorization
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         let request = SupergraphRequest::fake_builder()
@@ -1467,24 +1463,23 @@ mod test {
     #[test]
     fn test_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create a selector for set-cookie header
         let selector = SupergraphSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),
             redact: None,
             default: None,
         };
 
-        // Create masking rules
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         let response = SupergraphResponse::fake_builder()
@@ -1505,24 +1500,23 @@ mod test {
     #[test]
     fn test_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create a selector with redact: "allow"
         let selector = SupergraphSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),
             redact: Some("allow".to_string()),
             default: None,
         };
 
-        // Create masking rules
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         let response = SupergraphResponse::fake_builder()
@@ -1570,17 +1564,17 @@ mod test {
     #[test]
     fn test_request_header_case_insensitive_matching() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
 
-        // Create masking rules with lowercase header name
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
+        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
 
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| {
-            lock.insert(rules);
+            lock.insert(map);
         });
 
         // Test with lowercase selector

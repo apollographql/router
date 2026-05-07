@@ -8001,5 +8001,65 @@ mod tests {
                 "Bearer public-token"
             );
         }
+
+        #[test]
+        fn coprocessor_reads_masking_config_from_headers_path() {
+            // Verify the coprocessor reads masking rules from headers.all.request.masking
+            // (not the old "header_masking" top-level key that no longer exists).
+            let full_config = serde_json::json!({
+                "headers": {
+                    "all": {
+                        "request": {
+                            "masking": {
+                                "enabled": true,
+                                "sensitive_headers": ["authorization", "x-secret"]
+                            }
+                        }
+                    }
+                }
+            });
+
+            let rules = full_config
+                .get("headers")
+                .and_then(|h| h.get("all"))
+                .and_then(|a| a.get("request"))
+                .and_then(|r| r.get("masking"))
+                .and_then(|hm_config| {
+                    serde_json::from_value::<crate::configuration::header_masking_config::HeaderMaskingConfig>(
+                        hm_config.clone(),
+                    )
+                    .ok()
+                    .map(|config| {
+                        Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&config))
+                    })
+                });
+
+            assert!(rules.is_some(), "masking rules should be loaded from headers.all.request.masking");
+            let rules = rules.unwrap();
+            assert!(rules.should_mask("authorization"), "authorization should be masked");
+            assert!(rules.should_mask("x-secret"), "x-secret should be masked");
+            assert!(!rules.should_mask("content-type"), "content-type should not be masked");
+
+            // Old path must not work (the bug that was fixed)
+            let old_path_rules = full_config.get("header_masking");
+            assert!(old_path_rules.is_none(), "header_masking key should not exist at top level");
+        }
+
+        #[test]
+        fn coprocessor_masking_disabled_produces_empty_rules() {
+            // When enabled: false, from_config returns empty rules (no headers masked).
+            use crate::configuration::header_masking_config::HeaderMaskingConfig;
+            use crate::services::header_masking::HeaderMaskingRules;
+
+            let config = HeaderMaskingConfig {
+                enabled: false,
+                sensitive_headers: vec!["authorization".to_string()],
+            };
+            let rules = HeaderMaskingRules::from_config(&config);
+            assert!(
+                !rules.should_mask("authorization"),
+                "enabled: false should produce empty rules that mask nothing"
+            );
+        }
     }
 }

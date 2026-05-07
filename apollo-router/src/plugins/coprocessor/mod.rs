@@ -198,14 +198,18 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
-        // Initialize header masking rules from global configuration
+        // Read masking config from headers.all.request.masking (same location as headers plugin).
         let header_masking_rules = init.full_config.as_ref().and_then(|config| {
-            config.get("header_masking").and_then(|hm_config| {
-                serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
-                    .ok()
-                    .filter(|config| config.enabled)
-                    .map(|config| Arc::new(HeaderMaskingRules::from_config(&config)))
-            })
+            config
+                .get("headers")
+                .and_then(|h| h.get("all"))
+                .and_then(|a| a.get("request"))
+                .and_then(|r| r.get("masking"))
+                .and_then(|hm_config| {
+                    serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
+                        .ok()
+                        .map(|config| Arc::new(HeaderMaskingRules::from_config(&config)))
+                })
         });
 
         CoprocessorPlugin::new(
