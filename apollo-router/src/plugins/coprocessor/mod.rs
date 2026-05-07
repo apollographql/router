@@ -1238,8 +1238,8 @@ where
                 // Evaluate condition per-chunk. CHUNK_CONTAINS_GRAPHQL_ERROR has been set in
                 // context by check_for_errors for this chunk, so on_graphql_error conditions
                 // reflect the current chunk accurately.
-                let chunk_condition_matches = deferred_condition
-                    .evaluate_event_response(&(), &generator_map_context);
+                let chunk_condition_matches =
+                    deferred_condition.evaluate_event_response(&(), &generator_map_context);
 
                 if !response_condition_matches && !chunk_condition_matches {
                     return Ok(deferred_response);
