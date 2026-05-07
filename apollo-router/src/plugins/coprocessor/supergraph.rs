@@ -494,12 +494,10 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
+                // Use a new context to avoid carrying request extensions into the coprocessor
+                // HTTP call, consistent with how the initial chunk is handled.
                 let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
+                    .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
