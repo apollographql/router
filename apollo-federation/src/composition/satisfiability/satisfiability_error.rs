@@ -113,6 +113,15 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
     runtime_types_per_subgraphs: &IndexMap<Arc<str>, Arc<BTreeSet<Name>>>,
     hints: &mut Vec<CompositionHint>,
 ) -> Result<(), FederationError> {
+    let field_coord = field_definition_position.to_string();
+    let already_reported = hints.iter().any(|h| {
+        h.code() == "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN"
+            && h.message()
+                .contains(&format!("Shared field \"{}\"", field_coord))
+    });
+    if already_reported {
+        return Ok(());
+    }
     let witness = build_witness_operation(state.supergraph_path())?;
     let operation = witness.to_string();
     let all_subgraphs = state.current_subgraph_names()?;

@@ -1705,6 +1705,99 @@ Since a shared field must be resolved the same way in all subgraphs, make sure t
 Otherwise the @shareable contract will be broken."#,
         );
     }
+
+    #[test]
+    fn witness_prefers_query_over_mutation() {
+        // When a shareable field with inconsistent runtime types is reachable via both
+        // a Query path and a Mutation path, the witness operation in the hint message
+        // should use a query, not a mutation.
+        let subgraph_a = ServiceDefinition {
+            name: "A",
+            type_defs: r#"
+                type Query {
+                    entity: E! @shareable
+                }
+
+                type Mutation {
+                    updateEntity: E! @shareable
+                }
+
+                type E @key(fields: "id") {
+                    id: ID!
+                    result: R! @shareable
+                }
+
+                union R = Success | Failure
+
+                type Success @shareable {
+                    value: String
+                }
+
+                type Failure @shareable {
+                    error: String
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "B",
+            type_defs: r#"
+                type Query {
+                    entity: E! @shareable
+                }
+
+                type Mutation {
+                    updateEntity: E! @shareable
+                }
+
+                type E @key(fields: "id") {
+                    id: ID!
+                    result: R! @shareable
+                }
+
+                union R = Success | Failure | Pending
+
+                type Success @shareable {
+                    value: String
+                }
+
+                type Failure @shareable {
+                    error: String
+                }
+
+                type Pending {
+                    status: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).unwrap();
+        let hints: Vec<_> = result
+            .hints()
+            .iter()
+            .filter(|h| h.code() == "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN")
+            .collect();
+
+        assert!(
+            !hints.is_empty(),
+            "Expected INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN hint"
+        );
+
+        assert_eq!(
+            hints.len(),
+            1,
+            "Expected exactly one INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN hint (deduplicated across root kinds), got {}",
+            hints.len()
+        );
+
+        for hint in &hints {
+            assert!(
+                hint.message().contains("{\n  entity {"),
+                "Witness operation should use a query path (via 'entity'), not a mutation path (via 'updateEntity').\nActual message:\n{}",
+                hint.message()
+            );
+        }
+    }
 }
 
 mod implicit_federation_upgrades {

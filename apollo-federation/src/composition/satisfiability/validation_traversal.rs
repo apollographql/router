@@ -113,7 +113,7 @@ impl ValidationTraversal {
                 .max_validation_subgraph_paths
                 .unwrap_or(Self::DEFAULT_MAX_VALIDATION_SUBGRAPH_PATHS),
         };
-        for kind in api_schema_query_graph.root_kinds_to_nodes()?.keys() {
+        for kind in api_schema_query_graph.root_kinds_to_nodes()?.keys().rev() {
             validation_traversal.push_stack(ValidationState::new(
                 api_schema_query_graph.clone(),
                 federated_query_graph.clone(),
