@@ -3,6 +3,7 @@ use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 
 use crate::composition::ServiceDefinition;
+use crate::composition::compose;
 use crate::composition::compose_as_fed2_subgraphs;
 
 /// Helper to assert that a supergraph has no hints
@@ -249,7 +250,6 @@ mod entity_consistency {
 }
 
 mod value_type_fields {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 
@@ -857,12 +857,13 @@ In subgraph "Subgraph2", the description is:
             name: "Subgraph1",
             type_defs: r#"
                 type Query {
-                    a: Int
+                  t: T
                 }
 
-                type T @shareable {
-                    "I don't know what I'm doing"
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  "First description"
+                  f: Int @shareable
                 }
             "#,
         };
@@ -870,9 +871,10 @@ In subgraph "Subgraph2", the description is:
         let subgraph2 = ServiceDefinition {
             name: "Subgraph2",
             type_defs: r#"
-                type T @shareable {
-                    "Return a super secret integer"
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  "Second description"
+                  f: Int @shareable
                 }
             "#,
         };
@@ -880,11 +882,12 @@ In subgraph "Subgraph2", the description is:
         let subgraph3 = ServiceDefinition {
             name: "Subgraph3",
             type_defs: r#"
-                type T @shareable {
-                    """
-                    Return a super secret integer
-                    """
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  """
+                  Second description
+                  """
+                  f: Int @shareable
                 }
             "#,
         };
@@ -893,13 +896,13 @@ In subgraph "Subgraph2", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
+            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraphs "Subgraph2" and "Subgraph3"):
   """
-  I don't know what I'm doing
+  Second description
   """
-In subgraphs "Subgraph2" and "Subgraph3", the description is:
+In subgraph "Subgraph1", the description is:
   """
-  Return a super secret integer
+  First description
   """"#,
         );
     }
@@ -944,13 +947,13 @@ In subgraphs "Subgraph2" and "Subgraph3", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Users"):
-  """
-  Represents a user order
-  """
-In subgraph "Orders", the description is:
+            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Orders"):
   """
   Reference type to order entity in ONE GRAPH
+  """
+In subgraph "Users", the description is:
+  """
+  Represents a user order
   """"#,
         );
 
@@ -965,7 +968,7 @@ In subgraph "Orders", the description is:
         let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Represents a user order",
+            "Reference type to order entity in ONE GRAPH",
             "supergraph should use chosen description"
         );
     }
@@ -1014,7 +1017,12 @@ In subgraph "Orders", the description is:
 
         let result =
             compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
-                .unwrap();
+                .expect("successfully composed");
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            "Element \"Product\" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph \"Catalog\"):\n  \"\"\"\n  Product in the catalog\n  \"\"\"\nIn subgraph \"Inventory\", the description is:\n  \"\"\"\n  Inventory product entity\n  \"\"\" and \nIn subgraph \"Reviews\", the description is:\n  \"\"\"\n  Product for reviews\n  \"\"\"",
+        );
 
         let api_schema = result
             .to_api_schema(Default::default())
@@ -1023,7 +1031,7 @@ In subgraph "Orders", the description is:
             .schema()
             .types
             .get("Product")
-            .expect("Product type in schema");
+            .expect("Product type exists in schema");
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
@@ -1079,6 +1087,11 @@ In subgraph "Orders", the description is:
         let result =
             compose_as_fed2_subgraphs(&[reviews_subgraph, catalog_subgraph, inventory_subgraph])
                 .unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            "Element \"Product\" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph \"Catalog\"):\n  \"\"\"\n  Product in the catalog\n  \"\"\"\nIn subgraph \"Inventory\", the description is:\n  \"\"\"\n  Inventory product entity\n  \"\"\" and \nIn subgraph \"Reviews\", the description is:\n  \"\"\"\n  Product for reviews\n  \"\"\"",
+        );
 
         let api_schema = result
             .to_api_schema(Default::default())
@@ -1514,6 +1527,43 @@ mod non_repeatable_directive_arguments {
             "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"Replaced by field 'b'\"} (from subgraphs \"Subgraph2\" and \"Subgraph4\"), but found arguments {reason: \"because\"} in subgraph \"Subgraph1\" and no arguments in subgraph \"Subgraph3\".",
         );
     }
+
+    #[test]
+    fn includes_subgraphs_without_directive_in_mismatch_hint() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "because")
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "Replaced by field 'b'")
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS",
+            "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"because\"} (from subgraph \"Subgraph1\"), but found arguments {reason: \"Replaced by field 'b'\"} in subgraph \"Subgraph2\" and  in subgraph \"Subgraph3\".",
+        );
+    }
 }
 
 mod shareable_runtime_types {
@@ -1658,7 +1708,6 @@ Otherwise the @shareable contract will be broken."#,
 }
 
 mod implicit_federation_upgrades {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 

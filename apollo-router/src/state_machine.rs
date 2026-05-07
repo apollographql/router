@@ -796,9 +796,11 @@ mod tests {
         let mut config = Configuration::builder().build().unwrap();
         config.validated_yaml = Some(json!({
             "limits": {
-                "max_height": 100,
-                "max_aliases": 100,
-                "max_depth": 20
+                "router": {
+                    "max_height": 100,
+                    "max_aliases": 100,
+                    "max_depth": 20
+                }
             }
         }));
         Arc::new(config)

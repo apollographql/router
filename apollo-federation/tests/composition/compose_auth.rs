@@ -1,8 +1,10 @@
 use apollo_compiler::coord;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 
 // =============================================================================
@@ -480,6 +482,44 @@ fn policy_comprehensive_locations() {
         let has_policy = target.directives.iter().any(|d| d.name == "policy");
         assert!(has_policy, "No policy directive found in {}", target.node);
     }
+}
+
+#[test]
+fn specs_compose_in_consistent_order() {
+    let users_sdl = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@authenticated", "@key", "@policy", "@requiresScopes"])
+
+        type Query {
+          users: [User!]! @requiresScopes(scopes: [["admin"]])
+          user(id: ID!): User @authenticated
+        }
+
+        type User @key(fields: "id") @requiresScopes(scopes: [["user_1"]]) {
+          id: ID!
+          name: String!
+          dob: String! @policy(policies: [["user"]])
+        }
+    "#;
+    let users =
+        Subgraph::parse("users", "http://users/graphql", users_sdl).expect("valid users subgraph");
+
+    let address_sdl = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@requiresScopes"])
+
+        type User @key(fields: "id") @requiresScopes(scopes: [["user_2"]]) {
+          id: ID!
+          address: String
+        }
+    "#;
+    let address = Subgraph::parse("address", "http://address/graphql", address_sdl)
+        .expect("valid address subgraph");
+
+    let result = compose(vec![users.clone(), address.clone()]).expect("composes successfully");
+    let supergraph_schema = result.schema().schema();
+    assert_snapshot!(supergraph_schema);
+
+    let result = compose(vec![address, users]).expect("composes successfully");
+    assert_eq!(result.schema().schema(), supergraph_schema);
 }
 
 mod transitive_auth {
@@ -1445,6 +1485,72 @@ mod transitive_auth {
     }
 }
 
+#[test]
+fn verify_auth_works_with_older_federation_version() {
+    let orders_sdl = r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@authenticated", "@requiresScopes"])
+
+        type Query {
+          order(id: ID!): Order @authenticated
+        }
+
+        type Order @key(fields: "id") {
+          id: ID!
+          buyer: User! @requiresScopes(scopes: [["order:buyer"]])
+          total: Float
+        }
+
+        type User @key(fields: "id", resolvable: false) {
+          id: ID!
+        }
+    "#;
+    let orders =
+        Subgraph::parse("orders", "http://orders/graphql", orders_sdl).expect("valid subgraph");
+
+    let users_sdl = r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
+
+        type Query {
+          user(id: ID!): User
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String!
+          email: String
+        }
+    "#;
+    let users =
+        Subgraph::parse("users", "http://users/graphql", users_sdl).expect("valid subgraph");
+
+    let result = compose(vec![orders, users]).expect("composition should succeed");
+    let schema = result.schema().schema();
+
+    let order_query_field = coord!(Query.order)
+        .lookup_field(schema)
+        .expect("Query.order field exists");
+    assert!(
+        order_query_field
+            .directives
+            .iter()
+            .any(|d| d.name == "authenticated"),
+        "Query.order should have @authenticated"
+    );
+
+    let buyer_field = coord!(Order.buyer)
+        .lookup_field(schema)
+        .expect("Order.buyer field exists");
+    assert!(
+        buyer_field
+            .directives
+            .iter()
+            .any(|d| d.name == "requiresScopes"),
+        "Order.buyer should have @requiresScopes"
+    );
+}
+
 mod propagate_auth {
     use apollo_compiler::Name;
     use apollo_compiler::Node;
@@ -1453,9 +1559,9 @@ mod propagate_auth {
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::FieldDefinition;
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
 
+    use super::compose;
     use crate::composition::ServiceDefinition;
     use crate::composition::compose_as_fed2_subgraphs;
 

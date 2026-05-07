@@ -89,6 +89,9 @@ static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
         .expect("this regex to check the path is valid")
 });
 
+static TRAILING_SLASH: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"/+$").expect("this regex to check the path has no trailing slash"));
+
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 #[non_exhaustive]
@@ -868,6 +871,13 @@ impl Supergraph {
             let new_path = SUPERGRAPH_ENDPOINT_REGEX
                 .replace(&self.path, "${first_path}${sub_path}{supergraph_route}");
             path = new_path.to_string();
+        } else if TRAILING_SLASH.is_match(&self.path) {
+            let new_path = TRAILING_SLASH.replace(&self.path, "");
+            if new_path.is_empty() {
+                path = "/".to_string();
+            } else {
+                path = new_path.to_string();
+            }
         }
 
         path
@@ -1553,10 +1563,9 @@ pub(crate) enum BatchingMode {
 
 /// Configuration for Batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
-    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Batching mode
@@ -1566,12 +1575,12 @@ pub(crate) struct Batching {
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
 
     /// Maximum size for a batch
-    #[serde(default)]
     pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct CommonBatchingConfig {
     /// Whether this batching config should be enabled
     pub(crate) enabled: bool,

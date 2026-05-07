@@ -5,4 +5,5 @@ coprocessor:
     request:
       body: true
 limits:
-  http_max_request_bytes: 100
+  router:
+    http_max_request_bytes: 100

@@ -222,7 +222,7 @@ impl FederationBlueprint {
                 };
             }
 
-            let Ok(Some(name_in_schema)) = metadata
+            let Some(name_in_schema) = metadata
                 .federation_spec_definition()
                 .directive_name_in_schema(schema, &Name::new_unchecked(unknown_directive_name))
             else {
@@ -313,6 +313,7 @@ impl FederationBlueprint {
             imports: fed1_link_imports(),
             spec_alias: None,
             purpose: None,
+            line_column_range: None,
         });
         for type_spec in &FED_1.type_specs() {
             if let Err(err) = type_spec.check_or_add(schema, Some(&fed_1_link)) {

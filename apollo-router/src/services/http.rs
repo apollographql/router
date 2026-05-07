@@ -9,6 +9,7 @@ use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
 
+pub(crate) mod connection_timing;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -91,4 +92,19 @@ where
     fn make(&self) -> BoxService {
         self.clone().boxed()
     }
+}
+
+/// The kind of remote service an [`HttpClientService`] is configured to talk to.
+///
+/// Used by [`service::HttpClientService`] to derive the service name and by
+/// [`connection_timing::ConnectionTimingConnector`] to select the OTel attributes emitted on the
+/// `apollo.router.connection.acquire.duration` histogram.
+#[derive(Clone)]
+enum ServiceTarget {
+    /// A coprocessor: emits `coprocessor = true`.
+    Coprocessor,
+    /// A subgraph: emits `subgraph.name = name`.
+    Subgraph { name: Arc<str> },
+    /// A connector source: emits `connector.source.name = name`.
+    Connector { name: Arc<str> },
 }

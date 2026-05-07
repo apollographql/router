@@ -1,8 +1,8 @@
-use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 use super::print_sdl;
 
@@ -10,8 +10,89 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
+/// Invalid `{}` on inputs with required fields (e.g. `AuditsFilterV2`) must not appear on the
+/// composed supergraph, matching `FED-1001.graphql` / graphql-js `printSchema`. Valid `{}` on
+/// all-optional inputs is kept; see `misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it`.
 #[test]
-#[ignore = "until merge implementation completed"]
+fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
+    let subgraph = ServiceDefinition {
+        name: "subgraph",
+        type_defs: r#"
+        type Query {
+          audits(filter: AuditsFilterV2 = {}): String
+          carriers(filter: CarriersFilterV2 = {}): String
+        }
+
+        input AuditsFilterV2 {
+          startDate: String!
+          endDate: String!
+          carrierId: String!
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
+    let sdl = print_sdl(supergraph.schema().schema());
+
+    assert!(
+        !sdl.contains("filter: AuditsFilterV2 = {}"),
+        "supergraph should omit invalid empty-object default for AuditsFilterV2 (FED-1001), got:\n{sdl}"
+    );
+    assert!(
+        sdl.contains("filter: CarriersFilterV2 = {}"),
+        "supergraph should keep valid empty-object default when all input fields are optional, got:\n{sdl}"
+    );
+}
+
+#[test]
+fn misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it() {
+    let with_default = ServiceDefinition {
+        name: "withDefault",
+        type_defs: r#"
+        type Query {
+          q: Int @shareable
+        }
+
+        type Thing @shareable {
+          f(filter: CarriersFilterV2 = {}): String
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+    let without_default = ServiceDefinition {
+        name: "withoutDefault",
+        type_defs: r#"
+        type Query {
+          q: Int @shareable
+        }
+
+        type Thing @shareable {
+          f(filter: CarriersFilterV2): String
+        }
+
+        input CarriersFilterV2 {
+          code: String
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[with_default, without_default])
+        .expect("composition should succeed");
+    let sdl = print_sdl(supergraph.schema().schema());
+    assert!(
+        sdl.contains("filter: CarriersFilterV2 = {}"),
+        "supergraph should keep `= {{}}` when at least one subgraph declares it and the default is valid, got:\n{sdl}"
+    );
+}
+
+#[test]
 fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -36,7 +117,6 @@ fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_handles_fragments_in_requires_using_inaccessible_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -147,11 +227,11 @@ fn misc_handles_fragments_in_requires_using_inaccessible_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_existing_authenticated_directive_with_fed1() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "http://subgraphA",
+        r#"
         directive @authenticated(scope: [String!]) repeatable on FIELD_DEFINITION
 
         extend type Foo @key(fields: "id") {
@@ -159,11 +239,13 @@ fn misc_existing_authenticated_directive_with_fed1() {
           name: String! @authenticated(scope: ["read:foo"])
         }
         "#,
-    };
+    )
+    .expect("valid subgraph");
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "http://subgraphB",
+        r#"
         type Query {
           foo: Foo
         }
@@ -172,17 +254,19 @@ fn misc_existing_authenticated_directive_with_fed1() {
           id: ID!
         }
         "#,
-    };
+    )
+    .expect("valid subgraph");
 
-    // NOTE: This test uses composeServices() in JS (Fed1), not composeAsFed2Subgraphs()
-    // The test validates that existing @authenticated directives in Fed1 are handled properly
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph =
-        result.expect("Expected composition to succeed with existing @authenticated directive");
+    let result = compose(vec![subgraph_a, subgraph_b])
+        .expect("Expected composition to succeed with existing @authenticated directive");
 
-    // NOTE: The JS test validates that the custom @authenticated directive is NOT present in the final schema
-    // (it should be filtered out). For now, we just verify composition succeeds.
-    let _schema = supergraph.schema();
+    assert!(
+        !result
+            .schema()
+            .schema()
+            .directive_definitions
+            .contains_key("@authenticated")
+    );
 }
 
 #[test]

@@ -304,9 +304,12 @@ impl Config {
 #[cfg(test)]
 mod test {
     use std::future::Future;
+    use std::sync::Arc;
     use std::time::Duration;
 
+    use once_cell::sync::Lazy;
     use serde_json::Value;
+    use tokio::sync::Mutex;
     use tokio_stream::StreamExt;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
@@ -328,8 +331,30 @@ mod test {
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
 
+    // Serializes every test in this module. `Telemetry::new` populates
+    // `create_builtin_instruments` from the global meter provider, and
+    // `Telemetry::activate` installs global tracer and meter providers via
+    // `opentelemetry::global::set_tracer_provider` and
+    // `meter_provider_internal().set(...)`. Running these tests in parallel
+    // allows one test's global providers to clobber another's, causing the
+    // target test's `apollo_metrics_sender` channel to receive zero or partial
+    // stats reports and failing the snapshot assertions. This is the same
+    // pattern `apollo_otel_traces.rs` and `apollo_reports.rs` use at the
+    // integration-test layer, for the same reason.
+    //
+    // The dragons here are ancient and very evil. Do not attempt to take
+    // their treasure.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-apollo-metrics-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
+    static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
+
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let config = r#"
             telemetry:
               apollo:
@@ -346,6 +371,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_enabled() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let plugin = create_default_telemetry_plugin().await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Apollo(_)));
         Ok(())
@@ -353,6 +379,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
@@ -366,6 +393,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_for_subscription() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "subscription {userWasCreated{name}}";
         let context = Context::new();
         let _ = context
@@ -383,6 +411,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_for_subscription_error() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "subscription{reviewAdded{body}}";
         let context = Context::new();
         let _ = context
@@ -400,6 +429,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}} query {topProducts{name}}";
         let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
@@ -413,6 +443,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "garbage";
         let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
@@ -426,6 +457,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query, Some("UNKNOWN"), None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
@@ -437,6 +469,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts(minStarRating: 4.7){name}}";
         let results = get_metrics_for_request(query, None, None, false, None).await?;
         let mut settings = insta::Settings::clone_current();
@@ -451,6 +484,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_exclude() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let context = Context::new();
         context.insert(STUDIO_EXCLUDE, true)?;
@@ -467,6 +501,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_features_explicitly_enabled() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let plugin = create_telemetry_plugin(include_str!(
             "../../testdata/full_config_all_features_enabled.router.yaml"
@@ -498,6 +533,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_features_explicitly_disabled() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let plugin = create_telemetry_plugin(include_str!(
             "../../testdata/full_config_all_features_explicitly_disabled.router.yaml"
@@ -516,6 +552,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_features_disabled_when_defaulted() -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let plugin = create_telemetry_plugin(include_str!(
             "../../testdata/full_config_all_features_defaults.router.yaml"
@@ -535,6 +572,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_distributed_apq_cache_feature_enabled_with_partial_defaults()
     -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let plugin = create_telemetry_plugin(include_str!(
             "../../testdata/full_config_apq_enabled_partial_defaults.router.yaml"
@@ -554,6 +592,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_distributed_apq_cache_feature_disabled_with_partial_defaults()
     -> Result<(), BoxError> {
+        let _guard = TEST.lock().await;
         let query = "query {topProducts{name}}";
         let plugin = create_telemetry_plugin(include_str!(
             "../../testdata/full_config_apq_disabled_partial_defaults.router.yaml"

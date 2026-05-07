@@ -39,12 +39,17 @@ pub enum HandleResponseError {
 
 /// Converts a response body into a json Value based on the Content-Type header.
 pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
-    // If the body is obviously empty, don't try to parse it
-    if headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-        .is_some_and(|content_length| content_length == 0)
+    // If the body is empty, there's nothing to parse. We check body.is_empty()
+    // directly because spec-compliant HTTP 204 responses must not include a
+    // Content-Length header — so we can't rely on that header alone to detect
+    // empty bodies. The Content-Length: 0 check is kept for non-compliant
+    // servers that do send it, but body.is_empty() covers both cases.
+    if body.is_empty()
+        || headers
+            .get(CONTENT_LENGTH)
+            .and_then(|len| len.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .is_some_and(|content_length| content_length == 0)
     {
         return Ok(Value::Null);
     }
@@ -176,6 +181,16 @@ impl<'a> GraphQLDataMapper<'a> {
                                     output_field_name.to_string(),
                                     self.map_data(field_value, &field.selection_set),
                                 );
+                            } else if field.name == TYPENAME {
+                                // __typename is an intrinsic field that always
+                                // resolves to the concrete type name, even when
+                                // the connector response doesn't include it
+                                // (e.g., mappingOnly connectors returning `{}`).
+                                let output_field_name = field.alias.as_ref().unwrap_or(&field.name);
+                                new_map.insert(
+                                    output_field_name.to_string(),
+                                    Value::String(selection_set.ty.to_string().into()),
+                                );
                             }
                         }
 
@@ -242,6 +257,27 @@ fn is_success(
         res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
         warnings,
     )
+}
+
+/// Returns a response for a mapping-only connector by applying the selection against `{}`.
+///
+/// Used when `http` is omitted from a `@connect` directive, skipping the HTTP transport.
+pub fn handle_mapping_only_response(
+    key: ResponseKey,
+    connector: &Connector,
+    context: impl ContextReader,
+    client_headers: &HeaderMap<HeaderValue>,
+) -> MappedResponse {
+    let data = Value::Object(Map::new());
+    let inputs = key
+        .inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .request(&connector.response_headers, client_headers)
+        .merge();
+    map_response(&data, key, inputs, Vec::new())
 }
 
 /// Returns a response with data transformed by the selection mapping.
@@ -556,6 +592,11 @@ impl MappedResponse {
                                 if let Selection::Field(field) = field
                                     && field.name.as_str() == name.as_str()
                                 {
+                                    // Use the field's selection set type so that
+                                    // __typename resolves to the return type (e.g.
+                                    // "UserMutations") rather than the root operation
+                                    // type (e.g. "Mutation").
+                                    new_sub.ty = field.selection_set.ty.clone();
                                     new_sub
                                         .selections
                                         .extend(field.selection_set.selections.iter().cloned());
@@ -692,5 +733,41 @@ impl MappedResponse {
             // When operation_option.is_none(), return self unmodified.
             (mapped, None) => mapped,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use serde_json_bytes::Value;
+
+    use super::deserialize_response;
+
+    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in pairs {
+            map.insert(
+                http::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn empty_body_no_content_length_returns_null() {
+        // Spec-compliant 204: no Content-Length header, no body.
+        let headers = HeaderMap::new();
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn empty_body_with_content_length_zero_returns_null() {
+        // Non-compliant server that sends Content-Length: 0 on a 204.
+        let headers = headers_with(&[("content-length", "0")]);
+        let result = deserialize_response(b"", &headers).unwrap();
+        assert_eq!(result, Value::Null);
     }
 }

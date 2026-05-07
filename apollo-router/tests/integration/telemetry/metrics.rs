@@ -1,9 +1,15 @@
 use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -15,16 +21,118 @@ const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
 
+/// Stand up a wiremock that responds 200 to any `POST /` with a synthesized
+/// `LicenseQuery` GraphQL response. We return `RouterEntitlementsResult`
+/// with `entitlement: null`, which `license_stream::From` maps to
+/// `UplinkResponse::New { response: License::default(), .. }` — the
+/// "unlicensed but valid" path. That lets the router's license-source
+/// state machine make forward progress (it gets an `UpdateLicense` event
+/// and the router transitions to Running) without requiring a real signed
+/// JWT, while still incrementing
+/// `apollo.router.uplink.fetch.count.total{status="success",query="License"}`
+/// on every poll.
+///
+/// Returning `Unchanged` would *not* work for the *first* poll because the
+/// state machine wouldn't have a baseline License to compare against, and
+/// the router would hang in Startup waiting for its first license event.
+async fn mock_license_uplink() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "routerEntitlements": {
+                    "__typename": "RouterEntitlementsResult",
+                    "id": "test-license-id",
+                    "minDelaySeconds": 1,
+                    "entitlement": null,
+                }
+            }
+        })))
+        .mount(&server)
+        .await;
+    server
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
-    if !graph_os_enabled() {
-        eprintln!("test skipped");
-        return;
-    }
+    // Stand up an Uplink mock first so we can pass its URL into the spawned
+    // router via `APOLLO_UPLINK_ENDPOINTS`. The Studio side (Apollo-protocol
+    // ingress + OTLP) is handled by the harness's per-test `apollo_otlp_server`,
+    // which now has a catch-all `POST → 200` route alongside its specific
+    // `/v1/metrics` capture, so any reporting path the router picks succeeds
+    // deterministically without touching the public Internet.
+    let uplink_mock = mock_license_uplink().await;
+    let uplink_uri = uplink_mock.uri();
+
+    let mut env: HashMap<String, OsString> = HashMap::new();
+    env.insert("APOLLO_UPLINK_ENDPOINTS".to_string(), uplink_uri.into());
+    // Provide fake credentials so the executable selects
+    // `LicenseSource::Registry(uplink_config)` (and therefore actually runs
+    // the License Uplink poller). On CircleCI the harness will overwrite
+    // `APOLLO_KEY` / `APOLLO_GRAPH_REF` with the real
+    // `TEST_APOLLO_KEY` / `TEST_APOLLO_GRAPH_REF` values, which is fine —
+    // the mock accepts any key.
+    env.insert("APOLLO_KEY".to_string(), "test-mocked-key".into());
+    env.insert(
+        "APOLLO_GRAPH_REF".to_string(),
+        "test-mocked-graph@current".into(),
+    );
+
+    // Force every request to be sampled by Apollo's field-level instrumentation
+    // so the apollo_exporter pipeline always sees traces and emits the
+    // `studio_reports_total{report_type="traces"}` counter — the production
+    // default is 1 % which is non-deterministic over the 6 queries this test
+    // sends. Drop the batch processor's `scheduled_delay` so the 30 s
+    // assertion deadline doesn't have to wait for a long timer to fire.
+    // We patch `PROMETHEUS_CONFIG` in place rather than forking a whole new
+    // fixture; `merge_overrides` will subsequently populate the mock
+    // endpoints into the same `telemetry.apollo` block.
+    let mut config_value: serde_yaml::Value =
+        serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
+    // The OTLP traces path defaults to gRPC. wiremock only speaks HTTP, so
+    // we pin both OTLP protocols to HTTP/protobuf; otherwise the OTLP
+    // traces export silently fails to connect, the
+    // `studio_reports_total{report_type="traces"}` counter never
+    // increments, and the assertion times out. Apollo-protocol metrics
+    // (counter `report_type="metrics"`) use plain HTTP irrespective of
+    // this setting.
+    let apollo_block: serde_yaml::Value = serde_yaml::from_str(
+        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+    )
+    .unwrap();
+    config_value
+        .as_mapping_mut()
+        .and_then(|m| m.get_mut(&serde_yaml::Value::String("telemetry".into())))
+        .and_then(|t| t.as_mapping_mut())
+        .expect("PROMETHEUS_CONFIG has a telemetry block")
+        .insert(serde_yaml::Value::String("apollo".into()), apollo_block);
+    let config = serde_yaml::to_string(&config_value).unwrap();
+
     let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_CONFIG)
+        .config(config)
+        .env(env)
         .build()
         .await;
+
+    // The harness suppresses its `--supergraph <path>` CLI arg when any of
+    // {`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`,
+    // `APOLLO_GRAPH_ARTIFACT_REFERENCE`, `APOLLO_GRAPH_REF`} is set in the
+    // per-test env. Setting `APOLLO_GRAPH_REF` (which we need for the
+    // license-source decision above) trips that suppression, which would
+    // route the executable into `SchemaSource::Registry` and cause the
+    // router to look for the *schema* on Uplink as well. Re-introduce the
+    // file-based schema source by pointing
+    // `APOLLO_ROUTER_SUPERGRAPH_PATH` at the schema the harness wrote, so
+    // `SchemaSource::File` wins regardless of `APOLLO_GRAPH_REF`. This
+    // keeps the License poller pointed at our Uplink mock without
+    // forcing the schema to be fetched from there as well.
+    let schema_path = router.test_schema_location().to_string_lossy().into_owned();
+    let mut extra_env: HashMap<String, OsString> = HashMap::new();
+    extra_env.insert(
+        "APOLLO_ROUTER_SUPERGRAPH_PATH".to_string(),
+        schema_path.into(),
+    );
+    router.set_env(extra_env);
 
     router.start().await;
     router.assert_started().await;
@@ -76,13 +184,38 @@ async fn test_metrics_reloading() {
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
-    router.assert_metrics_contains_multiple(vec![
-        r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
-        r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
-        r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
-        r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
-        ], Some(Duration::from_secs(10)))
+    // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
+    // pointed at local wiremocks (Studio via the harness's per-test mock at
+    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // four reporting paths complete successfully and deterministically — no
+    // public-Internet dependency, no batch-timer race.
+    //
+    // Patterns match label fragments rather than full lines because
+    // Prometheus orders labels alphabetically and the label set on these
+    // metrics grows over time (eg. `report_protocol`,
+    // `report_extended_references_enabled` were added to studio_reports).
+    // `assert_metrics_contains_multiple` substring-matches anywhere on a
+    // line and supports `<any>` (→ `.+`) wildcards, so naming the labels we
+    // care about is sufficient.
+    // Patterns are substring matches anywhere on a line. We use `<anyopt>`
+    // (→ `.*`, zero-or-more) rather than `<any>` (→ `.+`, one-or-more)
+    // between the opening `{` and the label we care about, because
+    // Prometheus orders labels alphabetically — `query="License"` happens
+    // to be the alphabetically-first label on `uplink_fetch_count_total`,
+    // so requiring even a single character before it would never match.
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"apollo_router_telemetry_studio_reports_total{<anyopt>report_type="metrics""#,
+                r#"apollo_router_telemetry_studio_reports_total{<anyopt>report_type="traces""#,
+                r#"apollo_router_uplink_fetch_count_total{<anyopt>query="License"<anyopt>status="success""#,
+                r#"apollo_router_uplink_fetch_duration_seconds_count{<anyopt>query="License""#,
+            ],
+            Some(Duration::from_secs(30)),
+        )
         .await;
+
+    drop(uplink_mock);
 }
 
 #[track_caller]
@@ -613,4 +746,153 @@ async fn test_response_body_size_records_compressed_size_with_gzip() {
         .await;
 
     router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_request_duration_selector() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/request_duration.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"request_happened_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_contains(
+            r#"reasonably_short_total{otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"overly_short_total{otel_scope_name="apollo/router"}"#)
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// Drives an `@defer` query against a router configured with two supergraph
+/// counters that split on `is_primary_response`. Returns the scraped
+/// Prometheus metrics text so the caller can assert on a specific series.
+///
+/// Shared by the two regression tests for the selector fix (see PR #9238).
+async fn run_is_primary_response_query() -> String {
+    use tokio_stream::StreamExt;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    // Products subgraph: returns the primary chunk's data.
+    let mock_products = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "topProducts": [
+                    {"__typename": "Product", "upc": "1", "name": "Table"},
+                    {"__typename": "Product", "upc": "2", "name": "Chair"},
+                ]
+            }
+        })))
+        .mount(&mock_products)
+        .await;
+
+    // Reviews subgraph: slow so the router defers reviews into a second chunk.
+    let mock_reviews = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(100))
+                .set_body_json(json!({
+                    "data": {
+                        "_entities": [
+                            {"reviews": [{"body": "great"}]},
+                            {"reviews": [{"body": "ok"}]},
+                        ]
+                    }
+                })),
+        )
+        .mount(&mock_reviews)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/is_primary_response.router.yaml"))
+        .subgraph_override("products", mock_products.uri())
+        .subgraph_override("reviews", mock_reviews.uri())
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+
+    let query = Query::builder()
+        .body(json!({
+            "query": "query Q { topProducts { name ... @defer { reviews { body } } } }"
+        }))
+        .header("Accept", "multipart/mixed;deferSpec=20220824")
+        .build();
+    let (_, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    // Drain the multipart stream so every chunk flows through the
+    // `response_stream.inspect(...)` closure and updates metrics.
+    let mut stream = response.bytes_stream();
+    let mut chunks = 0;
+    while let Some(Ok(_)) = stream.next().await {
+        chunks += 1;
+    }
+    assert!(
+        chunks >= 2,
+        "expected a multipart @defer response with at least 2 chunks, got {chunks}"
+    );
+
+    router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap()
+}
+
+/// Regression test for the `is_primary_response` supergraph telemetry selector.
+///
+/// Before the PR #9238 fix, the selector always evaluated to `false` at
+/// `on_response` / `on_response_event` scope because `FIRST_EVENT_CONTEXT_KEY`
+/// was never set to `Bool(true)` on the primary chunk. A counter conditioned on
+/// `is_primary_response == true` therefore never fired, even for the primary
+/// chunk of a multipart `@defer` response.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_is_primary_response_fires_on_primary_chunk() {
+    let metrics = run_is_primary_response_query().await;
+    check_metrics_contains(
+        &metrics,
+        r#"is_primary_chunks_total{otel_scope_name="apollo/router"} 1"#,
+    );
+}
+
+/// Mirror of `test_is_primary_response_fires_on_primary_chunk` that asserts
+/// the selector evaluates to `false` for deferred chunks. The exact count
+/// of deferred chunks is a query-planner property — for a defer fragment
+/// over multiple entities, the planner may emit one chunk per entity or
+/// one chunk total depending on dependency-graph reduction. We only assert
+/// the counter fires at least once, since OpenTelemetry counters that never
+/// increment are not present in the scrape output at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_is_primary_response_fires_on_deferred_chunks() {
+    let metrics = run_is_primary_response_query().await;
+    check_metrics_contains(
+        &metrics,
+        r#"deferred_chunks_total{otel_scope_name="apollo/router"}"#,
+    );
 }

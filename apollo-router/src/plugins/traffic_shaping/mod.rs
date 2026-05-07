@@ -76,7 +76,7 @@ struct Shaping {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
     )]
-    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
@@ -193,7 +193,7 @@ struct ConnectorShaping {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_pool_idle_timeout"
     )]
-    #[schemars(with = "String", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
     pool_idle_timeout: Option<Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
@@ -545,8 +545,9 @@ impl PluginPrivate for TrafficShaping {
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression {
-                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
@@ -839,11 +840,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -951,7 +952,9 @@ mod test {
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request;
+                let TransportRequest::Http(ref http_request) = req.transport_request else {
+                    panic!("expected Http transport request");
+                };
 
                 assert_eq!(
                     http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
@@ -1376,6 +1379,52 @@ mod test {
                 .subgraph_client_config("unknown")
                 .pool_idle_timeout,
             Some(Duration::from_secs(10)),
+            "unknown subgraph falls back to all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_pool_idle_timeout_null() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          pool_idle_timeout: null
+        subgraphs:
+          explicit_value:
+            pool_idle_timeout: 10s
+          explicit_null:
+            pool_idle_timeout: null
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_value")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(10)),
+            "subgraph-specific override should win"
+        );
+
+        assert!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout
+                .is_none(),
+            "explicit null falls back to all"
+        );
+
+        assert!(
+            shaping_config
+                .subgraph_client_config("unknown")
+                .pool_idle_timeout
+                .is_none(),
             "unknown subgraph falls back to all"
         );
     }

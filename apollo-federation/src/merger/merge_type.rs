@@ -108,7 +108,11 @@ impl Merger {
                 continue;
             };
 
-            if subgraph.is_orphan_extension_type(element.name()) {
+            let is_orphan = subgraph.is_orphan_extension_type(element.name());
+            let has_extends_directive = subgraph
+                .extends_directive_name()
+                .is_some_and(|extends_name| element.directives().has(extends_name.as_str()));
+            if is_orphan || has_extends_directive {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));
@@ -144,8 +148,7 @@ impl Merger {
             let subgraph = &self.subgraphs[*idx];
             let is_interface_object = subgraph.is_interface_object_type(source);
 
-            let key_directive_name = subgraph.key_directive_name()?;
-            let keys = if let Some(key_directive_name) = &key_directive_name {
+            let keys = if let Some(key_directive_name) = &subgraph.key_directive_name() {
                 source.get_applied_directives(subgraph.schema(), key_directive_name)
             } else {
                 Vec::new()
@@ -168,8 +171,6 @@ impl Merger {
                 // If this type has keys, we apply a `@join__type` for each key.
                 let extends_directive_name = subgraph
                     .extends_directive_name()
-                    .ok()
-                    .flatten()
                     .clone()
                     .unwrap_or(FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC);
 

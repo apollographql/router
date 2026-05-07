@@ -44,10 +44,9 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::RngExt as _;
 use regex::Regex;
 use reload::activation::Activation;
 use reload::tracing::TracingConfigurator;
@@ -131,7 +130,6 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
-use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -381,6 +379,19 @@ impl PluginPrivate for Telemetry {
             .router_custom_instruments
             .clone();
 
+        let spans = &self.config.instrumentation.spans;
+        let router_attributes = &spans.router.attributes.attributes;
+
+        let client_name_key = router_attributes
+            .client_name
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_NAME_KEY));
+
+        let client_version_key = router_attributes
+            .client_version
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_VERSION_KEY));
+
         ServiceBuilder::new()
             .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
@@ -415,10 +426,25 @@ impl PluginPrivate for Telemetry {
 
                 response
             })
-            .option_layer(use_legacy_request_span.then(move || {
-                InstrumentLayer::new(move |request: &router::Request| {
+            .layer(InstrumentLayer::new(move |request: &router::Request| {
+                if use_legacy_request_span {
                     span_mode.create_router(&request.router_request)
-                })
+                } else {
+                    // When running through axum, the TraceLayer holds a "router" span guard
+                    // across the entire synchronous call chain, so Span::current() already
+                    // returns it here — reuse it rather than creating a duplicate SERVER span.
+                    // In tests that bypass axum, there is no active span, so we create one to
+                    // match the behavior users actually see.
+                    let current = Span::current();
+                    if current
+                        .metadata()
+                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                    {
+                        current
+                    } else {
+                        span_mode.create_router(&request.router_request)
+                    }
+                }
             }))
             .checkpoint(move |req: router::Request| {
                 let library_name_valid = req
@@ -460,14 +486,6 @@ impl PluginPrivate for Telemetry {
                         SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
                         supergraph_schema_id.clone(),
                     );
-                    if !use_legacy_request_span {
-                        let span = Span::current();
-
-                        span.set_span_dyn_attribute(
-                            HTTP_REQUEST_METHOD.into(),
-                            request.router_request.method().to_string().into(),
-                        );
-                    }
 
                     let client_name = request
                         .router_request
@@ -557,6 +575,8 @@ impl PluginPrivate for Telemetry {
                     let config = config_later.clone();
                     let sender = metrics_sender.clone();
                     let enabled_features = enabled_features.clone();
+                    let client_name_key = client_name_key.clone();
+                    let client_version_key = client_version_key.clone();
 
                     Self::plugin_metrics(&config);
 
@@ -578,10 +598,16 @@ impl PluginPrivate for Telemetry {
                                 crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
                             )
                         });
-                        custom_attributes.extend([
-                            KeyValue::new(CLIENT_NAME_KEY, client_name.unwrap_or_default()),
-                            KeyValue::new(CLIENT_VERSION_KEY, client_version.unwrap_or_default()),
-                        ]);
+
+                        if let Some(key) = client_name_key {
+                            custom_attributes
+                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
+                        }
+
+                        if let Some(key) = client_version_key {
+                            custom_attributes
+                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
+                        }
 
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
@@ -2128,6 +2154,28 @@ mod tests {
     use crate::services::SupergraphResponse;
     use crate::services::router;
 
+    // Serializes tests that call `plugin.activate()`. `Telemetry::activate()`
+    // -> `Activation::commit()` performs two process-wide writes:
+    //   1. `opentelemetry::global::set_tracer_provider(...)`
+    //   2. `*REGISTRY.lock() = self.prometheus_registry.clone();`
+    //      (the global Prometheus registry pointer in reload/activation.rs)
+    // Neither is covered by `FutureMetricsExt::with_metrics`, which only
+    // isolates the meter provider via a tokio task-local. When multiple
+    // `it_test_prometheus_*` tests run in parallel under nextest, one test's
+    // activate() can clobber another's global state mid-test, causing rare
+    // but observable flakes against the per-plugin Prometheus registry scrape.
+    //
+    // See `src/plugins/telemetry/metrics/apollo/mod.rs` for the same pattern
+    // applied to the apollo_metrics tests.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-prometheus-telemetry-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
+    static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
+        once_cell::sync::Lazy::new(Default::default);
+
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
             let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
@@ -3130,6 +3178,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -3145,6 +3194,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets.router.yaml"
@@ -3162,6 +3212,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
@@ -3178,6 +3229,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_view_drop() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_view_drop.router.yaml"
@@ -3192,6 +3244,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_units_are_included() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;

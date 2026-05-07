@@ -221,8 +221,27 @@ impl PluginPrivate for EntityCache {
             let required_to_start = redis_config.required_to_start;
             // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
+
+            // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+            // create its wrapped client because we want that client to be replaceable and need a
+            // standalone data container for certain fields used for its creation (and thus
+            // recreation)
             all = match RedisCacheStorage::new(redis_config, "entity").await {
-                Ok(storage) => Some(storage),
+                Ok(storage) => {
+                    // WARN: on new(), RedisCacheStorage doesn't have an inner client pool; it must be
+                    // created with create_client_pool()
+                    if let Err(e) = storage.create_client_pool().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                    }
+                    Some(storage)
+                }
                 Err(e) => {
                     tracing::error!(
                         cache = "entity",
@@ -232,10 +251,18 @@ impl PluginPrivate for EntityCache {
                     if required_to_start {
                         return Err(e);
                     }
+                    // WARN: this is a terminal error; without a RedisCacheStorage, we won't be
+                    // able to connect or reconnect to redis
+                    tracing::error!(
+                        cache = "entity",
+                        e,
+                        "terminal failure reached and all commands to Redis will fail",
+                    );
                     None
                 }
             };
         }
+
         let mut subgraph_storages = HashMap::new();
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
@@ -243,7 +270,14 @@ impl PluginPrivate for EntityCache {
                 // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
+
+                // NOTE: this is a bit of a dance, but we have to create a RedisCacheStorage before we can
+                // create its wrapped client because we want that client to be replaceable and need a
+                // standalone data container for certain fields used for its creation (and thus
+                // recreation)
                 let storage = match RedisCacheStorage::new(redis_config, "entity").await {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
                     Ok(storage) => Some(storage),
                     Err(e) => {
                         tracing::error!(
@@ -257,7 +291,20 @@ impl PluginPrivate for EntityCache {
                         None
                     }
                 };
+
                 if let Some(storage) = storage {
+                    // WARN: don't skip creating the client; the RedisCacheStorage::new() starts with a None as
+                    // for wrapped client
+                    if let Err(e) = storage.create_client_pool().await {
+                        tracing::error!(
+                            cache = "entity",
+                            e,
+                            "could not open connection to Redis for caching",
+                        );
+                        if required_to_start {
+                            return Err(e);
+                        }
+                    }
                     subgraph_storages.insert(subgraph.clone(), storage);
                 }
             }
@@ -1035,12 +1082,7 @@ async fn cache_lookup_entities(
     expose_keys_in_context: bool,
     request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
-    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
-        return Ok(ControlFlow::Continue((
-            request,
-            EntityCacheResults(vec![], None),
-        )));
-    }
+    let is_no_cache = request_cache_control.is_some_and(|c| c.is_no_cache());
 
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
@@ -1055,28 +1097,37 @@ async fn cache_lookup_entities(
         private_id,
     )?;
 
-    let redis_keys = keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>();
-    let result_len = redis_keys.len();
-    let cache_result: Vec<Option<CacheEntry>> = cache
-        .get_multiple(redis_keys)
-        .await
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
-                .map(|v| match v {
-                    Err(_) => None,
-                    Ok(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
+    let keys_len = keys.len();
+    let cache_result: Vec<Option<CacheEntry>> = if is_no_cache {
+        // no-cache means bypass the cache for lookup but still fetch from the subgraph.
+        // Treat every entity as a cache miss so filter_representations includes all of them
+        // in the outgoing request. This avoids the previous early-return bug (ROUTER-1689)
+        // where an empty IntermediateResult list caused insert_entities_in_result to
+        // produce an empty _entities array, making entity fields return null.
+        vec![None; keys_len]
+    } else {
+        let redis_keys = keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>();
+        cache
+            .get_multiple(redis_keys)
+            .await
+            .map(|values| {
+                values
+                    .into_iter()
+                    .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+                    .map(|v| match v {
+                        Err(_) => None,
+                        Ok(v) => {
+                            if v.control.can_use() {
+                                Some(v)
+                            } else {
+                                None
+                            }
                         }
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or(vec![None; result_len]);
+                    })
+                    .collect()
+            })
+            .unwrap_or(vec![None; keys_len])
+    };
 
     let representations = body
         .variables
@@ -1084,8 +1135,14 @@ async fn cache_lookup_entities(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
     // remove from representations the entities we already obtained from the cache
-    let (new_representations, cache_result, cache_control) =
-        filter_representations(&name, representations, keys, cache_result, &request.context)?;
+    let (new_representations, cache_result, cache_control) = filter_representations(
+        &name,
+        representations,
+        keys,
+        cache_result,
+        &request.context,
+        !is_no_cache,
+    )?;
 
     if expose_keys_in_context {
         let mut cache_entries = Vec::with_capacity(cache_result.len());
@@ -1612,6 +1669,7 @@ fn filter_representations(
     keys: Vec<String>,
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
+    record_metrics: bool,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -1661,10 +1719,12 @@ fn filter_representations(
         });
     }
 
-    let _ = context.insert(
-        CacheMetricContextKey::new(subgraph_name.to_string()),
-        CacheSubgraph(cache_hit),
-    );
+    if record_metrics {
+        let _ = context.insert(
+            CacheMetricContextKey::new(subgraph_name.to_string()),
+            CacheSubgraph(cache_hit),
+        );
+    }
 
     Ok((new_representations, result, cache_control))
 }
@@ -1770,10 +1830,13 @@ async fn insert_entities_in_result(
         let span = tracing::info_span!("cache_store");
 
         tokio::spawn(async move {
-            cache
+            let _ = cache
                 .insert_multiple(&to_insert, ttl)
                 .instrument(span)
-                .await;
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("error inserting multiple to entity cache: {e:?}")
+                });
         });
     }
 

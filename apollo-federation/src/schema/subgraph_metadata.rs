@@ -129,6 +129,10 @@ impl SubgraphMetadata {
         self.interface_object_types.contains(type_name)
     }
 
+    pub(crate) fn interface_object_types(&self) -> &IndexSet<apollo_compiler::Name> {
+        &self.interface_object_types
+    }
+
     pub(crate) fn remove_external_field(&mut self, field: &FieldDefinitionPosition) {
         self.external_metadata.external_fields.shift_remove(field);
     }
@@ -236,7 +240,7 @@ impl SubgraphMetadata {
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
         let Some(shareable_directive_name) =
-            federation_spec_definition.shareable_directive_name_in_schema(schema)?
+            federation_spec_definition.shareable_directive_name_in_schema(schema)
         else {
             return Ok(shareable_fields);
         };
@@ -352,7 +356,7 @@ impl SubgraphMetadata {
         let mut interface_object_types = IndexSet::default();
 
         let Some(interface_object_directive_name) = federation_spec_definition
-            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
+            .directive_name_in_schema(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
         else {
             return Ok(interface_object_types);
         };
@@ -444,7 +448,7 @@ impl ExternalMetadata {
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let Some(external_directive_name) =
-            federation_spec_definition.external_directive_name_in_schema(schema)?
+            federation_spec_definition.external_directive_name_in_schema(schema)
         else {
             return Ok(Default::default());
         };
@@ -515,7 +519,7 @@ impl ExternalMetadata {
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let Some(external_directive_name) =
-            federation_spec_definition.external_directive_name_in_schema(schema)?
+            federation_spec_definition.external_directive_name_in_schema(schema)
         else {
             return Ok(Default::default());
         };

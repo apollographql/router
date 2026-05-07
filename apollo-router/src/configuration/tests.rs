@@ -834,6 +834,46 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(&conf.supergraph.sanitized_path(), "/test");
 
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/graphql/").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/graphql");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/graphql///").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/graphql");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/api/graphql/").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/api/graphql",);
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("///").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/");
+
     assert!(
         Configuration::builder()
             .supergraph(Supergraph::builder().path("/*/whatever").build())
@@ -1195,6 +1235,17 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
 
     assert!(!config.batch_include("anything"));
     assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_mode_defaults_correctly() {
+    let json_config = json!({
+        "enabled": true,
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(matches!(config.mode, BatchingMode::BatchHttpLink));
 }
 
 #[test]
