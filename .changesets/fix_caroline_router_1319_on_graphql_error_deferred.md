@@ -10,4 +10,4 @@ The router and supergraph coprocessors, along with telemetry selectors, now eval
 
 Additionally, `on_graphql_error: false` (fire when there are *no* errors) now works correctly in all selector contexts: router, supergraph, and subgraph.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9365
