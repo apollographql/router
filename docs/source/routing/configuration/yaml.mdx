@@ -583,15 +583,76 @@ supergraph:
 
 #### Variable validation modes
 
-By default, the router validates input variables strictly. It validates each input object value against its type definition, and any unknown fields result in a request error.
+<MinVersionBadge version="Router v2.11.0" />
 
-```yaml
+By default, the router validates the fields of input object variables against their type definitions. If a variable contains an unknown field—one not defined on the corresponding input type—the router rejects the request with an HTTP 400 error.
+
+For example, given this schema and query:
+
+```graphql
+input MessageInput {
+  content: String
+  author: String
+}
+
+type Query {
+  send(message: MessageInput): Receipt
+}
+
+query SendMessage($msg: MessageInput) {
+  send(message: $msg) {
+    id
+  }
+}
+```
+
+Sending `$msg` with an extra `unknownField` key:
+
+```json
+{
+  "msg": {
+    "content": "Hello",
+    "author": "Me",
+    "unknownField": "unexpected"
+  }
+}
+```
+
+Returns a `VALIDATION_INVALID_TYPE_VARIABLE` error:
+
+```json
+{
+  "errors": [
+    {
+      "message": "unknown field input value at `$msg.unknownField` found for GraphQL type `MessageInput`",
+      "extensions": {
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE",
+        "name": "msg"
+      }
+    }
+  ]
+}
+```
+
+This is the default `enforce` mode:
+
+```yaml title="router.yaml"
 supergraph:
   strict_variable_validation: enforce
 ```
 
-If your implementation requires unknown fields on a defined type, you can opt out of stricter validation by specifying `strict_variable_validation: measure`.
-In this case, the router will not error when encountering unknown fields, but will log the field for reference.
+**When to use `measure` mode:** If you have existing clients sending extra fields that you can't update immediately, set `strict_variable_validation: measure` to allow those requests through while you migrate. In `measure` mode, the router logs a warning for each unknown field at `warn` level instead of rejecting the request.
+
+```yaml title="router.yaml"
+supergraph:
+  strict_variable_validation: measure
+```
+
+<Caution>
+
+`measure` mode is intended as a temporary migration aid. Unknown fields in input variables are silently ignored by subgraphs, which can mask bugs or data loss. Switch to `enforce` as soon as your clients are updated.
+
+</Caution>
 
 ---
 
