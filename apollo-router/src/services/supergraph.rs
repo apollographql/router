@@ -437,7 +437,7 @@ impl Response {
     fn check_for_errors(self) -> Self {
         let context = self.context.clone();
         self.map_stream(move |response| {
-            if !response.errors.is_empty() {
+            if response.contains_errors() {
                 context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
             }
             response
