@@ -100,10 +100,7 @@ impl Supergraph<Merged> {
     }
 
     pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
-        let mut schema = Schema::builder()
-            .adopt_orphan_extensions()
-            .parse(schema_str, "schema.graphql")
-            .build()?;
+        let mut schema = Schema::parse_and_validate(schema_str, "schema.graphql")?.into_inner();
         crate::compat::coerce_schema_default_values(&mut schema);
         let schema = schema.validate()?;
         Ok(Self {
