@@ -8,6 +8,7 @@ use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
 use crate::Context;
+use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
@@ -423,6 +424,19 @@ impl Selector for RouterSelector {
                 .map(opentelemetry::Value::from),
             RouterSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn on_response_event(&self, _response: &(), ctx: &Context) -> Option<opentelemetry::Value> {
+        match self {
+            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                let chunk_has_errors = ctx
+                    .get_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Some(opentelemetry::Value::Bool(chunk_has_errors))
             }
             _ => None,
         }
