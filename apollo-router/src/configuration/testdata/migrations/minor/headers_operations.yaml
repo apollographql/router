@@ -17,6 +17,3 @@ headers:
       request:
         - propagate:
             named: x-user-id
-      response:
-        - propagate:
-            named: set-cookie

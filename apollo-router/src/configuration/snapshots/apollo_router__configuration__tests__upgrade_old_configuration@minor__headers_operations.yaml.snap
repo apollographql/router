@@ -25,7 +25,3 @@ headers:
         operations:
           - propagate:
               named: x-user-id
-      response:
-        operations:
-          - propagate:
-              named: set-cookie

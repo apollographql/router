@@ -56,8 +56,8 @@ enum Action {
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
-const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request`, `headers.all.response`, and per-subgraph equivalents \
-     now require an `operations` key wrapping the list of propagation rules. \
+const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request` and per-subgraph \
+     equivalents now require an `operations` key wrapping the list of propagation rules. \
      Your configuration has been automatically migrated.";
 
 #[derive(Debug, Clone, Copy)]
@@ -310,10 +310,9 @@ fn cleanup(value: &mut Value) {
 /// Old: `headers.all.request: [list of operations]`
 /// New: `headers.all.request.operations: [list of operations]`
 ///
-/// The same wrapping applies to `headers.all.response` and all entries under
-/// `headers.subgraphs.*`. Can't be expressed as a proteus YAML action because
-/// the source path is a prefix of the destination path, and subgraph names are
-/// dynamic so they can't be addressed with static dot-notation paths.
+/// Can't be expressed as a proteus YAML action because the source path is a prefix of the
+/// destination path, and subgraph names are dynamic so they can't be addressed with static
+/// dot-notation paths.
 fn migrate_headers_operations(mut config: Value) -> Value {
     let Some(headers) = config.get_mut("headers") else {
         return config;
@@ -321,13 +320,11 @@ fn migrate_headers_operations(mut config: Value) -> Value {
 
     if let Some(all) = headers.get_mut("all") {
         wrap_operations_if_array(all, "request");
-        wrap_operations_if_array(all, "response");
     }
 
     if let Some(Value::Object(subgraphs)) = headers.get_mut("subgraphs") {
         for sg in subgraphs.values_mut() {
             wrap_operations_if_array(sg, "request");
-            wrap_operations_if_array(sg, "response");
         }
     }
 
