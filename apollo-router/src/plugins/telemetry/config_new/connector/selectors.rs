@@ -216,10 +216,8 @@ impl Selector for ConnectorSelector {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                 .map(|m| {
-                                    m.get(Some(
-                                        request.connector.id.subgraph_name.as_str(),
-                                    ))
-                                    .should_mask(connector_request_header)
+                                    m.get(Some(request.connector.id.subgraph_name.as_str()))
+                                        .should_mask(connector_request_header)
                                 })
                                 .unwrap_or(false)
                         });

@@ -63,7 +63,9 @@ impl
                 {
                     let headers = request.supergraph_request.headers();
                     request.context.extensions().with_lock(|lock| {
-                        if let Some(m) = lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>() {
+                        if let Some(m) =
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                        {
                             m.get(None).mask_headers_debug(headers)
                         } else {
                             format!("{headers:?}")

@@ -78,7 +78,9 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
                 {
                     let headers = response.response.headers();
                     response.context.extensions().with_lock(|lock| {
-                        if let Some(m) = lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>() {
+                        if let Some(m) =
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                        {
                             m.get(None).mask_headers_debug(headers)
                         } else {
                             format!("{headers:?}")

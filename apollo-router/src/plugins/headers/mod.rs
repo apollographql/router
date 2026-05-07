@@ -939,12 +939,12 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
+            InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -966,12 +966,12 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::Static(InsertStatic {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
+            InsertStatic {
                 name: "c".try_into()?,
                 value: "d".try_into()?,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service
@@ -997,14 +997,12 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromContext(
-                InsertFromContext {
-                    name: "header_from_context".try_into()?,
-                    from_context: "my_key".to_string(),
-                },
-            ))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
+            Insert::FromContext(InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            }),
+        )]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1026,14 +1024,12 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromContext(
-                InsertFromContext {
-                    name: "header_from_context".try_into()?,
-                    from_context: "my_key".to_string(),
-                },
-            ))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
+            Insert::FromContext(InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            }),
+        )]))
         .layer(mock);
 
         service
@@ -1059,13 +1055,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str("$.operationName").unwrap(),
                 default: None,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1087,13 +1083,13 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str("$.myCoolField").unwrap(),
                 default: None,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service
@@ -1119,13 +1115,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str(".operationName").unwrap(),
                 default: None,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1148,13 +1144,13 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
                 name: "header_from_request".try_into()?,
                 path: JsonPathInst::from_str(".myCoolField").unwrap(),
                 default: None,
-            }))]),
-        )
+            },
+        ))]))
         .layer(mock);
 
         service
@@ -1173,9 +1169,9 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1190,9 +1186,9 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
         .layer(mock);
 
         let ctx = Context::new();
@@ -1250,9 +1246,9 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
+            "aa".try_into()?,
+        ))]))
         .layer(mock);
 
         service
@@ -1271,11 +1267,9 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
-                "a[ab]",
-            )?))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
+            Regex::from_str("a[ab]")?,
+        ))]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1290,11 +1284,9 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Remove(Remove::Matching(Regex::from_str(
-                "a[ab]",
-            )?))]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
+            Regex::from_str("a[ab]")?,
+        ))]))
         .layer(mock);
 
         service
@@ -1322,12 +1314,11 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1350,12 +1341,11 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Matching {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str("d[ab]")?,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service
             .ready()
@@ -1380,14 +1370,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1408,14 +1397,13 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: None,
                 default: None,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service
             .ready()
@@ -1440,14 +1428,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1468,14 +1455,13 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "da".try_into()?,
                 rename: Some("ea".try_into()?),
                 default: None,
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service
             .ready()
@@ -1501,26 +1487,24 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("rb".try_into()?),
-                    default: None,
-                }),
-                // This should not take effect as the header is already propagated
-                Operation::Propagate(Propagate::Named {
-                    named: "db".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-            ]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("rb".try_into()?),
+                default: None,
+            }),
+            // This should not take effect as the header is already propagated
+            Operation::Propagate(Propagate::Named {
+                named: "db".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+        ]))
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
@@ -1543,26 +1527,24 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-                Operation::Propagate(Propagate::Named {
-                    named: "da".try_into()?,
-                    rename: Some("rb".try_into()?),
-                    default: None,
-                }),
-                // This should not take effect as the header is already propagated
-                Operation::Propagate(Propagate::Named {
-                    named: "db".try_into()?,
-                    rename: Some("ra".try_into()?),
-                    default: None,
-                }),
-            ]),
-        )
+        let mut service = HeadersLayer::new(Arc::new(vec![
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+            Operation::Propagate(Propagate::Named {
+                named: "da".try_into()?,
+                rename: Some("rb".try_into()?),
+                default: None,
+            }),
+            // This should not take effect as the header is already propagated
+            Operation::Propagate(Propagate::Named {
+                named: "db".try_into()?,
+                rename: Some("ra".try_into()?),
+                default: None,
+            }),
+        ]))
         .layer(mock);
 
         service
@@ -1588,14 +1570,13 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -1616,14 +1597,13 @@ mod test {
             })
             .returning(example_connector_response);
 
-        let mut service = HeadersLayer::new(
-            Arc::new(vec![Operation::Propagate(Propagate::Named {
+        let mut service =
+            HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
                 default: Some("defaulted".try_into()?),
-            })]),
-        )
-        .layer(mock);
+            })]))
+            .layer(mock);
 
         service
             .ready()

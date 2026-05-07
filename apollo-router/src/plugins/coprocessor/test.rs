@@ -8025,24 +8025,40 @@ mod tests {
                 .and_then(|a| a.get("request"))
                 .and_then(|r| r.get("masking"))
                 .and_then(|hm_config| {
-                    serde_json::from_value::<crate::configuration::header_masking_config::HeaderMaskingConfig>(
-                        hm_config.clone(),
-                    )
+                    serde_json::from_value::<
+                        crate::configuration::header_masking_config::HeaderMaskingConfig,
+                    >(hm_config.clone())
                     .ok()
                     .map(|config| {
-                        Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&config))
+                        Arc::new(
+                            crate::services::header_masking::HeaderMaskingRules::from_config(
+                                &config,
+                            ),
+                        )
                     })
                 });
 
-            assert!(rules.is_some(), "masking rules should be loaded from headers.all.request.masking");
+            assert!(
+                rules.is_some(),
+                "masking rules should be loaded from headers.all.request.masking"
+            );
             let rules = rules.unwrap();
-            assert!(rules.should_mask("authorization"), "authorization should be masked");
+            assert!(
+                rules.should_mask("authorization"),
+                "authorization should be masked"
+            );
             assert!(rules.should_mask("x-secret"), "x-secret should be masked");
-            assert!(!rules.should_mask("content-type"), "content-type should not be masked");
+            assert!(
+                !rules.should_mask("content-type"),
+                "content-type should not be masked"
+            );
 
             // Old path must not work (the bug that was fixed)
             let old_path_rules = full_config.get("header_masking");
-            assert!(old_path_rules.is_none(), "header_masking key should not exist at top level");
+            assert!(
+                old_path_rules.is_none(),
+                "header_masking key should not exist at top level"
+            );
         }
 
         #[test]
