@@ -1624,6 +1624,15 @@ impl VarPaths for PathList {
     }
 }
 
+// Sticky delimiter mode for `SubSelection::parse_naked_selections_v0_4`,
+// set by the first inter-item separator and enforced for the rest of the
+// list. See that function for the diagnostics emitted on mixed separators.
+enum NamedSelectionSeparator {
+    Undetermined,
+    Comma,
+    Space,
+}
+
 // SubSelection ::= "{" NakedSubSelection "}"
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -1721,8 +1730,6 @@ impl SubSelection {
     // Both errors point at the offending span (the stray comma, or the item
     // missing its preceding comma).
     fn parse_naked_selections_v0_4(input: Span) -> ParseResult<Vec<NamedSelection>> {
-        use nom::Err;
-
         let mut selections: Vec<NamedSelection> = Vec::new();
 
         // Try parsing the first NamedSelection. If none, we're done (empty body).
@@ -1731,24 +1738,18 @@ impl SubSelection {
                 selections.push(sel);
                 r
             }
-            Err(Err::Error(_)) => return Ok((input, selections)),
+            Err(nom::Err::Error(_)) => return Ok((input, selections)),
             Err(e) => return Err(e),
         };
 
-        // Sticky delimiter mode, set by the first inter-item separator.
-        enum Mode {
-            Undetermined,
-            Comma,
-            Space,
-        }
-        let mut mode = Mode::Undetermined;
+        let mut mode = NamedSelectionSeparator::Undetermined;
 
         loop {
             let (after_ws, _) = spaces_or_comments(rest.clone())?;
             let comma_attempt: ParseResult<char> = char(',').parse(after_ws.clone());
 
             if let Ok((after_comma, _)) = comma_attempt {
-                if matches!(mode, Mode::Space) {
+                if matches!(mode, NamedSelectionSeparator::Space) {
                     // The final phrase before the colon ("Unexpected comma")
                     // is rendered by `JSONSelectionParseError`'s Display impl
                     // immediately before the offending fragment, which is why
@@ -1761,7 +1762,7 @@ impl SubSelection {
                          the list. Unexpected comma",
                     ));
                 }
-                mode = Mode::Comma;
+                mode = NamedSelectionSeparator::Comma;
                 rest = after_comma;
 
                 match NamedSelection::parse(rest.clone()) {
@@ -1769,11 +1770,11 @@ impl SubSelection {
                         selections.push(sel);
                         rest = r;
                     }
-                    Err(Err::Error(_)) => break, // trailing comma
+                    Err(nom::Err::Error(_)) => break, // trailing comma
                     Err(e) => return Err(e),
                 }
             } else {
-                if matches!(mode, Mode::Comma) {
+                if matches!(mode, NamedSelectionSeparator::Comma) {
                     // A comma-separated list must stay comma-separated. If
                     // another NamedSelection follows without a preceding
                     // comma, that is an inconsistent-separator error; if no
@@ -1795,9 +1796,9 @@ impl SubSelection {
                     Ok((r, sel)) => {
                         selections.push(sel);
                         rest = r;
-                        mode = Mode::Space;
+                        mode = NamedSelectionSeparator::Space;
                     }
-                    Err(Err::Error(_)) => break,
+                    Err(nom::Err::Error(_)) => break,
                     Err(e) => return Err(e),
                 }
             }
