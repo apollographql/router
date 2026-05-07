@@ -1241,7 +1241,7 @@ where
                 let chunk_condition_matches =
                     deferred_condition.evaluate_event_response(&(), &generator_map_context);
 
-                if !response_condition_matches && !chunk_condition_matches {
+                if !chunk_condition_matches {
                     return Ok(deferred_response);
                 }
 
