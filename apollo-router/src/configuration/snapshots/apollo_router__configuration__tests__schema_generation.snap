@@ -5660,7 +5660,7 @@ expression: "&schema"
     },
     "GlobalHeadersConfiguration": {
       "additionalProperties": false,
-      "description": "Global configuration with request and response sections",
+      "description": "Per-location (request) configuration with operations and masking",
       "properties": {
         "request": {
           "anyOf": [
@@ -5672,17 +5672,6 @@ expression: "&schema"
             }
           ],
           "description": "Request configuration (operations and masking)"
-        },
-        "response": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HeadersLocation"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Response configuration (operations and masking)"
         }
       },
       "type": "object"
