@@ -1191,8 +1191,9 @@ mod test {
 
     #[test]
     fn router_on_graphql_error_on_response() {
-        use crate::context::CONTAINS_GRAPHQL_ERROR;
         use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
 
         // on_graphql_error: true — true when errors present, false when not
         let selector_true = RouterSelector::OnGraphQLError {
@@ -1238,9 +1239,10 @@ mod test {
 
     #[test]
     fn on_response_event_on_graphql_error_true() {
+        use serde_json_bytes::Value;
+
         use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
         use crate::plugins::telemetry::config_new::Selector;
-        use serde_json_bytes::Value;
 
         let selector = RouterSelector::OnGraphQLError {
             on_graphql_error: true,
@@ -1272,9 +1274,10 @@ mod test {
 
     #[test]
     fn on_response_event_on_graphql_error_false() {
+        use serde_json_bytes::Value;
+
         use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
         use crate::plugins::telemetry::config_new::Selector;
-        use serde_json_bytes::Value;
 
         let selector = RouterSelector::OnGraphQLError {
             on_graphql_error: false,

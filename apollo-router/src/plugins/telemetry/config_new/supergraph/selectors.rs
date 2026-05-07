@@ -1268,8 +1268,9 @@ mod test {
 
     #[test]
     fn supergraph_on_graphql_error_on_response() {
-        use crate::context::CONTAINS_GRAPHQL_ERROR;
         use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
 
         // on_graphql_error: true — returns true when errors present, false when absent
         let selector_true = SupergraphSelector::OnGraphQLError {

@@ -599,7 +599,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
-            } => Some((!response.response.body().errors.is_empty() == *on_graphql_error).into()),
+            } => Some((response.response.body().errors.is_empty() != *on_graphql_error).into()),
             SubgraphSelector::SubgraphResendCount {
                 subgraph_resend_count,
                 default,
