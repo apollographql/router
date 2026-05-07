@@ -384,7 +384,9 @@ impl Selector for SupergraphSelector {
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error == *on_graphql_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
             SupergraphSelector::OperationName {
                 operation_name,
@@ -473,11 +475,9 @@ impl Selector for SupergraphSelector {
                     .flatten()
                     .map(opentelemetry::Value::from),
             },
-            SupergraphSelector::OnGraphQLError { on_graphql_error } => {
-                Some(opentelemetry::Value::Bool(
-                    response.contains_errors() == *on_graphql_error,
-                ))
-            }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } => Some(
+                opentelemetry::Value::Bool(response.contains_errors() == *on_graphql_error),
+            ),
             SupergraphSelector::OperationName {
                 operation_name,
                 default,

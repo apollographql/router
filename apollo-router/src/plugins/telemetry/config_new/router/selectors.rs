@@ -410,7 +410,9 @@ impl Selector for RouterSelector {
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error == *on_graphql_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -436,7 +438,9 @@ impl Selector for RouterSelector {
                     .get_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR)
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                Some(opentelemetry::Value::Bool(chunk_has_errors == *on_graphql_error))
+                Some(opentelemetry::Value::Bool(
+                    chunk_has_errors == *on_graphql_error,
+                ))
             }
             _ => None,
         }
