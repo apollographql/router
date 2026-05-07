@@ -357,9 +357,6 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    if !response_config.condition.evaluate_response(&response) {
-        return Ok(response);
-    }
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
@@ -373,74 +370,91 @@ where
         BoxError::from("Coprocessor cannot convert body into future due to problem with first part")
     })?;
 
-    // Now we process our first chunk of response
-    // Encode headers, body, status, context, sdl to create a payload
-    let headers_to_send = response_config
-        .headers
-        .then(|| externalize_header_map(&parts.headers));
-    let body_to_send = filter_graphql_response_body(&first, &response_config.body);
-    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable::supergraph_builder()
-        .stage(PipelineStep::SupergraphResponse)
-        .id(response.context.id.clone())
-        .and_headers(headers_to_send)
-        .and_body(body_to_send)
-        .and_context(context_to_send)
-        .and_status_code(status_to_send)
-        .and_sdl(sdl_to_send.clone())
-        .and_has_next(first.has_next)
-        .build();
+    // Evaluate the condition against the first chunk. For on_graphql_error this inspects the
+    // chunk directly rather than reading the sticky context flag, so it fires only when this
+    // specific chunk contains errors.
+    let new_body = if response_config
+        .condition
+        .evaluate_event_response(&first, &response.context)
+    {
+        // Now we process our first chunk of response
+        // Encode headers, body, status, context, sdl to create a payload
+        let headers_to_send = response_config
+            .headers
+            .then(|| externalize_header_map(&parts.headers));
+        let body_to_send = filter_graphql_response_body(&first, &response_config.body);
+        let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+        let context_to_send = response_config.context.get_context(&response.context);
 
-    // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
+        let payload = Externalizable::supergraph_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .id(response.context.id.clone())
+            .and_headers(headers_to_send)
+            .and_body(body_to_send)
+            .and_context(context_to_send)
+            .and_status_code(status_to_send)
+            .and_sdl(sdl_to_send.clone())
+            .and_has_next(first.has_next)
+            .build();
 
-    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
-    // we don't intend for coprocessor calls; if in the future we change it, make sure to
-    // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, Context::new())
-        .await;
-    // Indicate the stage was executed to raise execution metric on parent
-    *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+        // Second, call our co-processor and get a reply.
+        tracing::debug!(?payload, "externalized output");
+        let start = Instant::now();
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+        // We use a new context here to avoid any risk of carrying extensions to coprocessor calls
+        // that we don't intend for coprocessor calls; if in the future we change it, make sure to
+        // understand what could be sent to coprocessors and how that might affect their behavior
+        let co_processor_result = payload
+            .call(http_client.clone(), &coprocessor_url, Context::new())
+            .await;
+        // Indicate the stage was executed to raise execution metric on parent
+        *executed = true;
+        let duration = start.elapsed();
+        record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
-    validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
+        tracing::debug!(?co_processor_result, "co-processor returned");
+        let co_processor_output = co_processor_result?;
 
-    // Check if the incoming GraphQL response was valid according to GraphQL spec
-    let incoming_payload_was_valid =
-        crate::plugins::coprocessor::was_incoming_payload_valid(&first, &response_config.body);
+        validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
 
-    // Third, process our reply and act on the contents. Our processing logic is
-    // that we replace "bits" of our incoming response with the updated bits if they
-    // are present in our co_processor_output. If they aren't present, just use the
-    // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(
-        first,
-        co_processor_output.body,
-        response_validation,
-        incoming_payload_was_valid,
-        &response_config.body,
-    )?;
+        // Check if the incoming GraphQL response was valid according to GraphQL spec
+        let incoming_payload_was_valid =
+            crate::plugins::coprocessor::was_incoming_payload_valid(&first, &response_config.body);
 
-    if let Some(control) = co_processor_output.control {
-        parts.status = control.get_http_status()?
-    }
+        // Third, process our reply and act on the contents. Our processing logic is
+        // that we replace "bits" of our incoming response with the updated bits if they
+        // are present in our co_processor_output. If they aren't present, just use the
+        // bits that we sent to the co_processor.
+        let new_body = handle_graphql_response(
+            first,
+            co_processor_output.body,
+            response_validation,
+            incoming_payload_was_valid,
+            &response_config.body,
+        )?;
 
-    if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
-    }
+        if let Some(control) = co_processor_output.control {
+            parts.status = control.get_http_status()?
+        }
 
-    if let Some(headers) = co_processor_output.headers {
-        parts.headers = internalize_header_map(headers)?;
-    }
+        if let Some(context) = co_processor_output.context {
+            update_context_from_coprocessor(
+                &response.context,
+                context,
+                &response_config.context,
+            )?;
+        }
+
+        if let Some(headers) = co_processor_output.headers {
+            parts.headers = internalize_header_map(headers)?;
+        }
+
+        new_body
+    } else {
+        first
+    };
 
     // Clone all the bits we need
     let context = response.context.clone();
