@@ -1108,7 +1108,7 @@ async fn process_router_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
     sdl: Arc<String>,
-    mut response: router::Response,
+    response: router::Response,
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
     executed: &mut bool,
