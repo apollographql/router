@@ -1325,7 +1325,8 @@ mod test {
     #[test]
     fn test_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = SupergraphSelector::RequestHeader {
             request_header: "authorization".to_string(),
@@ -1362,7 +1363,8 @@ mod test {
     #[test]
     fn test_request_header_no_masking_when_not_sensitive() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = SupergraphSelector::RequestHeader {
             request_header: "user-agent".to_string(),
@@ -1399,7 +1401,8 @@ mod test {
     #[test]
     fn test_request_header_redact_allow_overrides_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = SupergraphSelector::RequestHeader {
             request_header: "authorization".to_string(),
@@ -1463,7 +1466,8 @@ mod test {
     #[test]
     fn test_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = SupergraphSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),
@@ -1500,7 +1504,8 @@ mod test {
     #[test]
     fn test_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = SupergraphSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),
@@ -1564,7 +1569,8 @@ mod test {
     #[test]
     fn test_request_header_case_insensitive_matching() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,

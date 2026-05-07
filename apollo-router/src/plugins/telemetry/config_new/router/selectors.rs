@@ -829,7 +829,8 @@ mod test {
     #[test]
     fn router_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = RouterSelector::RequestHeader {
             request_header: "authorization".to_string(),
@@ -857,7 +858,8 @@ mod test {
     #[test]
     fn router_request_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = RouterSelector::RequestHeader {
             request_header: "authorization".to_string(),
@@ -920,7 +922,8 @@ mod test {
     #[test]
     fn router_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = RouterSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),
@@ -949,7 +952,8 @@ mod test {
     #[test]
     fn router_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = RouterSelector::ResponseHeader {
             response_header: "set-cookie".to_string(),

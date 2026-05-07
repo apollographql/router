@@ -794,7 +794,8 @@ mod tests {
     #[test]
     fn connector_request_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
@@ -815,7 +816,8 @@ mod tests {
     #[test]
     fn connector_request_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
@@ -839,7 +841,8 @@ mod tests {
     #[test]
     fn connector_response_header_masking_with_global_rules() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
@@ -862,7 +865,8 @@ mod tests {
     #[test]
     fn connector_response_header_redact_allow_overrides_masking() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::{HeaderMaskingRules, MaskingRulesMap};
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
 
         let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
