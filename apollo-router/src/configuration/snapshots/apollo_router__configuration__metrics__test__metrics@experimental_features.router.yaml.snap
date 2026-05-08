@@ -32,12 +32,27 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
+- name: apollo.router.config.experimental_expose_query_plan
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
 - name: apollo.router.config.experimental_hoist_orphan_errors
   data:
     datapoints:
       - value: 1
         attributes: {}
 - name: apollo.router.config.experimental_http2
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2_keep_alive_interval
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2_keep_alive_timeout
   data:
     datapoints:
       - value: 1
@@ -52,7 +67,22 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes: {}
+- name: apollo.router.config.experimental_mock_subgraphs
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
 - name: apollo.router.config.experimental_otlp_endpoint
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_otlp_metrics_protocol
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_otlp_tracing_protocol
   data:
     datapoints:
       - value: 1

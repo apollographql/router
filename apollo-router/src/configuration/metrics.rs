@@ -533,6 +533,36 @@ impl InstrumentData {
             "$.traffic_shaping[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]"
         );
 
+        populate_config_instrument!(
+            apollo.router.config.experimental_http2_keep_alive_interval,
+            "$..experimental_http2_keep_alive_interval"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_http2_keep_alive_timeout,
+            "$..experimental_http2_keep_alive_timeout"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_otlp_tracing_protocol,
+            "$.telemetry.apollo.experimental_otlp_tracing_protocol"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_otlp_metrics_protocol,
+            "$.telemetry.apollo.experimental_otlp_metrics_protocol"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_mock_subgraphs,
+            "$.experimental_mock_subgraphs"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.experimental_expose_query_plan,
+            "$.plugins[?(@['experimental.expose_query_plan']==true)]"
+        );
+
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) =
