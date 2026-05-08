@@ -1034,17 +1034,14 @@ fn metrics_contain_and_observed(
 /// for `apollo.router.operations.fetch.duration`: an early datapoint stamped with
 /// `apollo.operation.id` (no `has_errors` yet), and a subsequent datapoint with the
 /// `has_errors` enrichment that the assertion expects. Returning on the first batch races
-/// with the second batch arriving and explains the
-/// `test_connector_request_emits_histogram` flake on PR #9339's CircleCI build 366174
-/// (no datapoint matched the expected attribute set).
+/// with the second batch arriving and yields a no-matching-datapoint flake.
 ///
-/// Same shape as the deadline-bounded poll Phase 1 applied to
-/// `verifier.rs::validate_*` and `apollo_otel_traces::get_traces` (PR #9257), and the
-/// `events.rs::EventTest::capture_logged_events` poll added in PR #9340 — keep draining
-/// batches into an accumulator until either the expected metric arrives or the deadline
-/// expires. `tests/common.rs::wait_for_emitted_otel_metrics` is owned by the
-/// multi-agent coordinator and intentionally not modified here; the fix lives at the
-/// call site.
+/// Mirrors the deadline-bounded poll pattern used by
+/// `verifier.rs::validate_*`, `apollo_otel_traces::get_traces`, and
+/// `events.rs::EventTest::capture_logged_events` — keep draining batches into an
+/// accumulator until either the expected metric arrives or the deadline expires.
+/// `tests/common.rs::wait_for_emitted_otel_metrics` is intentionally not modified
+/// here; the fix lives at the call site.
 async fn wait_for_metric_match(
     router: &mut IntegrationTest,
     expected_metric: &Metric,
