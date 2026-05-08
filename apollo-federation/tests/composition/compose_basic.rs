@@ -1,9 +1,12 @@
 use apollo_compiler::coord;
+use apollo_federation::subgraph::typestate::Subgraph;
+use apollo_federation::supergraph::Supergraph;
 use insta::assert_snapshot;
 use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 use super::extract_subgraphs_from_supergraph_result;
 
@@ -593,4 +596,77 @@ fn override_from_nonexistent_subgraph_hint_has_subgraph_location() {
         hint.locations[0].subgraph, "subgraphA",
         "Hint location should reference the subgraph with @override"
     );
+}
+
+/// Regression test: when subgraphs use `extend schema { query: Query }`,
+/// the supergraph SDL must be re-parseable without "duplicate definitions
+/// for the `query` root operation type" errors.
+#[test]
+fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
+    let sub1 = Subgraph::parse(
+        "s1",
+        "http://s1",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+            {
+              query: Query
+              mutation: Mutation
+            }
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+
+            type Query {
+              hello: String
+            }
+
+            type Mutation {
+              doThing: String
+            }
+        "#,
+    )
+    .unwrap();
+
+    let sub2 = Subgraph::parse(
+        "s2",
+        "http://s2",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+            {
+              query: Query
+              mutation: Mutation
+            }
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+
+            type Query {
+              world: String
+            }
+
+            type Mutation {
+              doOther: String
+            }
+        "#,
+    )
+    .unwrap();
+
+    let supergraph = compose(vec![sub1, sub2]).expect("composition should succeed");
+    let sdl = supergraph.schema().schema().to_string();
+
+    Supergraph::parse(&sdl).expect("supergraph SDL should be re-parseable");
 }

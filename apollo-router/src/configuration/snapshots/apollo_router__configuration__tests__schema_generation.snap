@@ -733,6 +733,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +745,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +996,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {

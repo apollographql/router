@@ -1238,6 +1238,17 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
 }
 
 #[test]
+fn it_processes_batching_mode_defaults_correctly() {
+    let json_config = json!({
+        "enabled": true,
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(matches!(config.mode, BatchingMode::BatchHttpLink));
+}
+
+#[test]
 fn it_processes_unspecified_maximum_batch_limit_correctly() {
     let json_config = json!({
         "enabled": true,
