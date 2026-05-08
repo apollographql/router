@@ -7,8 +7,9 @@ use super::compose_as_fed2_subgraphs;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use apollo_federation::subgraph::typestate::Subgraph;
+
+    use super::*;
 
     #[test]
     fn errors_on_incompatible_types_with_external() {
