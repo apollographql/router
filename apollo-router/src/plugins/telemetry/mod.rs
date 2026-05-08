@@ -426,10 +426,25 @@ impl PluginPrivate for Telemetry {
 
                 response
             })
-            .option_layer(use_legacy_request_span.then(move || {
-                InstrumentLayer::new(move |request: &router::Request| {
+            .layer(InstrumentLayer::new(move |request: &router::Request| {
+                if use_legacy_request_span {
                     span_mode.create_router(&request.router_request)
-                })
+                } else {
+                    // When running through axum, the TraceLayer holds a "router" span guard
+                    // across the entire synchronous call chain, so Span::current() already
+                    // returns it here — reuse it rather than creating a duplicate SERVER span.
+                    // In tests that bypass axum, there is no active span, so we create one to
+                    // match the behavior users actually see.
+                    let current = Span::current();
+                    if current
+                        .metadata()
+                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                    {
+                        current
+                    } else {
+                        span_mode.create_router(&request.router_request)
+                    }
+                }
             }))
             .checkpoint(move |req: router::Request| {
                 let library_name_valid = req
