@@ -10,6 +10,7 @@ use Event::Reload;
 use Event::RhaiReload;
 use Event::Shutdown;
 use State::Errored;
+use State::Reloading;
 use State::Running;
 use State::Startup;
 use State::Stopped;
@@ -20,6 +21,7 @@ use tokio::sync::Notify;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -47,6 +49,7 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
+const RELOAD_RETRY_DELAY_SECS: u64 = 10;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -72,6 +75,26 @@ enum State<FA: RouterSuperServiceFactory> {
         router_service_factory: FA::RouterFactory,
         all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     },
+    /// Server is live on the committed state while a reload attempt is pending.
+    /// Committed fields are what is currently being served; pending_* fields hold
+    /// the newest inputs we want to apply. If try_start fails we stay here and
+    /// fire again at retry_after without requiring a new event from Uplink.
+    Reloading {
+        // Currently serving
+        configuration: Arc<Configuration>,
+        _metrics: Option<Metrics>,
+        schema: Arc<SchemaState>,
+        license: Arc<LicenseState>,
+        server_handle: Option<HttpServerHandle>,
+        router_service_factory: FA::RouterFactory,
+        all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
+        // What we're trying to apply
+        pending_configuration: Arc<Configuration>,
+        pending_schema: Arc<SchemaState>,
+        pending_license: Arc<LicenseState>,
+        // When to fire the next attempt
+        retry_after: Instant,
+    },
     Stopped,
     Errored(ApolloRouterError),
 }
@@ -79,18 +102,11 @@ enum State<FA: RouterSuperServiceFactory> {
 impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Startup { .. } => {
-                write!(f, "Startup")
-            }
-            Running { .. } => {
-                write!(f, "Running")
-            }
-            Stopped => {
-                write!(f, "Stopped")
-            }
-            Errored(_) => {
-                write!(f, "Errored")
-            }
+            Startup { .. } => write!(f, "Startup"),
+            Running { .. } => write!(f, "Running"),
+            Reloading { .. } => write!(f, "Reloading"),
+            Stopped => write!(f, "Stopped"),
+            Errored(_) => write!(f, "Errored"),
         }
     }
 }
@@ -290,6 +306,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn shutdown(self) -> Self {
         match self {
             Running {
+                server_handle: Some(server_handle),
+                mut all_connections_stopped_signals,
+                ..
+            }
+            | Reloading {
                 server_handle: Some(server_handle),
                 mut all_connections_stopped_signals,
                 ..
