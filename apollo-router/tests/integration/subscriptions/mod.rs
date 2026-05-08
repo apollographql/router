@@ -37,8 +37,7 @@ pub mod ws_passthrough;
 /// be serving (not just bound) before the test exercises them.
 ///
 /// The fixture historically slept 500 ms here, which races with axum's
-/// task scheduling under load — see `flaky-test-fixes.md` Section 9
-/// and `flaky-test-phases/phase-6-subscriptions.md` Step 1.
+/// task scheduling under load — see `flaky-test-fixes.md` Section 9.
 pub async fn wait_for_http_ok(url: &str, deadline: Duration) {
     let start = Instant::now();
     let client = reqwest::Client::builder()
