@@ -22,6 +22,7 @@ fn create_test_router() -> Router {
         output_directory,
         Arc::from("test: config"),
         Arc::new("type Query { test: String }".to_string()),
+        Arc::new("test-schema-id".to_string()),
     )
 }
 
@@ -402,7 +403,12 @@ fn test_not_found_response() {
 #[tokio::test]
 async fn test_router_with_empty_config() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let router = create_router(temp_dir.path(), Arc::from(""), Arc::new(String::new()));
+    let router = create_router(
+        temp_dir.path(),
+        Arc::from(""),
+        Arc::new(String::new()),
+        Arc::new(String::new()),
+    );
 
     let mut router_service = router;
     let (status, body, _) =

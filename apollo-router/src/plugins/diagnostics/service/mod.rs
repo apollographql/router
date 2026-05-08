@@ -70,6 +70,7 @@ struct DiagnosticsState {
     static_resources: StaticResourceHandler,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
+    supergraph_schema_id: Arc<String>,
     output_directory: PathBuf,
 }
 
@@ -78,12 +79,14 @@ pub(super) fn create_router(
     output_directory: &std::path::Path,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
+    supergraph_schema_id: Arc<String>,
 ) -> Router {
     let state = DiagnosticsState {
         memory: MemoryService::new(output_directory),
         static_resources: StaticResourceHandler::new(),
         router_config,
         supergraph_schema,
+        supergraph_schema_id,
         output_directory: output_directory.to_path_buf(),
     };
 
@@ -188,7 +191,7 @@ async fn handle_router_system_info_json(
             let with_hashes = RouterSystemInfoWithHashes {
                 info,
                 config_hash: Some(sha256_hex(&state.router_config)),
-                supergraph_hash: Some(sha256_hex(&state.supergraph_schema)),
+                supergraph_hash: Some(state.supergraph_schema_id.to_string()),
             };
             match serde_json::to_string_pretty(&with_hashes) {
                 Ok(json) => (
@@ -256,6 +259,7 @@ async fn handle_export(Extension(state): Extension<DiagnosticsState>) -> Respons
             output_directory: state.output_directory.clone(),
         },
         state.supergraph_schema.clone(),
+        state.supergraph_schema_id.clone(),
         state.router_config.clone(),
     );
 

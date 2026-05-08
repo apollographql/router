@@ -25,6 +25,7 @@ async fn collect_streaming_archive(
     let stream = Exporter::create_streaming_archive(
         config.clone(),
         Arc::new(supergraph_schema.to_string()),
+        Arc::new("test-schema-id".to_string()),
         Arc::from(router_config.to_string()),
     )
     .await;
@@ -54,6 +55,7 @@ async fn test_export_service_creation() {
     let export_service = Exporter::new(
         config.clone(),
         Arc::new("supergraph_schema".to_string()),
+        Arc::new("test-schema-id".to_string()),
         Arc::from(test_config_json.to_string()),
     );
     assert_eq!(

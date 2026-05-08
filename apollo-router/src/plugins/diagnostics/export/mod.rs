@@ -84,6 +84,7 @@ mod tests;
 pub(super) struct Exporter {
     config: Config,
     supergraph_schema: Arc<String>,
+    supergraph_schema_id: Arc<String>,
     router_config: Arc<str>,
 }
 
@@ -92,11 +93,13 @@ impl Exporter {
     pub(super) fn new(
         config: Config,
         supergraph_schema: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         router_config: Arc<str>,
     ) -> Self {
         Self {
             config,
             supergraph_schema,
+            supergraph_schema_id,
             router_config,
         }
     }
@@ -116,9 +119,13 @@ impl Exporter {
         let filename = format!("router-diagnostics-{}.tar.gz", timestamp);
 
         // Create streaming tar archive
-        let data_stream =
-            Self::create_streaming_archive(self.config, self.supergraph_schema, self.router_config)
-                .await;
+        let data_stream = Self::create_streaming_archive(
+            self.config,
+            self.supergraph_schema,
+            self.supergraph_schema_id,
+            self.router_config,
+        )
+        .await;
 
         Response::builder()
             .status(StatusCode::OK)
@@ -142,6 +149,7 @@ impl Exporter {
     async fn create_streaming_archive(
         config: Config,
         supergraph_schema: Arc<String>,
+        supergraph_schema_id: Arc<String>,
         router_config: Arc<str>,
     ) -> impl futures::Stream<Item = Result<Bytes, BoxError>> + Send + 'static {
         // Use tokio::io::simplex for unidirectional pipe with backpressure
@@ -153,6 +161,7 @@ impl Exporter {
             if let Err(e) = Self::create_streaming_archive_async(
                 &config,
                 &supergraph_schema,
+                &supergraph_schema_id,
                 &router_config,
                 writer,
             )
@@ -184,6 +193,7 @@ impl Exporter {
     >(
         config: &Config,
         supergraph_schema: &str,
+        supergraph_schema_id: &str,
         router_config: &str,
         writer: W,
     ) -> DiagnosticsResult<()> {
@@ -199,7 +209,7 @@ impl Exporter {
         Self::add_manifest_to_archive(&mut tar, config).await?;
         Self::add_router_config_to_archive(&mut tar, router_config).await?;
         Self::add_supergraph_schema_to_archive(&mut tar, supergraph_schema).await?;
-        Self::add_system_info_to_archive(&mut tar, router_config, supergraph_schema).await?;
+        Self::add_system_info_to_archive(&mut tar, router_config, supergraph_schema_id).await?;
         Self::add_memory_data_to_archive(&mut tar, config).await?;
         Self::add_html_report_to_archive(&mut tar, config, router_config, supergraph_schema)
             .await?;
@@ -247,7 +257,7 @@ impl Exporter {
     async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         router_config: &str,
-        supergraph_schema: &str,
+        supergraph_schema_id: &str,
     ) -> DiagnosticsResult<()> {
         let full_system_info =
             crate::plugins::diagnostics::system_info::collect_resources().await?;
@@ -257,17 +267,12 @@ impl Exporter {
                 h.update(router_config.as_bytes());
                 format!("{:x}", h.finalize())
             };
-            let supergraph_hash = {
-                let mut h = sha2::Sha256::new();
-                h.update(supergraph_schema.as_bytes());
-                format!("{:x}", h.finalize())
-            };
             format!(
                 "ROUTER SYSTEM INFO (static)\n{}\n{}Config hash (live): {}\nSupergraph hash (live): {}\n\n{}",
                 "----------------------------",
                 router_info.format_for_cli(),
                 config_hash,
-                supergraph_hash,
+                supergraph_schema_id,
                 full_system_info
             )
         } else {

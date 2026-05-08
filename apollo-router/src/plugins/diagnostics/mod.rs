@@ -148,6 +148,7 @@ struct DiagnosticsPlugin {
     config: Config,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
+    supergraph_schema_id: Arc<String>,
 }
 
 #[async_trait::async_trait]
@@ -158,6 +159,7 @@ impl Plugin for DiagnosticsPlugin {
         Ok(Self {
             config: init.config,
             supergraph_schema: init.supergraph_sdl,
+            supergraph_schema_id: init.supergraph_schema_id,
             router_config: init.raw_yaml.unwrap_or(Arc::from("")),
         })
     }
@@ -171,6 +173,7 @@ impl Plugin for DiagnosticsPlugin {
             &self.config.output_directory,
             self.router_config.clone(),
             self.supergraph_schema.clone(),
+            self.supergraph_schema_id.clone(),
         );
 
         let mut map = MultiMap::new();
