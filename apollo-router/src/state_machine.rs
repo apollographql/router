@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
@@ -57,6 +58,83 @@ pub(crate) struct ListenAddresses {
     pub(crate) extra_listen_addresses: Vec<ListenAddr>,
 }
 
+/// Wraps a pending reload value and records whether it changed relative to the
+/// last committed Running state.  The `Changed` variant carries both the
+/// committed (old) value and the pending (new) value together, eliminating the
+/// need for a separate committed-value field on the enclosing state.
+enum PendingChange<T> {
+    /// Value changed: `committed` is what was running before the reload was
+    /// triggered; `pending` is the value we are trying to apply.
+    Changed { committed: T, pending: T },
+    /// Value carried forward from the committed state without modification.
+    Unchanged(T),
+}
+
+impl<T> PendingChange<T> {
+    /// Build from a committed value and an optional incoming update.
+    /// `None` means no update arrived. `Some` applies the same equality check
+    /// as `update`: reverts to `Unchanged` if the new value matches committed.
+    fn new(committed: T, new: Option<T>) -> Self
+    where
+        T: PartialEq,
+    {
+        PendingChange::Unchanged(committed).update(new)
+    }
+
+    /// The value we are trying to apply on the next try_start attempt.
+    /// Equal to the committed value when there is no pending change.
+    fn target(&self) -> &T {
+        match self {
+            PendingChange::Changed { pending, .. } => pending,
+            PendingChange::Unchanged(v) => v,
+        }
+    }
+
+    /// The last committed (currently serving) value.
+    fn committed(&self) -> &T {
+        match self {
+            PendingChange::Changed { committed, .. } => committed,
+            PendingChange::Unchanged(v) => v,
+        }
+    }
+
+    /// Unconditionally set a new pending value, preserving the committed value from `self`.
+    /// Moves the committed value out of `self`, avoiding a clone.
+    fn set_pending(self, pending: T) -> Self {
+        PendingChange::Changed {
+            committed: self.into_committed(),
+            pending,
+        }
+    }
+
+    /// Conditionally set a new pending value, checking `new` against the committed value.
+    /// If `new` matches committed, cancels any pending change and reverts to `Unchanged`.
+    /// `None` is a no-op.
+    fn update(self, new: Option<T>) -> Self
+    where
+        T: PartialEq,
+    {
+        match new {
+            None => self,
+            Some(new) if self.committed() == &new => PendingChange::Unchanged(new),
+            Some(new) => self.set_pending(new),
+        }
+    }
+
+    /// Consume self and return the committed value.
+    fn into_committed(self) -> T {
+        match self {
+            PendingChange::Changed { committed, .. } => committed,
+            PendingChange::Unchanged(v) => v,
+        }
+    }
+
+    /// True when there is a pending change relative to the committed (serving) value.
+    fn is_pending(&self) -> bool {
+        matches!(self, PendingChange::Changed { .. })
+    }
+}
+
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
 enum State<FA: RouterSuperServiceFactory> {
@@ -76,23 +154,21 @@ enum State<FA: RouterSuperServiceFactory> {
         all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     },
     /// Server is live on the committed state while a reload attempt is pending.
-    /// Committed fields are what is currently being served; pending_* fields hold
-    /// the newest inputs we want to apply. If try_start fails we stay here and
-    /// fire again at retry_after without requiring a new event from Uplink.
+    /// If try_start fails we stay here and fire again at retry_after without
+    /// requiring a new event from Uplink.
     Reloading {
-        // Currently serving
-        configuration: Arc<Configuration>,
+        // Currently serving:
+        // RAII guard — keeps committed metrics alive until the reload succeeds.
         _metrics: Option<Metrics>,
-        schema: Arc<SchemaState>,
-        license: Arc<LicenseState>,
         server_handle: Option<HttpServerHandle>,
+        // Passed as previous_router_service_factory to each try_start attempt
+        // so the factory can reuse resources from the previous instance.
         router_service_factory: FA::RouterFactory,
         all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
-        // What we're trying to apply
-        pending_configuration: Arc<Configuration>,
-        pending_schema: Arc<SchemaState>,
-        pending_license: Arc<LicenseState>,
-        // When to fire the next attempt
+        // What we are trying to apply:
+        configuration: PendingChange<Arc<Configuration>>,
+        schema: PendingChange<Arc<SchemaState>>,
+        license: PendingChange<Arc<LicenseState>>,
         retry_after: Instant,
     },
     Stopped,
@@ -136,171 +212,259 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
-    async fn update_inputs<S>(
-        mut self,
-        state_machine: &mut StateMachine<S, FA>,
+    /// Returns true if the router is actively serving traffic under a valid license.
+    fn is_licensed(&self) -> bool {
+        match self {
+            Running { license, .. } => license.licensed(),
+            Reloading { license, .. } => license.committed().licensed(),
+            _ => false,
+        }
+    }
+
+    /// Pure step: merge new inputs into the current state, transitioning
+    /// Running → Reloading when a reload is needed. No I/O.
+    fn accumulate_inputs(
+        self,
         new_schema: Option<Arc<SchemaState>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<Arc<LicenseState>>,
         force_reload: bool,
-    ) -> Self
-    where
-        S: HttpServerFactory,
-    {
-        let mut new_state = None;
-        match &mut self {
+    ) -> Self {
+        // When we get an unlicensed event, if the router is already running with a license,
+        // just carry on. Users can delete and undelete their graphs in Studio while
+        // the router continues to run.
+        if self.is_licensed() && new_license.as_deref().is_some_and(|l| l.is_unlicensed()) {
+            tracing::info!(
+                event = STATE_CHANGE,
+                "ignoring reload because of loss of license"
+            );
+            return self;
+        }
+
+        match self {
             Startup {
                 schema,
                 configuration,
                 license,
                 listen_addresses_guard,
-            } => {
-                *schema = new_schema.or_else(|| schema.take());
-                *configuration = new_configuration.or_else(|| configuration.take());
-                *license = new_license.or_else(|| license.take());
+            } => Startup {
+                schema: new_schema.or(schema),
+                configuration: new_configuration.or(configuration),
+                license: new_license.or(license),
+                listen_addresses_guard,
+            },
 
-                if let (Some(schema), Some(configuration), Some(license)) =
-                    (schema, configuration, license)
-                {
-                    new_state = Some(
-                        Self::try_start(
-                            state_machine,
-                            &mut None,
-                            None,
-                            configuration.clone(),
-                            schema.clone(),
-                            license.clone(),
-                            listen_addresses_guard,
-                            vec![],
-                        )
-                        .map_ok_or_else(Errored, |f| f.0)
-                        .await,
-                    );
-                }
-            }
             Running {
-                schema,
                 configuration,
+                _metrics,
+                schema,
                 license,
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
-                ..
             } => {
-                // When we get an unlicensed event, if we were licensed before then just carry on.
-                // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                if new_license.as_deref() == Some(&LicenseState::Unlicensed)
-                    && **license != LicenseState::Unlicensed
-                {
-                    tracing::info!(
-                        event = STATE_CHANGE,
-                        "ignoring reload because of loss of license"
-                    );
-                    return self;
-                }
+                // Configuration has no equality check — any new config unconditionally triggers a reload.
+                let configuration = match new_configuration {
+                    Some(nc) => PendingChange::Unchanged(configuration).set_pending(nc),
+                    None => PendingChange::Unchanged(configuration),
+                };
+                let schema = PendingChange::new(schema, new_schema);
+                let license = PendingChange::new(license, new_license);
 
-                // Have things actually changed?
-                let (mut license_reload, mut schema_reload, mut configuration_reload) =
-                    (false, false, false);
-                let old_notify = configuration.notify.clone();
-                if let Some(new_configuration) = new_configuration {
-                    *configuration = new_configuration;
-                    configuration_reload = true;
-                }
-                if let Some(new_schema) = new_schema
-                    && schema.as_ref() != new_schema.as_ref()
-                {
-                    *schema = new_schema;
-                    schema_reload = true;
-                }
-                if let Some(new_license) = new_license
-                    && *license != new_license
-                {
-                    *license = new_license;
-                    license_reload = true;
-                }
+                let need_reload = force_reload
+                    || configuration.is_pending()
+                    || schema.is_pending()
+                    || license.is_pending();
 
-                // Let users know we are about to process a state reload event
                 tracing::info!(
-                    new_schema = schema_reload,
-                    new_license = license_reload,
-                    new_configuration = configuration_reload,
+                    new_schema = schema.is_pending(),
+                    new_license = license.is_pending(),
+                    new_configuration = configuration.is_pending(),
                     event = STATE_CHANGE,
                     "processing event"
                 );
 
-                let need_reload =
-                    force_reload || schema_reload || license_reload || configuration_reload;
-
                 if need_reload {
-                    // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
-                    // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
-                    let mut guard = state_machine.listen_addresses.clone().write_owned().await;
-                    let signals = std::mem::take(all_connections_stopped_signals);
-                    new_state = match Self::try_start(
-                        state_machine,
+                    Reloading {
+                        _metrics,
                         server_handle,
-                        Some(router_service_factory),
-                        configuration.clone(),
-                        schema.clone(),
-                        license.clone(),
-                        &mut guard,
-                        signals,
-                    )
-                    .await
-                    {
-                        Ok((new_state, new_schema)) => {
-                            tracing::info!(
-                                new_schema = schema_reload,
-                                new_license = license_reload,
-                                new_configuration = configuration_reload,
-                                event = STATE_CHANGE,
-                                "reload complete"
-                            );
-
-                            // We broadcast change notifications _after_ the pipelines have fully
-                            // rolled over.
-                            if configuration_reload {
-                                old_notify.broadcast_configuration(Arc::downgrade(configuration));
-                            }
-                            if schema_reload {
-                                configuration.notify.broadcast_schema(new_schema);
-                            }
-
-                            Some(new_state)
-                        }
-                        Err(e) => {
-                            // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
-                            match server_handle {
-                                None => {
-                                    tracing::error!(
-                                        error = %e,
-                                        event = STATE_CHANGE,
-                                        "fatal error while trying to reload"
-                                    );
-                                    Some(Errored(e))
-                                }
-                                Some(_) => {
-                                    tracing::error!(error = %e, event = STATE_CHANGE, "error while reloading, continuing with previous configuration");
-                                    None
-                                }
-                            }
-                        }
+                        router_service_factory,
+                        all_connections_stopped_signals,
+                        configuration,
+                        schema,
+                        license,
+                        retry_after: Instant::now(),
                     }
                 } else {
                     tracing::info!(
-                        new_schema = schema_reload,
-                        new_license = license_reload,
-                        new_configuration = configuration_reload,
+                        new_schema = false,
+                        new_license = false,
+                        new_configuration = false,
                         event = STATE_CHANGE,
                         "no reload necessary"
                     );
+                    Running {
+                        configuration: configuration.into_committed(),
+                        _metrics,
+                        schema: schema.into_committed(),
+                        license: license.into_committed(),
+                        server_handle,
+                        router_service_factory,
+                        all_connections_stopped_signals,
+                    }
                 }
             }
-            _ => {}
-        }
 
-        new_state.unwrap_or(self)
+            Reloading {
+                _metrics,
+                server_handle,
+                router_service_factory,
+                all_connections_stopped_signals,
+                mut configuration,
+                mut schema,
+                mut license,
+                retry_after: _,
+            } => {
+                if let Some(nc) = new_configuration {
+                    configuration = configuration.set_pending(nc);
+                }
+                schema = schema.update(new_schema);
+                license = license.update(new_license);
+
+                tracing::info!(
+                    // True when there is a pending change relative to what the router is serving.
+                    new_schema = schema.is_pending(),
+                    new_license = license.is_pending(),
+                    new_configuration = configuration.is_pending(),
+                    event = STATE_CHANGE,
+                    "processing event while reloading"
+                );
+
+                Reloading {
+                    _metrics,
+                    server_handle,
+                    router_service_factory,
+                    all_connections_stopped_signals,
+                    configuration,
+                    schema,
+                    license,
+                    retry_after: Instant::now(),
+                }
+            }
+
+            s => s,
+        }
+    }
+
+    /// Async step: attempt a (re)load for states that are ready for one.
+    /// Returns self unchanged for states that have nothing to do.
+    async fn attempt_reload<S>(self, state_machine: &mut StateMachine<S, FA>) -> Self
+    where
+        S: HttpServerFactory,
+    {
+        match self {
+            Startup {
+                schema: Some(schema),
+                configuration: Some(configuration),
+                license: Some(license),
+                mut listen_addresses_guard,
+            } => {
+                Self::try_start(
+                    state_machine,
+                    &mut None,
+                    None,
+                    configuration,
+                    schema,
+                    license,
+                    &mut listen_addresses_guard,
+                    vec![],
+                )
+                .map_ok_or_else(Errored, |f| f.0)
+                .await
+            }
+
+            Reloading {
+                mut _metrics,
+                mut server_handle,
+                router_service_factory,
+                all_connections_stopped_signals: signals,
+                configuration,
+                schema,
+                license,
+                retry_after: _,
+            } => {
+                let mut guard = state_machine.listen_addresses.clone().write_owned().await;
+
+                match Self::try_start(
+                    state_machine,
+                    &mut server_handle,
+                    Some(&router_service_factory),
+                    configuration.target().clone(),
+                    schema.target().clone(),
+                    license.target().clone(),
+                    &mut guard,
+                    signals,
+                )
+                .await
+                {
+                    Ok((new_state, new_schema)) => {
+                        tracing::info!(event = STATE_CHANGE, "reload complete");
+                        // router_service_factory from committed state is no longer needed;
+                        // the new Running state holds the factory returned by try_start.
+                        drop(router_service_factory);
+                        // Broadcast change notifications after pipelines have fully rolled over.
+                        if configuration.is_pending() {
+                            // Notify listeners on the *previous* configuration's channel that
+                            // the configuration has changed, passing a weak ref to the new one.
+                            configuration
+                                .committed()
+                                .notify
+                                .broadcast_configuration(Arc::downgrade(configuration.target()));
+                        }
+                        if schema.is_pending() {
+                            // Notify listeners on the *new* configuration's channel that
+                            // the schema has changed.
+                            configuration.target().notify.broadcast_schema(new_schema);
+                        }
+                        new_state
+                    }
+                    Err(e) if server_handle.is_some() => {
+                        tracing::error!(
+                            error = %e,
+                            event = STATE_CHANGE,
+                            "error while reloading, will retry"
+                        );
+                        Reloading {
+                            _metrics,
+                            server_handle,
+                            router_service_factory,
+                            // try_start consumed and dropped the signals on failure, as it
+                            // did before the Reloading state was introduced. Connections
+                            // from before this attempt will not be awaited on shutdown.
+                            all_connections_stopped_signals: vec![],
+                            configuration,
+                            schema,
+                            license,
+                            retry_after: Instant::now()
+                                + Duration::from_secs(RELOAD_RETRY_DELAY_SECS),
+                        }
+                    }
+                    // The point of no return was passed — server handle consumed
+                    // before the failure. Fatal.
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            event = STATE_CHANGE,
+                            "fatal error while trying to reload"
+                        );
+                        drop(router_service_factory);
+                        Errored(e)
+                    }
+                }
+            }
+
+            s => s,
+        }
     }
 
     async fn shutdown(self) -> Self {
@@ -625,38 +789,50 @@ where
                 .expect("must have listen address guard"),
         };
 
-        // Process all the events in turn until we get to error state or we run out of events.
-        while let Some(event) = messages.next().await {
-            let event_name = event.to_string();
+        // Process events and retry-timer ticks until we reach a terminal state or
+        // run out of events.
+        loop {
+            // When in Reloading state, arm a timer at the scheduled retry instant.
+            // Otherwise use a never-resolving future so the arm is never selected.
+            let retry_future = if let Reloading { retry_after, .. } = &state {
+                futures::future::Either::Left(tokio::time::sleep_until(*retry_after))
+            } else {
+                futures::future::Either::Right(std::future::pending())
+            };
 
-            let previous_state = format!("{state:?}");
+            let (event_name, previous_state) = tokio::select! {
+                biased;
 
-            state = match event {
-                UpdateConfiguration(configuration) => {
-                    state
-                        .update_inputs(&mut self, None, Some(configuration), None, false)
-                        .await
+                event = messages.next() => {
+                    let Some(event) = event else { break };
+                    let event_name = event.to_string();
+                    let previous_state = format!("{state:?}");
+
+                    state = match event {
+                        UpdateConfiguration(configuration) => {
+                            state.accumulate_inputs(None, Some(configuration), None, false)
+                        }
+                        NoMoreConfiguration => state.no_more_configuration().await,
+                        UpdateSchema(schema) => {
+                            state.accumulate_inputs(Some(Arc::new(schema)), None, None, false)
+                        }
+                        NoMoreSchema => state.no_more_schema().await,
+                        UpdateLicense(license) => {
+                            state.accumulate_inputs(None, None, Some(license), false)
+                        }
+                        Reload => state.accumulate_inputs(None, None, None, false),
+                        RhaiReload => state.accumulate_inputs(None, None, None, true),
+                        NoMoreLicense => state.no_more_license().await,
+                        Shutdown => state.shutdown().await,
+                    };
+                    state = state.attempt_reload(&mut self).await;
+                    (event_name, previous_state)
                 }
-                NoMoreConfiguration => state.no_more_configuration().await,
-                UpdateSchema(schema) => {
-                    state
-                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None, false)
-                        .await
+                _ = retry_future => {
+                    let previous_state = format!("{state:?}");
+                    state = state.attempt_reload(&mut self).await;
+                    (String::from("retry"), previous_state)
                 }
-                NoMoreSchema => state.no_more_schema().await,
-                UpdateLicense(license) => {
-                    state
-                        .update_inputs(&mut self, None, None, Some(license), false)
-                        .await
-                }
-                Reload => {
-                    state
-                        .update_inputs(&mut self, None, None, None, false)
-                        .await
-                }
-                RhaiReload => state.update_inputs(&mut self, None, None, None, true).await,
-                NoMoreLicense => state.no_more_license().await,
-                Shutdown => state.shutdown().await,
             };
 
             // Update the shared state
