@@ -2118,7 +2118,7 @@ pub fn graph_os_enabled() -> bool {
 }
 
 /// Automatic tracing initialization using ctor for integration tests
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn init_integration_test_tracing() {
     // Initialize tracing for integration tests
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
