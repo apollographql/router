@@ -76,8 +76,7 @@ async fn test_metrics_reloading() {
     //     Apollo-protocol + OTLP) complete deterministically.
     //
     // See `apollo-router/tests/common.rs::start()` and
-    // `merge_overrides()` for the wiring; `flaky-test-phases/HARNESS-CONTRACT.md`
-    // C2 + C8 for the invariants.
+    // `merge_overrides()` for the wiring.
     let mut router = IntegrationTest::builder().config(config).build().await;
 
     router.start().await;

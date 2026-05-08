@@ -105,11 +105,10 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
 ///
 /// JWT lifetime caveat: `warnAt` / `haltAt` are pinned at unix epoch
 /// 1787000000 (= 2026-08-17 20:53:20 UTC). When this approaches, mint
-/// a fresh JWT with the same JWKS using `mint-jwt.sh` in the repo root
-/// — see `flaky-test-phases/workers/phase-2-uplink-lift/BLOG-NOTES.md`
-/// for the rotation runbook. (The same pinned `haltAt` is used by 7
-/// JWTs in `tests/integration/allowed_features.rs`; tokio's ~1-year
-/// `Instant` scheduler cap rules out moving the pin to 2030+.)
+/// a fresh JWT with the same JWKS using `mint-jwt.sh` in the repo
+/// root. The same pinned `haltAt` is shared with the JWTs in
+/// `tests/integration/allowed_features.rs`; tokio's ~1-year `Instant`
+/// scheduler cap rules out moving the pin to 2030+.
 const TEST_LICENSE_JWT_FULL_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.LPNJgPY20DH054mXgrzaxEFiME656ZJ-ge5y9Zh3kkc"; // gitleaks:allow
 
 /// Stand up a per-test wiremock that stands in for
@@ -159,8 +158,7 @@ const TEST_LICENSE_JWT_FULL_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVC
 ///
 /// Lifted into the harness from a per-test helper that originally
 /// lived in `tests/integration/telemetry/metrics.rs::test_metrics_reloading`
-/// (Phase 1, `b3a0986e0`). See `flaky-test-phases/blog-details.md`
-/// Arc 4.7 for the credential-gate war story.
+/// (`b3a0986e0`).
 async fn mock_license_uplink() -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
 
@@ -376,18 +374,14 @@ pub struct IntegrationTest {
     /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
     /// to the per-test `apollo_otlp_server` mock, regardless of this
     /// flag. That pinning is load-bearing for keeping CI off the
-    /// public Internet (see the egress-block invariant in
-    /// `HARNESS-CONTRACT.md` C2). If a future test genuinely needs
-    /// real Studio reporting, that change has to also amend
-    /// `merge_overrides()` and re-evaluate the egress-block contract.
+    /// public Internet. If a future test genuinely needs real Studio
+    /// reporting, that change has to also amend `merge_overrides()`.
     ///
     /// Reserve this for the rare end-to-end test that genuinely needs
     /// to talk to production Apollo's License + Uplink + orbiter; every
     /// other test should accept the default (fake credentials, per-test
     /// mock Uplink, per-test mock Studio reporting) so that the suite
-    /// passes on runners with restricted egress. See
-    /// `flaky-test-phases/blog-details.md` Arc 4.7 for the design
-    /// discussion.
+    /// passes on runners with restricted egress.
     with_real_studio_creds: bool,
 }
 
@@ -997,8 +991,8 @@ impl IntegrationTest {
             "APOLLO_GRAPH_REF",
         ];
 
-        // Harness defaults (T12 / harness-contract C8). Forward fake
-        // Studio credentials so the spawned router activates
+        // Harness defaults. Forward fake Studio credentials so the
+        // spawned router activates
         // `LicenseSource::Registry` (and therefore exercises the
         // license-stream code path that ships in production), and pin
         // `APOLLO_UPLINK_ENDPOINTS` to the per-test mock so neither the
@@ -1062,10 +1056,7 @@ impl IntegrationTest {
             // request per spawned router (the orbiter is fire-and-forget
             // so the test wouldn't *fail*, but the connection attempt
             // would still leak — defeating the egress-block invariant
-            // this phase is establishing). Found via `lsof` monitoring
-            // during Phase 2 verification — see
-            // `flaky-test-phases/workers/phase-2-uplink-lift/BLOG-NOTES.md`
-            // "egress-blocked verification methodology" for the trace.
+            // the harness establishes by default).
             router.env("APOLLO_TELEMETRY_DISABLED", "true");
         }
 
@@ -1100,8 +1091,7 @@ impl IntegrationTest {
         // real-Studio-traffic exercise — a credential gate (whether the
         // test runs at all) that doubled as a network gate (whether the
         // router talks to production Apollo). This branch makes that
-        // coupling opt-in. See `flaky-test-phases/blog-details.md`
-        // Arc 4.7 and `HARNESS-CONTRACT.md` C8 for the reasoning.
+        // coupling opt-in.
         if self.with_real_studio_creds {
             if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
                 router.env("APOLLO_KEY", apollo_key);
