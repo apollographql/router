@@ -103,13 +103,54 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
 /// `APOLLO_ROUTER_LICENSE` directly and beats Uplink-fetched
 /// licenses via `LicenseSource::Env` precedence.
 ///
-/// JWT lifetime caveat: `warnAt` / `haltAt` are pinned at unix epoch
-/// 1787000000 (= 2026-08-17 20:53:20 UTC). When this approaches, mint
-/// a fresh JWT with the same JWKS using `mint-jwt.sh` in the repo
-/// root. The same pinned `haltAt` is shared with the JWTs in
-/// `tests/integration/allowed_features.rs`; tokio's ~1-year `Instant`
-/// scheduler cap rules out moving the pin to 2030+.
-const TEST_LICENSE_JWT_FULL_FEATURES: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJleHAiOiAxMDAwMDAwMDAwMCwKICAiaXNzIjogImh0dHBzOi8vd3d3LmFwb2xsb2dyYXBocWwuY29tLyIsCiAgInN1YiI6ICJhcG9sbG8iLAogICJhdWQiOiAiU0VMRl9IT1NURUQiLCAKICAid2FybkF0IjogMTc4NzAwMDAwMCwKICAiaGFsdEF0IjogMTc4NzAwMDAwMAp9.LPNJgPY20DH054mXgrzaxEFiME656ZJ-ge5y9Zh3kkc"; // gitleaks:allow
+/// The JWT is minted at runtime each time the harness starts a test,
+/// using the bundled HS256 test secret and a rolling `warnAt`/`haltAt`
+/// of `now() + ~6 months`. This eliminates the periodic-rotation
+/// toil a static-pinned JWT would incur. The 6-month horizon stays
+/// well within tokio's `Instant`-based `DelayQueue` scheduler cap
+/// (the consumer is `apollo-router/src/uplink/license_stream.rs`,
+/// which calls `DelayQueue::insert_at(claims.halt_at)`).
+static TEST_LICENSE_JWT_FULL_FEATURES: LazyLock<String> =
+    LazyLock::new(mint_test_license_jwt);
+
+/// HS256 test secret bundled in `apollo-router/src/uplink/testdata/license.jwks.json`.
+/// JWK format (`oct`/`HS256`/`use=sig`) with `k` base64url-encoded.
+/// Decoded value is the byte string `make_a_long_secret_for_rfc_7518_256_bits_requirement_blah`.
+const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
+    "bWFrZV9hX2xvbmdfc2VjcmV0X2Zvcl9yZmNfNzUxOF8yNTZfYml0c19yZXF1aXJlbWVudF9ibGFo";
+
+/// Mint a fresh test license JWT signed with the bundled HS256 test secret.
+/// `warnAt` and `haltAt` are pinned to `now() + ~6 months` so the JWT
+/// stays valid through any reasonable test session and well within
+/// tokio's `DelayQueue` scheduler cap.
+fn mint_test_license_jwt() -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_secs();
+    let six_months_secs: u64 = 60 * 60 * 24 * 180;
+    let halt_at = now + six_months_secs;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": halt_at,
+        "haltAt": halt_at,
+    });
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
 
 /// Stand up a per-test wiremock that stands in for
 /// `uplink.api.apollographql.com`. The harness wires this server's URL
@@ -171,7 +212,7 @@ async fn mock_license_uplink() -> wiremock::MockServer {
                     "id": "test-license-id",
                     "minDelaySeconds": 1,
                     "entitlement": {
-                        "jwt": TEST_LICENSE_JWT_FULL_FEATURES,
+                        "jwt": &*TEST_LICENSE_JWT_FULL_FEATURES,
                     },
                 }
             }
