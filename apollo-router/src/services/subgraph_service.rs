@@ -2968,6 +2968,11 @@ mod tests {
                 1,
                 "subgraph.name" = "test"
             );
+            assert_counter!(
+                "apollo.router.operations.subscriptions.reconnect",
+                1,
+                "subgraph.name" = "test"
+            );
 
             spawned_task.abort();
         }

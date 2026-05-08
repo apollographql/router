@@ -229,155 +229,24 @@ async fn call_websocket(
     // Clone for use in reconnect attempts
     let retry_connection_params = connection_params.clone();
 
-    let request = get_websocket_request(service_name, parts, subgraph_cfg)?;
-
     let signing_params = context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
     // Clone for use in reconnect attempts
     let retry_signing_params = signing_params.clone();
 
-    let request = if let Some(signing_params) = signing_params {
-        signing_params.sign_empty(request, service_name).await?
-    } else {
-        request
-    };
-
-    if let Some(level) = log_request_level {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", request.method()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(
-                serde_json::to_string(request.body())
-                    .unwrap_or_default()
-                    .into(),
-            ),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.to_string().into()),
-        ));
-        log_event(
-            level,
-            "subgraph.request",
-            attrs,
-            &format!("Websocket request body to subgraph {service_name:?}"),
-        );
-    }
-
-    let uri = request.uri();
-    let path = uri.path();
-    let host = uri.host().unwrap_or_default();
-    let port = uri.port_u16().unwrap_or_else(|| {
-        let scheme = uri.scheme_str();
-        if scheme == Some("wss") {
-            443
-        } else if scheme == Some("ws") {
-            80
-        } else {
-            0
-        }
-    });
-
-    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
-        "otel.kind" = "CLIENT",
-        "net.peer.name" = %host,
-        "net.peer.port" = %port,
-        "http.route" = %path,
-        "http.url" = %uri,
-        "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = body.operation_name.as_deref().unwrap_or(""),
-    );
-
-    let (ws_stream, resp) = match request.uri().scheme_str() {
-        Some("wss") => {
-            connect_async_tls_with_config(request, None, false, None)
-                .instrument(subgraph_req_span)
-                .await
-        }
-        _ => connect_async(request).instrument(subgraph_req_span).await,
-    }
-    .map_err(|err| {
-        let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8(details) => {
-                format!("invalid UTF-8 in WebSocket handshake: {details}")
-            }
-
-            tokio_tungstenite::tungstenite::Error::Http(response) => {
-                let status = response.status();
-                let headers = response
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| {
-                        let header_value = v.to_str().unwrap_or("HTTP Error");
-                        format!("{k:?}: {header_value:?}")
-                    })
-                    .collect::<Vec<String>>()
-                    .join("; ");
-
-                format!("WebSocket upgrade failed. Status: {status}; Headers: [{headers}]")
-            }
-
-            tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
-                format!("WebSocket protocol error: {proto_err}")
-            }
-
-            other_error => other_error.to_string(),
-        };
-
-        tracing::debug!(
-            error.type   = "websocket_connection_failed",
-            error.details= %error_details,
-            error.source = %std::any::type_name_of_val(&err),
-            "WebSocket connection failed"
-        );
-
-        increment_subgraph_rejected_counter(service_name);
-        FetchError::SubrequestWsError {
-            service: service_name.to_string(),
-            reason: format!("cannot connect websocket to subgraph: {error_details}"),
-        }
-    })?;
-
     let retry_subscription_hash = subscription_hash.clone();
-    let gql_socket = GraphqlWebSocket::new(
-        convert_websocket_stream(ws_stream, subscription_hash.clone()),
-        subscription_hash,
-        subgraph_cfg.protocol,
+    let (gql_stream, completed_normally, resp) = open_ws_gql_stream(
+        service_name,
+        parts,
+        body,
         connection_params,
+        signing_params,
+        subgraph_cfg,
+        subscription_hash,
+        log_request_level,
     )
-    .await
-    .map_err(|err| {
-        increment_subgraph_rejected_counter(service_name);
-        FetchError::SubrequestWsError {
-            service: service_name.to_string(),
-            reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
-        }
-    })?;
-
-    let (gql_stream, completed_normally) = gql_socket
-        .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
-        .await
-        .map_err(|err| {
-            increment_subgraph_rejected_counter(service_name);
-            FetchError::SubrequestWsError {
-                service: service_name.to_string(),
-                reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
-            }
-        })?;
+    .await?;
 
     let (mut handle_sink, handle_stream) = handle.split();
     let service_name_for_task = service_name.to_string();
@@ -392,7 +261,7 @@ async fn call_websocket(
     // don't need to handle connection_closed_signal here.
     tokio::task::spawn(
         async move {
-            let mut gql_stream: BoxGqlStream = Box::pin(gql_stream);
+            let mut gql_stream = gql_stream;
             let mut stream_completed_normally = completed_normally;
             let mut attempt = 0u32;
 
@@ -451,17 +320,29 @@ async fn call_websocket(
                             "apollo.router.operations.subscriptions.reconnect",
                             "Number of subscription WebSocket reconnect attempts",
                             1,
-                            subgraph.service.name = service_name_for_task.clone()
+                            subgraph.name = service_name_for_task.clone()
                         );
                         tracing::debug!(
                             attempt,
                             max_reconnect_attempts,
                             "subscription WebSocket connection dropped, reconnecting"
                         );
-                        tokio::time::sleep(reconnect_delay).await;
-                        match reconnect_ws_gql_stream(
+                        // Abort the reconnect if all router clients drop during the delay,
+                        // otherwise we'd reconnect to the subgraph for nobody.
+                        select! {
+                            biased;
+                            _ = subscription_closing_signal.recv() => {
+                                tracing::debug!("subscription_closing_signal received during reconnect delay");
+                                break 'retry;
+                            },
+                            _ = tokio::time::sleep(reconnect_delay) => {},
+                        }
+                        let (retry_parts, retry_body) =
+                            retry_subgraph_request.clone().into_parts();
+                        match open_ws_gql_stream(
                             &service_name_for_task,
-                            retry_subgraph_request.clone(),
+                            retry_parts,
+                            retry_body,
                             retry_connection_params.clone(),
                             retry_signing_params.clone(),
                             &retry_subgraph_cfg,
@@ -470,7 +351,7 @@ async fn call_websocket(
                         )
                         .await
                         {
-                            Ok((new_stream, new_completed_normally)) => {
+                            Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
                                 stream_completed_normally = new_completed_normally;
                                 break 'reconnect;
@@ -743,38 +624,48 @@ async fn subgraph_request(
     }
 }
 
-/// Establish a new WebSocket subscription stream to a subgraph. Used for reconnection retries.
-async fn reconnect_ws_gql_stream(
+/// Open a WebSocket subscription stream to a subgraph. Shared by the initial
+/// connect path in `call_websocket` and the reconnect retry path so that the
+/// signing, logging, connection, and protocol setup live in one place.
+#[allow(clippy::too_many_arguments)]
+async fn open_ws_gql_stream(
     service_name: &str,
-    request: http::Request<graphql::Request>,
+    parts: http::request::Parts,
+    body: graphql::Request,
     connection_params: Option<serde_json_bytes::Value>,
     signing_params: Option<Arc<SigningParamsConfig>>,
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
     log_request_level: Option<EventLevel>,
-) -> Result<(BoxGqlStream, Arc<AtomicBool>), BoxError> {
-    let (parts, body) = request.into_parts();
-    let ws_request = get_websocket_request(service_name, parts, subgraph_cfg)?;
+) -> Result<
+    (
+        BoxGqlStream,
+        Arc<AtomicBool>,
+        http::Response<Option<Vec<u8>>>,
+    ),
+    BoxError,
+> {
+    let request = get_websocket_request(service_name, parts, subgraph_cfg)?;
 
-    let ws_request = if let Some(signing_params) = signing_params {
-        signing_params.sign_empty(ws_request, service_name).await?
+    let request = if let Some(signing_params) = signing_params {
+        signing_params.sign_empty(request, service_name).await?
     } else {
-        ws_request
+        request
     };
 
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", ws_request.headers()).into()),
+            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", ws_request.method()).into()),
+            opentelemetry::Value::String(format!("{}", request.method()).into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", ws_request.version()).into()),
+            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.body"),
@@ -792,7 +683,7 @@ async fn reconnect_ws_gql_stream(
         );
     }
 
-    let uri = ws_request.uri();
+    let uri = request.uri();
     let path = uri.path();
     let host = uri.host().unwrap_or_default();
     let port = uri.port_u16().unwrap_or_else(|| {
@@ -817,17 +708,13 @@ async fn reconnect_ws_gql_stream(
         "graphql.operation.name" = body.operation_name.as_deref().unwrap_or(""),
     );
 
-    let (ws_stream, _resp) = match ws_request.uri().scheme_str() {
+    let (ws_stream, resp) = match request.uri().scheme_str() {
         Some("wss") => {
-            connect_async_tls_with_config(ws_request, None, false, None)
+            connect_async_tls_with_config(request, None, false, None)
                 .instrument(subgraph_req_span)
                 .await
         }
-        _ => {
-            connect_async(ws_request)
-                .instrument(subgraph_req_span)
-                .await
-        }
+        _ => connect_async(request).instrument(subgraph_req_span).await,
     }
     .map_err(|err| {
         let error_details = match &err {
@@ -857,13 +744,13 @@ async fn reconnect_ws_gql_stream(
             error.type   = "websocket_connection_failed",
             error.details= %error_details,
             error.source = %std::any::type_name_of_val(&err),
-            "WebSocket reconnection failed"
+            "WebSocket connection failed"
         );
 
         increment_subgraph_rejected_counter(service_name);
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
-            reason: format!("cannot reconnect websocket to subgraph: {error_details}"),
+            reason: format!("cannot connect websocket to subgraph: {error_details}"),
         }
     })?;
 
@@ -878,10 +765,7 @@ async fn reconnect_ws_gql_stream(
         increment_subgraph_rejected_counter(service_name);
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
-            reason: format!(
-                "cannot get the GraphQL websocket stream on reconnect: {}",
-                err.message
-            ),
+            reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
         }
     })?;
 
@@ -892,13 +776,11 @@ async fn reconnect_ws_gql_stream(
             increment_subgraph_rejected_counter(service_name);
             FetchError::SubrequestWsError {
                 service: service_name.to_string(),
-                reason: format!(
-                    "cannot send the subgraph request to websocket stream on reconnect: {err:?}"
-                ),
+                reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
             }
         })?;
 
-    Ok((Box::pin(gql_stream), completed_normally))
+    Ok((Box::pin(gql_stream), completed_normally, resp))
 }
 
 fn increment_subgraph_rejected_counter(service_name: &str) {
