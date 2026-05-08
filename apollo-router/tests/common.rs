@@ -110,8 +110,7 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
 /// well within tokio's `Instant`-based `DelayQueue` scheduler cap
 /// (the consumer is `apollo-router/src/uplink/license_stream.rs`,
 /// which calls `DelayQueue::insert_at(claims.halt_at)`).
-static TEST_LICENSE_JWT_FULL_FEATURES: LazyLock<String> =
-    LazyLock::new(mint_test_license_jwt);
+static TEST_LICENSE_JWT_FULL_FEATURES: LazyLock<String> = LazyLock::new(mint_test_license_jwt);
 
 /// HS256 test secret bundled in `apollo-router/src/uplink/testdata/license.jwks.json`.
 /// JWK format (`oct`/`HS256`/`use=sig`) with `k` base64url-encoded.
