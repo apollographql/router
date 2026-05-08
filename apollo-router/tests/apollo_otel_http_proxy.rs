@@ -352,10 +352,10 @@ async fn test_otlp_http_traces_through_proxy() {
     let _ = response.response.into_body().collect().await;
 
     // Poll until the OTLP batch has been flushed through the proxy to the
-    // backend. The previous fixed 10×100 ms (~1 s) window matched what other
-    // OTLP tests had before Phase 1 widened them to 10 s for CI; the same
-    // windowing applies here because the proxy adds an extra hop and the OTLP
-    // batch flush itself can be delayed under load.
+    // backend. The OTLP integration tests use a 10 s deadline-bounded poll
+    // (see `verifier.rs::validate_metrics`); apply the same window here
+    // because the proxy adds an extra hop and the OTLP batch flush itself
+    // can be delayed under load.
     let mut trace_received = false;
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
