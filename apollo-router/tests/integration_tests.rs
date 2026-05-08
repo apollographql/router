@@ -1598,8 +1598,6 @@ fn starstuff_mocks_for_top_products_with_reviews_and_authors() -> MockedSubgraph
 // Sandboxed counterpart of `setup_router_and_registry`. Replaces the
 // public starstuff subgraph URLs with in-process MockSubgraph services so
 // the test does not depend on the public demo deployment being reachable.
-// See `flaky-test-phases/workers/cross-cutting-subgraph-url-sandboxing/`
-// for the C10 work item this helper enables.
 async fn setup_sandboxed_router_and_registry_with_config(
     config: Configuration,
     mocks: MockedSubgraphs,
