@@ -123,10 +123,11 @@ const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
 /// stays valid through any reasonable test session and well within
 /// tokio's `DelayQueue` scheduler cap.
 fn mint_test_license_jwt() -> String {
-    use base64::Engine;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
+
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
