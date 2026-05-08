@@ -247,9 +247,14 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            Ok::<bool, FederationError>(
-                                !other_subgraph.is_orphan_extension_type(extended_type.name()),
-                            )
+                            let is_orphan =
+                                other_subgraph.is_orphan_extension_type(extended_type.name());
+                            let has_extends_directive = other_subgraph
+                                .extends_directive_name()
+                                .is_some_and(|extends_name| {
+                                    extended_type.directives().has(extends_name.as_str())
+                                });
+                            Ok::<bool, FederationError>(!is_orphan && !has_extends_directive)
                         })
                 })
                 .unwrap_or(Ok(false))?;
@@ -608,16 +613,27 @@ impl SchemaUpgrader {
             {
                 interface_key_types.insert(pos.type_name.clone());
                 pos.remove_directive_name(schema, key);
+            }
+        }
 
-                let fields: Vec<_> = pos.fields(schema.schema())?.collect();
-                for field in fields {
-                    if let Some(provides) = &upgrade_metadata.provides_directive_name {
-                        field.remove_directive_name(schema, provides);
-                    }
-                    if let Some(requires) = &upgrade_metadata.requires_directive_name {
-                        field.remove_directive_name(schema, requires);
-                    }
-                }
+        if let Some(provides) = &upgrade_metadata.provides_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(provides)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, provides);
+            }
+        }
+        if let Some(requires) = &upgrade_metadata.requires_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(requires)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, requires);
             }
         }
 
@@ -2701,6 +2717,52 @@ scalar _FieldSet
 
                 scalar link__Import
             "###
+        );
+    }
+
+    #[test]
+    fn removes_provides_and_requires_from_interface_fields_without_key() {
+        let s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+            directive @extends on OBJECT | INTERFACE
+
+            scalar _FieldSet
+
+            type Query {
+              product: Product
+            }
+
+            type Author @key(fields: "id") {
+              id: ID! @external
+              name: String
+            }
+
+            interface Product {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+
+            type Book implements Product @key(fields: "id") {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let result = upgrade_subgraphs_if_necessary(vec![s1]);
+        assert!(
+            result.is_ok(),
+            "Expected upgrade to succeed but got: {:?}",
+            result.err()
         );
     }
 }

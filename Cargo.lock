@@ -314,7 +314,7 @@ dependencies = [
  "console",
  "cookie",
  "crossbeam-channel",
- "ctor 0.11.1",
+ "ctor 1.0.3",
  "dashmap",
  "derivative",
  "derive_more",
@@ -1131,12 +1131,6 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -1918,20 +1912,13 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "0.11.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "400a21f1014a968ec518c7ccdf9b4a4ed0cac8c56ccb6d604f8b91f00110501e"
+checksum = "5c24d2b2b7c12a2fffb7c5c8fd0dcda7ca14b4600fa2d3701b6079aefb6fa180"
 dependencies = [
- "ctor-proc-macro",
- "dtor",
  "link-section",
+ "linktime-proc-macro",
 ]
-
-[[package]]
-name = "ctor-proc-macro"
-version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a949c44fcacbbbb7ada007dc7acb34603dd97cd47de5d054f2b6493ecebb483"
 
 [[package]]
 name = "ctutils"
@@ -2249,7 +2236,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2265,11 +2252,11 @@ dependencies = [
 
 [[package]]
 name = "docker_credential"
-version = "1.3.2"
+version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d89dfcba45b4afad7450a99b39e751590463e45c04728cf555d36bb66940de8"
+checksum = "a4564c274ebf369f501de192b02a0b81a5c4bda375abfe526aa70fc702fa6fa0"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "serde",
  "serde_json",
 ]
@@ -2279,21 +2266,6 @@ name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
-
-[[package]]
-name = "dtor"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96eb86b441d67a711e6e76b410de7135385fec1b8cd304e99d11c56ae542e2fc"
-dependencies = [
- "dtor-proc-macro",
-]
-
-[[package]]
-name = "dtor-proc-macro"
-version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2647271c92754afcb174e758003cfd1cbf1e43e5a7853d7b1813e63e19e39a73"
 
 [[package]]
 name = "dunce"
@@ -2472,7 +2444,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3503,7 +3475,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -3936,9 +3908,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.46.3"
+version = "0.46.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbe92a2f8b00686061eab5cdcfd6f382c27f2084456e7be90ae9f0fe4a30552a"
+checksum = "fc59d2432e047d6090ba1d83c782d0128bd6203857978218f5614dbd3287281f"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4105,9 +4077,9 @@ checksum = "9e69cdf6b85b5c8dce514f694089a2cf8b1a702f6cd28607bcb3cf296c9778db"
 
 [[package]]
 name = "link-section"
-version = "0.11.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acde40189b7f4b102f876f43a98ec1f5899f96e9a144945d36d9ce0be7f99c7"
+checksum = "4641b91711debb59c61b07eb5e30521ed6d9e2bdd9fd04f934e7da3a5bc386d4"
 
 [[package]]
 name = "linked-hash-map"
@@ -4134,6 +4106,12 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "linktime-proc-macro"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a44cd706ff0d503ee32b2071166510ca27e281228de10cd3aa8d35ff94560f81"
 
 [[package]]
 name = "linux-raw-sys"
@@ -4479,7 +4457,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6172,7 +6150,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6921,7 +6899,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -8055,7 +8033,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

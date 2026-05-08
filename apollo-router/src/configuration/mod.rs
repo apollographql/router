@@ -1563,10 +1563,9 @@ pub(crate) enum BatchingMode {
 
 /// Configuration for Batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
-    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Batching mode
@@ -1576,12 +1575,12 @@ pub(crate) struct Batching {
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
 
     /// Maximum size for a batch
-    #[serde(default)]
     pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct CommonBatchingConfig {
     /// Whether this batching config should be enabled
     pub(crate) enabled: bool,

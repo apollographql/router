@@ -465,7 +465,7 @@ where
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
                     && !response.subscribed.unwrap_or(false)
-                    && (accepts_json || accepts_wildcard)
+                    && (response.has_next.is_none() || accepts_json || accepts_wildcard)
                 {
                     let errors = response.errors.clone();
 

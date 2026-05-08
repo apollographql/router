@@ -1017,6 +1017,16 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     let mut multipart = multer::Multipart::new(stream, "graphql");
     let mut multipart_bis = multer::Multipart::new(stream_bis, "graphql");
 
+    // Explicit signal that the primary reader has dropped its multipart stream and is shutting
+    // down. Previously this test relied on `task.is_finished()` ordering, which races the tokio
+    // scheduler: `break` in the primary task only marks the JoinHandle finished after the runtime
+    // gets a chance to poll it again, so the `bis` task could reach the assertion before the
+    // primary task had actually been observed as finished. A `Notify` makes the handoff explicit:
+    // the primary signals the moment it drops its stream, and the `bis` task waits on that signal
+    // before asserting that the primary has fully completed.
+    let primary_closed = Arc::new(tokio::sync::Notify::new());
+    let primary_closed_signal = primary_closed.clone();
+
     // Task for the first (deduplicated) subscription.
     let task = tokio::task::spawn(tokio::time::timeout(Duration::from_secs(30), async move {
         let expected_event = create_expected_user_payload(1);
@@ -1035,6 +1045,12 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
             // subscription should continue to receive events...
             break;
         }
+        // Drop the multipart stream explicitly so the underlying connection is closed before
+        // we signal the `bis` task. (Doing this is also what `break` would do implicitly when
+        // the async block returns, but being explicit avoids any future refactor accidentally
+        // introducing work between the break and the drop.)
+        drop(multipart);
+        primary_closed_signal.notify_one();
     }));
     // This the the other connection with the duplicate subscription to the one above.
     // After the subscription above is closed, it should continue to receive events.
@@ -1057,10 +1073,14 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
         }
 
         // Make sure that we're actually testing what we think we're testing, i.e. the first task
-        // closed its connection successfully
-        assert!(task.is_finished(), "primary connection should be closed");
+        // closed its connection successfully. Wait for the explicit signal from the primary task
+        // (with a generous timeout in case something has gone wrong) instead of polling
+        // `task.is_finished()`, which races the scheduler.
+        tokio::time::timeout(Duration::from_secs(30), primary_closed.notified())
+            .await
+            .expect("primary connection should have signaled close");
         task.await
-            .expect("asserted that it completes")
+            .expect("primary task should complete after signaling close")
             .expect("should not have timed out");
         assert!(
             expected_events.is_empty(),
