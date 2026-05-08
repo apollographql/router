@@ -680,6 +680,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
+    use std::time::Duration;
 
     use futures::channel::oneshot;
     use mockall::Sequence;
@@ -689,6 +690,8 @@ mod tests {
     use rstest::rstest;
     use serde_json::json;
     use test_log::test;
+    use tokio::task::yield_now;
+    use tokio_stream::wrappers::ReceiverStream;
     use tower::BoxError;
     use tower::Service;
 
@@ -2194,5 +2197,173 @@ mod tests {
             });
 
         router_factory
+    }
+
+    // Helper: build the three startup events that bring the state machine to Running.
+    fn startup_events() -> Vec<Event> {
+        vec![
+            UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+            UpdateSchema(example_schema()),
+            UpdateLicense(Default::default()),
+        ]
+    }
+
+    fn mock_router_ok() -> MockMyRouterFactory {
+        let mut router = MockMyRouterFactory::new();
+        router.expect_clone().return_once(MockMyRouterFactory::new);
+        router.expect_web_endpoints().returning(MultiMap::new);
+        router
+    }
+
+    // After a reload attempt fails, the state machine should automatically retry
+    // after a delay (without requiring a new external event from Uplink). This
+    // prevents routers from being permanently stuck on a stale schema when a
+    // transient error (e.g. NAT port exhaustion during a burst) causes try_start
+    // to fail.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_with_retry() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        // 1. Startup succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // 2. Schema-triggered reload fails (transient error).
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient uplink error")));
+
+        // 3. Automatic retry succeeds — no external event required.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+
+        // Bring up the router.
+        for event in startup_events() {
+            tx.send(event).await.unwrap();
+            notify.notified().await;
+        }
+
+        // Trigger the failing reload.
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await; // state machine processed the (failed) reload
+
+        // Advance the clock past the retry delay (10 s) so the timer fires.
+        tokio::time::advance(Duration::from_secs(11)).await;
+        // Give the state machine enough yields to complete the retry. The number
+        // of yields needed is small (the mock create() resolves immediately and
+        // the TCP bind in restart() completes in one or two polls), but 10 is
+        // generous enough to be reliable without being slow.
+        for _ in 0..10 {
+            yield_now().await;
+        }
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        // With the retry implemented, the mock's times(1) expectation for the
+        // third create() call is satisfied and the task exits cleanly.
+        // Without it, the mock panics at drop and handle.await returns Err.
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        // Two successful server starts: initial startup + retry.
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    // Same as above, but the first retry also fails. The state machine should
+    // keep retrying until it succeeds.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_repeated_retry() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient uplink error")));
+
+        // First retry also fails.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("still failing")));
+
+        // Second retry succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+
+        for event in startup_events() {
+            tx.send(event).await.unwrap();
+            notify.notified().await;
+        }
+
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await; // initial reload failed
+
+        // First retry — still failing (create() returns Err, no server restart).
+        tokio::time::advance(Duration::from_secs(11)).await;
+        for _ in 0..10 {
+            yield_now().await;
+        }
+
+        // Second retry — succeeds.
+        tokio::time::advance(Duration::from_secs(11)).await;
+        for _ in 0..10 {
+            yield_now().await;
+        }
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
 }
