@@ -1487,34 +1487,18 @@ fn from_context_field_in_all_subgraphs_preserves_join_field() {
     .unwrap();
 
     let supergraph = compose(vec![s1, s2]).expect("composition should succeed");
-    let sdl = supergraph.schema().schema().to_string();
+    insta::assert_snapshot!(supergraph.schema().schema().to_string());
 
-    // U.f must have @join__field with contextArguments for s1.
-    // The bug caused needs_join_field to return false, dropping all @join__field.
-    let u_section: String = sdl
-        .lines()
-        .skip_while(|line| !line.starts_with("type U "))
-        .take_while(|line| !line.starts_with('}'))
-        .chain(std::iter::once("}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // The f field must have @join__field (not be bare)
-    let f_line = sdl
-        .lines()
-        .find(|line| line.trim_start().starts_with("f") && u_section.contains(line.trim()));
-
-    assert!(
-        f_line.is_some_and(|l| l.contains("@join__field")),
-        "U.f should have @join__field directives (including contextArguments for s1) \
-         but the composed supergraph U section is:\n{}",
-        u_section
-    );
-
-    assert!(
-        f_line.is_some_and(|l| l.contains("contextArguments")),
-        "U.f should have @join__field with contextArguments for s1 \
-         but the composed supergraph U section is:\n{}",
-        u_section
-    );
+    let type_u = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("U")
+        .expect("U exists in the schema");
+    insta::assert_snapshot!(type_u.to_string(), @r#"
+    type U @join__type(graph: S1, key: "id") @join__type(graph: S2, key: "id") {
+      id: ID!
+      f: Int! @join__field(graph: S1, contextArguments: [{context: "s1__ctx", name: "a", type: "String", selection: "{ prop }"}]) @join__field(graph: S2)
+    }
+    "#);
 }
