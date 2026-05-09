@@ -108,11 +108,7 @@ impl Merger {
                 continue;
             };
 
-            let is_orphan = subgraph.is_orphan_extension_type(element.name());
-            let has_extends_directive = subgraph
-                .extends_directive_name()
-                .is_some_and(|extends_name| element.directives().has(extends_name.as_str()));
-            if is_orphan || has_extends_directive {
+            if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));
