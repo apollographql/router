@@ -288,29 +288,6 @@ mod tests {
         .unwrap();
 
         let supergraph = compose(vec![s1, s2, s3]).expect("composition should succeed");
-        let sdl = supergraph.schema().schema().to_string();
-
-        // Extract the T type section from the supergraph SDL
-        let t_section: String = sdl
-            .lines()
-            .skip_while(|line| !line.starts_with("type T "))
-            .take_while(|line| !line.starts_with('}'))
-            .chain(std::iter::once("}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(
-            t_section.contains("@join__field") && t_section.contains("id: ID!"),
-            "T.id should have @join__field directives (including external: true for s3) \
-             but the composed supergraph T section is:\n{}",
-            t_section
-        );
-
-        assert!(
-            t_section.contains("external: true"),
-            "T.id should have @join__field(graph: S3, external: true) \
-             but the composed supergraph T section is:\n{}",
-            t_section
-        );
+        assert_snapshot!(supergraph.schema().schema().to_string());
     }
 }
