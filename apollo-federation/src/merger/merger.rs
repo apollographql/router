@@ -2221,10 +2221,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             (ExtendedType::Object(_), ExtendedType::Union(union_type)) => {
                 Ok(union_type.members.contains(potential_subtype))
             }
-            // Interface that is a member of a union (if supported)
-            (ExtendedType::Interface(_), ExtendedType::Union(union_type)) => {
-                Ok(union_type.members.contains(potential_subtype))
-            }
             _ => Ok(false),
         }
     }
