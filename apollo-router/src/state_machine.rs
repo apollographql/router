@@ -941,7 +941,6 @@ mod tests {
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
-    use std::time::Duration;
 
     use futures::channel::oneshot;
     use mockall::Sequence;
@@ -951,7 +950,6 @@ mod tests {
     use rstest::rstest;
     use serde_json::json;
     use test_log::test;
-    use tokio_stream::wrappers::ReceiverStream;
     use tower::BoxError;
     use tower::Service;
 
