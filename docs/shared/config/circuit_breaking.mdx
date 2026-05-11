@@ -1,0 +1,20 @@
+### `circuit_breaking`
+
+```yaml title="circuit_breaking"
+circuit_breaking:
+  all:
+    enabled: true
+    error_threshold: 5
+    window: 30s
+    recovery_timeout: 60s
+    half_open_max_requests: 1
+    mode: enforce
+  subgraphs:
+    products:
+      enabled: true
+      error_threshold: 3
+      window: 15s
+      recovery_timeout: 30s
+      half_open_max_requests: 1
+      mode: enforce
+```

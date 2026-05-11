@@ -1,30 +1,121 @@
 ---
 title: Circuit Breaking
-subtitle: Improve system stability by implementing circuit breaking
+subtitle: Protect subgraphs from cascading failures with automatic circuit breaking
 ---
 
-Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that fail or experience high latency. This gives your services time to recover without being overwhelmed by additional requests.
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraph operations that are failing. When the router detects repeated errors for a specific subgraph operation, it stops sending requests for that operation, giving the service time to recover without being overwhelmed.
 
-Apollo Router monitors the health of your services. When it detects failures or timeouts, it temporarily removes the service from the request chain. You can implement circuit breakers at various levels (for example, at the router level or subgraph level).
+The router's built-in circuit breaker operates at **per-operation granularity**. If a single resolver behind one subgraph fetch starts failing, only requests for that specific operation are blocked — other healthy operations to the same subgraph continue normally.
 
-Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize resource usage.
+## How it works
 
-Set thresholds for timeouts or errors to trigger circuit breaking. Manually override them to force a breaker closed or open.
+The circuit breaker follows a three-state model:
 
-## Implementing circuit breaking
+1. **Closed** (normal): All requests pass through. The router counts errors within a sliding time window.
+2. **Open** (tripped): When the error count reaches the configured threshold, the circuit opens. Requests for the affected operation are immediately rejected with a `CIRCUIT_BREAKER_OPEN` error, without being sent to the subgraph.
+3. **Half-open** (probing): After the recovery timeout elapses, the router allows a limited number of probe requests through. If a probe succeeds, the circuit closes. If it fails, the circuit reopens.
 
-To implement circuit breaking, evaluate your system architecture and the specific requirements of your services.
+## Configuration
 
-### Use service meshes and proxies (recommended)
+Circuit breaking is disabled by default. Enable it by adding `circuit_breaking` to your [YAML config file](/router/configuration/overview/#yaml-config-file):
 
-Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services.
+```yaml title="router.yaml"
+circuit_breaking:
+  all:
+    enabled: true
+```
 
-Apollo recommends using these tools for circuit breaking outside the Apollo Router. Many organizations already use this approach for rate limiting and load balancing.
+### Global and per-subgraph settings
 
-Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+Use `all` to set defaults for every subgraph. Use `subgraphs` to override settings for specific subgraphs:
 
-### Use circuit breakers at the application level
+```yaml title="router.yaml"
+circuit_breaking:
+  all:
+    enabled: true
+    error_threshold: 5
+    window: 30s
+    recovery_timeout: 60s
+    half_open_max_requests: 1
+    mode: enforce
+  subgraphs:
+    products:
+      enabled: true
+      error_threshold: 3
+      window: 15s
+      recovery_timeout: 30s
+```
 
-Wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach in your subgraph services to enable per-resolver or per-backend API circuit breaking.
+Per-subgraph settings are merged with the global defaults. Any field not specified in a subgraph override inherits from `all`.
 
-This decentralized approach can require coordination and duplication across your services.
+### Options reference
+
+| Option | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Whether circuit breaking is active for this subgraph. |
+| `error_threshold` | `5` | Number of errors within the sliding window required to trip the circuit. |
+| `window` | `30s` | Duration of the sliding error-counting window. If the window expires without reaching the threshold, the error count resets. |
+| `recovery_timeout` | `60s` | How long the circuit stays open before transitioning to half-open and allowing probe requests. |
+| `half_open_max_requests` | `1` | Maximum concurrent probe requests allowed while the circuit is half-open. |
+| `mode` | `enforce` | Either `enforce` (reject requests when open) or `measure` (log state transitions but never reject). |
+
+### Measure mode
+
+Use `measure` mode to observe circuit breaker behavior in production before enforcing it. In measure mode the router tracks errors, counts state transitions, and emits metrics, but never rejects requests:
+
+```yaml title="router.yaml"
+circuit_breaking:
+  all:
+    enabled: true
+    mode: measure
+```
+
+## Per-operation granularity
+
+The circuit breaker keys its state by the combination of the **subgraph name** and the **operation hash** (a SHA-256 digest of the schema, subgraph operation text, and operation name). This means:
+
+- Two different client queries that produce the same subgraph fetch share the same circuit.
+- Two different fetches to the same subgraph (for example, a root field query vs. an `_entities` lookup) have independent circuits.
+
+This prevents a single failing resolver from blocking all traffic to an otherwise healthy subgraph.
+
+## Error responses
+
+When the circuit is open and mode is `enforce`, the router returns a response with HTTP status `503 Service Unavailable` and a GraphQL error:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Circuit breaker is open for subgraph 'products' (operation hash: a1b2c3d4e5f6...)",
+      "extensions": {
+        "code": "CIRCUIT_BREAKER_OPEN",
+        "service": "products"
+      }
+    }
+  ]
+}
+```
+
+## Metrics
+
+The router emits the following metrics for observability:
+
+| Metric | Description | Attributes |
+|---|---|---|
+| `apollo.router.circuit_breaker.state_change` | Counter incremented on every state transition (closed → open, open → half-open, etc.) | `subgraph.name`, `circuit_breaker.operation_hash`, `circuit_breaker.from_state`, `circuit_breaker.to_state` |
+| `apollo.router.circuit_breaker.rejected` | Counter incremented each time a request is rejected by an open circuit. | `subgraph.name`, `circuit_breaker.operation_hash` |
+
+## External circuit breaking
+
+In addition to the router's built-in circuit breaker, you can use external infrastructure for circuit breaking.
+
+### Service meshes and proxies
+
+Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide circuit breaking at the network level. These tools monitor health, error rates, and latency to halt or reroute traffic to failing services.
+
+Service mesh circuit breaking is typically not GraphQL-aware and treats entire subgraphs atomically, lacking per-operation granularity.
+
+### Application-level circuit breakers
+
+You can also wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java) in your subgraph services. This approach enables per-resolver or per-backend API circuit breaking but requires coordination across services.
