@@ -689,16 +689,7 @@ mod enum_hints {
             "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
             "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraphs \"Subgraph2\" and \"Subgraph3\".",
         );
-        let hint_count = result
-            .hints()
-            .iter()
-            .filter(|h| h.code() == "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM")
-            .count();
-        assert_eq!(
-            hint_count,
-            1,
-            "Expected exactly 1 hint but got {hint_count}"
-        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
     }
 }
 
