@@ -121,8 +121,8 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
-- `apollo.router.cache.redis.reconnection` - Number of reconnect events raised by the Redis client when a Redis server requires client reconnection.
-- `apollo.router.cache.redis.unresponsive` - Number of unresponsive events raised by the Redis client when a Redis server becomes unresponsive.
+- `apollo.router.cache.redis.reconnection` - Number of Redis client reconnections
+- `apollo.router.cache.redis.unresponsive` - Number of times a Redis server became unresponsive
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
 - `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
