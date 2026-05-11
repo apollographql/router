@@ -2884,4 +2884,85 @@ mod tests {
         assert_matches!(handle.await.unwrap(), Ok(()));
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
+
+    // With max_retries: null the retry timer must keep firing past the default
+    // limit of 5 retries.  This test fails 6 times (one more than the default)
+    // and then succeeds, proving the budget is truly unlimited.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_unlimited_retries() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        // Startup.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // Initial reload + 6 timer-driven retries all fail.
+        router_factory
+            .expect_create()
+            .times(6)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("persistent failure")));
+
+        // 7th attempt (would have been blocked by max_retries: 5) succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let unlimited_config = Arc::new(
+            Configuration::from_str("reload:\n  max_retries: null")
+                .expect("config with max_retries: null must be valid"),
+        );
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+
+        tx.send(UpdateConfiguration(unlimited_config))
+            .await
+            .unwrap();
+        notify.notified().await;
+        tx.send(UpdateSchema(example_schema())).await.unwrap();
+        notify.notified().await;
+        tx.send(UpdateLicense(Default::default())).await.unwrap();
+        notify.notified().await;
+
+        // Trigger a reload that fails — enters Reloading with None budget.
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await; // attempt 1 failed
+
+        // Five more timer-driven failures, each separated by the retry delay.
+        for _ in 0..5 {
+            let retry_done = notify.notified();
+            tokio::time::advance(Duration::from_secs(11)).await;
+            retry_done.await;
+        }
+        // 6 failures total — one more than max_retries: 5 would have allowed.
+
+        // Final retry succeeds.
+        let success = notify.notified();
+        tokio::time::advance(Duration::from_secs(11)).await;
+        success.await;
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
 }
