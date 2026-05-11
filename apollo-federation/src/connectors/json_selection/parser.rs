@@ -2805,17 +2805,17 @@ mod tests {
         }
 
         {
-            // Same grammar unification consequence as above: under v0.4,
-            // `'quoted with alias'` in an alias-value position is a string
-            // literal, so the value is stored verbatim as
-            // `LitPath(String, Selection)` — no synthetic `PathList::Expr`
-            // wrapper, since that node is reserved for source `$(...)`. To
-            // look up a field with that name the user would write
-            // `$.'quoted with alias' { ... }`.
-            let quoted_with_alias_value: WithRange<LitExpr> = if matches!(spec, ConnectSpec::V0_4) {
-                WithRange::new(
-                    LitExpr::LitPath(
-                        WithRange::new(LitExpr::String("quoted with alias".to_string()), None),
+            // A quoted-string token immediately followed by `{ ... }` is
+            // *not* a LitPath in v0.4: per the grammar (NonEmptyPathTail
+            // excludes SubSelection), and per the explicit disambiguation
+            // rule documented in the README's "Literals followed by a
+            // SubSelection" section, such a token is reinterpreted as the
+            // `Key` of a `KeyPath` whose trailing `SubSelection` is the
+            // `{ ... }`. The resulting AST matches v0.3 verbatim.
+            let quoted_with_alias_value: WithRange<LitExpr> = path_value(PathSelection {
+                path: WithRange::new(
+                    PathList::Key(
+                        Key::quoted("quoted with alias").into_with_range(),
                         WithRange::new(
                             PathList::Selection(SubSelection {
                                 selections: vec![
@@ -2836,35 +2836,8 @@ mod tests {
                         ),
                     ),
                     None,
-                )
-            } else {
-                path_value(PathSelection {
-                    path: WithRange::new(
-                        PathList::Key(
-                            Key::quoted("quoted with alias").into_with_range(),
-                            WithRange::new(
-                                PathList::Selection(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::field(
-                                            None,
-                                            Key::field("id").into_with_range(),
-                                            None,
-                                        ),
-                                        NamedSelection::field(
-                                            Some(Alias::quoted("n a m e")),
-                                            Key::field("name").into_with_range(),
-                                            None,
-                                        ),
-                                    ],
-                                    ..Default::default()
-                                }),
-                                None,
-                            ),
-                        ),
-                        None,
-                    ),
-                })
-            };
+                ),
+            });
             let expected = PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),

@@ -201,6 +201,26 @@ impl LitExpr {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
                         }
+                        // `NonEmptyPathTail` (the grammar tail attached to a
+                        // LitPath) admits only `?`, `.key`, and `->method`
+                        // continuations — never a `SubSelection`. So a literal
+                        // immediately followed by `{ ... }` cannot be a
+                        // LitPath: we re-parse the original input as a
+                        // `PathSelection` so the literal's source token is
+                        // reinterpreted as a `Key` (quoted string, or one of
+                        // the identifier-shaped `LitPrimitive`s `null` /
+                        // `true` / `false`) anchoring a `KeyPath` whose
+                        // trailing `SubSelection` is the `{ ... }`.
+                        //
+                        // See the README section "Literals followed by a
+                        // SubSelection". Wrap the literal in `$(...)` to force
+                        // the LitExpr-then-trailing-`{...}` reading.
+                        if matches!(subpath.as_ref(), PathList::Selection(_)) {
+                            return PathSelection::parse(input.clone()).map(|(remainder, path)| {
+                                let range = path.range();
+                                (remainder, WithRange::new(Self::Path(path), range))
+                            });
+                        }
                         let full_range = merge_ranges(initial_literal.range(), subpath.range());
                         Ok((
                             remainder,
