@@ -890,6 +890,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
+    add_optional_apollo_plugin!("circuit_breaking");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_oss_apollo_plugin!("connectors");
