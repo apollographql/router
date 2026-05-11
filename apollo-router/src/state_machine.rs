@@ -436,8 +436,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 {
                     Ok((new_state, new_schema)) => {
                         tracing::info!(event = STATE_CHANGE, "reload complete");
-                        // router_service_factory from committed state is no longer needed;
-                        // the new Running state holds the factory returned by try_start.
+                        // Explicitly drop the old factory before broadcasting notifications so
+                        // that its resources (connections, background tasks) are fully torn down
+                        // before any listeners act on the reload-complete signal.
                         drop(router_service_factory);
                         // Broadcast change notifications after pipelines have fully rolled over.
                         if configuration.is_pending() {
