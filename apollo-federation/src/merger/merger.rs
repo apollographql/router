@@ -301,6 +301,15 @@ impl Merger {
         linked_federation_version
     }
 
+    /// Collect fields that have arguments with `@fromContext`.
+    ///
+    /// `@fromContext` is applied to field **arguments**, so `DirectiveReferencers`
+    /// puts them in `object_field_arguments` / `interface_field_arguments`. But
+    /// `needs_join_field` checks `object_fields` / `interface_fields`. We map
+    /// argument positions to their parent field positions to match the JS behavior:
+    ///
+    ///     // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
+    ///     const field = application.parent.parent; // argument → field
     fn get_fields_with_from_context_directive(
         subgraphs: &[Subgraph<Validated>],
     ) -> DirectiveReferencers {
@@ -313,7 +322,14 @@ impl Merger {
                         .referencers()
                         .get_directive(&directive_name);
                     if !referencers.is_empty() {
-                        acc.extend(referencers);
+                        // Map argument positions to their parent field positions,
+                        // since needs_join_field checks object_fields/interface_fields.
+                        for arg_pos in &referencers.object_field_arguments {
+                            acc.object_fields.insert(arg_pos.parent());
+                        }
+                        for arg_pos in &referencers.interface_field_arguments {
+                            acc.interface_fields.insert(arg_pos.parent());
+                        }
                     }
                 }
                 acc

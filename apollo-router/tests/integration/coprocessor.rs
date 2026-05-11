@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
 use serde_json::json;
@@ -1346,6 +1347,93 @@ coprocessor:
     );
 
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_no_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor and return successfully
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query and respond with a short delay
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_delay(Duration::from_secs(5)).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_with_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor
+    let (_trace_id, response) = router.execute_default_query().await;
+    // But the router should timeout due to the config
+    assert_eq!(response.status(), 504);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
     Ok(())
 }
 

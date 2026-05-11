@@ -397,7 +397,7 @@ impl ExternalMetadata {
     ) -> Result<Self, FederationError> {
         let external_fields = Self::collect_external_fields(federation_spec_definition, schema)?;
         let fake_external_fields =
-            Self::collect_fake_externals(federation_spec_definition, schema)?;
+            Self::collect_fake_externals(federation_spec_definition, schema, &external_fields)?;
         // We do not collect @external on types for Fed 1 schemas since those will be discarded by
         // the schema upgrader. The schema upgrader, through calls to `is_external()`, relies on the
         // populated `fields_on_external_types` set to inform when @shareable should be
@@ -478,6 +478,7 @@ impl ExternalMetadata {
     fn collect_fake_externals(
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &FederationSchema,
+        external_fields: &IndexSet<FieldDefinitionPosition>,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut fake_external_fields = IndexSet::default();
         let (Ok(extends_directive_definition), Ok(key_directive_applications)) = (
@@ -503,12 +504,16 @@ impl ExternalMetadata {
                     .extension_id()
                     .is_some()
             {
-                fake_external_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    key_directive.target.type_name().clone(),
-                    key_directive.arguments.fields,
-                    false,
-                )?);
+                fake_external_fields.extend(
+                    collect_target_fields_from_field_set(
+                        unwrap_schema(schema),
+                        key_directive.target.type_name().clone(),
+                        key_directive.arguments.fields,
+                        false,
+                    )?
+                    .into_iter()
+                    .filter(|field| external_fields.contains(field)),
+                );
             }
         }
         Ok(fake_external_fields)
@@ -719,5 +724,71 @@ mod tests {
             type_name: Name::new_unchecked(type_name),
             field_name: Name::new_unchecked(field_name),
         })
+    }
+
+    /// Regression test: type-level @external fields should NOT be fake-external.
+    ///
+    /// When type T has `@key(fields: "id") @external` and another type S has
+    /// `@key(fields: "t { id }") @extends`, the key field set traversal for S
+    /// reaches T.id. `collect_fake_externals` must filter these to only include
+    /// fields with field-level @external (matching JS `collectTargetFields(...)
+    /// .filter(f => f.hasAppliedDirective(@external))`).
+    #[test]
+    fn type_level_external_field_not_fake_external() {
+        use crate::subgraph::typestate::Subgraph;
+
+        let subgraph = Subgraph::parse(
+            "s1",
+            "http://s1",
+            r#"
+                extend schema
+                  @link(url: "https://specs.apollo.dev/link/v1.0")
+                  @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@external", "@extends", "@requires"])
+
+                directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+                directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+                directive @external on OBJECT | FIELD_DEFINITION
+                directive @extends on OBJECT | INTERFACE
+                directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+                enum link__Purpose { SECURITY EXECUTION }
+                scalar link__Import
+                scalar federation__FieldSet
+
+                type Query {
+                    ss: [S!]!
+                }
+
+                type T @key(fields: "id") @external {
+                    id: ID!
+                }
+
+                type S @key(fields: "t { id }") @extends {
+                    t: T! @external
+                    x: ID @external
+                    y: [String!] @requires(fields: "x")
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let meta = subgraph.metadata();
+        let t_id = field("T", "id");
+
+        // T.id should be external (inherited from type-level @external)
+        assert!(
+            meta.is_field_external(&t_id),
+            "T.id should be external (inherited from type-level @external). \
+             collect_fake_externals must filter traversed fields to only include \
+             those with field-level @external."
+        );
+
+        assert!(
+            !meta.external_metadata().is_fake_external(&t_id),
+            "T.id should NOT be fake-external: only the parent type has @external, \
+             not the field itself."
+        );
     }
 }

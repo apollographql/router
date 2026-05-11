@@ -108,11 +108,11 @@ impl Merger {
                 continue;
             };
 
-            let is_orphan = subgraph.is_orphan_extension_type(element.name());
-            let has_extends_directive = subgraph
-                .extends_directive_name()
-                .is_some_and(|extends_name| element.directives().has(extends_name.as_str()));
-            if is_orphan || has_extends_directive {
+            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+            //   extensions defined using federation @extends directive. Since fixing it would be
+            //   a breaking change that could affect some customers, we are keeping current behavior
+            //   to match JavaScript logic. We should fix this in the future versions.
+            if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));

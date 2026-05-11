@@ -247,14 +247,13 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            let is_orphan =
-                                other_subgraph.is_orphan_extension_type(extended_type.name());
-                            let has_extends_directive = other_subgraph
-                                .extends_directive_name()
-                                .is_some_and(|extends_name| {
-                                    extended_type.directives().has(extends_name.as_str())
-                                });
-                            Ok::<bool, FederationError>(!is_orphan && !has_extends_directive)
+                            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+                            //   extensions defined using federation @extends directive. Since fixing it would be
+                            //   a breaking change that could affect some customers, we are keeping current behavior
+                            //   to match JavaScript logic. We should fix this in the future versions.
+                            Ok::<bool, FederationError>(
+                                !other_subgraph.is_orphan_extension_type(extended_type.name()),
+                            )
                         })
                 })
                 .unwrap_or(Ok(false))?;
