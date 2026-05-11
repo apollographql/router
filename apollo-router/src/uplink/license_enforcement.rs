@@ -664,7 +664,7 @@ impl LicenseState {
         matches!(self, LicenseState::Unlicensed)
     }
 
-    pub(crate) fn licensed(&self) -> bool {
+    pub(crate) fn is_licensed(&self) -> bool {
         !self.is_unlicensed()
     }
 

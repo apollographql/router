@@ -218,8 +218,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     /// Returns true if the router is actively serving traffic under a valid license.
     fn is_licensed(&self) -> bool {
         match self {
-            Running { license, .. } => license.licensed(),
-            Reloading { license, .. } => license.committed().licensed(),
+            Running { license, .. } => license.is_licensed(),
+            Reloading { license, .. } => license.committed().is_licensed(),
             _ => false,
         }
     }
@@ -459,19 +459,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         // Decrement the retry budget (saturating so it stops at 0, not wrapping).
                         let retries_remaining = retries_remaining.map(|n| n.saturating_sub(1));
 
-                        if matches!(retries_remaining, Some(0)) {
-                            tracing::error!(
-                                error = %e,
-                                event = STATE_CHANGE,
-                                "error while reloading; retry limit reached, waiting for new inputs from Uplink"
-                            );
-                        } else {
-                            tracing::error!(
-                                error = %e,
-                                event = STATE_CHANGE,
-                                "error while reloading, will retry"
-                            );
-                        }
+                        tracing::error!(
+                            error = %e,
+                            retries_remaining = retries_remaining
+                                .map_or("unlimited".to_string(), |n| n.to_string()),
+                            event = STATE_CHANGE,
+                            "error while reloading"
+                        );
 
                         let retry_delay =
                             retry_delay_with_jitter(configuration.committed().reload.retry_delay);
