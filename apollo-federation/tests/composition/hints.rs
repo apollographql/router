@@ -684,17 +684,20 @@ mod enum_hints {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
-        let hints = result.hints();
-        let matching: Vec<_> = hints
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
+            "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraphs \"Subgraph2\" and \"Subgraph3\".",
+        );
+        let hint_count = result
+            .hints()
             .iter()
             .filter(|h| h.code() == "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM")
-            .collect();
+            .count();
         assert_eq!(
-            matching.len(),
+            hint_count,
             1,
-            "Expected exactly 1 INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM hint but got {}: {:?}",
-            matching.len(),
-            matching.iter().map(|h| h.message()).collect::<Vec<_>>()
+            "Expected exactly 1 hint but got {hint_count}"
         );
     }
 }
