@@ -1,4 +1,4 @@
-use crate::services::external::PipelineStep;
+use crate::services::PipelineStep;
 
 macro_rules! assert_counter_zero_or_absent {
     ($($arg:tt)*) => {{
@@ -97,9 +97,9 @@ mod tests {
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
-    use crate::services::external::PipelineStep;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -6265,8 +6265,8 @@ mod tests {
         use crate::plugins::coprocessor::connector::ConnectorStage;
         use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
         use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::services::PipelineStep;
         use crate::services::connector::request_service;
-        use crate::services::external::PipelineStep;
         use crate::services::http::HttpRequest;
         use crate::services::http::HttpResponse;
         use crate::services::router;
@@ -6314,11 +6314,11 @@ mod tests {
                     None,
                     0,
                 ),
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -6351,10 +6351,10 @@ mod tests {
                 .body(r#"{"query":"test"}"#.to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             request_service::Request {
                 context: crate::Context::default(),
@@ -6520,10 +6520,10 @@ mod tests {
                 .body("plain text body".to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             let request = request_service::Request {
                 context: crate::Context::default(),
@@ -6603,7 +6603,9 @@ mod tests {
                 let captured_uri = captured_uri_clone.clone();
                 let captured_headers = captured_headers_clone.clone();
                 async move {
-                    let TransportRequest::Http(ref http_req) = req.transport_request;
+                    let TransportRequest::Http(ref http_req) = req.transport_request else {
+                        panic!("expected Http transport request");
+                    };
                     *captured_uri.lock().unwrap() = http_req.inner.uri().to_string();
                     *captured_headers.lock().unwrap() = http_req
                         .inner

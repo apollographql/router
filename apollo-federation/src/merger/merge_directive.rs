@@ -290,7 +290,7 @@ impl Merger {
             );
             dest.insert_directive(&mut self.merged, merged_directive)?;
             self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
+                    definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                     message: format!(
                         "Directive @{name} is applied to \"{dest}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
                         directive_in_supergraph.and_then(|d| d.arguments_merger.as_ref()).map_or("undefined".to_string(), |m| (m.to_string)())
@@ -546,6 +546,7 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
+                    dest.remove(&mut self.merged)?;
                     self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
@@ -560,6 +561,7 @@ impl Merger {
                         false,
                         false,
                     );
+                    return Ok(());
                 }
             }
         }
@@ -656,9 +658,9 @@ impl Merger {
                     &REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
                     &POLICY_DIRECTIVE_NAME_IN_SPEC,
                 ] {
-                    if let Some(directive) = federation_spec
-                        .directive_definition(subgraph.schema(), access_control_directive)?
-                    {
+                    let directive = federation_spec
+                        .try_directive_definition(subgraph.schema(), access_control_directive);
+                    if let Some(directive) = directive {
                         let referencers = subgraph_referencers.get_directive(&directive.name);
                         for type_position in &referencers.object_types {
                             // we will be propagating access control from objects up to the interfaces

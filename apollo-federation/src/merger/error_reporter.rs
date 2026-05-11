@@ -61,6 +61,7 @@ impl ErrorReporter {
         self.hints.push(hint);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn has_hints(&self) -> bool {
         !self.hints.is_empty()
     }
@@ -223,7 +224,7 @@ impl ErrorReporter {
                 ));
                 let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
-                    code: code.code().to_string(),
+                    definition: code.definition(),
                     message: format!("{message}{distribution_str}{suffix}"),
                     locations,
                 });
@@ -258,18 +259,17 @@ impl ErrorReporter {
              idx: usize,
              subgraph_element: &S,
              distribution_map: &mut IndexMap<String, Vec<String>>| {
-                if let Some(element) = subgraph_mismatch_accessor(subgraph_element, idx) {
-                    locations.extend(
-                        subgraphs
-                            .get(idx)
-                            .map(|sg| subgraph_element.locations(sg))
-                            .unwrap_or_default(),
-                    );
-                    distribution_map
-                        .entry(element)
-                        .or_default()
-                        .push(name.to_string());
-                }
+                let element = subgraph_mismatch_accessor(subgraph_element, idx).unwrap_or_default();
+                locations.extend(
+                    subgraphs
+                        .get(idx)
+                        .map(|sg| subgraph_element.locations(sg))
+                        .unwrap_or_default(),
+                );
+                distribution_map
+                    .entry(element)
+                    .or_default()
+                    .push(name.to_string());
             };
         if include_missing_sources {
             for (i, name) in self.names.iter().enumerate() {

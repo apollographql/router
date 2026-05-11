@@ -39,6 +39,8 @@ pub(crate) const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION
 pub(crate) const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
 const SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE: &str = "SUBSCRIPTION_JWT_EXPIRED";
 const SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE: &str = "SUBSCRIPTION_EXECUTION_ERROR";
+pub(crate) const SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE: &str =
+    "SUBSCRIPTION_MAX_LIFETIME_EXCEEDED";
 
 /// The execution side of the subscriptions implementation starts up a side-channel task used to
 /// handle messages received from the subgraph that we subscribed to.
@@ -239,6 +241,12 @@ async fn subscription_task(
         futures::future::pending().boxed()
     };
 
+    let mut max_lifetime_timeout = if let Some(max_lifetime) = subscription_config.max_lifetime {
+        tokio::time::sleep(max_lifetime).boxed()
+    } else {
+        futures::future::pending().boxed()
+    };
+
     loop {
         tokio::select! {
             // We prefer to specify the order of checks within the select
@@ -248,6 +256,10 @@ async fn subscription_task(
             }
             _ = &mut timeout => {
                 let _ = sender.send(subscription_fatal_error("subscription closed because the JWT has expired", SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE)).await;
+                break;
+            },
+            _ = &mut max_lifetime_timeout => {
+                let _ = sender.send(subscription_fatal_error("subscription closed because the maximum lifetime has been reached", SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE)).await;
                 break;
             },
             message = receiver.next() => {

@@ -220,20 +220,17 @@ The invalidation endpoint accepts HTTP POST requests containing a JSON payload w
 ```mermaid
 flowchart RL
 	subgraph QueryResponse["Cache invalidation POST"]
-		n1["{
-			&nbsp;&nbsp;&nbsp;&nbsp;&quot;kind&quot;: &quot;subgraph&quot;,
+		n1["[{
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;kind&quot;: &quot;type&quot;,
 			&nbsp;&nbsp;&nbsp;&nbsp;&quot;subgraph&quot;: &quot;price&quot;,
-			&nbsp;&nbsp;&nbsp;&nbsp;&quot;type&quot;: &quot;Price&quot;,
-			&nbsp;&nbsp;&nbsp;&nbsp;&quot;key&quot;: {
-			&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&quot;id&quot;: &quot;101&quot;
-			&nbsp;&nbsp;&nbsp;&nbsp;}
-		}"]
+			&nbsp;&nbsp;&nbsp;&nbsp;&quot;type&quot;: &quot;Price&quot;
+		}]"]
     end
 
 	subgraph Subgraphs["Subgraphs"]
 		Purchases["Purchases"]
 		Inventory["Inventory"]
-		Price["Price"]
+		Price["price"]
 	end
 
 	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
@@ -516,7 +513,7 @@ Accept: application/json
 The router would send the following response:
 
 ```
-HTTP/1.1 201 OK
+HTTP/1.1 202 Accepted
 Content-Type: application/json
 
 {

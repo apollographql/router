@@ -21,13 +21,17 @@ pub trait Verifier {
         if let Some(spec_id) = &self.spec().trace_id {
             assert_eq!(id.to_string(), *spec_id, "trace id");
         }
-        for _ in 0..20 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
             if self.find_valid_trace(id).await.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            if std::time::Instant::now() >= deadline {
+                self.find_valid_trace(id).await?;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        self.find_valid_trace(id).await?;
         let subgraph_context = router.subgraph_context();
         assert!(response.status().is_success());
         self.validate_subgraph(subgraph_context)?;
@@ -35,13 +39,17 @@ pub trait Verifier {
     }
 
     async fn validate_metrics(&self) -> Result<(), BoxError> {
-        for _ in 0..10 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
             if self.find_valid_metrics().await.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            if std::time::Instant::now() >= deadline {
+                self.find_valid_metrics().await?;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        self.find_valid_metrics().await?;
         Ok(())
     }
 

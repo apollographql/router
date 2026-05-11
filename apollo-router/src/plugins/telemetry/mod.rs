@@ -426,10 +426,25 @@ impl PluginPrivate for Telemetry {
 
                 response
             })
-            .option_layer(use_legacy_request_span.then(move || {
-                InstrumentLayer::new(move |request: &router::Request| {
+            .layer(InstrumentLayer::new(move |request: &router::Request| {
+                if use_legacy_request_span {
                     span_mode.create_router(&request.router_request)
-                })
+                } else {
+                    // When running through axum, the TraceLayer holds a "router" span guard
+                    // across the entire synchronous call chain, so Span::current() already
+                    // returns it here — reuse it rather than creating a duplicate SERVER span.
+                    // In tests that bypass axum, there is no active span, so we create one to
+                    // match the behavior users actually see.
+                    let current = Span::current();
+                    if current
+                        .metadata()
+                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                    {
+                        current
+                    } else {
+                        span_mode.create_router(&request.router_request)
+                    }
+                }
             }))
             .checkpoint(move |req: router::Request| {
                 let library_name_valid = req
@@ -2139,6 +2154,28 @@ mod tests {
     use crate::services::SupergraphResponse;
     use crate::services::router;
 
+    // Serializes tests that call `plugin.activate()`. `Telemetry::activate()`
+    // -> `Activation::commit()` performs two process-wide writes:
+    //   1. `opentelemetry::global::set_tracer_provider(...)`
+    //   2. `*REGISTRY.lock() = self.prometheus_registry.clone();`
+    //      (the global Prometheus registry pointer in reload/activation.rs)
+    // Neither is covered by `FutureMetricsExt::with_metrics`, which only
+    // isolates the meter provider via a tokio task-local. When multiple
+    // `it_test_prometheus_*` tests run in parallel under nextest, one test's
+    // activate() can clobber another's global state mid-test, causing rare
+    // but observable flakes against the per-plugin Prometheus registry scrape.
+    //
+    // See `src/plugins/telemetry/metrics/apollo/mod.rs` for the same pattern
+    // applied to the apollo_metrics tests.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-prometheus-telemetry-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
+    static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
+        once_cell::sync::Lazy::new(Default::default);
+
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
             let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
@@ -3141,6 +3178,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -3156,6 +3194,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets.router.yaml"
@@ -3173,6 +3212,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
@@ -3189,6 +3229,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_view_drop() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_view_drop.router.yaml"
@@ -3203,6 +3244,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_units_are_included() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;

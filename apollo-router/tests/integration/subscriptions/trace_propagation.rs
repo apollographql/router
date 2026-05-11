@@ -136,6 +136,7 @@ async fn start_header_capturing_ws_server() -> (SocketAddr, HeaderCaptureState) 
 
     let app = Router::new()
         .route("/ws", get(websocket_handler_with_header_capture))
+        .route("/", get(|| async { "header-capturing ws server running" }))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -146,8 +147,13 @@ async fn start_header_capturing_ws_server() -> (SocketAddr, HeaderCaptureState) 
         axum::serve(listener, app).await.unwrap();
     });
 
-    // Wait for server to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for the server to actually serve. See `mod.rs::wait_for_http_ok`
+    // for why TCP connect is insufficient.
+    crate::integration::subscriptions::wait_for_http_ok(
+        &format!("http://{}/", ws_addr),
+        Duration::from_secs(5),
+    )
+    .await;
 
     (ws_addr, state)
 }

@@ -1,0 +1,25 @@
+---
+source: apollo-router/tests/integration/response_size_limits.rs
+expression: response_json
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "connector response body exceeded limit of 50 bytes",
+      "path": [
+        "posts"
+      ],
+      "extensions": {
+        "code": "CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED",
+        "service": "connectors",
+        "connector": {
+          "coordinate": "connectors:Query.posts[0]"
+        },
+        "http": {
+          "status": 200
+        }
+      }
+    }
+  ]
+}

@@ -12,3 +12,4 @@ mod merge_interface;
 mod merge_links;
 mod merge_type;
 mod merge_union;
+mod supergraph_coordinate;

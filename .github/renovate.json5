@@ -74,11 +74,23 @@
       groupSlug: null,
     },
 
-    // Put all the rustc dependencies in a single PR
+    // Put all the rustc dependencies in a single PR.
+    //
+    // Note the two `matchPackageNames` entries: the `mise` manager reports
+    // rust as `rust-lang/rust` (its upstream `packageName`), while the other
+    // three managers report it as just `rust`.  Renovate's `matchPackageNames`
+    // only matches against `packageName` — not `depName` — so we have to list
+    // both to catch every manager's view of the Rust release.
+    //
+    // The `minimumReleaseAge` here aligns the soak window across all four
+    // managers: otherwise `dockerfile` / `custom.regex` / `rust-release-channel`
+    // open their PR immediately while `mise` waits out its own 5-day soak
+    // (set below), and the two halves never meet in the same PR.
     {
-      matchPackageNames: ['rust'],
+      matchPackageNames: ['rust', 'rust-lang/rust'],
       matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
       groupName: 'rustc',
+      minimumReleaseAge: '5 days',
     },
 
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
