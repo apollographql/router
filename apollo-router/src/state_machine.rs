@@ -2572,11 +2572,11 @@ mod tests {
                 .in_sequence(&mut seq)
                 .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
 
-            let h = Harness::new(router_factory, 2);
-            h.startup().await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // reload fails
-            h.advance_and_wait(Duration::from_secs(11)).await; // timer fires, retry succeeds
-            h.finish().await;
+            let harness = Harness::new(router_factory, 2);
+            harness.startup().await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // reload fails
+            harness.advance_and_wait(Duration::from_secs(11)).await; // timer fires, retry succeeds
+            harness.finish().await;
         }
 
         #[test(tokio::test(start_paused = true))]
@@ -2600,12 +2600,12 @@ mod tests {
                 .in_sequence(&mut seq)
                 .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
 
-            let h = Harness::new(router_factory, 2);
-            h.startup().await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
-            h.advance_and_wait(Duration::from_secs(11)).await; // first retry fails
-            h.advance_and_wait(Duration::from_secs(11)).await; // second retry succeeds
-            h.finish().await;
+            let harness = Harness::new(router_factory, 2);
+            harness.startup().await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
+            harness.advance_and_wait(Duration::from_secs(11)).await; // first retry fails
+            harness.advance_and_wait(Duration::from_secs(11)).await; // second retry succeeds
+            harness.finish().await;
         }
 
         // A newer schema arrives while we are still in Reloading (e.g. Uplink publishes
@@ -2633,12 +2633,12 @@ mod tests {
                 .in_sequence(&mut seq)
                 .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
 
-            let h = Harness::new(router_factory, 2);
-            h.startup().await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
+            let harness = Harness::new(router_factory, 2);
+            harness.startup().await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             // Send a newer schema before the timer fires — retries immediately.
-            h.send_and_wait(UpdateSchema(example_schema())).await;
-            h.finish().await;
+            harness.send_and_wait(UpdateSchema(example_schema())).await;
+            harness.finish().await;
         }
 
         // With max_retries: 0 the retry timer is never armed.  The router should keep
@@ -2664,12 +2664,12 @@ mod tests {
                 Configuration::from_str("reload:\n  max_retries: 0")
                     .expect("config with max_retries: 0 must be valid"),
             );
-            let h = Harness::new(router_factory, 1);
-            h.startup_with_config(zero_retries).await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, no retry scheduled
+            let harness = Harness::new(router_factory, 1);
+            harness.startup_with_config(zero_retries).await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, no retry scheduled
             // Advance well past any retry delay — the timer must not fire.
             tokio::time::advance(Duration::from_secs(60)).await;
-            h.finish().await;
+            harness.finish().await;
         }
 
         // After the retry budget is exhausted (timer disabled), a new schema event
@@ -2700,11 +2700,11 @@ mod tests {
                 Configuration::from_str("reload:\n  max_retries: 0")
                     .expect("config with max_retries: 0 must be valid"),
             );
-            let h = Harness::new(router_factory, 2);
-            h.startup_with_config(zero_retries).await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, budget exhausted
-            h.send_and_wait(UpdateSchema(example_schema())).await; // resets + retries immediately
-            h.finish().await;
+            let harness = Harness::new(router_factory, 2);
+            harness.startup_with_config(zero_retries).await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, budget exhausted
+            harness.send_and_wait(UpdateSchema(example_schema())).await; // resets + retries immediately
+            harness.finish().await;
         }
 
         // A RhaiReload event arrives while the state machine is already in Reloading
@@ -2735,17 +2735,18 @@ mod tests {
                 .in_sequence(&mut seq)
                 .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
 
-            let h = Harness::new(router_factory, 2);
-            h.startup().await;
+            let harness = Harness::new(router_factory, 2);
+            harness.startup().await;
             // Trigger a failing configuration reload (distinct from the startup config
             // so accumulate_inputs sees a change).
-            h.send_and_wait(UpdateConfiguration(Arc::new(
-                Configuration::builder().build().unwrap(),
-            )))
-            .await;
+            harness
+                .send_and_wait(UpdateConfiguration(Arc::new(
+                    Configuration::builder().build().unwrap(),
+                )))
+                .await;
             // Rhai script change arrives before the retry timer — retries immediately.
-            h.send_and_wait(RhaiReload).await;
-            h.finish().await;
+            harness.send_and_wait(RhaiReload).await;
+            harness.finish().await;
         }
 
         // With max_retries: null the retry timer must keep firing past the default
@@ -2777,15 +2778,15 @@ mod tests {
                 Configuration::from_str("reload:\n  max_retries: null")
                     .expect("config with max_retries: null must be valid"),
             );
-            let h = Harness::new(router_factory, 2);
-            h.startup_with_config(unlimited).await;
-            h.send_and_wait(UpdateSchema(minimal_schema())).await; // attempt 1 fails
+            let harness = Harness::new(router_factory, 2);
+            harness.startup_with_config(unlimited).await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // attempt 1 fails
             // Five more timer-driven failures — total 6, one more than the default max.
             for _ in 0..5 {
-                h.advance_and_wait(Duration::from_secs(11)).await;
+                harness.advance_and_wait(Duration::from_secs(11)).await;
             }
-            h.advance_and_wait(Duration::from_secs(11)).await; // 7th attempt succeeds
-            h.finish().await;
+            harness.advance_and_wait(Duration::from_secs(11)).await; // 7th attempt succeeds
+            harness.finish().await;
         }
     }
 }
