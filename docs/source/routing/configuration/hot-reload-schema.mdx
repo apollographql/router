@@ -26,11 +26,11 @@ When using hot reloading for supergraph schemas, be aware of the following perfo
 - Request handling: During reload, new requests might experience slight latency increases while the new schema is being processed.
 - Memory usage: The router maintains both the old and new schema briefly during reload, temporarily increasing memory usage.
 
-## Configuring reload retries
+## Configure reload retries
 
 When a reload fails—for example, because a transient network error prevents the router from fetching a persisted query manifest from Uplink—the router automatically retries instead of continuing to serve traffic on the previous configuration indefinitely.
 
-You can tune this behavior with the `reload` configuration section:
+Tune this behavior with the `reload` configuration section:
 
 ```yaml title="router.yaml"
 reload:
@@ -40,7 +40,7 @@ reload:
   max_retries: 5
 
   # Base delay between retry attempts. A random jitter of up to 25%
-  # is added to spread retries across multiple router instances.
+# adds a random jitter of up to 25% to spread retries across multiple router instances.
   # Default: 10s
   retry_delay: 10s
 ```
