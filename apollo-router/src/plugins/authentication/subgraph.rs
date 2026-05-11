@@ -497,11 +497,10 @@ impl SubgraphAuth {
     ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
-                .map_request(move |req: SubgraphRequest| {
-                    let signing_params = signing_params.clone();
-                    req.context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(signing_params));
+                .map_request(move |mut req: SubgraphRequest| {
+                    req.subgraph_request
+                        .extensions_mut()
+                        .insert(signing_params.clone());
                     req
                 })
                 .service(service)
@@ -734,6 +733,122 @@ mod test {
         Ok(())
     }
 
+    // SigV4 params stored in per-request extensions must not leak to other subgraphs
+    // that share the same operation context.
+    #[tokio::test]
+    async fn test_signing_params_do_not_leak_to_unconfigured_subgraph() -> Result<(), BoxError> {
+        let signing_params = Arc::new(SigningParams {
+            all: None,
+            subgraphs: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    "products".to_string(),
+                    Arc::new(
+                        make_signing_params(
+                            &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
+                                AWSSigV4HardcodedConfig {
+                                    access_key_id: "id".to_string(),
+                                    secret_access_key: "secret".to_string(),
+                                    region: "us-east-1".to_string(),
+                                    service_name: "execute-api".to_string(),
+                                    assume_role: None,
+                                },
+                            )),
+                            "products",
+                        )
+                        .await
+                        .unwrap(),
+                    ),
+                );
+                map
+            },
+        });
+
+        // The "reviews" subgraph is NOT configured for SigV4 — its request extensions
+        // must not contain signing params even if "products" was called in the same op.
+        let shared_context = Context::new();
+
+        // Simulate "products" being called first: insert params into a products request.
+        let products_request = SubgraphRequest::builder()
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .header(HOST, "host")
+                    .body(Request::builder().query("query").build())
+                    .expect("valid request"),
+            ))
+            .subgraph_request(
+                http::Request::builder()
+                    .header(HOST, "rhost")
+                    .uri("https://products-endpoint.com")
+                    .body(Request::builder().query("query").build())
+                    .expect("valid request"),
+            )
+            .operation_kind(OperationKind::Query)
+            .context(shared_context.clone())
+            .subgraph_name("products".to_string())
+            .build();
+
+        let mut mock_products = MockSubgraphService::new();
+        mock_products
+            .expect_call()
+            .times(1)
+            .returning(example_response);
+
+        let mut products_service = SubgraphAuth {
+            signing_params: signing_params.clone(),
+        }
+        .subgraph_service("products", mock_products.boxed());
+
+        products_service
+            .ready()
+            .await?
+            .call(products_request)
+            .await?;
+
+        // Now create a "reviews" request sharing the same context.
+        let reviews_request = SubgraphRequest::builder()
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .header(HOST, "host")
+                    .body(Request::builder().query("query").build())
+                    .expect("valid request"),
+            ))
+            .subgraph_request(
+                http::Request::builder()
+                    .header(HOST, "rhost")
+                    .uri("https://reviews-endpoint.com")
+                    .body(Request::builder().query("query").build())
+                    .expect("valid request"),
+            )
+            .operation_kind(OperationKind::Query)
+            .context(shared_context.clone())
+            .subgraph_name("reviews".to_string())
+            .build();
+
+        let mut mock_reviews = MockSubgraphService::new();
+        mock_reviews
+            .expect_call()
+            .times(1)
+            .withf(|request| {
+                // "reviews" must NOT have signing params in its request extensions.
+                request
+                    .subgraph_request
+                    .extensions()
+                    .get::<Arc<SigningParamsConfig>>()
+                    .is_none()
+            })
+            .returning(example_response);
+
+        let mut reviews_service = SubgraphAuth {
+            signing_params: signing_params.clone(),
+        }
+        .subgraph_service("reviews", mock_reviews.boxed());
+
+        reviews_service.ready().await?.call(reviews_request).await?;
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_credentials_provider_keeps_credentials_in_cache() -> Result<(), BoxError> {
         #[derive(Debug, Default, Clone)]
@@ -876,9 +991,10 @@ mod test {
         service_name: String,
     ) -> http::Request<RouterBody> {
         let signing_params = request
-            .context
+            .subgraph_request
             .extensions()
-            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+            .get::<Arc<SigningParamsConfig>>()
+            .cloned()
             .unwrap();
 
         let http_request = request
