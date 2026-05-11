@@ -308,8 +308,10 @@ impl Merger {
     /// `needs_join_field` checks `object_fields` / `interface_fields`. We map
     /// argument positions to their parent field positions to match the JS behavior:
     ///
-    ///     // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
-    ///     const field = application.parent.parent; // argument → field
+    /// ```text
+    /// // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
+    /// const field = application.parent.parent; // argument → field
+    /// ```
     fn get_fields_with_from_context_directive(
         subgraphs: &[Subgraph<Validated>],
     ) -> DirectiveReferencers {
