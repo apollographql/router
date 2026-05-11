@@ -335,16 +335,9 @@ impl Merger {
             has_seen_source = true;
         }
 
-        let apply_inconsistent_empty_object_default = self
-            .inconsistent_defaults_are_all_coercible_empty_objects(
-                sources,
-                dest_default.as_ref(),
-                target_type,
-            );
-
         // Note that we set the default if is_incompatible mostly to help the building of the error message. But
         // as we'll error out, it doesn't really matter.
-        if !is_inconsistent || is_incompatible || apply_inconsistent_empty_object_default {
+        if !is_inconsistent || is_incompatible {
             trace!("Setting merged default value for \"{dest}\" to {dest_default:?}");
             dest.set_default_value(&mut self.merged, dest_default.clone())?;
         }
@@ -383,120 +376,40 @@ impl Merger {
             } else {
                 "Argument"
             };
-            if apply_inconsistent_empty_object_default {
-                self.error_reporter.report_mismatch_hint(
-                    HintCode::InconsistentDefaultValuePresence,
-                    format!("{elt_kind} \"{dest}\" has a default value in only some subgraphs: "),
-                    dest_default,
-                    sources,
-                    &self.subgraphs,
-                    |v| Some(format!("default value {v}")),
-                    |pos, idx| {
-                        Some(
-                            pos.get_default_value(self.subgraphs[idx].schema())
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "no default value".to_string()),
-                        )
-                    },
-                    |_, subgraphs| {
-                        let subgraphs = subgraphs.unwrap_or_default();
-                        format!("will still use that default in the supergraph (there is no default in {subgraphs}) but ")
-                    },
-                    |elt, subgraphs| format!("\"{dest}\" declares {elt} in {subgraphs}"),
-                    false,
-                    false,
-                );
-            } else {
-                self.error_reporter.report_mismatch_hint(
-                    HintCode::InconsistentDefaultValuePresence,
-                    format!("{elt_kind} \"{dest}\" has a default value in only some subgraphs: "),
-                    dest_default,
-                    sources,
-                    &self.subgraphs,
-                    // When inconsistent, we set no default. So, the supergraph element should always
-                    // be "no default value". The matching strings drive the ordering in the message.
-                    |_| Some("no default value".to_string()),
-                    |pos, idx| {
-                        Some(
-                            pos.get_default_value(self.subgraphs[idx].schema())
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "no default value".to_string()),
-                        )
-                    },
-                    |_, subgraphs| {
-                        let subgraphs = subgraphs.unwrap_or_default();
-                        format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
-                    },
-                    |elt, subgraphs| format!("\"{dest}\" has default value {elt} in {subgraphs}"),
-                    false,
-                    false,
-                );
-            }
+            self.error_reporter.report_mismatch_hint(
+                HintCode::InconsistentDefaultValuePresence,
+                format!("{elt_kind} \"{dest}\" has a default value in only some subgraphs: "),
+                dest_default,
+                sources,
+                &self.subgraphs,
+                |_| Some("no default value".to_string()),
+                |pos, idx| {
+                    Some(
+                        pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "no default value".to_string()),
+                    )
+                },
+                |_, subgraphs| {
+                    let subgraphs = subgraphs.unwrap_or_default();
+                    format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
+                },
+                |elt, subgraphs| format!("\"{dest}\" has default value {elt} in {subgraphs}"),
+                false,
+                false,
+            );
         }
 
         Ok(())
     }
 
-    /// When default *presence* differs across subgraphs, but every subgraph that declares a default
-    /// uses the same empty input object `{}` and that value is valid for the merged type, the
-    /// supergraph still records `= {}` so omitting the argument matches JS composition behavior.
-    fn inconsistent_defaults_are_all_coercible_empty_objects<Tpos: HasDefaultValue + HasType>(
-        &self,
-        sources: &Sources<Tpos>,
-        dest_default: Option<&Node<Value>>,
-        target_type: &Type,
-    ) -> bool {
-        let Some(default_node) = dest_default else {
-            return false;
-        };
-        let Value::Object(fields) = default_node.as_ref() else {
-            return false;
-        };
-        if !fields.is_empty() {
-            return false;
-        }
-        let types = &self.merged.schema().types;
-        if !crate::compat::schema_default_value_coerces(types, default_node, target_type) {
-            return false;
-        }
-        let mut any_default = false;
-        for (idx, source_pos) in sources.iter() {
-            let Some(pos) = source_pos else {
-                continue;
-            };
-            let subgraph = &self.subgraphs[*idx];
-            let Some(d) = pos.get_default_value(subgraph.schema()) else {
-                continue;
-            };
-            any_default = true;
-            let inner = d.as_ref();
-            let Value::Object(f) = inner else {
-                return false;
-            };
-            if !f.is_empty() {
-                return false;
-            }
-            if !Self::are_default_values_equivalent(inner, default_node.as_ref(), target_type) {
-                return false;
-            }
-        }
-        any_default
-    }
-
-    /// Check if two default values are equivalent, considering type coercibility.
-    /// For example, Int value 200 is equivalent to Float value 200.0 when the target type is Float.
     fn are_default_values_equivalent(value1: &Value, value2: &Value, target_type: &Type) -> bool {
-        // TODO: This coercibility check should really come from `apollo_compiler`
-        // First check for direct equality
         if value1 == value2 {
             return true;
         }
 
-        // Check for Int to Float coercibility
-        // According to GraphQL spec, Int values can be coerced to Float
         if target_type.inner_named_type() == "Float" {
             match (value1, value2) {
-                // Int literal coercible to Float literal
                 (Value::Int(int_val), Value::Float(float_val))
                 | (Value::Float(float_val), Value::Int(int_val)) => {
                     let Ok(int_val_parsed) = int_val.try_to_f64() else {

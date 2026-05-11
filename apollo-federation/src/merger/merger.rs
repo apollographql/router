@@ -474,6 +474,18 @@ impl Merger {
         self.add_types_shallow()?;
         self.add_directives_shallow()?;
 
+        // Type kind mismatches (e.g. Object vs Interface) leave the merged schema in an
+        // inconsistent state that causes later stages to fail with internal errors. Bail
+        // early so the user sees the real TYPE_KIND_MISMATCH errors instead.
+        if self.error_reporter.has_errors() {
+            let (errors, hints) = self.error_reporter.into_errors_and_hints();
+            return Ok(MergeResult {
+                supergraph: None,
+                errors,
+                hints,
+            });
+        }
+
         let object_types = self.get_merged_object_type_names();
         let interface_types = self.get_merged_interface_type_names();
         let union_types = self.get_merged_union_type_names();
@@ -702,11 +714,11 @@ impl Merger {
     }
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
-        let mut mismatched_types = IndexSet::new();
-        // A mapping of Ty -> [SubgraphA, SubgraphB] where Ty is a interface object in those
-        // subgraphs
-        let mut subgraphs_with_interface_obj =
-            MultiIndexMap::<TypeDefinitionPosition, String>::new();
+        let mut mismatched_types: IndexSet<Name> = IndexSet::new();
+        // A mapping of type name -> [SubgraphA, SubgraphB] where the type uses @interfaceObject
+        // in those subgraphs. Keyed by Name (not TypeDefinitionPosition) to match JS behavior
+        // where lookups use plain type name strings regardless of kind.
+        let mut subgraphs_with_interface_obj = MultiIndexMap::<Name, String>::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -717,19 +729,17 @@ impl Merger {
                 let mut expects_interface = false;
                 if subgraph.is_interface_object_type(&pos) {
                     expects_interface = true;
-                    let itf_pos = InterfaceTypeDefinitionPosition {
-                        type_name: pos.type_name().clone(),
-                    };
-                    subgraphs_with_interface_obj.insert(itf_pos.into(), subgraph.name.clone());
+                    subgraphs_with_interface_obj
+                        .insert(pos.type_name().clone(), subgraph.name.clone());
                 }
                 if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
                     if expects_interface
                         && !matches!(previous, TypeDefinitionPosition::Interface(_))
                     {
-                        mismatched_types.insert(previous.clone());
+                        mismatched_types.insert(pos.type_name().clone());
                     }
                     if !expects_interface && previous != pos {
-                        mismatched_types.insert(previous.clone());
+                        mismatched_types.insert(pos.type_name().clone());
                     }
                 } else if expects_interface {
                     let itf_pos = InterfaceTypeDefinitionPosition {
@@ -744,26 +754,28 @@ impl Merger {
             }
         }
 
-        for mismatched_type in mismatched_types.iter() {
+        for type_name in mismatched_types.iter() {
             let subgraphs = subgraphs_with_interface_obj
-                .get(mismatched_type)
+                .get(type_name)
                 .cloned()
                 .unwrap_or_default();
-            self.report_mismatched_type_definitions(mismatched_type, &subgraphs);
+            if let Ok(mismatched_type) = self.merged.get_type(type_name.clone()) {
+                self.report_mismatched_type_definitions(&mismatched_type, &subgraphs);
+            }
         }
 
         // Most invalid use of @interfaceObject are reported as a mismatch above, but one exception is the
         // case where a type is used only with @interfaceObject, but there is no corresponding interface
         // definition in any subgraph.
-        for type_ in subgraphs_with_interface_obj.keys() {
-            if mismatched_types.contains(type_) {
+        for type_name in subgraphs_with_interface_obj.keys() {
+            if mismatched_types.contains(type_name) {
                 continue;
             }
 
             let mut found_interface = false;
             let mut subgraphs_with_type = IndexSet::new();
             for subgraph in &self.subgraphs {
-                let type_in_subgraph = subgraph.schema().get_type(type_.type_name().clone());
+                let type_in_subgraph = subgraph.schema().get_type(type_name.clone());
                 if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
                     found_interface = true;
                     break;
@@ -780,7 +792,7 @@ impl Merger {
             if !found_interface {
                 self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {message: format!(
                     "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
-                    type_.type_name(),
+                    type_name,
                     human_readable_subgraph_names(subgraphs_with_type.iter())
                 ) });
             }

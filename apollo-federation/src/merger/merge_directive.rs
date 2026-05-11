@@ -546,6 +546,7 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
+                    dest.remove(&mut self.merged)?;
                     self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
@@ -560,6 +561,7 @@ impl Merger {
                         false,
                         false,
                     );
+                    return Ok(());
                 }
             }
         }
