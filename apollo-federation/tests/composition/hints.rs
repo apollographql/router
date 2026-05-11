@@ -289,6 +289,54 @@ mod value_type_fields {
     }
 
     #[test]
+    fn hints_on_value_type_field_emits_single_hint_when_multiple_subgraphs_missing_field() {
+        // Regression test: before the fix, hint_on_inconsistent_value_type_field was missing
+        // a break after emitting the hint. Since report_mismatch_hint already examines all
+        // sources internally, the loop would emit duplicate identical hints — one per subgraph
+        // missing the field.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @shareable {
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
+            r#"Field "T.b" of non-entity object type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraphs "Subgraph2" and "Subgraph3"."#,
+        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
+    }
+
+    #[test]
     fn use_of_federation_key_does_not_raise_hint() {
         let subgraph1 = Subgraph::parse(
             "subgraph1",

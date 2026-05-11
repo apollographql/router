@@ -1640,7 +1640,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
                         false,
                         false,
-                    )
+                    );
+                break;
             }
         }
         Ok(())
