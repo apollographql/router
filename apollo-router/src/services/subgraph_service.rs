@@ -2616,7 +2616,7 @@ mod tests {
             assert_counter_not_exists!(
                 "apollo.router.operations.subscriptions.reconnect",
                 u64,
-                "subgraph.service.name" = "test"
+                "subgraph.name" = "test"
             );
 
             spawned_task.abort();
@@ -2971,6 +2971,102 @@ mod tests {
             assert_counter!(
                 "apollo.router.operations.subscriptions.reconnect",
                 1,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Verifies the default behavior: when `max_reconnect_attempts` is 0 (equivalent to the
+    /// unset default via `unwrap_or(0)` in subgraph.rs), an abnormal subgraph disconnect must
+    /// terminate the subscription immediately — no reconnect attempt, no reconnect counter.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_drop_does_not_reconnect_when_attempts_zero() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            // Sends one event and then an abnormal close on every connection. With
+            // max_reconnect_attempts=0 we expect only the first event to reach the client.
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
+
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                0,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Event from the initial (and only) connection.
+            let first = gql_stream.next().await.unwrap();
+            assert_eq!(
+                first,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // After the abnormal close the stream must terminate without producing another data
+            // item. Windows may surface one or more error items from the close frame before the
+            // stream ends; drain those and assert no data follows.
+            loop {
+                match gql_stream.next().await {
+                    Some(item) if !item.errors.is_empty() => continue,
+                    Some(_) => {
+                        panic!("unexpected data after subgraph drop with max_reconnect_attempts=0")
+                    }
+                    None => break,
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // The drop is the terminal end of the subscription on the subgraph side.
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+            // No reconnect was attempted.
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.reconnect",
+                u64,
                 "subgraph.name" = "test"
             );
 

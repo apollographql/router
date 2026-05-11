@@ -1197,6 +1197,25 @@ mod tests {
 
         assert!(config_no_reconnect.max_reconnect_attempts.is_none());
         assert!(config_no_reconnect.reconnect_delay.is_none());
+
+        // Explicit `0` is the documented default and must deserialize as `Some(0)` so that an
+        // operator can pin "no reconnect" in config — subgraph.rs treats `Some(0)` and `None`
+        // identically via `unwrap_or(0)`.
+        let config_zero_reconnect: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "passthrough": {
+                    "all": {
+                        "path": "/subscriptions"
+                    }
+                }
+            },
+            "max_reconnect_attempts": 0
+        }))
+        .unwrap();
+
+        assert_eq!(config_zero_reconnect.max_reconnect_attempts, Some(0));
+        assert!(config_zero_reconnect.reconnect_delay.is_none());
     }
 }
 
