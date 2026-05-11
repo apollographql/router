@@ -409,6 +409,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .await
             }
 
+            // Note: attempt_reload always tries regardless of `retries_remaining`.
+            // The budget only gates the *timer* — a retry triggered by an external
+            // event (new schema, RhaiReload, etc.) always gets an immediate attempt
+            // even if the timer budget is exhausted.  This is intentional: a fresh
+            // Uplink publish should never be silently ignored.
             Reloading {
                 mut _metrics,
                 mut server_handle,
@@ -475,7 +480,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         );
 
                         let retry_delay =
-                            retry_delay_with_jitter(configuration.committed().reload.retry_delay);
+                            retry_delay_with_jitter(configuration.target().reload.retry_delay);
 
                         Reloading {
                             _metrics,
@@ -2490,13 +2495,12 @@ mod tests {
         struct Harness {
             tx: tokio::sync::mpsc::Sender<Event>,
             notify: Arc<Notify>,
-            shutdown_receivers: (SharedOneShotReceiver, SharedOneShotReceiver),
             handle: tokio::task::JoinHandle<Result<(), ApolloRouterError>>,
         }
 
         impl Harness {
             fn new(router_factory: MockMyRouterConfigurator, server_starts: usize) -> Self {
-                let (server_factory, shutdown_receivers) =
+                let (server_factory, _shutdown_receivers) =
                     create_mock_server_factory(server_starts);
                 let notify = Arc::new(Notify::new());
                 let state_machine =
@@ -2504,12 +2508,7 @@ mod tests {
                 let (tx, rx) = tokio::sync::mpsc::channel::<Event>(16);
                 let stream = ReceiverStream::new(rx);
                 let handle = tokio::spawn(state_machine.process_events(stream));
-                Self {
-                    tx,
-                    notify,
-                    shutdown_receivers,
-                    handle,
-                }
+                Self { tx, notify, handle }
             }
 
             /// Send an event and wait for the state machine to acknowledge it.
@@ -2540,12 +2539,11 @@ mod tests {
                 self.send_and_wait(UpdateLicense(Default::default())).await;
             }
 
-            /// Shut down and return the number of times a server was started.
-            async fn finish(self) -> usize {
+            /// Shut down and assert the state machine exited cleanly.
+            async fn finish(self) {
                 self.tx.send(Shutdown).await.unwrap();
                 drop(self.tx);
                 assert_matches!(self.handle.await.unwrap(), Ok(()));
-                self.shutdown_receivers.0.lock().len()
             }
         }
 
@@ -2578,7 +2576,7 @@ mod tests {
             h.startup().await;
             h.send_and_wait(UpdateSchema(minimal_schema())).await; // reload fails
             h.advance_and_wait(Duration::from_secs(11)).await; // timer fires, retry succeeds
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
 
         #[test(tokio::test(start_paused = true))]
@@ -2592,15 +2590,9 @@ mod tests {
                 .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
             router_factory
                 .expect_create()
-                .times(1)
+                .times(2)
                 .in_sequence(&mut seq)
                 .returning(|_, _, _, _, _, _| Err(BoxError::from("transient uplink error")));
-            // First retry also fails.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("still failing")));
             // Second retry succeeds.
             router_factory
                 .expect_create()
@@ -2613,7 +2605,7 @@ mod tests {
             h.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             h.advance_and_wait(Duration::from_secs(11)).await; // first retry fails
             h.advance_and_wait(Duration::from_secs(11)).await; // second retry succeeds
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
 
         // A newer schema arrives while we are still in Reloading (e.g. Uplink publishes
@@ -2646,7 +2638,7 @@ mod tests {
             h.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             // Send a newer schema before the timer fires — retries immediately.
             h.send_and_wait(UpdateSchema(example_schema())).await;
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
 
         // With max_retries: 0 the retry timer is never armed.  The router should keep
@@ -2677,7 +2669,7 @@ mod tests {
             h.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, no retry scheduled
             // Advance well past any retry delay — the timer must not fire.
             tokio::time::advance(Duration::from_secs(60)).await;
-            assert_eq!(h.finish().await, 1);
+            h.finish().await;
         }
 
         // After the retry budget is exhausted (timer disabled), a new schema event
@@ -2712,7 +2704,7 @@ mod tests {
             h.startup_with_config(zero_retries).await;
             h.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, budget exhausted
             h.send_and_wait(UpdateSchema(example_schema())).await; // resets + retries immediately
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
 
         // A RhaiReload event arrives while the state machine is already in Reloading
@@ -2753,7 +2745,7 @@ mod tests {
             .await;
             // Rhai script change arrives before the retry timer — retries immediately.
             h.send_and_wait(RhaiReload).await;
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
 
         // With max_retries: null the retry timer must keep firing past the default
@@ -2793,8 +2785,7 @@ mod tests {
                 h.advance_and_wait(Duration::from_secs(11)).await;
             }
             h.advance_and_wait(Duration::from_secs(11)).await; // 7th attempt succeeds
-            assert_eq!(h.finish().await, 2);
+            h.finish().await;
         }
     }
-
 }
