@@ -8,6 +8,7 @@ pub(crate) use common::IntegrationTest;
 pub(crate) mod redis_monitor;
 
 mod allowed_features;
+mod circuit_breaking;
 mod connectors;
 mod coprocessor;
 mod demand_control;
