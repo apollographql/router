@@ -643,6 +643,60 @@ mod enum_hints {
             "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraph \"Subgraph2\".",
         );
     }
+
+    #[test]
+    fn hints_on_output_enum_value_emits_single_hint_when_multiple_subgraphs_missing_value() {
+        // Regression test: before the fix, hint_on_inconsistent_output_enum_value was missing
+        // an early return after emitting the hint. Since report_mismatch_hint already examines
+        // all sources internally, the loop would emit duplicate identical hints — one per
+        // subgraph missing the value.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: T
+                }
+
+                enum T {
+                    V1
+                    V2
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        let hints = result.hints();
+        let matching: Vec<_> = hints
+            .iter()
+            .filter(|h| h.code() == "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM")
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "Expected exactly 1 INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM hint but got {}: {:?}",
+            matching.len(),
+            matching.iter().map(|h| h.message()).collect::<Vec<_>>()
+        );
+    }
 }
 
 mod executable_directives {

@@ -281,6 +281,7 @@ impl Merger {
                     false,
                     false,
                 );
+                return;
             }
         }
     }
