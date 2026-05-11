@@ -1012,10 +1012,6 @@ fn metrics_contain_and_observed(
         })
         .collect();
 
-    if observed.is_empty() {
-        return (false, observed);
-    }
-
     let metric_found = observed.iter().any(|m| {
         // Only match values and attributes that are explicitly set
         expected_metric.value.is_none_or(|v| Some(v) == m.value)
