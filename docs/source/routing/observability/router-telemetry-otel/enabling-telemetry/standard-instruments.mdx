@@ -121,6 +121,8 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
+- `apollo.router.cache.redis.reconnection` - Number of Redis client reconnections
+- `apollo.router.cache.redis.unresponsive` - Number of times a Redis server became unresponsive
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
 - `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
@@ -129,6 +131,10 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 All Redis metrics, except for `apollo.router.cache.redis.clients`, include the following attribute:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
+
+The `apollo.router.cache.redis.reconnection` and `apollo.router.cache.redis.unresponsive` metrics also include:
+
+- `server`: the Redis server that raised the event
 
 The `apollo.router.cache.redis.errors` metric also includes an `error_type` attribute with possible values:
 - `config` - Configuration errors (invalid Redis settings)
