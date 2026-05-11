@@ -464,7 +464,7 @@ fn circuit_breaker_open_error() -> graphql::Error {
         .build()
 }
 
-register_private_plugin!("apollo", "circuit_breaking", CircuitBreaking);
+register_private_plugin!("apollo", "experimental_circuit_breaking", CircuitBreaking);
 
 #[cfg(test)]
 mod tests {
@@ -562,7 +562,7 @@ mod tests {
     async fn disabled_plugin_passes_through() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: false
 "#,
@@ -588,7 +588,7 @@ circuit_breaking:
     async fn trips_after_threshold_and_rejects() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 2
@@ -634,7 +634,7 @@ circuit_breaking:
     async fn measure_mode_does_not_reject() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 1
@@ -671,7 +671,7 @@ circuit_breaking:
     async fn successful_responses_do_not_trip() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 2
@@ -705,7 +705,7 @@ circuit_breaking:
     async fn per_subgraph_config_applies_independently() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 100
@@ -763,7 +763,7 @@ circuit_breaking:
     async fn recovery_allows_probe_then_closes() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 1
@@ -931,7 +931,7 @@ circuit_breaking:
     async fn connector_disabled_passes_through() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   connector:
     all:
       enabled: false
@@ -948,7 +948,7 @@ circuit_breaking:
     async fn connector_trips_after_threshold() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   connector:
     all:
       enabled: true
@@ -986,7 +986,7 @@ circuit_breaking:
     async fn connector_measure_mode_does_not_reject() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   connector:
     all:
       enabled: true
@@ -1018,7 +1018,7 @@ circuit_breaking:
     async fn connector_and_subgraph_circuits_are_independent() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   all:
     enabled: true
     error_threshold: 1
@@ -1060,7 +1060,7 @@ circuit_breaking:
     async fn connector_per_source_config_overrides() {
         let harness = build_harness(
             r#"
-circuit_breaking:
+experimental_circuit_breaking:
   connector:
     all:
       enabled: true

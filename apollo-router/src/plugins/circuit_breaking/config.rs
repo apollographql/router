@@ -73,11 +73,11 @@ impl Default for CircuitBreakerConfig {
 impl CircuitBreakerConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         if self.error_threshold == 0 {
-            return Err("circuit_breaking: error_threshold must be greater than 0".into());
+            return Err("experimental_circuit_breaking: error_threshold must be greater than 0".into());
         }
         if self.half_open_max_requests == 0 {
             return Err(
-                "circuit_breaking: half_open_max_requests must be greater than 0".into(),
+                "experimental_circuit_breaking: half_open_max_requests must be greater than 0".into(),
             );
         }
         Ok(())

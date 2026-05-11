@@ -56,7 +56,7 @@ async fn test_circuit_trips_after_threshold() -> Result<(), BoxError> {
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 2
@@ -103,7 +103,7 @@ async fn test_measure_mode_does_not_reject() -> Result<(), BoxError> {
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 1
@@ -144,7 +144,7 @@ async fn test_disabled_circuit_breaking_passes_through() -> Result<(), BoxError>
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: false
             "#,
@@ -177,7 +177,7 @@ async fn test_successful_responses_do_not_trip_circuit() -> Result<(), BoxError>
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 2
@@ -215,7 +215,7 @@ async fn test_circuit_breaker_error_includes_extension_fields() -> Result<(), Bo
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 1
@@ -263,7 +263,7 @@ async fn test_http_500_from_subgraph_trips_circuit() -> Result<(), BoxError> {
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 2
@@ -304,7 +304,7 @@ async fn test_config_reload_enables_circuit_breaking() -> Result<(), BoxError> {
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: false
             "#,
@@ -333,7 +333,7 @@ async fn test_config_reload_enables_circuit_breaking() -> Result<(), BoxError> {
             r#"
             include_subgraph_errors:
               all: true
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 1
@@ -366,7 +366,7 @@ async fn test_router_starts_with_full_circuit_breaking_config() -> Result<(), Bo
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            circuit_breaking:
+            experimental_circuit_breaking:
               all:
                 enabled: true
                 error_threshold: 5
