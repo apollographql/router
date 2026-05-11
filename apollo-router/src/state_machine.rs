@@ -2480,6 +2480,28 @@ mod tests {
             router
         }
 
+        /// Build a factory from a sequence of outcomes: `Ok(())` → one successful
+        /// `create()` call, `Err(())` → one failing call.  Ordering is enforced by a
+        /// mockall `Sequence` (the Arc counter inside it outlives the helper frame).
+        fn factory(outcomes: &[Result<(), ()>]) -> MockMyRouterConfigurator {
+            let mut seq = Sequence::new();
+            let mut factory = MockMyRouterConfigurator::new();
+            for &outcome in outcomes {
+                factory
+                    .expect_create()
+                    .times(1)
+                    .in_sequence(&mut seq)
+                    .returning(move |_, _, _, _, _, _| {
+                        if outcome.is_ok() {
+                            Ok(mock_router_ok())
+                        } else {
+                            Err(BoxError::from("transient error"))
+                        }
+                    });
+            }
+            factory
+        }
+
         fn minimal_schema() -> SchemaState {
             SchemaState {
                 sdl: include_str!("testdata/minimal_supergraph.graphql").to_owned(),
@@ -2528,7 +2550,7 @@ mod tests {
             /// Send the three startup events and wait for each, bringing the
             /// state machine to `Running` with default configuration.
             async fn startup(&self) {
-                self.startup_with_config(Arc::new(Configuration::builder().build().unwrap()))
+                self.startup_with_config(Arc::new(Configuration::default()))
                     .await;
             }
 
@@ -2540,10 +2562,12 @@ mod tests {
             }
 
             /// Shut down and assert the state machine exited cleanly.
+            /// Dropping `self` also drops the mock router factory, which causes
+            /// mockall to assert that all expected `create()` calls were made.
             async fn finish(self) {
                 self.tx.send(Shutdown).await.unwrap();
                 drop(self.tx);
-                assert_matches!(self.handle.await.unwrap(), Ok(()));
+                self.handle.await.unwrap().unwrap();
             }
         }
 
@@ -2554,25 +2578,8 @@ mod tests {
         // to fail.
         #[test(tokio::test(start_paused = true))]
         async fn with_retry() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("transient uplink error")));
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
-            let harness = Harness::new(router_factory, 2);
+            // startup ok, reload fails, retry succeeds
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
             harness.startup().await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // reload fails
             harness.advance_and_wait(Duration::from_secs(11)).await; // timer fires, retry succeeds
@@ -2581,26 +2588,8 @@ mod tests {
 
         #[test(tokio::test(start_paused = true))]
         async fn repeated_retry() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            router_factory
-                .expect_create()
-                .times(2)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("transient uplink error")));
-            // Second retry succeeds.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
-            let harness = Harness::new(router_factory, 2);
+            // startup ok, reload fails, first retry fails, second retry succeeds
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Err(()), Ok(())]), 2);
             harness.startup().await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             harness.advance_and_wait(Duration::from_secs(11)).await; // first retry fails
@@ -2613,27 +2602,8 @@ mod tests {
         // re-attempt with the new schema via the event arm — no clock advance needed.
         #[test(tokio::test(start_paused = true))]
         async fn new_schema_while_reloading() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            // First schema reload fails, leaving the router in Reloading.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
-            // A newer schema arrives → immediate retry via event arm → succeeds.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
-            let harness = Harness::new(router_factory, 2);
+            // startup ok, reload fails, new-schema event triggers immediate retry → ok
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
             harness.startup().await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             // Send a newer schema before the timer fires — retries immediately.
@@ -2646,25 +2616,12 @@ mod tests {
         // still work cleanly.
         #[test(tokio::test(start_paused = true))]
         async fn retries_exhausted() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            // Reload fails.  With max_retries: 0 no timer retry is scheduled.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
-
+            // startup ok, reload fails — no timer retry scheduled with max_retries: 0
             let zero_retries = Arc::new(
                 Configuration::from_str("reload:\n  max_retries: 0")
                     .expect("config with max_retries: 0 must be valid"),
             );
-            let harness = Harness::new(router_factory, 1);
+            let harness = Harness::new(factory(&[Ok(()), Err(())]), 1);
             harness.startup_with_config(zero_retries).await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, no retry scheduled
             // Advance well past any retry delay — the timer must not fire.
@@ -2676,31 +2633,12 @@ mod tests {
         // resets the budget and triggers an immediate retry via the event arm.
         #[test(tokio::test(start_paused = true))]
         async fn budget_reset_after_exhaustion() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            // First reload fails → budget exhausted (max_retries: 0), timer disabled.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
-            // New schema arrives → budget resets → immediate retry → succeeds.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
+            // startup ok, reload fails (budget exhausted), new schema resets budget → ok
             let zero_retries = Arc::new(
                 Configuration::from_str("reload:\n  max_retries: 0")
                     .expect("config with max_retries: 0 must be valid"),
             );
-            let harness = Harness::new(router_factory, 2);
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
             harness.startup_with_config(zero_retries).await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // fails, budget exhausted
             harness.send_and_wait(UpdateSchema(example_schema())).await; // resets + retries immediately
@@ -2713,39 +2651,39 @@ mod tests {
         // immediately via the event arm without waiting for the timer.
         #[test(tokio::test(start_paused = true))]
         async fn rhai_reload_while_reloading() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            // Configuration reload fails → Reloading state.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| {
-                    Err(BoxError::from("transient config reload failure"))
-                });
-            // RhaiReload arrives while in Reloading → immediate retry → succeeds.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
-            let harness = Harness::new(router_factory, 2);
+            // startup ok, config reload fails, RhaiReload triggers immediate retry → ok
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
             harness.startup().await;
             // Trigger a failing configuration reload (distinct from the startup config
             // so accumulate_inputs sees a change).
             harness
-                .send_and_wait(UpdateConfiguration(Arc::new(
-                    Configuration::builder().build().unwrap(),
-                )))
+                .send_and_wait(UpdateConfiguration(Arc::new(Configuration::default())))
                 .await;
             // Rhai script change arrives before the retry timer — retries immediately.
             harness.send_and_wait(RhaiReload).await;
+            harness.finish().await;
+        }
+
+        // When a failing reload carries a new retry_delay in its pending config,
+        // the retry timer must use that new delay (from target()), not the old one
+        // (from committed()).  If the bug were reintroduced (using committed()), the
+        // timer would fire at 10 s, the notification would be consumed during the
+        // first advance, and advance_and_wait would hang because there is nothing
+        // left to wake it.
+        #[test(tokio::test(start_paused = true))]
+        async fn retry_uses_pending_config_delay() {
+            let long_delay = Arc::new(
+                Configuration::from_str("reload:\n  retry_delay: 30s")
+                    .expect("config with retry_delay: 30s must be valid"),
+            );
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
+            harness.startup().await;
+            // The failing reload carries a 30 s retry_delay as the pending config.
+            harness.send_and_wait(UpdateConfiguration(long_delay)).await;
+            // Advance past the old default (10 s) but not the new delay (30 s).
+            tokio::time::advance(Duration::from_secs(11)).await;
+            // Advance past the new delay — the timer fires and the retry succeeds.
+            harness.advance_and_wait(Duration::from_secs(21)).await;
             harness.finish().await;
         }
 
@@ -2754,31 +2692,16 @@ mod tests {
         // and then succeeds, proving the budget is truly unlimited.
         #[test(tokio::test(start_paused = true))]
         async fn unlimited_retries() {
-            let mut seq = Sequence::new();
-            let mut router_factory = MockMyRouterConfigurator::new();
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-            // Initial reload + 6 timer-driven retries all fail.
-            router_factory
-                .expect_create()
-                .times(6)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Err(BoxError::from("persistent failure")));
-            // 7th attempt (would have been blocked by max_retries: 5) succeeds.
-            router_factory
-                .expect_create()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
-
+            // startup ok, then 6 failures (one more than the default max_retries: 5),
+            // then success — proves the None budget never stops the timer.
+            let mut outcomes = vec![Ok(())];
+            outcomes.extend(std::iter::repeat(Err(())).take(6));
+            outcomes.push(Ok(()));
             let unlimited = Arc::new(
                 Configuration::from_str("reload:\n  max_retries: null")
                     .expect("config with max_retries: null must be valid"),
             );
-            let harness = Harness::new(router_factory, 2);
+            let harness = Harness::new(factory(&outcomes), 2);
             harness.startup_with_config(unlimited).await;
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // attempt 1 fails
             // Five more timer-driven failures — total 6, one more than the default max.
@@ -2786,6 +2709,20 @@ mod tests {
                 harness.advance_and_wait(Duration::from_secs(11)).await;
             }
             harness.advance_and_wait(Duration::from_secs(11)).await; // 7th attempt succeeds
+            harness.finish().await;
+        }
+
+        // Verify that the router can perform more than two consecutive successful reloads
+        // without getting stuck.  Each UpdateSchema event should transition from the
+        // previous Running state to a fresh Running state via Reloading.
+        #[test(tokio::test)]
+        async fn multiple_successive_reloads() {
+            // startup + three successful reloads = four total factory creates
+            let harness = Harness::new(factory(&[Ok(()), Ok(()), Ok(()), Ok(())]), 4);
+            harness.startup().await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await;
+            harness.send_and_wait(UpdateSchema(example_schema())).await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await;
             harness.finish().await;
         }
     }
