@@ -21,3 +21,8 @@ expression: "& metrics.non_zero()"
           opt.tracing.batch_processor.max_export_timeout: 30s
           opt.tracing.batch_processor.max_queue_size: 2048
           opt.tracing.batch_processor.scheduled_delay: 5s
+- name: apollo.router.config.experimental_local_field_metrics
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}

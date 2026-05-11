@@ -8,7 +8,6 @@ use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
-use std::time::Instant;
 
 use futures::Sink;
 use futures::Stream;
@@ -21,6 +20,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
+use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -1275,7 +1275,25 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    // Uses `start_paused = true` so the TTL machinery is driven by a
+    // controlled clock with no wall-clock dependence. Three ingredients
+    // matter:
+    //
+    // 1. `tokio::time::interval(ttl)` inside the notify task already
+    //    uses tokio's clock, so a paused runtime stops it from firing
+    //    on its own.
+    // 2. `Subscription::updated_at` is a `tokio::time::Instant`, so
+    //    `elapsed()` also tracks the paused clock — without this the
+    //    interval would fire under auto-advance but every subscription
+    //    would still report ~0 ms elapsed and never be killed.
+    // 3. The test relies on auto-advance firing the *second* interval
+    //    tick (the first one fires `kill_dead_topics` while elapsed is
+    //    exactly equal to the TTL — see the timing comment below the
+    //    `set_ttl` call). Tokio's docs recommend `sleep` over
+    //    `advance` for "reliably trigger a timeout" because `advance`
+    //    only yields once and may run user code before the timer
+    //    driver has actually fired the queued timers.
+    #[tokio::test(start_paused = true)]
     async fn it_test_ttl() {
         let mut notify = Notify::builder()
             .ttl(Duration::from_millis(300))
@@ -1318,6 +1336,14 @@ mod tests {
             .await
             .unwrap();
 
+        // Effective TTL after `set_ttl` is 70 ms × 3 = 210 ms — the
+        // notify task multiplies by 3 to tolerate up to 3 missed
+        // heartbeats. Under the paused clock, auto-advance steps to
+        // the next deadline whenever no task is ready, so this
+        // 150 ms sleep advances the clock to t0 + 150 ms (short of
+        // the first kill-dead-topics tick at t0 + 210 ms) and wakes
+        // the test main task. Both topics remain alive so we can
+        // re-subscribe to topic_1 below.
         tokio::time::sleep(Duration::from_millis(150)).await;
         let mut cloned_notify = notify.clone();
         tokio::spawn(async move {
@@ -1328,7 +1354,20 @@ mod tests {
         });
         let new_msg = handle_1_bis.next().await.unwrap();
         assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        // Sleep across the *second* interval tick (auto-advance steps
+        // to t0+210 ms then t0+420 ms). The first tick at t0+210 ms
+        // is a no-op: `elapsed == ttl == 210 ms` and the kill predicate
+        // is `elapsed <= ttl`, so the topics survive that exact-boundary
+        // moment. Under wall-clock execution scheduler jitter pushes
+        // `elapsed` past 210 ms so the first tick does evict — but
+        // the paused clock is exact, so we have to wait for the
+        // *next* tick at t0+420 ms, where `elapsed == 420 ms > ttl`
+        // and `kill_dead_topics` evicts both topics and broadcasts
+        // `connection_closed` to topic_1's subscribers. Sleeping
+        // 300 ms (total 450 ms post-`set_ttl`) puts the main-task
+        // wake-up safely past that second tick so the broadcast is
+        // visible to `now_or_never` below.
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         let res = handle_1_bis.next().now_or_never().unwrap();
         assert_eq!(
