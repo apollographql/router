@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use std::time::Duration;
 
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
@@ -50,7 +49,6 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
-const RELOAD_RETRY_DELAY_SECS: u64 = 10;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -170,6 +168,11 @@ enum State<FA: RouterSuperServiceFactory> {
         schema: PendingChange<Arc<SchemaState>>,
         license: PendingChange<Arc<LicenseState>>,
         retry_after: Instant,
+        /// Retries remaining for the current pending (configuration, schema, license).
+        /// `None` means unlimited; `Some(0)` means exhausted.
+        /// Reset to the configured `max_retries` whenever a new publish is received
+        /// so that each publish gets a fresh budget of attempts.
+        retries_remaining: Option<u32>,
     },
     Stopped,
     Errored(ApolloRouterError),
@@ -218,6 +221,20 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Running { license, .. } => license.licensed(),
             Reloading { license, .. } => license.committed().licensed(),
             _ => false,
+        }
+    }
+
+    /// Returns the scheduled retry instant if the state machine is in `Reloading`
+    /// with at least one attempt remaining.  Returns `None` when not reloading or
+    /// when the retry budget is exhausted (`retries_remaining == Some(0)`).
+    fn retry_after(&self) -> Option<Instant> {
+        match self {
+            Reloading {
+                retry_after,
+                retries_remaining,
+                ..
+            } if *retries_remaining != Some(0) => Some(*retry_after),
+            _ => None,
         }
     }
 
@@ -290,6 +307,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         server_handle,
                         router_service_factory,
                         all_connections_stopped_signals,
+                        // Initialize the retry budget from the config we are about to apply.
+                        retries_remaining: configuration.target().reload.max_retries,
                         configuration,
                         schema,
                         license,
@@ -324,12 +343,18 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 mut schema,
                 mut license,
                 retry_after: _,
+                retries_remaining: _,
             } => {
                 if let Some(nc) = new_configuration {
                     configuration = configuration.set_pending(nc);
                 }
                 schema = schema.update(new_schema);
                 license = license.update(new_license);
+
+                // Any event while reloading resets the retry budget: new inputs from
+                // Uplink deserve a fresh set of attempts, and explicit Reload/RhaiReload
+                // commands should also revive an exhausted budget.
+                let retries_remaining = configuration.target().reload.max_retries;
 
                 tracing::info!(
                     // True when there is a pending change relative to what the router is serving.
@@ -349,6 +374,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     schema,
                     license,
                     retry_after: Instant::now(),
+                    retries_remaining,
                 }
             }
 
@@ -392,6 +418,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 schema,
                 license,
                 retry_after: _,
+                retries_remaining,
             } => {
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
 
@@ -429,11 +456,26 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_state
                     }
                     Err(e) if server_handle.is_some() => {
-                        tracing::error!(
-                            error = %e,
-                            event = STATE_CHANGE,
-                            "error while reloading, will retry"
-                        );
+                        // Decrement the retry budget (saturating so it stops at 0, not wrapping).
+                        let retries_remaining = retries_remaining.map(|n| n.saturating_sub(1));
+
+                        if matches!(retries_remaining, Some(0)) {
+                            tracing::error!(
+                                error = %e,
+                                event = STATE_CHANGE,
+                                "error while reloading; retry limit reached, waiting for new inputs from Uplink"
+                            );
+                        } else {
+                            tracing::error!(
+                                error = %e,
+                                event = STATE_CHANGE,
+                                "error while reloading, will retry"
+                            );
+                        }
+
+                        let retry_delay =
+                            retry_delay_with_jitter(configuration.committed().reload.retry_delay);
+
                         Reloading {
                             _metrics,
                             server_handle,
@@ -445,8 +487,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             configuration,
                             schema,
                             license,
-                            retry_after: Instant::now()
-                                + Duration::from_secs(RELOAD_RETRY_DELAY_SECS),
+                            retry_after: Instant::now() + retry_delay,
+                            retries_remaining,
                         }
                     }
                     // The point of no return was passed — server handle consumed
@@ -792,10 +834,10 @@ where
         // Process events and retry-timer ticks until we reach a terminal state or
         // run out of events.
         loop {
-            // When in Reloading state, arm a timer at the scheduled retry instant.
-            // Otherwise use a never-resolving future so the arm is never selected.
-            let retry_future = if let Reloading { retry_after, .. } = &state {
-                futures::future::Either::Left(tokio::time::sleep_until(*retry_after))
+            // Arm the retry timer when there are retries remaining; otherwise
+            // use a never-resolving future so the arm is never selected.
+            let retry_future = if let Some(retry_after) = state.retry_after() {
+                futures::future::Either::Left(tokio::time::sleep_until(retry_after))
             } else {
                 futures::future::Either::Right(std::future::pending())
             };
@@ -871,6 +913,22 @@ where
     }
 }
 
+/// Computes the retry delay: base delay plus up to 25% random positive jitter.
+/// `rand::random::<f64>()` returns a value in [0.0, 1.0), so the result is always
+/// at least `base` and at most `base * 1.25` — never shorter than the base delay.
+/// Jitter is suppressed in test builds so that timer-based tests are deterministic.
+fn retry_delay_with_jitter(base: std::time::Duration) -> std::time::Duration {
+    #[cfg(not(test))]
+    {
+        const JITTER_FACTOR: f64 = 0.25;
+        base + base.mul_f64(rand::random::<f64>() * JITTER_FACTOR)
+    }
+    #[cfg(test)]
+    {
+        base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -887,7 +945,6 @@ mod tests {
     use rstest::rstest;
     use serde_json::json;
     use test_log::test;
-    use tokio::task::yield_now;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::BoxError;
     use tower::Service;
@@ -2468,15 +2525,12 @@ mod tests {
         .unwrap();
         notify.notified().await; // state machine processed the (failed) reload
 
-        // Advance the clock past the retry delay (10 s) so the timer fires.
+        // Pre-register interest in the next notification before advancing the clock
+        // so we don't miss the wakeup if the timer fires during time::advance.
+        let retry_done = notify.notified();
+        // Retry delay is exactly 10 s in tests (jitter is suppressed).
         tokio::time::advance(Duration::from_secs(11)).await;
-        // Give the state machine enough yields to complete the retry. The number
-        // of yields needed is small (the mock create() resolves immediately and
-        // the TCP bind in restart() completes in one or two polls), but 10 is
-        // generous enough to be reliable without being slow.
-        for _ in 0..10 {
-            yield_now().await;
-        }
+        retry_done.await; // state machine completed the automatic retry
 
         tx.send(Shutdown).await.unwrap();
         drop(tx);
@@ -2546,16 +2600,15 @@ mod tests {
         notify.notified().await; // initial reload failed
 
         // First retry — still failing (create() returns Err, no server restart).
+        // Pre-register before advancing so we don't miss the wakeup.
+        let first_retry_done = notify.notified();
         tokio::time::advance(Duration::from_secs(11)).await;
-        for _ in 0..10 {
-            yield_now().await;
-        }
+        first_retry_done.await; // state machine completed first retry (failed)
 
         // Second retry — succeeds.
+        let second_retry_done = notify.notified();
         tokio::time::advance(Duration::from_secs(11)).await;
-        for _ in 0..10 {
-            yield_now().await;
-        }
+        second_retry_done.await; // state machine completed second retry (succeeded)
 
         tx.send(Shutdown).await.unwrap();
         drop(tx);

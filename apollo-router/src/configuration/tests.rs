@@ -1495,3 +1495,66 @@ fn hoist_orphan_errors_all_with_subgraph_override() {
             .enabled
     );
 }
+
+mod reload {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn defaults() {
+        // An empty config should produce the documented defaults.
+        let config = Configuration::from_str("").expect("empty config must be valid");
+        assert_eq!(config.reload.max_retries, Some(5));
+        assert_eq!(
+            config.reload.retry_delay,
+            std::time::Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn max_retries_null_means_unlimited() {
+        // `null` must deserialize as `None` (unlimited retries), not as Some(0).
+        // This has bitten us before — Option<u32> with a serde default sometimes
+        // ignores an explicit `null` in YAML if the default function is not wired up
+        // correctly.
+        let config = Configuration::from_str(
+            r#"
+reload:
+  max_retries: null
+"#,
+        )
+        .expect("config with null max_retries must be valid");
+        assert_eq!(
+            config.reload.max_retries, None,
+            "max_retries: null should deserialize to None (unlimited retries)"
+        );
+    }
+
+    #[test]
+    fn max_retries_zero_disables_retries() {
+        let config = Configuration::from_str(
+            r#"
+reload:
+  max_retries: 0
+"#,
+        )
+        .expect("config with max_retries: 0 must be valid");
+        assert_eq!(config.reload.max_retries, Some(0));
+    }
+
+    #[test]
+    fn custom_retry_delay() {
+        let config = Configuration::from_str(
+            r#"
+reload:
+  retry_delay: 30s
+"#,
+        )
+        .expect("config with custom retry_delay must be valid");
+        assert_eq!(
+            config.reload.retry_delay,
+            std::time::Duration::from_secs(30)
+        );
+    }
+}
