@@ -28,7 +28,7 @@ When using hot reloading for supergraph schemas, be aware of the following perfo
 
 ## Configure reload retries
 
-When a reload fails—for example, because a transient network error prevents the router from fetching a persisted query manifest from Uplink—the router automatically retries instead of continuing to serve traffic on the previous configuration indefinitely.
+When a reload fails — for example, because a transient network error prevents the router from fetching a persisted query manifest from Uplink — the router automatically retries instead of continuing to serve traffic on the previous configuration indefinitely.
 
 Tune this behavior with the `reload` configuration section:
 
@@ -45,7 +45,7 @@ reload:
   retry_delay: 10s
 ```
 
-The retry budget is reset whenever the router receives a new reload trigger—a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal—so any new change will always get a fresh set of attempts even if previous retries were exhausted.
+The retry budget is reset whenever the router receives a new reload trigger — a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal— so any new change will always get a fresh set of attempts even if previous retries were exhausted.
 
 ## Production recommendations
 
