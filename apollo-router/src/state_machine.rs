@@ -2693,7 +2693,7 @@ mod tests {
             // startup ok, then 6 failures (one more than the default max_retries: 5),
             // then success — proves the None budget never stops the timer.
             let mut outcomes = vec![Ok(())];
-            outcomes.extend(std::iter::repeat(Err(())).take(6));
+            outcomes.extend(std::iter::repeat_n(Err(()), 6));
             outcomes.push(Ok(()));
             let unlimited = Arc::new(
                 Configuration::from_str("reload:\n  max_retries: null")
