@@ -309,8 +309,10 @@ impl Merger {
     /// `needs_join_field` checks `object_fields` / `interface_fields`. We map
     /// argument positions to their parent field positions to match the JS behavior:
     ///
+    /// ```js,ignore
     ///     // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
     ///     const field = application.parent.parent; // argument → field
+    /// ```
     fn get_fields_with_from_context_directive(
         subgraphs: &[Subgraph<Validated>],
     ) -> DirectiveReferencers {
@@ -1836,36 +1838,27 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                             type_name: itf.type_name.clone(),
                             field_name: itf_obj_field.field_name.clone(),
                         };
-                        let ast_node_to_add =
-                            (*merged_itf_field.get(self.merged.schema())?.node).clone();
                         if implementer
                             .field(itf_obj_field.field_name.clone())
                             .try_get(self.merged.schema())
                             .is_none()
                         {
-                            let mut missing_obj_node = ast_node_to_add.clone();
+                            let mut missing_obj_node =
+                                (*merged_itf_field.get(self.merged.schema())?.node).clone();
                             missing_obj_node.directives.retain(|d| {
-                                self.merged
-                                    .schema()
-                                    .directive_definitions
-                                    .contains_key(&d.name)
-                                    // filter access control directives for now as they will be merged later one
-                                    && !access_control_directive_names.contains(&d.name)
+                                // filter access control directives for now as they will be merged later one
+                                !access_control_directive_names.contains(&d.name)
                                     // filter join__field directives as they will be added later on
                                     && !self
                                         .join_spec_definition
                                         .is_spec_directive_name(&self.merged, &d.name)
                                         .unwrap_or(false)
                             });
-                            missing_obj_node.arguments.iter_mut().for_each(|arg| {
-                                // note: if we ever introduce join__x directive on arguments, we'll need to filter it below
-                                arg.make_mut().directives.retain(|d| {
-                                    self.merged
-                                        .schema()
-                                        .directive_definitions
-                                        .contains_key(&d.name)
-                                });
-                            });
+                            // PORT NOTE: since we are copying complete field AST directly it will include all args information as well.
+                            // We don't need any extra logic to filter arg directives as
+                            //   1) access control directives are not applicable on args
+                            //   2) we currently do not have a `@join__x` directive that is applied on arguments
+                            // If this changes in the future we'll need to explicitly filter them.
 
                             // We add a special @join__field for those added field with no `graph` target. This
                             // clarifies to the later extraction process that this particular field doesn't come
