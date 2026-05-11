@@ -79,6 +79,29 @@ impl<T> PendingChange<T> {
         PendingChange::Unchanged(committed).update(new)
     }
 
+    /// Conditionally set a new pending value, checking `new` against the committed value.
+    /// If `new` matches committed, cancels any pending change and reverts to `Unchanged`.
+    /// `None` is a no-op.
+    fn update(self, new: Option<T>) -> Self
+    where
+        T: PartialEq,
+    {
+        match new {
+            None => self,
+            Some(new) if self.committed() == &new => PendingChange::Unchanged(new),
+            Some(new) => self.set_pending(new),
+        }
+    }
+
+    /// Unconditionally set a new pending value, preserving the committed value from `self`.
+    /// Moves the committed value out of `self`, avoiding a clone.
+    fn set_pending(self, pending: T) -> Self {
+        PendingChange::Changed {
+            committed: self.into_committed(),
+            pending,
+        }
+    }
+
     /// The value we are trying to apply on the next try_start attempt.
     /// Equal to the committed value when there is no pending change.
     fn target(&self) -> &T {
@@ -93,29 +116,6 @@ impl<T> PendingChange<T> {
         match self {
             PendingChange::Changed { committed, .. } => committed,
             PendingChange::Unchanged(v) => v,
-        }
-    }
-
-    /// Unconditionally set a new pending value, preserving the committed value from `self`.
-    /// Moves the committed value out of `self`, avoiding a clone.
-    fn set_pending(self, pending: T) -> Self {
-        PendingChange::Changed {
-            committed: self.into_committed(),
-            pending,
-        }
-    }
-
-    /// Conditionally set a new pending value, checking `new` against the committed value.
-    /// If `new` matches committed, cancels any pending change and reverts to `Unchanged`.
-    /// `None` is a no-op.
-    fn update(self, new: Option<T>) -> Self
-    where
-        T: PartialEq,
-    {
-        match new {
-            None => self,
-            Some(new) if self.committed() == &new => PendingChange::Unchanged(new),
-            Some(new) => self.set_pending(new),
         }
     }
 
@@ -435,7 +435,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .await
                 {
                     Ok((new_state, new_schema)) => {
-                        tracing::info!(event = STATE_CHANGE, "reload complete");
+                        tracing::info!(
+                            new_schema = schema.is_pending(),
+                            new_license = license.is_pending(),
+                            new_configuration = configuration.is_pending(),
+                            event = STATE_CHANGE,
+                            "reload complete"
+                        );
                         // Explicitly drop the old factory before broadcasting notifications so
                         // that its resources (connections, background tasks) are fully torn down
                         // before any listeners act on the reload-complete signal.
@@ -465,7 +471,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             retries_remaining = retries_remaining
                                 .map_or("unlimited".to_string(), |n| n.to_string()),
                             event = STATE_CHANGE,
-                            "error while reloading"
+                            "error while reloading, still running with previous configuration"
                         );
 
                         let retry_delay =
