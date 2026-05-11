@@ -1132,6 +1132,45 @@ In these examples, only the outermost `$(...)` wrapper is required, though the
 inner wrappers may be used to clarify the structure of the expression, similar
 to parentheses in other languages.
 
+#### Literals followed by a `SubSelection`
+
+Notice that `NonEmptyPathTail` admits only `?`, `.Key`, and `->Identifier`
+continuations — never a `SubSelection`. So a `LitPrimitive`, `LitObject`,
+or `LitArray` whose next token is `{` cannot extend into a `LitPath`,
+and the surrounding `LitExpr` rule's left-to-right alternative search
+must therefore fall through past the `LitPrimitive | LitObject | LitArray`
+alternatives to the trailing `PathSelection` alternative.
+
+For literals whose source token is also a valid `Key` — quoted strings,
+and the identifier-shaped primitives `true` / `false` / `null` — the
+fall-through succeeds via `KeyPath ::= Key PathTail` plus
+`PathSelection ::= … SubSelection?`, yielding a field-reference reading.
+That preserves the v0.3 semantics of source like:
+
+```graphql
+soldTo: "sold-to" { customerNumber partnerName }
+```
+
+which parses as `Alias("soldTo")` over `PathSelection(KeyPath(Quoted("sold-to"), Empty), SubSelection({ customerNumber partnerName }))`.
+
+For numeric/object/array literals, no `Key` reading is available, so
+sources like `5 { a }`, `[1] { a }`, and `{ a: 1 } { b }` are parse
+errors — matching the v0.3 behavior (none of them had a sensible
+reading there either).
+
+When you actually want a literal value with a `{ … }` body — i.e., the
+LitPath you'd get if `NonEmptyPathTail` admitted `SubSelection` — wrap
+the literal in `$(…)` to opt out of the field-reference fall-through:
+
+```graphql
+truth: $(true) { is: $ }
+```
+
+This rule and the JSON-superset property are independent: the
+"literal-token followed by `{`" pattern is not expressible in valid
+JSON (JSON requires `:` or `,` between values), so JSON-shaped input
+pasted into a `LitExpr` context never triggers it.
+
 ### `LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"`
 
 ![LitPrimitive](./grammar/LitPrimitive.svg)
