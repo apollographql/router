@@ -1,4 +1,5 @@
 use test_log::test;
+
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
