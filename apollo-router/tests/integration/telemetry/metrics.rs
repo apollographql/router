@@ -327,7 +327,6 @@ async fn test_subgraph_auth_metrics() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
     if !graph_os_enabled() {
-        eprintln!("test skipped");
         return;
     }
 
