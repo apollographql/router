@@ -45,7 +45,7 @@ reload:
   retry_delay: 10s
 ```
 
-The retry budget is reset whenever the router receives a new reload trigger — a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal— so any new change will always get a fresh set of attempts even if previous retries were exhausted.
+The retry budget is reset whenever the router receives a new reload trigger — a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal — so any new change will always get a fresh set of attempts even if previous retries were exhausted.
 
 ## Production recommendations
 
