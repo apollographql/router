@@ -122,17 +122,16 @@ When the circuit is open and mode is `enforce`, the router returns a GraphQL err
 {
   "errors": [
     {
-      "message": "Circuit breaker is open for subgraph 'products' (field: Product.inventory)",
+      "message": "Circuit breaker is open",
       "extensions": {
-        "code": "CIRCUIT_BREAKER_OPEN",
-        "service": "products"
+        "code": "CIRCUIT_BREAKER_OPEN"
       }
     }
   ]
 }
 ```
 
-For connectors, the error message references the connector source name instead.
+The error message is intentionally generic and does not expose internal subgraph or connector names. Detailed information (subgraph name, field coordinate, or connector source) is logged server-side for debugging.
 
 ## Metrics
 
@@ -140,7 +139,7 @@ The router emits the following metrics for observability:
 
 | Metric | Description | Attributes |
 |---|---|---|
-| `apollo.router.circuit_breaker.state_change` | Counter incremented on every state transition (closed → open, open → half-open, etc.) | `subgraph.name` or `connector.source.name`, `circuit_breaker.field_coordinate`, `circuit_breaker.from_state`, `circuit_breaker.to_state` |
+| `apollo.router.circuit_breaker.state_change` | Counter incremented on every state transition (closed → open, open → half-open, etc.) | `subgraph.name` or `connector.source.name`, `circuit_breaker.from_state`, `circuit_breaker.to_state` |
 | `apollo.router.circuit_breaker.rejected` | Counter incremented each time a request is rejected by an open circuit. | `subgraph.name` or `connector.source.name` |
 
 ## External circuit breaking

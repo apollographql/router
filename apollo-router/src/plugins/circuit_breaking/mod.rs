@@ -129,6 +129,11 @@ fn extract_error_field_names(errors: &[graphql::Error]) -> HashSet<String> {
     names
 }
 
+/// Coordinates stashed in the request context by the checkpoint layer so the
+/// response handler can reuse them without recomputing.
+#[derive(Clone)]
+struct CachedCoordinates(HashSet<String>);
+
 /// Data extracted from the request and passed through to the response handler
 /// via `map_future_with_request_data`.
 #[derive(Clone)]
@@ -151,8 +156,6 @@ fn emit_transition(key: &CircuitKey, t: &state::Transition) {
         "Circuit breaker state transitions",
         1,
         "subgraph.name" = key.subgraph_name.clone(),
-        // TODO(circuit_breaking): This will be high cardinality, remove?
-        "circuit_breaker.field_coordinate" = key.field_coordinate.clone(),
         "circuit_breaker.from_state" = t.from.to_string(),
         "circuit_breaker.to_state" = t.to.to_string()
     );
@@ -173,6 +176,10 @@ impl PluginPrivate for CircuitBreaking {
         if !effective.enabled {
             return service;
         }
+        if let Err(e) = effective.validate() {
+            tracing::warn!(subgraph = %name, "{e} — circuit breaking disabled for this subgraph");
+            return service;
+        }
 
         let registry = CircuitBreakerRegistry::new(
             effective.error_threshold,
@@ -190,6 +197,9 @@ impl PluginPrivate for CircuitBreaking {
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 let coordinates = extract_selection_coordinates(&req);
+                req.context.extensions().with_lock(|lock| {
+                    lock.insert(CachedCoordinates(coordinates.clone()));
+                });
 
                 let mut any_rejected = false;
                 let mut rejected_coordinate = None;
@@ -227,16 +237,14 @@ impl PluginPrivate for CircuitBreaking {
                         "apollo.router.circuit_breaker.rejected",
                         "Requests rejected by circuit breaker",
                         1,
-                        "subgraph.name" = key.subgraph_name.clone(),
-                        // TODO(circuit_breaking): This will be high cardinality, remove?
-                        "circuit_breaker.field_coordinate" = key.field_coordinate.clone()
+                        "subgraph.name" = key.subgraph_name.clone()
                     );
                     if mode == CircuitBreakerMode::Enforce {
                         Ok(ControlFlow::Break(
                             SubgraphResponse::error_builder()
                                 .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                 .subgraph_name(key.subgraph_name.clone())
-                                .error(circuit_breaker_open_error(&key))
+                                .error(circuit_breaker_open_error())
                                 .context(req.context)
                                 .build(),
                         ))
@@ -249,7 +257,12 @@ impl PluginPrivate for CircuitBreaking {
             })
             .map_future_with_request_data(
                 move |req: &subgraph::Request| {
-                    let coordinates = extract_selection_coordinates(req);
+                    let coordinates = req
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<CachedCoordinates>().cloned())
+                        .map(|c| c.0)
+                        .unwrap_or_else(|| extract_selection_coordinates(req));
                     let field_name_index = build_field_name_index(&coordinates);
                     RequestFieldData {
                         subgraph_name: subgraph_name.clone(),
@@ -347,6 +360,10 @@ impl PluginPrivate for CircuitBreaking {
         if !effective.enabled {
             return service;
         }
+        if let Err(e) = effective.validate() {
+            tracing::warn!(connector.source.name = %source_name, "{e} — circuit breaking disabled for this connector source");
+            return service;
+        }
 
         let registry = CircuitBreakerRegistry::new(
             effective.error_threshold,
@@ -389,14 +406,10 @@ impl PluginPrivate for CircuitBreaking {
                             Ok(ControlFlow::Break(
                                 connector::request_service::Response::error_new(
                                     req.context,
-                                    ConnectorError::TransportFailure(format!(
-                                        "Circuit breaker is open for connector source '{}'",
-                                        key.subgraph_name
-                                    )),
-                                    format!(
-                                        "Circuit breaker is open for connector source '{}'",
-                                        key.subgraph_name
+                                    ConnectorError::TransportFailure(
+                                        "Circuit breaker is open".to_string(),
                                     ),
+                                    "Circuit breaker is open",
                                     req.key,
                                 ),
                             ))
@@ -444,16 +457,10 @@ impl PluginPrivate for CircuitBreaking {
     }
 }
 
-fn circuit_breaker_open_error(key: &CircuitKey) -> graphql::Error {
+fn circuit_breaker_open_error() -> graphql::Error {
     graphql::Error::builder()
-        // TODO(circuit_breaking): This should not be user facing
-        .message(format!(
-            "Circuit breaker is open for subgraph '{}' (field: {})",
-            key.subgraph_name, key.field_coordinate
-        ))
-        // TODO(circuit_breaking): Check if this code makes sense
+        .message("Circuit breaker is open")
         .extension_code("CIRCUIT_BREAKER_OPEN")
-        .extension("service", key.subgraph_name.as_str())
         .build()
 }
 
@@ -491,23 +498,15 @@ mod tests {
 
     #[test]
     fn circuit_breaker_error_has_expected_shape() {
-        let key = CircuitKey {
-            subgraph_name: "products".to_string(),
-            field_coordinate: "Product.inventory".to_string(),
-        };
-        let err = circuit_breaker_open_error(&key);
-        assert!(
-            err.message
-                .starts_with("Circuit breaker is open for subgraph 'products'")
-        );
-        assert!(err.message.contains("Product.inventory"));
+        let err = circuit_breaker_open_error();
+        assert_eq!(err.message, "Circuit breaker is open");
         assert_eq!(
             err.extensions.get("code").and_then(|v| v.as_str()),
             Some("CIRCUIT_BREAKER_OPEN")
         );
-        assert_eq!(
-            err.extensions.get("service").and_then(|v| v.as_str()),
-            Some("products")
+        assert!(
+            err.extensions.get("service").is_none(),
+            "error should not leak subgraph name"
         );
     }
 

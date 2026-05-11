@@ -243,15 +243,13 @@ async fn test_circuit_breaker_error_includes_extension_fields() -> Result<(), Bo
         Some("CIRCUIT_BREAKER_OPEN"),
     );
     assert!(
-        error["extensions"]["service"].as_str().is_some(),
-        "error should include 'service' extension: {error:?}"
+        error["extensions"]["service"].is_null(),
+        "error should not leak subgraph name in 'service' extension: {error:?}"
     );
-    assert!(
-        error["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Circuit breaker is open"),
-        "error message should mention circuit breaker: {error:?}"
+    assert_eq!(
+        error["message"].as_str(),
+        Some("Circuit breaker is open"),
+        "error message should be generic: {error:?}"
     );
 
     router.graceful_shutdown().await;
