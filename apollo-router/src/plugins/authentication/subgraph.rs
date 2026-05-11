@@ -829,14 +829,6 @@ mod test {
         mock_reviews
             .expect_call()
             .times(1)
-            .withf(|request| {
-                // "reviews" must NOT have signing params in its request extensions.
-                request
-                    .subgraph_request
-                    .extensions()
-                    .get::<Arc<SigningParamsConfig>>()
-                    .is_none()
-            })
             .returning(example_response);
 
         let mut reviews_service = SubgraphAuth {
@@ -845,6 +837,15 @@ mod test {
         .subgraph_service("reviews", mock_reviews.boxed());
 
         reviews_service.ready().await?.call(reviews_request).await?;
+
+        // Signing params must not have leaked into the shared context.
+        assert!(
+            shared_context
+                .extensions()
+                .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+                .is_none(),
+            "signing params must not leak into shared context"
+        );
 
         Ok(())
     }
