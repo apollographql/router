@@ -2610,4 +2610,205 @@ mod tests {
         assert_matches!(handle.await.unwrap(), Ok(()));
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
+
+    // A newer schema arrives while we are still in Reloading (e.g. Uplink publishes
+    // again before the retry timer fires).  The state machine should immediately
+    // re-attempt with the new schema via the event arm — no clock advance needed.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_new_schema_while_reloading() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // First schema reload fails, leaving the router in Reloading.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
+
+        // A newer schema arrives → immediate retry via event arm → succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+
+        for event in startup_events() {
+            tx.send(event).await.unwrap();
+            notify.notified().await;
+        }
+
+        // Trigger a failing reload.
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await; // initial reload attempt failed
+
+        // Send a newer schema BEFORE the timer fires — the state machine must retry
+        // immediately via the event arm without any clock advance.
+        let reload_done = notify.notified();
+        tx.send(UpdateSchema(example_schema())).await.unwrap();
+        reload_done.await; // new schema applied successfully
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    // With max_retries: 0 the retry timer is never armed.  The router should keep
+    // serving the committed state until a new event arrives, and Shutdown should
+    // still work cleanly.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_retries_exhausted() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // Reload fails.  With max_retries: 0 no timer retry is scheduled, so this
+        // is the only create() call after startup — mockall enforces that.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let zero_retries_config = Arc::new(
+            Configuration::from_str("reload:\n  max_retries: 0")
+                .expect("config with max_retries: 0 must be valid"),
+        );
+
+        tx.send(UpdateConfiguration(zero_retries_config))
+            .await
+            .unwrap();
+        notify.notified().await;
+        tx.send(UpdateSchema(example_schema())).await.unwrap();
+        notify.notified().await;
+        tx.send(UpdateLicense(Default::default())).await.unwrap();
+        notify.notified().await;
+
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await; // reload failed, no retries scheduled
+
+        // Advance well past any retry delay — the timer must not fire.
+        tokio::time::advance(Duration::from_secs(60)).await;
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        // Only the initial server start — no successful reload.
+        assert_eq!(shutdown_receivers.0.lock().len(), 1);
+    }
+
+    // After the retry budget is exhausted (timer disabled), a new schema event
+    // resets the budget and triggers an immediate retry via the event arm.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_restart_budget_reset_after_exhaustion() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // First reload fails → budget exhausted (max_retries: 0), timer disabled.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient")));
+
+        // New schema arrives → budget resets → immediate retry → succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        let zero_retries_config = Arc::new(
+            Configuration::from_str("reload:\n  max_retries: 0")
+                .expect("config with max_retries: 0 must be valid"),
+        );
+
+        tx.send(UpdateConfiguration(zero_retries_config))
+            .await
+            .unwrap();
+        notify.notified().await;
+        tx.send(UpdateSchema(example_schema())).await.unwrap();
+        notify.notified().await;
+        tx.send(UpdateLicense(Default::default())).await.unwrap();
+        notify.notified().await;
+
+        // First reload fails, budget exhausted — timer is not armed.
+        tx.send(UpdateSchema(SchemaState {
+            sdl: minimal_schema.to_owned(),
+            launch_id: None,
+        }))
+        .await
+        .unwrap();
+        notify.notified().await;
+
+        // A new schema arrives — budget resets to Some(0) from config and an
+        // immediate retry is triggered via the event arm (no clock advance needed).
+        let reload_done = notify.notified();
+        tx.send(UpdateSchema(example_schema())).await.unwrap();
+        reload_done.await; // new schema applied successfully
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
 }
