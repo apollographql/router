@@ -78,6 +78,7 @@ use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -1831,8 +1832,12 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                             continue;
                         }
 
+                        let merged_itf_field = InterfaceFieldDefinitionPosition {
+                            type_name: itf.type_name.clone(),
+                            field_name: itf_obj_field.field_name.clone(),
+                        };
                         let ast_node_to_add =
-                            (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
+                            (*merged_itf_field.get(self.merged.schema())?.node).clone();
                         if implementer
                             .field(itf_obj_field.field_name.clone())
                             .try_get(self.merged.schema())
@@ -1846,8 +1851,14 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     .contains_key(&d.name)
                                     // filter access control directives for now as they will be merged later one
                                     && !access_control_directive_names.contains(&d.name)
+                                    // filter join__field directives as they will be added later on
+                                    && !self
+                                        .join_spec_definition
+                                        .is_spec_directive_name(&self.merged, &d.name)
+                                        .unwrap_or(false)
                             });
                             missing_obj_node.arguments.iter_mut().for_each(|arg| {
+                                // note: if we ever introduce join__x directive on arguments, we'll need to filter it below
                                 arg.make_mut().directives.retain(|d| {
                                     self.merged
                                         .schema()
