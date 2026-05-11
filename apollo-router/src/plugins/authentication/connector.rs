@@ -31,10 +31,9 @@ impl ConnectorAuth {
                             source_name.clone(),
                         ))
                         .cloned()
+                    && let TransportRequest::Http(ref mut http_request) = req.transport_request
                 {
-                    if let TransportRequest::Http(ref mut http_request) = req.transport_request {
-                        http_request.inner.extensions_mut().insert(signing_params);
-                    }
+                    http_request.inner.extensions_mut().insert(signing_params);
                 }
                 req
             })
