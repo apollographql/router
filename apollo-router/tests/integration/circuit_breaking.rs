@@ -381,6 +381,16 @@ async fn test_router_starts_with_full_circuit_breaking_config() -> Result<(), Bo
                   enabled: true
                   error_threshold: 3
                   mode: measure
+              connector:
+                all:
+                  enabled: true
+                  error_threshold: 3
+                  window: 30s
+                  recovery_timeout: 60s
+                  mode: enforce
+                sources:
+                  "connectors.jsonPlaceholder":
+                    error_threshold: 10
             "#,
         )
         .build()

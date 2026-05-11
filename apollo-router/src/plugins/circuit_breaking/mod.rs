@@ -8,6 +8,8 @@ use std::ops::ControlFlow;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use config::CircuitBreakerMode;
 use config::Config;
 use http::StatusCode;
@@ -24,9 +26,14 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::SubgraphResponse;
+use crate::services::connector;
 use crate::services::subgraph;
 
 const SKIP_FIELDS: &[&str] = &["__typename", "_entities", "_service"];
+
+/// Sentinel field coordinate used for connector circuit keys since connectors
+/// don't have the same field-level granularity as subgraph operations.
+const CONNECTOR_COORDINATE: &str = "_connector";
 
 pub(crate) struct CircuitBreaking {
     config: Config,
@@ -330,6 +337,111 @@ impl PluginPrivate for CircuitBreaking {
             .service(service)
             .boxed()
     }
+
+    fn connector_request_service(
+        &self,
+        service: connector::request_service::BoxService,
+        source_name: String,
+    ) -> connector::request_service::BoxService {
+        let effective = self.config.effective_connector_config(&source_name);
+        if !effective.enabled {
+            return service;
+        }
+
+        let registry = CircuitBreakerRegistry::new(
+            effective.error_threshold,
+            effective.window,
+            effective.recovery_timeout,
+            effective.half_open_max_requests,
+        );
+        let mode = effective.mode;
+
+        let check_registry = registry.clone();
+        let check_source = source_name.clone();
+        let response_registry = registry.clone();
+        let response_source = source_name.clone();
+
+        ServiceBuilder::new()
+            .checkpoint(move |req: connector::request_service::Request| {
+                let key = CircuitKey {
+                    subgraph_name: check_source.clone(),
+                    field_coordinate: CONNECTOR_COORDINATE.to_string(),
+                };
+                match check_registry.check(&key) {
+                    CheckResult::Allowed(transition) => {
+                        if let Some(ref t) = transition {
+                            emit_transition(&key, t);
+                        }
+                        Ok(ControlFlow::Continue(req))
+                    }
+                    CheckResult::Rejected => {
+                        tracing::warn!(
+                            connector.source.name = %key.subgraph_name,
+                            "circuit breaker rejected connector request (circuit is open)"
+                        );
+                        u64_counter!(
+                            "apollo.router.circuit_breaker.rejected",
+                            "Requests rejected by circuit breaker",
+                            1,
+                            "connector.source.name" = key.subgraph_name.clone()
+                        );
+                        if mode == CircuitBreakerMode::Enforce {
+                            Ok(ControlFlow::Break(
+                                connector::request_service::Response::error_new(
+                                    req.context,
+                                    ConnectorError::TransportFailure(format!(
+                                        "Circuit breaker is open for connector source '{}'",
+                                        key.subgraph_name
+                                    )),
+                                    format!(
+                                        "Circuit breaker is open for connector source '{}'",
+                                        key.subgraph_name
+                                    ),
+                                    req.key,
+                                ),
+                            ))
+                        } else {
+                            Ok(ControlFlow::Continue(req))
+                        }
+                    }
+                }
+            })
+            .map_future_with_request_data(
+                move |_req: &connector::request_service::Request| response_source.clone(),
+                move |source: String, fut| {
+                    let registry = response_registry.clone();
+                    async move {
+                        let response: Result<connector::request_service::Response, BoxError> =
+                            fut.await;
+                        let key = CircuitKey {
+                            subgraph_name: source,
+                            field_coordinate: CONNECTOR_COORDINATE.to_string(),
+                        };
+                        match &response {
+                            Ok(resp) => {
+                                let is_error = resp.transport_result.is_err()
+                                    || matches!(resp.mapped_response, MappedResponse::Error { .. });
+                                if is_error {
+                                    if let Some(t) = registry.record_error(&key) {
+                                        emit_transition(&key, &t);
+                                    }
+                                } else if let Some(t) = registry.record_success(&key) {
+                                    emit_transition(&key, &t);
+                                }
+                            }
+                            Err(_) => {
+                                if let Some(t) = registry.record_error(&key) {
+                                    emit_transition(&key, &t);
+                                }
+                            }
+                        }
+                        response
+                    }
+                },
+            )
+            .service(service)
+            .boxed()
+    }
 }
 
 fn circuit_breaker_open_error(key: &CircuitKey) -> graphql::Error {
@@ -349,15 +461,32 @@ register_private_plugin!("apollo", "circuit_breaking", CircuitBreaking);
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
 
+    use apollo_compiler::name;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorHttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse as ConnectorHttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use http::StatusCode;
 
     use super::*;
     use crate::graphql;
     use crate::plugins::test::PluginTestHarness;
+    use crate::plugins::test::ServiceHandle;
+    use crate::services::connector;
+    use crate::services::router::body;
     use crate::services::subgraph;
 
     #[test]
@@ -680,5 +809,291 @@ circuit_breaking:
         let resp = service.call_default().await.unwrap();
         assert!(resp.response.body().errors.is_empty());
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
+    }
+
+    // --- Connector test helpers ---
+
+    fn test_connector() -> Connector {
+        Connector {
+            id: ConnectId::new(
+                "subgraph".into(),
+                Some(SourceName::cast("source")),
+                name!(Query),
+                name!(users),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: None,
+                connect_template: StringTemplate::from_str("/test").unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::empty(),
+            config: None,
+            max_requests: None,
+            entity_resolver: None,
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test_connector".into(),
+        }
+    }
+
+    fn test_response_key() -> ResponseKey {
+        ResponseKey::RootField {
+            name: "users".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        }
+    }
+
+    fn connector_request() -> connector::request_service::Request {
+        let http_request = http::Request::builder().body("".into()).unwrap();
+        connector::request_service::Request {
+            context: crate::Context::default(),
+            connector: Arc::new(test_connector()),
+            transport_request: TransportRequest::Http(Box::new(ConnectorHttpRequest {
+                inner: http_request,
+                debug: Default::default(),
+            })),
+            key: test_response_key(),
+            mapping_problems: vec![],
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        }
+    }
+
+    fn connector_success_response(
+        req: connector::request_service::Request,
+    ) -> connector::request_service::Response {
+        connector::request_service::Response {
+            context: req.context,
+            transport_result: Ok(TransportResponse::Http(ConnectorHttpResponse {
+                inner: http::Response::builder()
+                    .status(200)
+                    .body(body::empty())
+                    .unwrap()
+                    .into_parts()
+                    .0,
+            })),
+            mapped_response: MappedResponse::Data {
+                data: serde_json::json!({}).into(),
+                problems: vec![],
+                key: test_response_key(),
+            },
+        }
+    }
+
+    fn connector_error_response(
+        req: connector::request_service::Request,
+    ) -> connector::request_service::Response {
+        connector::request_service::Response::error_new(
+            req.context,
+            ConnectorError::TransportFailure("test error".into()),
+            "something went wrong",
+            req.key,
+        )
+    }
+
+    // --- Connector tests ---
+
+    fn build_connector_service(
+        harness: &PluginTestHarness<CircuitBreaking>,
+        response_fn: impl Fn(
+                connector::request_service::Request,
+            ) -> connector::request_service::Response
+            + Send
+            + Sync
+            + Clone
+            + 'static,
+    ) -> ServiceHandle<connector::request_service::Request, connector::request_service::BoxService>
+    {
+        let inner: connector::request_service::BoxService =
+            connector::request_service::BoxService::new(
+                ServiceBuilder::new().service_fn(
+                    move |req: connector::request_service::Request| {
+                        let response_fn = response_fn.clone();
+                        async move { Ok((response_fn)(req)) }
+                    },
+                ),
+            );
+        ServiceHandle::new(
+            harness
+                .connector_request_service(inner, "my_connector".to_string()),
+        )
+    }
+
+    #[tokio::test]
+    async fn connector_disabled_passes_through() {
+        let harness = build_harness(
+            r#"
+circuit_breaking:
+  connector:
+    all:
+      enabled: false
+"#,
+        )
+        .await;
+
+        let svc = build_connector_service(&harness, connector_success_response);
+        let resp = svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn connector_trips_after_threshold() {
+        let harness = build_harness(
+            r#"
+circuit_breaking:
+  connector:
+    all:
+      enabled: true
+      error_threshold: 2
+      window: 60s
+      recovery_timeout: 300s
+      mode: enforce
+"#,
+        )
+        .await;
+
+        let svc = build_connector_service(&harness, connector_error_response);
+
+        let resp = svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_err());
+
+        let resp = svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_err());
+
+        // Third request should be rejected by the circuit breaker
+        let resp = svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_err());
+        if let MappedResponse::Error { ref error, .. } = resp.mapped_response {
+            assert!(
+                error.message.contains("Circuit breaker is open"),
+                "expected circuit breaker message, got: {}",
+                error.message
+            );
+        } else {
+            panic!("expected MappedResponse::Error");
+        }
+    }
+
+    #[tokio::test]
+    async fn connector_measure_mode_does_not_reject() {
+        let harness = build_harness(
+            r#"
+circuit_breaking:
+  connector:
+    all:
+      enabled: true
+      error_threshold: 1
+      window: 60s
+      recovery_timeout: 300s
+      mode: measure
+"#,
+        )
+        .await;
+
+        let svc = build_connector_service(&harness, connector_error_response);
+
+        // Trip the threshold
+        svc.call(connector_request()).await.unwrap();
+
+        // Measure mode should not reject
+        let resp = svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_err());
+        if let MappedResponse::Error { ref error, .. } = resp.mapped_response {
+            assert!(
+                !error.message.contains("Circuit breaker is open"),
+                "measure mode should not produce circuit breaker errors"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn connector_and_subgraph_circuits_are_independent() {
+        let harness = build_harness(
+            r#"
+circuit_breaking:
+  all:
+    enabled: true
+    error_threshold: 1
+    window: 60s
+    recovery_timeout: 300s
+    mode: enforce
+  connector:
+    all:
+      enabled: true
+      error_threshold: 100
+      window: 60s
+      recovery_timeout: 300s
+      mode: enforce
+"#,
+        )
+        .await;
+
+        // Trip the subgraph circuit
+        let subgraph_svc = harness.subgraph_service("products", move |req: subgraph::Request| {
+            let err = error_response();
+            async move {
+                Ok(subgraph::Response::fake_builder()
+                    .error(err)
+                    .context(req.context)
+                    .build())
+            }
+        });
+        subgraph_svc.call_default().await.unwrap();
+        let resp = subgraph_svc.call_default().await.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Connector should still work fine (independent circuit with high threshold)
+        let connector_svc = build_connector_service(&harness, connector_success_response);
+        let resp = connector_svc.call(connector_request()).await.unwrap();
+        assert!(resp.transport_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn connector_per_source_config_overrides() {
+        let harness = build_harness(
+            r#"
+circuit_breaking:
+  connector:
+    all:
+      enabled: true
+      error_threshold: 100
+      window: 60s
+      recovery_timeout: 300s
+      mode: enforce
+    sources:
+      my_connector:
+        enabled: true
+        error_threshold: 1
+        window: 60s
+        recovery_timeout: 300s
+        mode: enforce
+"#,
+        )
+        .await;
+
+        let svc = build_connector_service(&harness, connector_error_response);
+
+        // Trip the circuit with just 1 error (per-source override)
+        svc.call(connector_request()).await.unwrap();
+
+        let resp = svc.call(connector_request()).await.unwrap();
+        if let MappedResponse::Error { ref error, .. } = resp.mapped_response {
+            assert!(
+                error.message.contains("Circuit breaker is open"),
+                "per-source config should override all: {}",
+                error.message
+            );
+        } else {
+            panic!("expected circuit breaker rejection");
+        }
     }
 }

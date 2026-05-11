@@ -56,6 +56,17 @@ impl Default for CircuitBreakerConfig {
     }
 }
 
+/// Circuit breaker configuration scoped to connector sources.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ConnectorCircuitBreakerConfig {
+    /// Default circuit breaker settings applied to all connector sources.
+    all: Option<CircuitBreakerConfig>,
+    /// Per-source circuit breaker overrides, keyed by source config key
+    /// (e.g. `"subgraph_name.source_name"`).
+    sources: HashMap<String, CircuitBreakerConfig>,
+}
+
 /// Top-level plugin configuration with `all` + per-subgraph overrides.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -65,11 +76,25 @@ pub(crate) struct Config {
     all: Option<CircuitBreakerConfig>,
     /// Per-subgraph circuit breaker overrides.
     subgraphs: HashMap<String, CircuitBreakerConfig>,
+    /// Circuit breaker settings for connector sources.
+    connector: ConnectorCircuitBreakerConfig,
 }
 
 impl Config {
     pub(crate) fn effective_config(&self, subgraph_name: &str) -> CircuitBreakerConfig {
         match (self.subgraphs.get(subgraph_name), &self.all) {
+            (Some(specific), Some(global)) => merge_config(specific, global),
+            (Some(specific), None) => specific.clone(),
+            (None, Some(global)) => global.clone(),
+            (None, None) => CircuitBreakerConfig::default(),
+        }
+    }
+
+    pub(crate) fn effective_connector_config(&self, source_name: &str) -> CircuitBreakerConfig {
+        match (
+            self.connector.sources.get(source_name),
+            &self.connector.all,
+        ) {
             (Some(specific), Some(global)) => merge_config(specific, global),
             (Some(specific), None) => specific.clone(),
             (None, Some(global)) => global.clone(),
@@ -230,5 +255,126 @@ mod tests {
             }
         }));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn deserialize_connector_config() {
+        let config: Config = serde_json::from_value(json!({
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "error_threshold": 3,
+                    "window": "30s",
+                    "mode": "enforce"
+                },
+                "sources": {
+                    "connectors.jsonPlaceholder": {
+                        "enabled": true,
+                        "error_threshold": 10,
+                        "window": "15s"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let all = config.connector.all.as_ref().unwrap();
+        assert!(all.enabled);
+        assert_eq!(all.error_threshold, 3);
+        assert_eq!(all.window, Duration::from_secs(30));
+
+        let source = config
+            .connector
+            .sources
+            .get("connectors.jsonPlaceholder")
+            .unwrap();
+        assert!(source.enabled);
+        assert_eq!(source.error_threshold, 10);
+        assert_eq!(source.window, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn effective_connector_config_uses_all_when_no_source_override() {
+        let config: Config = serde_json::from_value(json!({
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "error_threshold": 3,
+                    "window": "30s",
+                    "recovery_timeout": "90s",
+                    "mode": "measure"
+                }
+            }
+        }))
+        .unwrap();
+
+        let effective = config.effective_connector_config("any_source");
+        assert!(effective.enabled);
+        assert_eq!(effective.error_threshold, 3);
+        assert_eq!(effective.window, Duration::from_secs(30));
+        assert_eq!(effective.recovery_timeout, Duration::from_secs(90));
+        assert_eq!(effective.mode, CircuitBreakerMode::Measure);
+    }
+
+    #[test]
+    fn effective_connector_config_source_overrides_all() {
+        let config: Config = serde_json::from_value(json!({
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "error_threshold": 10,
+                    "window": "60s",
+                    "recovery_timeout": "120s"
+                },
+                "sources": {
+                    "connectors.jsonPlaceholder": {
+                        "enabled": true,
+                        "error_threshold": 3,
+                        "recovery_timeout": "30s"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let effective = config.effective_connector_config("connectors.jsonPlaceholder");
+        assert!(effective.enabled);
+        assert_eq!(effective.error_threshold, 3);
+        // window inherits from connector.all
+        assert_eq!(effective.window, Duration::from_secs(60));
+        assert_eq!(effective.recovery_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn effective_connector_config_defaults_when_nothing_configured() {
+        let config: Config = serde_json::from_value(json!({})).unwrap();
+        let effective = config.effective_connector_config("anything");
+        assert!(!effective.enabled);
+        assert_eq!(effective.error_threshold, DEFAULT_ERROR_THRESHOLD);
+        assert_eq!(effective.window, DEFAULT_WINDOW);
+        assert_eq!(effective.recovery_timeout, DEFAULT_RECOVERY_TIMEOUT);
+    }
+
+    #[test]
+    fn subgraph_and_connector_configs_are_independent() {
+        let config: Config = serde_json::from_value(json!({
+            "all": {
+                "enabled": true,
+                "error_threshold": 5
+            },
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "error_threshold": 3
+                }
+            }
+        }))
+        .unwrap();
+
+        let subgraph_effective = config.effective_config("products");
+        assert_eq!(subgraph_effective.error_threshold, 5);
+
+        let connector_effective = config.effective_connector_config("connectors.jsonPlaceholder");
+        assert_eq!(connector_effective.error_threshold, 3);
     }
 }

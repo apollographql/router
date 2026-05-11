@@ -1,18 +1,21 @@
 ---
 title: Circuit Breaking
-subtitle: Protect subgraphs from cascading failures with automatic circuit breaking
+subtitle: Protect subgraphs and connectors from cascading failures with automatic circuit breaking
 ---
 
-Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraph operations that are failing. When the router detects repeated errors for a specific subgraph operation, it stops sending requests for that operation, giving the service time to recover without being overwhelmed.
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraph operations or connector sources that are failing. When the router detects repeated errors, it stops sending requests to the affected target, giving the service time to recover without being overwhelmed.
 
-The router's built-in circuit breaker operates at **per-operation granularity**. If a single resolver behind one subgraph fetch starts failing, only requests for that specific operation are blocked — other healthy operations to the same subgraph continue normally.
+The router's built-in circuit breaker supports both **subgraphs** and **Apollo Connectors**:
+
+- For subgraphs, it operates at **per-field granularity** using type-qualified field coordinates. If a single resolver starts failing, only requests touching that field are blocked — other healthy fields on the same subgraph continue normally.
+- For connectors, it operates at **per-source granularity**. Each connector source has an independent circuit.
 
 ## How it works
 
 The circuit breaker follows a three-state model:
 
 1. **Closed** (normal): All requests pass through. The router counts errors within a sliding time window.
-2. **Open** (tripped): When the error count reaches the configured threshold, the circuit opens. Requests for the affected operation are immediately rejected with a `CIRCUIT_BREAKER_OPEN` error, without being sent to the subgraph.
+2. **Open** (tripped): When the error count reaches the configured threshold, the circuit opens. Requests for the affected target are immediately rejected with a `CIRCUIT_BREAKER_OPEN` error.
 3. **Half-open** (probing): After the recovery timeout elapses, the router allows a limited number of probe requests through. If a probe succeeds, the circuit closes. If it fails, the circuit reopens.
 
 ## Configuration
@@ -25,7 +28,7 @@ circuit_breaking:
     enabled: true
 ```
 
-### Global and per-subgraph settings
+### Subgraph settings
 
 Use `all` to set defaults for every subgraph. Use `subgraphs` to override settings for specific subgraphs:
 
@@ -48,11 +51,33 @@ circuit_breaking:
 
 Per-subgraph settings are merged with the global defaults. Any field not specified in a subgraph override inherits from `all`.
 
+### Connector settings
+
+Use the `connector` section to configure circuit breaking for Apollo Connectors. Use `connector.all` to set defaults for every connector source which can be overridden per source under `connector.sources`:
+
+```yaml title="router.yaml"
+circuit_breaking:
+  connector:
+    all:
+      enabled: true
+      error_threshold: 3
+      window: 30s
+      recovery_timeout: 60s
+      mode: enforce
+    sources:
+      "connectors.jsonPlaceholder":
+        error_threshold: 10
+```
+
+Source names use the format `"subgraph_name.source_name"` (for example, `"connectors.jsonPlaceholder"`). Per-source settings are merged with `connector.all` the same way subgraph settings merge with `all`.
+
+Subgraph and connector configurations are independent — the top-level `all` setting only applies to subgraphs, not connectors.
+
 ### Options reference
 
 | Option | Default | Description |
 |---|---|---|
-| `enabled` | `false` | Whether circuit breaking is active for this subgraph. |
+| `enabled` | `false` | Whether circuit breaking is active. |
 | `error_threshold` | `5` | Number of errors within the sliding window required to trip the circuit. |
 | `window` | `30s` | Duration of the sliding error-counting window. If the window expires without reaching the threshold, the error count resets. |
 | `recovery_timeout` | `60s` | How long the circuit stays open before transitioning to half-open and allowing probe requests. |
@@ -68,26 +93,36 @@ circuit_breaking:
   all:
     enabled: true
     mode: measure
+  connector:
+    all:
+      enabled: true
+      mode: measure
 ```
 
-## Per-operation granularity
+## Granularity
 
-The circuit breaker keys its state by the combination of the **subgraph name** and the **operation hash** (a SHA-256 digest of the schema, subgraph operation text, and operation name). This means:
+### Subgraphs
 
-- Two different client queries that produce the same subgraph fetch share the same circuit.
-- Two different fetches to the same subgraph (for example, a root field query vs. an `_entities` lookup) have independent circuits.
+The circuit breaker keys subgraph state by **type-qualified field coordinates** (for example, `Product.inventory`). This means:
+
+- Two different client queries that touch the same field on the same subgraph share the same circuit.
+- Two different fields on the same subgraph have independent circuits.
 
 This prevents a single failing resolver from blocking all traffic to an otherwise healthy subgraph.
 
+### Connectors
+
+The circuit breaker keys connector state by **source name** (for example, `connectors.jsonPlaceholder`). Each connector source has its own independent circuit. Connector circuits are also fully independent from subgraph circuits.
+
 ## Error responses
 
-When the circuit is open and mode is `enforce`, the router returns a response with HTTP status `503 Service Unavailable` and a GraphQL error:
+When the circuit is open and mode is `enforce`, the router returns a GraphQL error with the `CIRCUIT_BREAKER_OPEN` code:
 
 ```json
 {
   "errors": [
     {
-      "message": "Circuit breaker is open for subgraph 'products' (operation hash: a1b2c3d4e5f6...)",
+      "message": "Circuit breaker is open for subgraph 'products' (field: Product.inventory)",
       "extensions": {
         "code": "CIRCUIT_BREAKER_OPEN",
         "service": "products"
@@ -97,14 +132,16 @@ When the circuit is open and mode is `enforce`, the router returns a response wi
 }
 ```
 
+For connectors, the error message references the connector source name instead.
+
 ## Metrics
 
 The router emits the following metrics for observability:
 
 | Metric | Description | Attributes |
 |---|---|---|
-| `apollo.router.circuit_breaker.state_change` | Counter incremented on every state transition (closed → open, open → half-open, etc.) | `subgraph.name`, `circuit_breaker.operation_hash`, `circuit_breaker.from_state`, `circuit_breaker.to_state` |
-| `apollo.router.circuit_breaker.rejected` | Counter incremented each time a request is rejected by an open circuit. | `subgraph.name`, `circuit_breaker.operation_hash` |
+| `apollo.router.circuit_breaker.state_change` | Counter incremented on every state transition (closed → open, open → half-open, etc.) | `subgraph.name` or `connector.source.name`, `circuit_breaker.field_coordinate`, `circuit_breaker.from_state`, `circuit_breaker.to_state` |
+| `apollo.router.circuit_breaker.rejected` | Counter incremented each time a request is rejected by an open circuit. | `subgraph.name` or `connector.source.name` |
 
 ## External circuit breaking
 
