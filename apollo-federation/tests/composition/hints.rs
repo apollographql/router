@@ -662,6 +662,15 @@ mod executable_directives {
             "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
             r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#,
         );
+
+        assert!(
+            !composition_result
+                .schema()
+                .schema()
+                .directive_definitions
+                .contains_key("t"),
+            "Directive @t should be removed from the supergraph when locations have no intersection"
+        );
     }
 
     #[test]

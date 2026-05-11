@@ -12,7 +12,7 @@ use super::print_sdl;
 
 /// Invalid `{}` on inputs with required fields (e.g. `AuditsFilterV2`) must not appear on the
 /// composed supergraph, matching `FED-1001.graphql` / graphql-js `printSchema`. Valid `{}` on
-/// all-optional inputs is kept; see `misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it`.
+/// all-optional inputs is kept when all subgraphs agree.
 #[test]
 fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
     let subgraph = ServiceDefinition {
@@ -49,7 +49,7 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
 }
 
 #[test]
-fn misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it() {
+fn misc_drops_empty_object_default_when_only_some_subgraphs_declare_it() {
     let with_default = ServiceDefinition {
         name: "withDefault",
         type_defs: r#"
@@ -87,8 +87,8 @@ fn misc_preserves_empty_object_default_when_only_some_subgraphs_declare_it() {
         .expect("composition should succeed");
     let sdl = print_sdl(supergraph.schema().schema());
     assert!(
-        sdl.contains("filter: CarriersFilterV2 = {}"),
-        "supergraph should keep `= {{}}` when at least one subgraph declares it and the default is valid, got:\n{sdl}"
+        !sdl.contains("filter: CarriersFilterV2 = {}"),
+        "supergraph should drop `= {{}}` when default presence is inconsistent across subgraphs, got:\n{sdl}"
     );
 }
 
