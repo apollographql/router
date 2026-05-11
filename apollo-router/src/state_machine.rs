@@ -2811,4 +2811,70 @@ mod tests {
         assert_matches!(handle.await.unwrap(), Ok(()));
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
     }
+
+    // A RhaiReload event arrives while the state machine is already in Reloading
+    // (e.g. a configuration reload failed and a concurrent rhai script change is
+    // detected before the retry timer fires).  The state machine must retry
+    // immediately via the event arm without waiting for the timer.
+    #[test(tokio::test(start_paused = true))]
+    async fn router_factory_error_rhai_reload_while_reloading() {
+        let mut seq = Sequence::new();
+        let mut router_factory = MockMyRouterConfigurator::new();
+
+        // Startup
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        // Configuration reload fails → Reloading state.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("transient config reload failure")));
+
+        // RhaiReload arrives while in Reloading → immediate retry via event arm → succeeds.
+        router_factory
+            .expect_create()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _, _, _, _, _| Ok(mock_router_ok()));
+
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let notify = Arc::new(Notify::new());
+        let state_machine = StateMachine::for_tests(server_factory, router_factory, notify.clone());
+
+        let (tx, rx) = mpsc::channel::<Event>(16);
+        let stream = ReceiverStream::new(rx);
+        let handle = tokio::spawn(state_machine.process_events(stream));
+
+        for event in startup_events() {
+            tx.send(event).await.unwrap();
+            notify.notified().await;
+        }
+
+        // Trigger a failing configuration reload (a new config with default settings,
+        // distinct from the startup config so accumulate_inputs sees a change).
+        tx.send(UpdateConfiguration(Arc::new(
+            Configuration::builder().build().unwrap(),
+        )))
+        .await
+        .unwrap();
+        notify.notified().await; // initial reload attempt failed → now in Reloading
+
+        // A rhai script change is detected before the retry timer fires.
+        // The state machine must pick this up immediately via the event arm and
+        // complete the reload — no clock advance required.
+        let reload_done = notify.notified();
+        tx.send(RhaiReload).await.unwrap();
+        reload_done.await; // reload completed successfully → back in Running
+
+        tx.send(Shutdown).await.unwrap();
+        drop(tx);
+
+        assert_matches!(handle.await.unwrap(), Ok(()));
+        assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
 }
