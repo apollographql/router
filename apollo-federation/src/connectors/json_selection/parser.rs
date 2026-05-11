@@ -222,6 +222,15 @@ impl JSONSelection {
         }
     }
 
+    /// Compare this selection's top-level structure to another's, ignoring the
+    /// `spec` field. Useful when surveying how the same source text parses
+    /// under different [`ConnectSpec`] versions: PartialEq on `JSONSelection`
+    /// includes `spec`, so two structurally-identical parses for different
+    /// specs would otherwise compare unequal.
+    pub fn structural_eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+
     pub fn is_empty(&self) -> bool {
         match &self.inner {
             TopLevelSelection::Named(subselect) => subselect.selections.is_empty(),

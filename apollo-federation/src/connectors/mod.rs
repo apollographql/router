@@ -42,6 +42,8 @@ use apollo_compiler::name;
 use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
+pub use json_selection::DiffKind;
+pub use json_selection::FollowedBy;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub(crate) use json_selection::LitExpr;

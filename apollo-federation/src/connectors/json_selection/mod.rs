@@ -1,4 +1,5 @@
 mod apply_to;
+mod diff;
 pub(crate) mod helpers;
 mod immutable;
 mod known_var;
@@ -11,6 +12,8 @@ mod selection_set;
 mod selection_trie;
 
 pub use apply_to::*;
+pub use diff::DiffKind;
+pub use diff::FollowedBy;
 pub(crate) use lit_expr::LitExpr;
 // Pretty code is currently only used in tests, so this cfg is to suppress the
 // unused lint warning. If pretty code is needed in not test code, feel free to
