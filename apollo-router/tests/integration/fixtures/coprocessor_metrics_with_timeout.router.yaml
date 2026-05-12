@@ -1,0 +1,18 @@
+# This coprocessor url will be updated to a test-scoped mock server
+coprocessor:
+  url: "<replace>"
+  router:
+    request:
+      body: true
+# set timeout to ensure coprocessor early termination
+traffic_shaping:
+  router:
+    timeout: 100ms
+# export recorded metrics
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        listen: "127.0.0.1:0"
+        path: "/metrics"

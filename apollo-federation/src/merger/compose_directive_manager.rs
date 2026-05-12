@@ -726,7 +726,7 @@ impl ErrorReporter {
         );
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\". {}",
+                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\".{}",
                 subgraph.name,
                 did_you_mean(words),
             ),

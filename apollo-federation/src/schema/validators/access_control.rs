@@ -499,7 +499,7 @@ impl<'validator> AccessControlValidator<'validator> {
             Err(FederationError::SingleFederationError(
                 SingleFederationError::MissingTransitiveAuthRequirements {
                     message: format!(
-                        "Field \"{}\" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field \"{condition_position}\" data from @{} selection set.",
+                        "Field \"{}\" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive data in inline fragment type condition \"{condition_position}\" from @{} selection set.",
                         auth_requirements.field_coordinate, auth_requirements.directive
                     ),
                 },

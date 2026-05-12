@@ -327,7 +327,7 @@ mod tests {
             "Composition should fail due to missing http argument in @source directive"
         );
 
-        let errors = result.unwrap_err();
+        let errors = result.unwrap_err().errors;
         // Check that we have exactly 1 error
         assert_eq!(errors.len(), 1, "Should have exactly 1 error");
 
@@ -384,7 +384,7 @@ mod tests {
             "Composition should fail due to missing http argument in @connect directive"
         );
 
-        let errors = result.unwrap_err();
+        let errors = result.unwrap_err().errors;
         // Check that we have exactly 1 error
         assert_eq!(errors.len(), 1, "Should have exactly 1 error");
 
