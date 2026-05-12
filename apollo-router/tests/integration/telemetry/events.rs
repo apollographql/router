@@ -1,3 +1,6 @@
+use std::time::Duration;
+use std::time::Instant;
+
 use insta::assert_yaml_snapshot;
 use serde::Deserialize;
 use serde::Serialize;
@@ -323,7 +326,7 @@ impl EventTest {
         let (_, response) = self.router.execute_default_query().await;
         response.error_for_status()?;
 
-        Ok(self.capture_logged_events())
+        Ok(self.capture_logged_events().await)
     }
 
     async fn execute_query(&mut self, query: Query) -> Result<Vec<EventLog>, BoxError> {
@@ -332,12 +335,53 @@ impl EventTest {
         let (_, response) = self.router.execute_query(query).await;
         response.error_for_status()?;
 
-        Ok(self.capture_logged_events())
+        Ok(self.capture_logged_events().await)
     }
 
-    fn capture_logged_events(&mut self) -> Vec<EventLog> {
-        self.router
-            .capture_logs(|s| serde_json::from_str::<EventLog>(&s).ok())
+    // Drain the router's stdout channel for a deadline-bounded window after
+    // the HTTP response returns, since the `router.response` /
+    // `supergraph.response` events are emitted *after* the response is
+    // written to the wire. Returning immediately on the first
+    // `try_recv` miss (the previous behaviour) caused
+    // `test_standard_events` to flake whenever the test thread reached
+    // `capture_logs` before all six events had crossed the
+    // `stdio_rx` channel — same shape as the
+    // `test_updown_counter_temporality_with_delta` miss in
+    // `blog-details.md` F4.
+    //
+    // Heuristic: poll until `quiet` ms pass with no new events, capped
+    // at `deadline`. Default tuning is conservative (200ms quiet, 5s
+    // deadline) — the events arrive within sub-millisecond of each
+    // other once the router's tracing layer flushes them, so 200ms is
+    // already well past the worst observed batch interval.
+    async fn capture_logged_events(&mut self) -> Vec<EventLog> {
+        let deadline = Duration::from_secs(5);
+        let quiet = Duration::from_millis(200);
+        let start = Instant::now();
+        // `last_event` is `None` until at least one event has been
+        // observed. Initializing it as `Some(Instant::now())` at function
+        // entry would make the `last_event.elapsed() >= quiet` check fire
+        // at T+200 ms relative to entry whenever no events have arrived
+        // yet — which would convert the 5 s deadline into an unreachable
+        // upper bound for the cold-start case (the exact scenario this
+        // function exists to handle).
+        let mut last_event: Option<Instant> = None;
+        let mut events: Vec<EventLog> = Vec::new();
+        loop {
+            let new = self
+                .router
+                .capture_logs(|s| serde_json::from_str::<EventLog>(&s).ok());
+            if !new.is_empty() {
+                events.extend(new);
+                last_event = Some(Instant::now());
+            }
+            let quiet_reached = last_event.is_some_and(|t| t.elapsed() >= quiet);
+            if quiet_reached || start.elapsed() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        events
     }
 
     async fn graceful_shutdown(&mut self) {

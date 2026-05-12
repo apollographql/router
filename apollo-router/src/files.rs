@@ -148,20 +148,18 @@ fn watch_rhai_with_duration(path: &Path, duration: Duration) -> impl Stream<Item
                         }
 
                         if proceed {
-                            loop {
-                                match watch_sender.try_send(()) {
-                                    Ok(_) => break,
-                                    Err(err) => {
-                                        tracing::warn!(
-                                            "could not process file watch notification. {}",
-                                            err.to_string()
-                                        );
-                                        if matches!(err, TrySendError::Full(_)) {
-                                            std::thread::sleep(Duration::from_millis(50));
-                                        } else {
-                                            panic!("event channel failed: {err}");
-                                        }
-                                    }
+                            match watch_sender.try_send(()) {
+                                Ok(_) => (),
+                                // Same behaviour as the config file watcher (#8336): if the
+                                // channel is full a reload is already pending, and when it
+                                // runs it will re-read the files from disk and pick up the
+                                // latest contents.  There is a narrow race where a change
+                                // that arrives during the read itself could be missed until
+                                // a subsequent edit triggers a new notification, which is
+                                // the same trade-off accepted for the config watcher.
+                                Err(TrySendError::Full(_)) => (),
+                                Err(err) => {
+                                    panic!("event channel failed: {err}");
                                 }
                             }
                         }
@@ -226,6 +224,32 @@ pub(crate) mod tests {
         write_and_flush(&mut file, "Some data 2").await;
         write_and_flush(&mut file, "Some data 3").await;
         write_and_flush(&mut file, "Some data 4").await;
+        assert!(
+            futures::poll!(watch.next()).is_ready(),
+            "polling the future should notice the event"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !futures::poll!(watch.next()).is_ready(),
+            "should only have one event for multiple updates"
+        );
+    }
+
+    // Rapid rhai file changes while the state machine is busy must not block an
+    // OS thread in a retry loop that can panic when the channel is eventually
+    // closed.  The watcher must drop duplicate events instead of retrying so
+    // that the callback always returns promptly.
+    #[test(tokio::test)]
+    async fn clog_watch_rhai() {
+        let dir = tempfile::tempdir().unwrap();
+        let rhai_path = dir.path().join("script.rhai");
+        let mut file = std::fs::File::create(&rhai_path).unwrap();
+        let mut watch = watch_rhai_with_duration(&rhai_path, Duration::from_millis(100));
+        assert!(futures::poll!(watch.next()).is_ready());
+        write_and_flush(&mut file, "// v1").await;
+        write_and_flush(&mut file, "// v2").await;
+        write_and_flush(&mut file, "// v3").await;
+        write_and_flush(&mut file, "// v4").await;
         assert!(
             futures::poll!(watch.next()).is_ready(),
             "polling the future should notice the event"
