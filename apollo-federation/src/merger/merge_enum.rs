@@ -257,31 +257,32 @@ impl Merger {
         dest_name: &Name,
         value_name: &Name,
     ) {
-        // As soon as we find a subgraph that has the type but not the member, we hint.
-        for enum_type in sources.values().flatten() {
-            if !enum_type.values.contains_key(value_name) {
-                self.error_reporter.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForOutputEnum,
-                    format!(
-                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
-                    ),
-                    dest_name,
-                    sources,
-                    &self.subgraphs,
-                    |_| Some("yes".to_string()),
-                    |source, _| {
-                        if source.values.contains_key(value_name) {
-                            Some("yes".to_string())
-                        } else {
-                            Some("no".to_string())
-                        }
-                    },
-                    |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
-                    |_, subgraphs| format!(" but not in {subgraphs}"),
-                    false,
-                    false,
-                );
-            }
+        if sources
+            .values()
+            .flatten()
+            .any(|e| !e.values.contains_key(value_name))
+        {
+            self.error_reporter.report_mismatch_hint(
+                HintCode::InconsistentEnumValueForOutputEnum,
+                format!(
+                    "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
+                ),
+                dest_name,
+                sources,
+                &self.subgraphs,
+                |_| Some("yes".to_string()),
+                |source, _| {
+                    if source.values.contains_key(value_name) {
+                        Some("yes".to_string())
+                    } else {
+                        Some("no".to_string())
+                    }
+                },
+                |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                |_, subgraphs| format!(" but not in {subgraphs}"),
+                false,
+                false,
+            );
         }
     }
 }

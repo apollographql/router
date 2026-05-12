@@ -14,6 +14,7 @@ use crate::ensure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::HasLocations;
+use crate::error::Locations;
 use crate::error::SingleFederationError;
 use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -59,14 +60,18 @@ pub(crate) fn validate_merged_schema(
                 if field_pos.get(supergraph_schema.schema()).is_err() {
                     // This means that the type was defined (or at least implemented the interface)
                     // only in subgraphs where the interface didn't have that field.
-                    let subgraphs_with_interface_field = subgraphs
+                    let mut locations: Locations = Vec::new();
+                    let subgraphs_with_interface_field: Vec<_> = subgraphs
                         .iter()
                         .filter(|subgraph| {
                             interface_field_pos.get(subgraph.schema().schema()).is_ok()
                         })
+                        .inspect(|subgraph| {
+                            locations.extend(interface_field_pos.locations(subgraph));
+                        })
                         .map(|subgraph| subgraph.name.clone())
-                        .collect::<Vec<_>>();
-                    let subgraphs_with_type_implementing_interface = subgraphs
+                        .collect();
+                    let subgraphs_with_type_implementing_interface: Vec<_> = subgraphs
                         .iter()
                         .filter(|subgraph| {
                             let Some(subgraph_type) =
@@ -84,8 +89,11 @@ pub(crate) fn validate_merged_schema(
                                 _ => false,
                             }
                         })
+                        .inspect(|subgraph| {
+                            locations.extend(type_pos.locations(subgraph));
+                        })
                         .map(|subgraph| subgraph.name.clone())
-                        .collect::<Vec<_>>();
+                        .collect();
                     errors.push(CompositionError::InterfaceFieldNoImplem {
                         message: format!(
                             "Interface field \"{}\" is declared in {} but type \"{}\", which implements \"{}\" only in {} does not have field \"{}\".",
@@ -95,7 +103,8 @@ pub(crate) fn validate_merged_schema(
                             interface_name,
                             human_readable_subgraph_names(subgraphs_with_type_implementing_interface.iter()),
                             interface_field_pos.field_name,
-                        )
+                        ),
+                        locations,
                     });
                 }
 

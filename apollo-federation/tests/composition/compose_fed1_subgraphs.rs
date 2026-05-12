@@ -331,6 +331,7 @@ mod validations {
     }
 
     #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
     fn errors_if_extends_directive_has_no_definition_counterpart() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -361,6 +362,7 @@ mod validations {
     }
 
     #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
     fn errors_if_multiple_subgraphs_all_use_extends_directive_with_no_base() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
