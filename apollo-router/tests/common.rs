@@ -1628,8 +1628,7 @@ impl IntegrationTest {
         // Previously 3 s. Raised to 10 s when the harness began injecting
         // a `connection_shutdown_timeout` default to prevent the 60 s
         // production default from hanging tests that hold HTTP/2 client
-        // connections open past the response (see `merge_overrides` and
-        // flaky-test-phases/blog-details.md Arc 2a for the full story).
+        // connections open past the response (see `merge_overrides`).
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(10) {
@@ -1904,11 +1903,10 @@ fn merge_overrides(
     //
     // This race is latent in any test that makes an HTTP request and then
     // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
-    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6 and
-    // flaky-test-phases/blog-details.md Arc 2a for the full story). Rather
-    // than patch each vulnerable fixture individually, inject a 5 s default
-    // at the harness layer, paired with a widened `assert_shutdown` budget
-    // (see that helper for the matching constant).
+    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6).
+    // Rather than patch each vulnerable fixture individually, inject a 5 s
+    // default at the harness layer, paired with a widened `assert_shutdown`
+    // budget (see that helper for the matching constant).
     //
     // The 5 s value is a trade-off:
     // - Must be long enough that intentionally-in-flight requests finish
