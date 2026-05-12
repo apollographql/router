@@ -1644,6 +1644,10 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
     use crate::integration::common::Query;
     use crate::integration::common::graph_os_enabled;
 
+    const ON_ERROR_CONFIG: &str = include_str!("fixtures/coprocessor_conditional.router.yaml");
+    const NO_ERROR_CONFIG: &str =
+        include_str!("fixtures/coprocessor_conditional_no_error.router.yaml");
+
     fn query(deferred: bool) -> Query {
         let query_str = if deferred {
             r#"query Q { topProducts { name ... @defer { inStock } ... @defer { reviews { id author { username ... @defer { name } } } } } }"#
@@ -1714,7 +1718,13 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             .set_body_json(response_json)
     }
 
-    async fn send_query_to_coprocessor_enabled_router(
+    /// Core helper: starts mock servers for the coprocessor and four subgraphs,
+    /// runs the router with the given `config_template` (which must contain
+    /// `<replace>` where the coprocessor URL should go), executes `query`, and
+    /// returns the list of response chunks and a map of coprocessor hit counts
+    /// keyed by stage name.
+    async fn send_query_with_config(
+        config_template: &str,
         query: Query,
         subgraph_response_products: ResponseTemplate,
         subgraph_response_inventory: ResponseTemplate,
@@ -1770,10 +1780,7 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             .await;
 
         let mut router = IntegrationTest::builder()
-            .config(
-                include_str!("fixtures/coprocessor_conditional.router.yaml")
-                    .replace("<replace>", &mock_coprocessor.uri()),
-            )
+            .config(config_template.replace("<replace>", &mock_coprocessor.uri()))
             .subgraph_override("products", mock_products.uri())
             .subgraph_override("inventory", mock_inventory.uri())
             .subgraph_override("reviews", mock_reviews.uri())
@@ -1823,7 +1830,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(false),
             response_template(products_response(false)),
             response_template(inventory_response(false)),
@@ -1842,7 +1850,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
         if !graph_os_enabled() {
             return Ok(());
         }
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(true),
             response_template(products_response(false)),
             delayed_response_template(inventory_response(false), 100),
@@ -1862,7 +1871,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(false),
             response_template(products_response(true)),
             response_template(inventory_response(false)),
@@ -1884,7 +1894,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
         }
 
         // NB: interestingly this still spawns the deferred tasks
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(true),
             response_template(products_response(true)),
             delayed_response_template(inventory_response(false), 100),
@@ -1905,7 +1916,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(false),
             response_template(products_response(false)),
             response_template(inventory_response(true)),
@@ -1926,7 +1938,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(true),
             response_template(products_response(false)),
             delayed_response_template(inventory_response(true), 100),
@@ -1947,7 +1960,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(false),
             response_template(products_response(false)),
             response_template(inventory_response(false)),
@@ -1968,7 +1982,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(true),
             response_template(products_response(false)),
             delayed_response_template(inventory_response(false), 100),
@@ -1989,7 +2004,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(false),
             response_template(products_response(false)),
             response_template(inventory_response(true)),
@@ -2010,7 +2026,8 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
             return Ok(());
         }
 
-        let (response_chunks, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
             query(true),
             response_template(products_response(false)),
             delayed_response_template(inventory_response(true), 100),
@@ -2021,6 +2038,129 @@ mod coprocessor_selectors_on_potentially_deferred_responses {
         assert_eq!(response_chunks.len(), 4);
         assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 2);
         assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 2);
+
+        Ok(())
+    }
+
+    // --- on_graphql_error: false ---
+    // The `on_graphql_error: false` condition is the complement: it fires when
+    // a response chunk contains *no* GraphQL errors.  The tests below verify
+    // that the condition works symmetrically with the `true` case above.
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_non_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // No errors → on_graphql_error: false evaluates to true → coprocessor fires.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_non_deferred_with_errors() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Errors present → on_graphql_error: false evaluates to false → coprocessor
+        // must not fire.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(true)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // All 4 chunks are error-free → coprocessor fires once per chunk.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 4);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 4);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_with_error_in_first_chunk() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Error in the initial chunk only: the 3 error-free deferred chunks
+        // each trigger the coprocessor; the initial chunk does not.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(true)), // error in initial chunk
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 3);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_with_error_in_deferred_chunk() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Error in one deferred chunk (inventory → second chunk): the initial
+        // chunk and the two remaining deferred chunks trigger the coprocessor;
+        // the error chunk does not.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(true), 100), // error in deferred chunk
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 3);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3);
 
         Ok(())
     }
