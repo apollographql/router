@@ -320,8 +320,7 @@ impl Selector for ConnectorSelector {
                         (None, Some(_)) => {
                             let should_mask = response.context.extensions().with_lock(|lock| {
                                 let subgraph = lock
-                                    .get::<crate::services::header_masking::ConnectorSubgraphName>(
-                                    )
+                                    .get::<crate::services::header_masking::ConnectorSubgraphName>()
                                     .map(|n| n.0.clone());
                                 lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                     .map(|m| {

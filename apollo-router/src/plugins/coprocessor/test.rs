@@ -7509,11 +7509,20 @@ mod tests {
             });
 
             // Create masking rules for sensitive headers
-            let inner = Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&crate::configuration::header_masking_config::HeaderMaskingConfig {
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
-                    }));
-            let masking_rules = Some(Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(inner, Default::default())));
+                    },
+                ),
+            );
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ),
+            ));
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7630,11 +7639,20 @@ mod tests {
             });
 
             // Create masking rules
-            let inner = Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&crate::configuration::header_masking_config::HeaderMaskingConfig {
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["x-api-key".to_string()],
-                    }));
-            let masking_rules = Some(Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(inner, Default::default())));
+                    },
+                ),
+            );
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ),
+            ));
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
@@ -7814,11 +7832,20 @@ mod tests {
             });
 
             // Configure to mask only authorization and cookie
-            let inner = Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&crate::configuration::header_masking_config::HeaderMaskingConfig {
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
-                    }));
-            let masking_rules = Some(Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(inner, Default::default())));
+                    },
+                ),
+            );
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ),
+            ));
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7930,14 +7957,23 @@ mod tests {
             });
 
             // Custom sensitive headers list
-            let inner = Arc::new(crate::services::header_masking::HeaderMaskingRules::from_config(&crate::configuration::header_masking_config::HeaderMaskingConfig {
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec![
                             "x-internal-token".to_string(),
                             "x-secret-key".to_string(),
                         ],
-                    }));
-            let masking_rules = Some(Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(inner, Default::default())));
+                    },
+                ),
+            );
+            let masking_rules = Some(Arc::new(
+                crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ),
+            ));
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -8115,9 +8151,7 @@ mod tests {
             ));
             let parse_masking = |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
                 v.get("masking")
-                    .and_then(|hm| {
-                        serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok()
-                    })
+                    .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
                     .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
             };
             let global_request = all

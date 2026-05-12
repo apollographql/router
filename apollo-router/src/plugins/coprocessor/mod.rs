@@ -213,14 +213,11 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 &HeaderMaskingConfig::default(),
             ));
 
-            let parse_masking =
-                |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
-                    v.get("masking")
-                        .and_then(|hm| {
-                            serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok()
-                        })
-                        .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
-                };
+            let parse_masking = |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
+                v.get("masking")
+                    .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
+                    .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
+            };
 
             let global_request = all
                 .and_then(|a| a.get("request"))
@@ -231,20 +228,15 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 .and_then(parse_masking)
                 .unwrap_or_else(|| default_rules.clone());
 
-            let mut per_subgraph_request: HashMap<String, Arc<HeaderMaskingRules>> =
-                HashMap::new();
+            let mut per_subgraph_request: HashMap<String, Arc<HeaderMaskingRules>> = HashMap::new();
             let mut per_subgraph_response: HashMap<String, Arc<HeaderMaskingRules>> =
                 HashMap::new();
             if let Some(serde_json::Value::Object(subgraphs)) = headers.get("subgraphs") {
                 for (name, sg_config) in subgraphs {
-                    if let Some(rules) =
-                        sg_config.get("request").and_then(&parse_masking)
-                    {
+                    if let Some(rules) = sg_config.get("request").and_then(&parse_masking) {
                         per_subgraph_request.insert(name.clone(), rules);
                     }
-                    if let Some(rules) =
-                        sg_config.get("response").and_then(&parse_masking)
-                    {
+                    if let Some(rules) = sg_config.get("response").and_then(&parse_masking) {
                         per_subgraph_response.insert(name.clone(), rules);
                     }
                 }
