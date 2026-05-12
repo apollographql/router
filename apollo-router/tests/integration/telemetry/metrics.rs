@@ -1,15 +1,9 @@
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::method;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -21,81 +15,28 @@ const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
 
-/// Stand up a wiremock that responds 200 to any `POST /` with a synthesized
-/// `LicenseQuery` GraphQL response. We return `RouterEntitlementsResult`
-/// with `entitlement: null`, which `license_stream::From` maps to
-/// `UplinkResponse::New { response: License::default(), .. }` — the
-/// "unlicensed but valid" path. That lets the router's license-source
-/// state machine make forward progress (it gets an `UpdateLicense` event
-/// and the router transitions to Running) without requiring a real signed
-/// JWT, while still incrementing
-/// `apollo.router.uplink.fetch.count.total{status="success",query="License"}`
-/// on every poll.
-///
-/// Returning `Unchanged` would *not* work for the *first* poll because the
-/// state machine wouldn't have a baseline License to compare against, and
-/// the router would hang in Startup waiting for its first license event.
-async fn mock_license_uplink() -> MockServer {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": {
-                "routerEntitlements": {
-                    "__typename": "RouterEntitlementsResult",
-                    "id": "test-license-id",
-                    "minDelaySeconds": 1,
-                    "entitlement": null,
-                }
-            }
-        })))
-        .mount(&server)
-        .await;
-    server
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
-    // Stand up an Uplink mock first so we can pass its URL into the spawned
-    // router via `APOLLO_UPLINK_ENDPOINTS`. The Studio side (Apollo-protocol
-    // ingress + OTLP) is handled by the harness's per-test `apollo_otlp_server`,
-    // which now has a catch-all `POST → 200` route alongside its specific
-    // `/v1/metrics` capture, so any reporting path the router picks succeeds
-    // deterministically without touching the public Internet.
-    let uplink_mock = mock_license_uplink().await;
-    let uplink_uri = uplink_mock.uri();
-
-    let mut env: HashMap<String, OsString> = HashMap::new();
-    env.insert("APOLLO_UPLINK_ENDPOINTS".to_string(), uplink_uri.into());
-    // Provide fake credentials so the executable selects
-    // `LicenseSource::Registry(uplink_config)` (and therefore actually runs
-    // the License Uplink poller). On CircleCI the harness will overwrite
-    // `APOLLO_KEY` / `APOLLO_GRAPH_REF` with the real
-    // `TEST_APOLLO_KEY` / `TEST_APOLLO_GRAPH_REF` values, which is fine —
-    // the mock accepts any key.
-    env.insert("APOLLO_KEY".to_string(), "test-mocked-key".into());
-    env.insert(
-        "APOLLO_GRAPH_REF".to_string(),
-        "test-mocked-graph@current".into(),
-    );
-
-    // Force every request to be sampled by Apollo's field-level instrumentation
-    // so the apollo_exporter pipeline always sees traces and emits the
-    // `studio_reports_total{report_type="traces"}` counter — the production
-    // default is 1 % which is non-deterministic over the 6 queries this test
-    // sends. Drop the batch processor's `scheduled_delay` so the 30 s
-    // assertion deadline doesn't have to wait for a long timer to fire.
-    // We patch `PROMETHEUS_CONFIG` in place rather than forking a whole new
-    // fixture; `merge_overrides` will subsequently populate the mock
-    // endpoints into the same `telemetry.apollo` block.
-    let mut config_value: serde_yaml::Value =
-        serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
-    // The OTLP traces path defaults to gRPC. wiremock only speaks HTTP, so
-    // we pin both OTLP protocols to HTTP/protobuf; otherwise the OTLP
-    // traces export silently fails to connect, the
+    // Force every request to be sampled by Apollo's field-level
+    // instrumentation so the apollo_exporter pipeline always sees traces
+    // and emits the `studio_reports_total{report_type="traces"}`
+    // counter — the production default is 1 % which is non-deterministic
+    // over the 6 queries this test sends. Drop the batch processor's
+    // `scheduled_delay` so the 30 s assertion deadline doesn't have to
+    // wait for a long timer to fire. We patch `PROMETHEUS_CONFIG` in
+    // place rather than forking a whole new fixture; `merge_overrides`
+    // will subsequently populate the mock endpoints into the same
+    // `telemetry.apollo` block.
+    //
+    // The OTLP traces path defaults to gRPC. wiremock only speaks HTTP,
+    // so we pin both OTLP protocols to HTTP/protobuf; otherwise the
+    // OTLP traces export silently fails to connect, the
     // `studio_reports_total{report_type="traces"}` counter never
     // increments, and the assertion times out. Apollo-protocol metrics
     // (counter `report_type="metrics"`) use plain HTTP irrespective of
     // this setting.
+    let mut config_value: serde_yaml::Value =
+        serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
     let apollo_block: serde_yaml::Value = serde_yaml::from_str(
         "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
     )
@@ -108,31 +49,35 @@ async fn test_metrics_reloading() {
         .insert(serde_yaml::Value::String("apollo".into()), apollo_block);
     let config = serde_yaml::to_string(&config_value).unwrap();
 
-    let mut router = IntegrationTest::builder()
-        .config(config)
-        .env(env)
-        .build()
-        .await;
-
-    // The harness suppresses its `--supergraph <path>` CLI arg when any of
-    // {`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`,
-    // `APOLLO_GRAPH_ARTIFACT_REFERENCE`, `APOLLO_GRAPH_REF`} is set in the
-    // per-test env. Setting `APOLLO_GRAPH_REF` (which we need for the
-    // license-source decision above) trips that suppression, which would
-    // route the executable into `SchemaSource::Registry` and cause the
-    // router to look for the *schema* on Uplink as well. Re-introduce the
-    // file-based schema source by pointing
-    // `APOLLO_ROUTER_SUPERGRAPH_PATH` at the schema the harness wrote, so
-    // `SchemaSource::File` wins regardless of `APOLLO_GRAPH_REF`. This
-    // keeps the License poller pointed at our Uplink mock without
-    // forcing the schema to be fetched from there as well.
-    let schema_path = router.test_schema_location().to_string_lossy().into_owned();
-    let mut extra_env: HashMap<String, OsString> = HashMap::new();
-    extra_env.insert(
-        "APOLLO_ROUTER_SUPERGRAPH_PATH".to_string(),
-        schema_path.into(),
-    );
-    router.set_env(extra_env);
+    // No explicit env / no real-creds opt-in. The harness now provides:
+    //   * Fake `APOLLO_KEY` / `APOLLO_GRAPH_REF` so the executable picks
+    //     `LicenseSource::Registry` (and the License poller actually
+    //     runs, incrementing
+    //     `apollo_router_uplink_fetch_*{query="License"}`).
+    //   * `APOLLO_UPLINK_ENDPOINTS` pinned to a per-test wiremock that
+    //     responds to `LicenseQuery` with a `RouterEntitlementsResult`
+    //     whose `entitlement.jwt` is `TEST_LICENSE_JWT_FULL_FEATURES` —
+    //     a real HS256-signed JWT carrying no `allowedFeatures` claim
+    //     (legacy-compat → all features allowed).
+    //   * `APOLLO_TEST_INTERNAL_UPLINK_JWKS=TEST_JWKS_ENDPOINT` so the
+    //     spawned router's `License::jwks()` validates that JWT against
+    //     the bundled test JWKS instead of the production JWKS baked
+    //     into the binary. The License state machine therefore reaches
+    //     `Licensed` (with all features), not the
+    //     `Unlicensed` `License::default()` — important for any test
+    //     downstream of this harness that exercises a paid feature, but
+    //     also fine for this test, which just asserts the License
+    //     poller's success counter increments.
+    //   * Both `telemetry.apollo.endpoint` and
+    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     per-test `apollo_otlp_server` mock with a catch-all
+    //     `POST → 200` route, so all four reporting paths
+    //     (`studio_reports_total{report_type=metrics|traces}` ×
+    //     Apollo-protocol + OTLP) complete deterministically.
+    //
+    // See `apollo-router/tests/common.rs::start()` and
+    // `merge_overrides()` for the wiring.
+    let mut router = IntegrationTest::builder().config(config).build().await;
 
     router.start().await;
     router.assert_started().await;
@@ -214,8 +159,6 @@ async fn test_metrics_reloading() {
             Some(Duration::from_secs(30)),
         )
         .await;
-
-    drop(uplink_mock);
 }
 
 #[track_caller]

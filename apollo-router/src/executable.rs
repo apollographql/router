@@ -1040,6 +1040,7 @@ mod tests {
             use crate::router::ConfigurationSource;
             let supergraph = crate::configuration::Supergraph::builder().build();
             let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                reload: Default::default(),
                 supergraph,
                 health_check: Default::default(),
                 sandbox: Default::default(),
@@ -1122,6 +1123,7 @@ mod tests {
             use crate::router::ConfigurationSource;
             let supergraph = crate::configuration::Supergraph::builder().build();
             let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                reload: Default::default(),
                 supergraph,
                 health_check: Default::default(),
                 sandbox: Default::default(),

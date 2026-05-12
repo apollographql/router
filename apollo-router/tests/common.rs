@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
@@ -68,6 +70,7 @@ use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::http::Method;
+use wiremock::matchers::body_string_contains;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
@@ -82,6 +85,151 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
     REDACT_HASH_RE
         .replace(key, ":hash:[query-hash]")
         .into_owned()
+}
+
+/// Default test license JWT served by `mock_license_uplink()` and
+/// validated by the spawned router against `TEST_JWKS_ENDPOINT` (via
+/// `APOLLO_TEST_INTERNAL_UPLINK_JWKS`, set in `IntegrationTest::start()`).
+///
+/// Mirrors `JWT_WITH_ALLOWED_FEATURES_NONE` in
+/// `tests/integration/allowed_features.rs`: signed by the HS256 test
+/// secret in `license.jwks.json`, no `allowedFeatures` claim. The
+/// router's `LicenseLimits::default()` interprets a missing claim as
+/// "all features allowed" (legacy compatibility for licenses minted
+/// before the claim was introduced), so the spawned router unlocks
+/// commercial features (federated subscriptions, coprocessors, entity
+/// caching, traffic shaping, datadog/apollo OTLP telemetry) under
+/// this license. Tests that need a *specific* license (eg. expired,
+/// or a constrained `allowedFeatures` set) override this default
+/// using `.jwt(...)` on the builder, which sets
+/// `APOLLO_ROUTER_LICENSE` directly and beats Uplink-fetched
+/// licenses via `LicenseSource::Env` precedence.
+///
+/// The JWT is minted at runtime each time the harness starts a test,
+/// using the bundled HS256 test secret and a rolling `warnAt`/`haltAt`
+/// of `now() + ~6 months`. This eliminates the periodic-rotation
+/// toil a static-pinned JWT would incur. The 6-month horizon stays
+/// well within tokio's `Instant`-based `DelayQueue` scheduler cap
+/// (the consumer is `apollo-router/src/uplink/license_stream.rs`,
+/// which calls `DelayQueue::insert_at(claims.halt_at)`).
+static TEST_LICENSE_JWT_FULL_FEATURES: LazyLock<String> = LazyLock::new(mint_test_license_jwt);
+
+/// HS256 test secret bundled in `apollo-router/src/uplink/testdata/license.jwks.json`.
+/// JWK format (`oct`/`HS256`/`use=sig`) with `k` base64url-encoded.
+/// Decoded value is the byte string `make_a_long_secret_for_rfc_7518_256_bits_requirement_blah`.
+const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
+    "bWFrZV9hX2xvbmdfc2VjcmV0X2Zvcl9yZmNfNzUxOF8yNTZfYml0c19yZXF1aXJlbWVudF9ibGFo";
+
+/// Mint a fresh test license JWT signed with the bundled HS256 test secret.
+/// `warnAt` and `haltAt` are pinned to `now() + ~6 months` so the JWT
+/// stays valid through any reasonable test session and well within
+/// tokio's `DelayQueue` scheduler cap.
+fn mint_test_license_jwt() -> String {
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_secs();
+    let six_months_secs: u64 = 60 * 60 * 24 * 180;
+    let halt_at = now + six_months_secs;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": halt_at,
+        "haltAt": halt_at,
+    });
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
+/// Stand up a per-test wiremock that stands in for
+/// `uplink.api.apollographql.com`. The harness wires this server's URL
+/// into the spawned router as `APOLLO_UPLINK_ENDPOINTS` whenever the
+/// router is going to receive an `APOLLO_KEY` (which is the harness
+/// default — see `IntegrationTest::start()`), so neither the License
+/// poller (`LicenseSource::Registry`) nor the schema poller
+/// (`SchemaSource::Registry`) reaches the real public Internet during
+/// integration tests.
+///
+/// Three matchers, in priority order:
+///
+/// 1. `LicenseQuery` (priority 5) returns
+///    `RouterEntitlementsResult { entitlement: { jwt: ... }, .. }`
+///    where the JWT is `TEST_LICENSE_JWT_FULL_FEATURES`. The
+///    license-stream `From` impl runs `License::from_str` on that
+///    JWT, which validates against the JWKS pointed at by
+///    `APOLLO_TEST_INTERNAL_UPLINK_JWKS` (also set in `start()`) and
+///    yields a license with all commercial features enabled.
+///    `apollo.router.uplink.fetch.count.total{status="success",query="License"}`
+///    increments on every poll.
+///
+///    Tests that need a specific license (eg. expired, or a
+///    constrained `allowedFeatures` set) call `.jwt(...)` on the
+///    builder, which sets `APOLLO_ROUTER_LICENSE` directly. The
+///    router's executable orders `LicenseSource::Env` ahead of
+///    `LicenseSource::Registry`, so the Uplink mock is bypassed for
+///    those tests.
+///
+/// 2. Catch-all `POST → 200 {"data": null}` (priority 10) for any
+///    other Uplink operation a router version might issue (eg.
+///    `SupergraphSdlQuery` if a test exercises
+///    `SchemaSource::Registry`, or `PersistedQueriesManifestQuery`
+///    when `APOLLO_GRAPH_REF` is set during PQ tests). Returns 200
+///    with an empty data envelope rather than 404, so the polling
+///    loop doesn't enter an error path that pollutes test logs.
+///
+/// Note: the harness does NOT bootstrap `SchemaSource::Registry`. The
+/// typical path pins schema via `--supergraph` at the CLI; tests that
+/// would activate Registry (`APOLLO_GRAPH_REF` set in `self.env`
+/// without `--supergraph`) will hang in Startup because the catch-all
+/// returns no useful payload and `UplinkResponse::Unchanged` cannot
+/// bootstrap a missing baseline. If a future test needs Registry-source
+/// schema, the mock has to return a real `supergraphSdl` body (mirror
+/// the License JWT pattern above).
+///
+/// Lifted into the harness from a per-test helper that originally
+/// lived in `tests/integration/telemetry/metrics.rs::test_metrics_reloading`
+/// (`b3a0986e0`).
+async fn mock_license_uplink() -> wiremock::MockServer {
+    let server = wiremock::MockServer::start().await;
+
+    Mock::given(method(Method::POST))
+        .and(body_string_contains("LicenseQuery"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "routerEntitlements": {
+                    "__typename": "RouterEntitlementsResult",
+                    "id": "test-license-id",
+                    "minDelaySeconds": 1,
+                    "entitlement": {
+                        "jwt": &*TEST_LICENSE_JWT_FULL_FEATURES,
+                    },
+                }
+            }
+        })))
+        .with_priority(5)
+        .mount(&server)
+        .await;
+
+    Mock::given(method(Method::POST))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": null})))
+        .with_priority(10)
+        .mount(&server)
+        .await;
+
+    server
 }
 
 /// Global registry to keep track of allocated ports across all tests
@@ -216,6 +364,26 @@ pub struct IntegrationTest {
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
     _apollo_otlp_server: wiremock::MockServer,
+    /// Per-test wiremock that stands in for `uplink.api.apollographql.com`.
+    /// The harness wires `APOLLO_UPLINK_ENDPOINTS` to this server's URL
+    /// **only in the default-credentials branch** of `start()` —
+    /// i.e. when `with_real_studio_creds == false`. The opt-in real-creds
+    /// branch leaves `APOLLO_UPLINK_ENDPOINTS` unset so the spawned router
+    /// reaches the real `uplink.api.apollographql.com`, and the per-test
+    /// mock is left idle (still bound to a loopback ephemeral port; just
+    /// not referenced).
+    ///
+    /// See `mock_license_uplink()` for the matchers. The `LicenseQuery`
+    /// matcher returns a `RouterEntitlementsResult` whose `entitlement.jwt`
+    /// is `TEST_LICENSE_JWT_FULL_FEATURES` — a real HS256-signed JWT that
+    /// the spawned router validates against the test JWKS exposed via
+    /// `APOLLO_TEST_INTERNAL_UPLINK_JWKS=TEST_JWKS_ENDPOINT` (also set by
+    /// the default-credentials branch). The JWT carries no
+    /// `allowedFeatures` claim, which `LicenseLimits::default()`'s
+    /// legacy-compat path interprets as "all features allowed," so paid
+    /// features (federated subscriptions, coprocessors, OTLP, entity
+    /// caching, traffic shaping) are unlocked under the test license.
+    _apollo_uplink_server: wiremock::MockServer,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
 
@@ -235,6 +403,29 @@ pub struct IntegrationTest {
     env: Option<HashMap<String, OsString>>,
     hot_reload: bool,
     reqwest_client: reqwest::Client,
+    /// When `true`, the harness forwards the host's `TEST_APOLLO_KEY`
+    /// and `TEST_APOLLO_GRAPH_REF` (real Studio credentials) into the
+    /// spawned router as `APOLLO_KEY` / `APOLLO_GRAPH_REF`, and does
+    /// **not** override `APOLLO_UPLINK_ENDPOINTS` or set
+    /// `APOLLO_TELEMETRY_DISABLED=true`. So the spawned router will
+    /// reach **real Uplink** (`uplink.api.apollographql.com`) and
+    /// **real orbiter** (`router.apollo.dev/telemetry`).
+    ///
+    /// **Note:** Studio reporting (`usage-reporting.api.apollographql.com`)
+    /// is NOT reached even in the opt-in branch. `merge_overrides()`
+    /// unconditionally pins `telemetry.apollo.endpoint` and
+    /// `telemetry.apollo.experimental_otlp_endpoint` in the YAML config
+    /// to the per-test `apollo_otlp_server` mock, regardless of this
+    /// flag. That pinning is load-bearing for keeping CI off the
+    /// public Internet. If a future test genuinely needs real Studio
+    /// reporting, that change has to also amend `merge_overrides()`.
+    ///
+    /// Reserve this for the rare end-to-end test that genuinely needs
+    /// to talk to production Apollo's License + Uplink + orbiter; every
+    /// other test should accept the default (fake credentials, per-test
+    /// mock Uplink, per-test mock Studio reporting) so that the suite
+    /// passes on runners with restricted egress.
+    with_real_studio_creds: bool,
 }
 
 impl IntegrationTest {
@@ -312,6 +503,17 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn test_schema_location(&self) -> &PathBuf {
         &self.test_schema_location
+    }
+
+    /// Address of the per-test Uplink mock. Exposed for the rare test
+    /// that wants to assert directly against the mock (eg. inspect the
+    /// queries the router posted) or wire its own subprocess at the
+    /// same mock. Most tests don't need this — the harness wires
+    /// `APOLLO_UPLINK_ENDPOINTS` automatically in `start()` whenever
+    /// the test isn't opted into real Studio credentials.
+    #[allow(dead_code)]
+    pub fn apollo_uplink_endpoint(&self) -> String {
+        self._apollo_uplink_server.uri()
     }
 
     /// Set an address placeholder using a URI, extracting the port automatically
@@ -586,6 +788,14 @@ impl IntegrationTest {
         redis_namespace: Option<String>,
         hot_reload: Option<bool>,
         reqwest_client: Option<reqwest::Client>,
+        // Opt-in to forwarding the host's real `TEST_APOLLO_KEY` /
+        // `TEST_APOLLO_GRAPH_REF` to the spawned router. Default `false`,
+        // which forwards fake credentials and pins
+        // `APOLLO_UPLINK_ENDPOINTS` to the per-test
+        // `_apollo_uplink_server` mock — the right answer for every test
+        // that doesn't need production Apollo to be reachable. Buildstructor
+        // surfaces this as `IntegrationTest::builder().with_real_studio_creds(true)`.
+        with_real_studio_creds: Option<bool>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
@@ -748,6 +958,13 @@ impl IntegrationTest {
             .mount(&apollo_otlp_server)
             .await;
 
+        // Per-test Uplink mock. Stood up unconditionally so it's
+        // available regardless of whether the test ends up opting into
+        // real Studio creds — an unused MockServer is essentially free
+        // (a tokio-backed listener bound to a loopback ephemeral port,
+        // dropped when `IntegrationTest` drops).
+        let apollo_uplink_server = mock_license_uplink().await;
+
         Self {
             router: None,
             router_location: Self::router_location(),
@@ -761,6 +978,7 @@ impl IntegrationTest {
             _subgraphs: subgraphs,
             _subgraph_overrides: subgraph_overrides,
             _apollo_otlp_server: apollo_otlp_server,
+            _apollo_uplink_server: apollo_uplink_server,
             bind_address: Default::default(),
             _tracer_provider_client: tracer_provider_client,
             subscriber_client,
@@ -777,6 +995,7 @@ impl IntegrationTest {
             env,
             hot_reload: hot_reload.unwrap_or(true),
             reqwest_client: reqwest_client.unwrap_or_default(),
+            with_real_studio_creds: with_real_studio_creds.unwrap_or(false),
         }
     }
 
@@ -814,7 +1033,81 @@ impl IntegrationTest {
             "APOLLO_GRAPH_ARTIFACT_REFERENCE",
             "APOLLO_GRAPH_REF",
         ];
-        // Any env vars set via the env argument should be passed along as-is
+
+        // Harness defaults. Forward fake Studio credentials so the
+        // spawned router activates
+        // `LicenseSource::Registry` (and therefore exercises the
+        // license-stream code path that ships in production), and pin
+        // `APOLLO_UPLINK_ENDPOINTS` to the per-test mock so neither the
+        // license poller nor a `SchemaSource::Registry` activation can
+        // reach `uplink.api.apollographql.com`. Skipped when the test
+        // opted into real Studio credentials via
+        // `IntegrationTest::builder().with_real_studio_creds(true)`,
+        // which is reserved for the rare end-to-end test that genuinely
+        // needs to talk to production Apollo.
+        //
+        // We set these via `router.env()` (not `self.env`) so they don't
+        // flip `needs_supergraph_cli_arg` to `false` — the harness's
+        // `--supergraph` CLI arg should still win for schema source.
+        // Tests that intentionally exercise `SchemaSource::Registry`
+        // put `APOLLO_GRAPH_REF` (or one of the other
+        // `non_file_startup_env` keys) into `self.env`, where the loop
+        // below picks them up and suppresses the CLI arg.
+        if !self.with_real_studio_creds {
+            router.env("APOLLO_KEY", "test-mocked-key");
+            router.env("APOLLO_GRAPH_REF", "test-mocked-graph@current");
+            router.env("APOLLO_UPLINK_ENDPOINTS", self._apollo_uplink_server.uri());
+            // Point the spawned router's `License::jwks()` lookup at the
+            // test JWKS (HS256 secret bundled in
+            // `apollo-router/src/uplink/testdata/license.jwks.json`) so it
+            // can validate the JWT that `mock_license_uplink()` returns
+            // for `LicenseQuery`. Without this, the router would fall
+            // back to the production JWKS baked into the binary, fail
+            // the signature check, and reject the test license — paid
+            // features (federated subscriptions, coprocessors, OTLP,
+            // entity caching, traffic shaping, ...) would then be
+            // gated off.
+            //
+            // Tests that explicitly set `.jwt(...)` on the builder
+            // also rely on this — every test JWT in
+            // `tests/integration/allowed_features.rs` is signed with
+            // the same secret. Setting it unconditionally in the
+            // default branch means individual tests no longer need to
+            // remember to inject it themselves.
+            router.env(
+                "APOLLO_TEST_INTERNAL_UPLINK_JWKS",
+                TEST_JWKS_ENDPOINT.as_os_str(),
+            );
+            // Strip any inherited license-source env vars so a developer
+            // who happens to have a real production-signed
+            // `APOLLO_ROUTER_LICENSE` exported in their shell doesn't
+            // see `LicenseSource::Env` win, fail signature verification
+            // against the test HS256 JWKS we just pinned above, and
+            // then hang in `Startup` because the license stream emits
+            // no `UpdateLicense` event on parse error. Tests that need a
+            // license reach through `.jwt(...)` (which sets
+            // `APOLLO_ROUTER_LICENSE` after this strip), or via the
+            // mocked Uplink response below.
+            router.env_remove("APOLLO_ROUTER_LICENSE");
+            router.env_remove("APOLLO_ROUTER_LICENSE_PATH");
+            // Disable the "orbiter" anonymous-usage telemetry, which
+            // otherwise POSTs to `https://router.apollo.dev/telemetry`
+            // unconditionally on every router boot — independent of
+            // `APOLLO_KEY` and entirely separate from Uplink. Without
+            // this, an integration test on a runner with restricted
+            // egress to `*.apollo.dev` would see a 1× outbound HTTPS
+            // request per spawned router (the orbiter is fire-and-forget
+            // so the test wouldn't *fail*, but the connection attempt
+            // would still leak — defeating the egress-block invariant
+            // the harness establishes by default).
+            router.env("APOLLO_TELEMETRY_DISABLED", "true");
+        }
+
+        // Any env vars set via the env argument should be passed along
+        // as-is. These run *after* the harness defaults so an
+        // explicit `.env(...)` builder call wins over the defaults
+        // (eg. for a test that wants to override `APOLLO_UPLINK_ENDPOINTS`
+        // to its own custom mock).
         if let Some(env) = &self.env {
             for (key, val) in env {
                 // If env vars are used to configure which schema to load, do not
@@ -826,15 +1119,29 @@ impl IntegrationTest {
             }
         }
 
-        // These env vars are set by CircleCI to provide a valid license check. This will
-        // overwrite setting these variables in the router.env loaded above, which is intentional
-        // in order to allow local testing without Uplink. Note that this introduces a slight
-        // discrepancy between what a test is executing locally vs. what it executes on CI.
-        if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
-            router.env("APOLLO_KEY", apollo_key);
-        }
-        if let Ok(apollo_graph_ref) = std::env::var("TEST_APOLLO_GRAPH_REF") {
-            router.env("APOLLO_GRAPH_REF", apollo_graph_ref);
+        // Opt-in real Studio credentials. Reads `TEST_APOLLO_KEY` and
+        // `TEST_APOLLO_GRAPH_REF` from the host environment (CI sets
+        // these on machines that have access to a real Studio
+        // account) and forwards them as `APOLLO_KEY` /
+        // `APOLLO_GRAPH_REF`. `APOLLO_UPLINK_ENDPOINTS` is
+        // intentionally NOT overridden, so the spawned router talks to
+        // the real `uplink.api.apollographql.com` and the per-test
+        // Uplink mock is left idle.
+        //
+        // Pre-2026-05 the harness forwarded these creds unconditionally
+        // whenever `TEST_APOLLO_KEY` was present in the host env, which
+        // turned every CircleCI run of the integration suite into a
+        // real-Studio-traffic exercise — a credential gate (whether the
+        // test runs at all) that doubled as a network gate (whether the
+        // router talks to production Apollo). This branch makes that
+        // coupling opt-in.
+        if self.with_real_studio_creds {
+            if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
+                router.env("APOLLO_KEY", apollo_key);
+            }
+            if let Ok(apollo_graph_ref) = std::env::var("TEST_APOLLO_GRAPH_REF") {
+                router.env("APOLLO_GRAPH_REF", apollo_graph_ref);
+            }
         }
 
         if let Some(jwt) = &self.jwt {
@@ -887,6 +1194,52 @@ impl IntegrationTest {
                         timestamp: String,
                         level: String,
                         message: String,
+                    }
+                    // Filter out OpenTelemetry SDK MeterProvider Drop lines
+                    // before strict-struct deserialisation.
+                    //
+                    // Upstream `opentelemetry-0.31.0`'s `otel_error!` macro
+                    // (`src/global/internal_logging.rs:202-228`) expands to
+                    // a `tracing::error!` call that supplies BOTH an empty
+                    // string as the event's display body AND an explicit
+                    // `message = ...` kv field. `tracing-subscriber`'s JSON
+                    // formatter serialises both, producing a JSON object
+                    // with two `"message"` keys. `serde_json::from_str::<Log>`
+                    // rejects duplicate struct fields
+                    // (`serde::de::Error::duplicate_field`), which previously
+                    // panicked the spawn task here, dropped the
+                    // `collect_stdio` `oneshot::Sender`, and made every
+                    // `collect_stdio`-using test fail with
+                    // `RecvError(())`. The triggering emission is gated on
+                    // `MeterProvider::shutdown()` returning `Err` during
+                    // `Drop` — a tokio-runtime-shutdown race in the SDK,
+                    // independent of router behaviour
+                    // (`opentelemetry_sdk-0.31.0/src/metrics/meter_provider.rs:170-175`).
+                    //
+                    // Filtering at the test-harness boundary (rather than
+                    // changing the router-wide JSON formatter) keeps the
+                    // blast radius local to the in-test stdout collector.
+                    //
+                    // The prefix match is `MeterProvider.Drop` (no
+                    // trailing dot) so the filter catches both the
+                    // bare `name="MeterProvider.Drop"` emission from
+                    // `otel_info!` (`meter_provider.rs:166-168`,
+                    // `MeterProvider` dropped without `shutdown_invoked`)
+                    // and the suffixed `name="MeterProvider.Drop.ShutdownFailed"`
+                    // / `name="MeterProvider.Drop.AlreadyShutdown"`
+                    // emissions from `otel_error!` / `otel_debug!`. All
+                    // share the same trailing-`""` Display-body
+                    // expansion at `internal_logging.rs:202-228` (and
+                    // `:42-62` for `otel_info!`) and therefore the
+                    // same duplicate-`message`-key surface.
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
+                        && value
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|name| name.starts_with("MeterProvider.Drop"))
+                    {
+                        let _ = stdio_tx.send(line).await;
+                        continue;
                     }
                     let Ok(log) = serde_json::from_str::<Log>(&line) else {
                         panic!(
@@ -943,7 +1296,11 @@ impl IntegrationTest {
             .open(&self.test_config_location)
             .await
             .expect("must have been able to open config file");
-        f.write_all("\n#touched\n".as_bytes())
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_nanos();
+        f.write_all(format!("\n#touched-{stamp}\n").as_bytes())
             .await
             .expect("must be able to write config file");
     }
@@ -958,12 +1315,17 @@ impl IntegrationTest {
             &self.redis_namespace,
             Some(&self.port_replacements),
         );
-        tokio::fs::write(
-            &self.test_config_location,
-            serde_yaml::to_string(&config).unwrap(),
-        )
-        .await
-        .expect("must be able to write config");
+        let mut content = serde_yaml::to_string(&config).unwrap();
+        // Append a unique comment so file content always changes. PollWatcher uses
+        // with_compare_contents(true); identical rewrites may not emit Data events on Windows.
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX epoch")
+            .as_nanos();
+        content.push_str(&format!("\n# update-{stamp}\n"));
+        tokio::fs::write(&self.test_config_location, content)
+            .await
+            .expect("must be able to write config");
     }
 
     #[allow(dead_code)]
@@ -1212,9 +1574,29 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
+    /// Like `graceful_shutdown` but lets the caller widen the
+    /// `assert_shutdown` budget. Use only for tests with a documented
+    /// shutdown-drain race that the default 10 s budget cannot beat.
+    /// Prefer fixing the underlying race when possible.
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn graceful_shutdown_with_deadline(&mut self, deadline: Duration) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGTERM);
+        }
+        self.assert_shutdown_with_deadline(deadline).await;
+    }
+
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
         // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    #[cfg(target_os = "windows")]
+    pub async fn graceful_shutdown_with_deadline(&mut self, _deadline: Duration) {
+        // Windows has no SIGTERM; forward to the non-graceful kill path.
         self.kill().await
     }
 
@@ -1250,7 +1632,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
-        self.wait_for_log_message("continuing with previous configuration")
+        self.wait_for_log_message("still running with previous configuration")
             .await;
     }
 
@@ -1630,11 +2012,26 @@ impl IntegrationTest {
         // Previously 3 s. Raised to 10 s when the harness began injecting
         // a `connection_shutdown_timeout` default to prevent the 60 s
         // production default from hanging tests that hold HTTP/2 client
-        // connections open past the response (see `merge_overrides` and
-        // flaky-test-phases/blog-details.md Arc 2a for the full story).
+        // connections open past the response (see `merge_overrides`).
+        self.assert_shutdown_with_deadline(Duration::from_secs(10))
+            .await;
+    }
+
+    /// Variant of `assert_shutdown` that lets a specific test widen the
+    /// shutdown-budget when its shutdown path has a documented drain race
+    /// the default 10 s budget cannot beat.
+    ///
+    /// Used by tests that trip the default 10 s deadline with a known
+    /// fingerprint (typically a hyper-client pool drain race or
+    /// OpenTelemetry SDK shutdown ordering bug, neither of which can be
+    /// pinned without Linux `dump_stack_traces`). Widening the budget
+    /// per-test rather than via the shared default keeps the rest of the
+    /// harness honest about shutdown regressions.
+    #[allow(dead_code)]
+    pub async fn assert_shutdown_with_deadline(&mut self, deadline: Duration) {
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
+        while now.elapsed() < deadline {
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
@@ -1906,11 +2303,10 @@ fn merge_overrides(
     //
     // This race is latent in any test that makes an HTTP request and then
     // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
-    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6 and
-    // flaky-test-phases/blog-details.md Arc 2a for the full story). Rather
-    // than patch each vulnerable fixture individually, inject a 5 s default
-    // at the harness layer, paired with a widened `assert_shutdown` budget
-    // (see that helper for the matching constant).
+    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6).
+    // Rather than patch each vulnerable fixture individually, inject a 5 s
+    // default at the harness layer, paired with a widened `assert_shutdown`
+    // budget (see that helper for the matching constant).
     //
     // The 5 s value is a trade-off:
     // - Must be long enough that intentionally-in-flight requests finish
