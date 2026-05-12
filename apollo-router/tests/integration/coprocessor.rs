@@ -17,6 +17,18 @@ use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::redact_cache_debug_query_hash;
 
+/// Build a `reqwest::Client` that disables HTTP keep-alive so each request
+/// closes its TCP connection on completion.
+/// `test_coprocessor_response_handling` runs many sequential router
+/// processes; any one inheriting an idle inbound connection at SIGTERM
+/// flakes `assert_shutdown` against its 10 s budget.
+fn no_keepalive_reqwest_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -188,6 +200,7 @@ async fn test_full_pipeline(
             include_str!("fixtures/coprocessor.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .reqwest_client(no_keepalive_reqwest_client())
         .build()
         .await;
 
@@ -201,7 +214,14 @@ async fn test_full_pipeline(
         "Failed at stage {stage}"
     );
 
-    router.graceful_shutdown().await;
+    // Widen the shutdown budget to 30 s. With many sequential pipeline
+    // iterations in `test_coprocessor_response_handling`, even a small
+    // per-shot probability of an OTel SDK / pool drain race compounds into
+    // visible flake. Pair with the no-keepalive client above to neutralise
+    // the inbound-connection arm of the race.
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(30))
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
