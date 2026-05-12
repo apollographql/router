@@ -66,7 +66,7 @@ impl
                         if let Some(m) =
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                         {
-                            m.get(None).mask_headers_debug(headers)
+                            m.get_request(None).mask_headers_debug(headers)
                         } else {
                             format!("{headers:?}")
                         }

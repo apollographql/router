@@ -311,9 +311,24 @@ where
                 #[cfg(not(test))]
                 let headers = &parts.headers;
 
+                let header_string = {
+                    #[cfg(test)]
+                    {
+                        // Deterministic output for snapshot/log assertions.
+                        format!("{:?}", headers)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        context.extensions().with_lock(|lock| {
+                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                                .map(|m| m.get_request(None).mask_headers_debug(headers))
+                                .unwrap_or_else(|| format!("{:?}", headers))
+                        })
+                    }
+                };
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    opentelemetry::Value::String(header_string.into()),
                 ));
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_METHOD,

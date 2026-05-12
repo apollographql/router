@@ -216,7 +216,7 @@ impl Selector for ConnectorSelector {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                 .map(|m| {
-                                    m.get(Some(request.connector.id.subgraph_name.as_str()))
+                                    m.get_request(Some(request.connector.id.subgraph_name.as_str()))
                                         .should_mask(connector_request_header)
                                 })
                                 .unwrap_or(false)
@@ -320,7 +320,10 @@ impl Selector for ConnectorSelector {
                         (None, Some(_)) => {
                             let should_mask = response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                    .map(|m| m.get(None).should_mask(connector_response_header))
+                                    .map(|m| {
+                                        m.get_response(None)
+                                            .should_mask(connector_response_header)
+                                    })
                                     .unwrap_or(false)
                             });
                             if should_mask {
@@ -806,7 +809,7 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = connector_request(http_request_with_header(), Some(context), None);
@@ -828,7 +831,7 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = connector_request(http_request_with_header(), Some(context), None);
@@ -853,7 +856,7 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let response = connector_response_with_header();
         response
             .context
@@ -877,7 +880,7 @@ mod tests {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let response = connector_response_with_header();
         response
             .context

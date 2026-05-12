@@ -39,7 +39,7 @@ use crate::services::connector::request_service;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
-use crate::services::header_masking::HeaderMaskingRules;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
@@ -112,7 +112,7 @@ impl ConnectorStage {
         service: request_service::BoxService,
         default_url: String,
         service_name: String,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> request_service::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -243,7 +243,7 @@ async fn process_connector_request_stage<C>(
     mut request: request_service::Request,
     mut request_config: ConnectorRequestConf,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<request_service::Response, request_service::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -272,8 +272,9 @@ where
     if request_config.headers
         && let Some(rules) = header_masking_rules.as_deref()
     {
+        let subgraph_name = request.connector.id.subgraph_name.as_str();
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_request(Some(subgraph_name)).mask_headers_debug(&parts.headers),
             service = %service_name,
             "Connector request headers (masked)"
         );
@@ -430,7 +431,7 @@ async fn process_connector_response_stage<C>(
     response_config: ConnectorResponseConf,
     context: Context,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<request_service::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -456,7 +457,7 @@ where
                 && let Some(rules) = header_masking_rules.as_deref()
             {
                 tracing::debug!(
-                    headers = %rules.mask_headers_debug(&http_response.inner.headers),
+                    headers = %rules.get_response(None).mask_headers_debug(&http_response.inner.headers),
                     service = %service_name,
                     "Connector response headers (masked)"
                 );

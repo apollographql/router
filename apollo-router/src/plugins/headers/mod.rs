@@ -48,8 +48,7 @@ use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
 
-/// Configuration for headers at a specific location (request or response)
-/// Used for subgraphs - includes both operations and masking
+/// Request-side header configuration: propagation operations + optional masking.
 #[derive(Clone, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct HeadersLocation {
@@ -57,7 +56,17 @@ struct HeadersLocation {
     #[serde(default)]
     operations: Vec<Operation>,
 
-    /// Header masking configuration
+    /// Header masking configuration applied to request headers in logs/telemetry.
+    #[serde(default)]
+    masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
+}
+
+/// Response-side header configuration. Response propagation isn't a router
+/// feature, so only masking is configurable here.
+#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ResponseHeadersLocation {
+    /// Header masking configuration applied to response headers in logs/telemetry.
     #[serde(default)]
     masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
 }
@@ -212,13 +221,18 @@ struct ConnectorHeadersConfiguration {
     sources: HashMap<String, ConnectorHeadersLocation>,
 }
 
-/// Per-location (request) configuration with operations and masking
+/// Per-subgraph (or global) header configuration. Request configuration covers
+/// propagation + masking; response configuration covers masking only.
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct GlobalHeadersConfiguration {
     /// Request configuration (operations and masking)
     #[serde(default)]
     request: Option<HeadersLocation>,
+
+    /// Response configuration (masking only)
+    #[serde(default)]
+    response: Option<ResponseHeadersLocation>,
 }
 
 /// Configuration for header propagation and masking
@@ -253,6 +267,8 @@ impl PluginPrivate for Headers {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::DirectionRules;
         use crate::services::header_masking::HeaderMaskingRules;
 
         // Extract global request operations from all.request.operations
@@ -299,6 +315,14 @@ impl PluginPrivate for Headers {
             })
             .collect();
 
+        // Fail-secure default: when the user hasn't written a `masking:` block,
+        // fall back to the full HeaderMaskingConfig::default() (the 12-header
+        // sensitive list) — *not* HeaderMaskingRules::default(), which would
+        // give an empty HashSet and silently mask nothing.
+        let default_rules = Arc::new(HeaderMaskingRules::from_config(
+            &HeaderMaskingConfig::default(),
+        ));
+
         let global_request_masking = init
             .config
             .all
@@ -306,7 +330,16 @@ impl PluginPrivate for Headers {
             .and_then(|a| a.request.as_ref())
             .and_then(|r| r.masking.as_ref())
             .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
-            .unwrap_or_else(|| Arc::new(HeaderMaskingRules::default()));
+            .unwrap_or_else(|| default_rules.clone());
+
+        let global_response_masking = init
+            .config
+            .all
+            .as_ref()
+            .and_then(|a| a.response.as_ref())
+            .and_then(|r| r.masking.as_ref())
+            .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
+            .unwrap_or_else(|| default_rules.clone());
 
         let per_subgraph_request_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
             .config
@@ -326,9 +359,27 @@ impl PluginPrivate for Headers {
             })
             .collect();
 
+        let per_subgraph_response_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
+            .config
+            .subgraphs
+            .iter()
+            .filter_map(|(name, sg_config)| {
+                sg_config
+                    .response
+                    .as_ref()
+                    .and_then(|r| r.masking.as_ref())
+                    .map(|masking_config| {
+                        (
+                            name.clone(),
+                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
+                        )
+                    })
+            })
+            .collect();
+
         let masking_rules_map = Arc::new(crate::services::header_masking::MaskingRulesMap::new(
-            global_request_masking,
-            per_subgraph_request_masking,
+            DirectionRules::new(global_request_masking, per_subgraph_request_masking),
+            DirectionRules::new(global_response_masking, per_subgraph_response_masking),
         ));
 
         Ok(Headers {
@@ -901,6 +952,64 @@ mod test {
         "#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_masking_config_response_global() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            response:
+                masking:
+                    enabled: true
+                    sensitive_headers:
+                        - set-cookie
+                        - www-authenticate
+        "#,
+        )
+        .unwrap();
+
+        let masking = config
+            .all
+            .as_ref()
+            .and_then(|a| a.response.as_ref())
+            .and_then(|r| r.masking.as_ref())
+            .expect("response masking should deserialize");
+        assert!(masking.enabled);
+        assert!(masking.sensitive_headers.iter().any(|h| h == "set-cookie"));
+    }
+
+    #[test]
+    fn test_masking_config_response_per_subgraph_differs_from_request() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            request:
+              masking:
+                enabled: true
+                sensitive_headers:
+                  - authorization
+            response:
+              masking:
+                enabled: true
+                sensitive_headers:
+                  - set-cookie
+        "#,
+        )
+        .unwrap();
+
+        let products = config.subgraphs.get("products").unwrap();
+        let req = products.request.as_ref().unwrap().masking.as_ref().unwrap();
+        let resp = products
+            .response
+            .as_ref()
+            .unwrap()
+            .masking
+            .as_ref()
+            .unwrap();
+        assert_eq!(req.sensitive_headers, vec!["authorization".to_string()]);
+        assert_eq!(resp.sensitive_headers, vec!["set-cookie".to_string()]);
     }
 
     #[test]

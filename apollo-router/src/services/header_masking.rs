@@ -85,24 +85,24 @@ impl HeaderMaskingRules {
                 v.to_str().unwrap_or("<non-utf8>")
             };
 
-            parts.push(format!("\"{}\": \"{}\"", k_str, value_str));
+            // Use Debug formatting so embedded quotes/backslashes/control chars are
+            // properly escaped — avoids invalid JSON and log-injection vectors via
+            // attacker-influenceable header values (Cookie, Referer, User-Agent, ...).
+            parts.push(format!("{k_str:?}: {value_str:?}"));
         }
 
         format!("{{{}}}", parts.join(", "))
     }
 }
 
-/// A write-once masking rules map stored in the request context.
-///
-/// Inserted by the headers plugin at router-service time so all stages (router,
-/// supergraph, subgraph, connector) read a consistent, immutable snapshot.
-/// Per-subgraph overrides are included; callers look up by name.
-pub(crate) struct MaskingRulesMap {
+/// Per-direction rules: a global default plus optional per-subgraph overrides.
+#[derive(Debug, Default)]
+pub(crate) struct DirectionRules {
     global: Arc<HeaderMaskingRules>,
     per_subgraph: HashMap<String, Arc<HeaderMaskingRules>>,
 }
 
-impl MaskingRulesMap {
+impl DirectionRules {
     pub(crate) fn new(
         global: Arc<HeaderMaskingRules>,
         per_subgraph: HashMap<String, Arc<HeaderMaskingRules>>,
@@ -113,11 +113,53 @@ impl MaskingRulesMap {
         }
     }
 
-    /// Returns the subgraph-specific rules when present, otherwise the global rules.
-    pub(crate) fn get(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
+    fn get(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
         subgraph_name
             .and_then(|n| self.per_subgraph.get(n))
             .unwrap_or(&self.global)
+    }
+}
+
+/// A write-once masking rules map stored in the request context.
+///
+/// Inserted by the headers plugin at router-service time so all stages (router,
+/// supergraph, subgraph, connector) read a consistent, immutable snapshot.
+/// Request and response directions are configured independently; callers must
+/// pick the matching direction via [`get_request`] or [`get_response`].
+#[derive(Debug)]
+pub(crate) struct MaskingRulesMap {
+    request: DirectionRules,
+    response: DirectionRules,
+}
+
+impl MaskingRulesMap {
+    pub(crate) fn new(request: DirectionRules, response: DirectionRules) -> Self {
+        Self { request, response }
+    }
+
+    /// Test helper: build a map that applies the same rules in both directions.
+    /// Real config builds the two directions independently.
+    #[cfg(test)]
+    pub(crate) fn new_test(
+        global: Arc<HeaderMaskingRules>,
+        per_subgraph: HashMap<String, Arc<HeaderMaskingRules>>,
+    ) -> Self {
+        Self::new(
+            DirectionRules::new(global.clone(), per_subgraph.clone()),
+            DirectionRules::new(global, per_subgraph),
+        )
+    }
+
+    /// Returns the request-side masking rules for the given subgraph (or the
+    /// global request rules when `subgraph_name` is `None` or unknown).
+    pub(crate) fn get_request(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
+        self.request.get(subgraph_name)
+    }
+
+    /// Returns the response-side masking rules for the given subgraph (or the
+    /// global response rules when `subgraph_name` is `None` or unknown).
+    pub(crate) fn get_response(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
+        self.response.get(subgraph_name)
     }
 }
 
@@ -246,6 +288,28 @@ mod tests {
     }
 
     #[test]
+    fn test_mask_headers_debug_escapes_special_characters() {
+        let rules = create_test_rules();
+        let mut headers = HeaderMap::new();
+
+        // A header value containing quotes and backslashes — exactly the shape
+        // that broke the prior naive "{}": "{}" formatter.
+        headers.insert(
+            HeaderName::from_static("etag"),
+            HeaderValue::from_static(r#""abc\123""#),
+        );
+
+        let result = rules.mask_headers_debug(&headers);
+
+        // Quotes inside the value should be escaped (Debug formatting), keeping
+        // the rendered string a valid JSON-ish key/value pair.
+        assert!(
+            result.contains(r#""etag": "\"abc\\123\"""#),
+            "expected escaped value, got: {result}"
+        );
+    }
+
+    #[test]
     fn test_empty_config() {
         let config = HeaderMaskingConfig {
             enabled: true,
@@ -256,6 +320,48 @@ mod tests {
         // No headers should be masked with empty config
         assert!(!rules.should_mask("authorization"));
         assert!(!rules.should_mask("cookie"));
+    }
+
+    #[test]
+    fn test_masking_rules_map_separates_request_and_response() {
+        let request_rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+        }));
+        let response_rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+        }));
+        let per_subgraph_response: HashMap<String, Arc<HeaderMaskingRules>> = [(
+            "products".to_string(),
+            Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+                enabled: true,
+                sensitive_headers: vec!["x-products-secret".to_string()],
+            })),
+        )]
+        .into_iter()
+        .collect();
+
+        let map = MaskingRulesMap::new(
+            DirectionRules::new(request_rules, HashMap::new()),
+            DirectionRules::new(response_rules, per_subgraph_response),
+        );
+
+        // Request side masks authorization, NOT set-cookie.
+        assert!(map.get_request(None).should_mask("authorization"));
+        assert!(!map.get_request(None).should_mask("set-cookie"));
+
+        // Response side masks set-cookie (global), NOT authorization.
+        assert!(map.get_response(None).should_mask("set-cookie"));
+        assert!(!map.get_response(None).should_mask("authorization"));
+
+        // Per-subgraph response override applies.
+        assert!(
+            map.get_response(Some("products"))
+                .should_mask("x-products-secret")
+        );
+        // Unknown subgraph falls back to global response rules.
+        assert!(map.get_response(Some("nobody")).should_mask("set-cookie"));
     }
 
     #[test]

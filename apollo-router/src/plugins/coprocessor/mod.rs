@@ -51,6 +51,7 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
 use crate::services::header_masking::HeaderMaskingRules;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
@@ -197,18 +198,32 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
-        // Read masking config from headers.all.request.masking (same location as headers plugin).
+        // Read masking config from headers.all.{request,response}.masking. The
+        // coprocessor mirrors the headers-plugin layout so request stages get
+        // request rules and response stages get response rules.
         let header_masking_rules = init.full_config.as_ref().and_then(|config| {
-            config
-                .get("headers")
-                .and_then(|h| h.get("all"))
-                .and_then(|a| a.get("request"))
+            let all = config.get("headers").and_then(|h| h.get("all"))?;
+            let request_rules = all
+                .get("request")
                 .and_then(|r| r.get("masking"))
-                .and_then(|hm_config| {
-                    serde_json::from_value::<HeaderMaskingConfig>(hm_config.clone())
-                        .ok()
-                        .map(|config| Arc::new(HeaderMaskingRules::from_config(&config)))
-                })
+                .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
+                .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))?;
+            let response_rules = all
+                .get("response")
+                .and_then(|r| r.get("masking"))
+                .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
+                .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
+                .unwrap_or_else(|| request_rules.clone());
+            Some(Arc::new(MaskingRulesMap::new(
+                crate::services::header_masking::DirectionRules::new(
+                    request_rules,
+                    Default::default(),
+                ),
+                crate::services::header_masking::DirectionRules::new(
+                    response_rules,
+                    Default::default(),
+                ),
+            )))
         });
 
         CoprocessorPlugin::new(
@@ -280,7 +295,7 @@ where
     http_client: C,
     configuration: Conf,
     sdl: Arc<String>,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 }
 
 impl<C> CoprocessorPlugin<C>
@@ -296,7 +311,7 @@ where
         http_client: C,
         configuration: Conf,
         sdl: Arc<String>,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             http_client,
@@ -715,7 +730,7 @@ impl RouterStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> router::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -853,7 +868,7 @@ impl SubgraphStage {
         default_url: String,
         service_name: String,
         response_validation: bool,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> subgraph::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -981,7 +996,7 @@ async fn process_router_request_stage<C>(
     mut request_config: RouterRequestConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1014,7 +1029,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
             "Router request headers (masked)"
         );
     }
@@ -1173,7 +1188,7 @@ async fn process_router_response_stage<C>(
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1219,7 +1234,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
             "Router response headers (masked)"
         );
     }
@@ -1402,7 +1417,7 @@ async fn process_subgraph_request_stage<C>(
     mut request_config: SubgraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1429,7 +1444,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_request(Some(&service_name)).mask_headers_debug(&parts.headers),
             subgraph = %service_name,
             "Subgraph request headers (masked)"
         );
@@ -1587,7 +1602,7 @@ async fn process_subgraph_response_stage<C>(
     response_config: SubgraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1615,7 +1630,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_response(Some(&service_name)).mask_headers_debug(&parts.headers),
             subgraph = %service_name,
             "Subgraph response headers (masked)"
         );

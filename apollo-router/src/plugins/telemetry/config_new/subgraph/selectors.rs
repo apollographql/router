@@ -438,7 +438,7 @@ impl Selector for SubgraphSelector {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                 .map(|m| {
-                                    m.get(Some(request.subgraph_name.as_str()))
+                                    m.get_request(Some(request.subgraph_name.as_str()))
                                         .should_mask(subgraph_request_header)
                                 })
                                 .unwrap_or(false)
@@ -479,7 +479,7 @@ impl Selector for SubgraphSelector {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                 .map(|m| {
-                                    m.get(Some(request.subgraph_name.as_str()))
+                                    m.get_request(Some(request.subgraph_name.as_str()))
                                         .should_mask(supergraph_request_header)
                                 })
                                 .unwrap_or(false)
@@ -577,7 +577,7 @@ impl Selector for SubgraphSelector {
                         let should_mask = response.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                 .map(|m| {
-                                    m.get(Some(response.subgraph_name.as_str()))
+                                    m.get_response(Some(response.subgraph_name.as_str()))
                                         .should_mask(subgraph_response_header)
                                 })
                                 .unwrap_or(false)
@@ -1237,7 +1237,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
@@ -1270,7 +1270,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
@@ -1303,7 +1303,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::SubgraphRequest::fake_builder()
@@ -1336,7 +1336,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::SubgraphResponse::fake2_builder()
@@ -1365,7 +1365,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::SubgraphResponse::fake2_builder()

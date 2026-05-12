@@ -17,7 +17,7 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
-use crate::services::header_masking::HeaderMaskingRules;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -77,7 +77,7 @@ impl SupergraphStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> supergraph::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -205,7 +205,7 @@ async fn process_supergraph_request_stage<C>(
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -233,7 +233,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
             "Supergraph request headers (masked)"
         );
     }
@@ -372,7 +372,7 @@ async fn process_supergraph_response_stage<C>(
     response_config: SupergraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -409,7 +409,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
             "Supergraph response headers (masked)"
         );
     }

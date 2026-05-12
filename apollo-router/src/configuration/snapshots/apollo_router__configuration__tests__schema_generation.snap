@@ -5660,7 +5660,7 @@ expression: "&schema"
     },
     "GlobalHeadersConfiguration": {
       "additionalProperties": false,
-      "description": "Per-location (request) configuration with operations and masking",
+      "description": "Per-subgraph (or global) header configuration. Request configuration covers\npropagation + masking; response configuration covers masking only.",
       "properties": {
         "request": {
           "anyOf": [
@@ -5672,6 +5672,17 @@ expression: "&schema"
             }
           ],
           "description": "Request configuration (operations and masking)"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResponseHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Response configuration (masking only)"
         }
       },
       "type": "object"
@@ -5934,7 +5945,7 @@ expression: "&schema"
     },
     "HeadersLocation": {
       "additionalProperties": false,
-      "description": "Configuration for headers at a specific location (request or response)\nUsed for subgraphs - includes both operations and masking",
+      "description": "Request-side header configuration: propagation operations + optional masking.",
       "properties": {
         "masking": {
           "anyOf": [
@@ -5946,7 +5957,7 @@ expression: "&schema"
             }
           ],
           "default": null,
-          "description": "Header masking configuration"
+          "description": "Header masking configuration applied to request headers in logs/telemetry."
         },
         "operations": {
           "description": "Propagate/Insert/Remove operations",
@@ -8428,6 +8439,25 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "ResponseHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Response-side header configuration. Response propagation isn't a router\nfeature, so only masking is configurable here.",
+      "properties": {
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration applied to response headers in logs/telemetry."
+        }
+      },
+      "type": "object"
     },
     "ResponseStatus": {
       "oneOf": [

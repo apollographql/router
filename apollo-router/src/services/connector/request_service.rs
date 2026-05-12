@@ -281,6 +281,8 @@ impl tower::Service<Request> for ConnectorRequestService {
                             &http_request.inner,
                             log_request_level,
                             request.connector.label.as_ref(),
+                            &request.context,
+                            &original_subgraph_name,
                         );
 
                         let source_name = request.connector.source_config_key();
@@ -342,27 +344,41 @@ fn log_request(
     request: &http::Request<String>,
     log_request_level: Option<EventLevel>,
     label: &str,
+    #[cfg_attr(test, allow(unused_variables))] context: &Context,
+    #[cfg_attr(test, allow(unused_variables))] subgraph_name: &str,
 ) {
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
 
-        #[cfg(test)]
-        let headers = {
-            let mut headers: IndexMap<String, http::HeaderValue> = request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            headers.sort_keys();
-            headers
+        let header_string = {
+            #[cfg(test)]
+            {
+                let mut headers: IndexMap<String, http::HeaderValue> = request
+                    .headers()
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                headers.sort_keys();
+                format!("{headers:?}")
+            }
+            #[cfg(not(test))]
+            {
+                let headers = request.headers();
+                context.extensions().with_lock(|lock| {
+                    lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                        .map(|m| {
+                            m.get_request(Some(subgraph_name))
+                                .mask_headers_debug(headers)
+                        })
+                        .unwrap_or_else(|| format!("{headers:?}"))
+                })
+            }
         };
-        #[cfg(not(test))]
-        let headers = request.headers().clone();
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(header_string.into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_METHOD,

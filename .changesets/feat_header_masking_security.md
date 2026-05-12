@@ -5,15 +5,16 @@ Adds header masking configuration to automatically mask sensitive header values 
 **Key Features:**
 
 - **Automatic masking** of common sensitive headers (authorization, cookie, x-api-key, etc.)
-- **Fail-secure by default** — masking is enabled by default with sensible defaults
+- **Fail-secure by default** — when no `masking:` block is configured, masking is enabled with a built-in sensitive-header list (authorization, cookie, set-cookie, x-api-key, etc.)
+- **Independently configurable request and response masking** — different sensitive lists for headers leaving the router vs. headers coming back
 - **Global and per-subgraph configuration** — set defaults under `headers.all` and override for specific subgraphs
 - **Connector inheritance** — connectors inherit masking rules from their parent subgraph
-- **Comprehensive coverage** across telemetry events, coprocessor logging, and OpenTelemetry spans
+- **Comprehensive coverage** across `router.request`, `router.response`, `supergraph.request`, `supergraph.response`, `connector.request`, `connector.response` telemetry events, coprocessor logging, and OpenTelemetry spans
 - **Case-insensitive matching** for header names
 
 **Configuration:**
 
-Masking is configured within the `headers` plugin, nested under `request` sections:
+Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections:
 
 ```yaml
 headers:
@@ -27,6 +28,12 @@ headers:
           - cookie
           - x-api-key
           - x-custom-secret  # add custom headers
+    response:
+      masking:
+        enabled: true
+        sensitive_headers:
+          - set-cookie
+          - www-authenticate
 
   # Per-subgraph overrides
   subgraphs:
@@ -37,6 +44,11 @@ headers:
           sensitive_headers:
             - authorization
             - x-products-api-key
+      response:
+        masking:
+          enabled: true
+          sensitive_headers:
+            - set-cookie
 ```
 
 When enabled, sensitive header values are replaced with `***MASKED***` in debug logs and telemetry output while preserving header names for debugging purposes.

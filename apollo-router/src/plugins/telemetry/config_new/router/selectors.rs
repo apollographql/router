@@ -255,7 +255,7 @@ impl Selector for RouterSelector {
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get(None).should_mask(request_header))
+                                .map(|m| m.get_request(None).should_mask(request_header))
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -359,7 +359,7 @@ impl Selector for RouterSelector {
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get(None).should_mask(response_header))
+                                .map(|m| m.get_response(None).should_mask(response_header))
                                 .unwrap_or(false)
                         });
                         if should_mask {
@@ -841,7 +841,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::RouterRequest::fake_builder()
@@ -870,7 +870,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let request = crate::services::RouterRequest::fake_builder()
@@ -934,7 +934,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::RouterResponse::fake_builder()
@@ -964,7 +964,7 @@ mod test {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
         }));
-        let map = Arc::new(MaskingRulesMap::new(rules, Default::default()));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
         context.extensions().with_lock(|lock| lock.insert(map));
         let response = crate::services::RouterResponse::fake_builder()

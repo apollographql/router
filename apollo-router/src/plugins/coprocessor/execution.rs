@@ -17,7 +17,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
-use crate::services::header_masking::HeaderMaskingRules;
+use crate::services::header_masking::MaskingRulesMap;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -74,7 +74,7 @@ impl ExecutionStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-        header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> execution::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -202,7 +202,7 @@ async fn process_execution_request_stage<C>(
     request_config: ExecutionRequestConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -227,7 +227,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
             "Execution request headers (masked)"
         );
     }
@@ -370,7 +370,7 @@ async fn process_execution_response_stage<C>(
     response_config: ExecutionResponseConf,
     response_validation: bool,
     executed: &mut bool,
-    header_masking_rules: Option<Arc<HeaderMaskingRules>>,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -404,7 +404,7 @@ where
         && let Some(rules) = header_masking_rules.as_deref()
     {
         tracing::debug!(
-            headers = %rules.mask_headers_debug(&parts.headers),
+            headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
             "Execution response headers (masked)"
         );
     }
