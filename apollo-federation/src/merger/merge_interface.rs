@@ -73,6 +73,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         trace!("Validating interface objects");
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
+        let mut is_interface_object = false;
 
         // Validates that if a source defines the interface as an @interfaceObject, then it doesn't define any
         // of the implementations. We can discuss if there is ways to lift that limitation later, but an
@@ -91,6 +92,7 @@ impl Merger {
                 continue;
             }
 
+            is_interface_object = true;
             let subgraph_name = &subgraph.name;
             let defined_implementations: IndexSet<_> = supergraph_implementations
                 .iter()
@@ -101,6 +103,27 @@ impl Merger {
                     message: format!("[{subgraph_name}] Interface type \"{dest}\" is defined as an @interfaceObject in subgraph \"{subgraph_name}\" so that subgraph should not define any of the implementation types of \"{dest}\", but it defines {}",
                         human_readable_types(defined_implementations.iter().map(|impl_type| &impl_type.type_name)),
                     )
+                });
+            }
+        }
+
+        // @interfaceObject cannot be implemented by other interfaces
+        if is_interface_object {
+            for interface_implements_intf_object in self
+                .merged
+                .all_implementation_types(dest)?
+                .iter()
+                .filter(|implementation| {
+                    matches!(
+                        implementation,
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    )
+                })
+            {
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                    message: format!(
+                        "Interfaces implementing @interfaceObject are not supported: @interfaceObject \"{dest}\" is implemented by an interface \"{interface_implements_intf_object}\".",
+                    ),
                 });
             }
         }
