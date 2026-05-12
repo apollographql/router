@@ -198,31 +198,61 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
-        // Read masking config from headers.all.{request,response}.masking. The
-        // coprocessor mirrors the headers-plugin layout so request stages get
-        // request rules and response stages get response rules.
+        // Read masking config from headers.all.{request,response}.masking and
+        // headers.subgraphs.<name>.{request,response}.masking. The coprocessor
+        // mirrors the headers-plugin layout so request stages get request
+        // rules and response stages get response rules, with per-subgraph
+        // overrides falling back to the global default for each direction.
         let header_masking_rules = init.full_config.as_ref().and_then(|config| {
-            let all = config.get("headers").and_then(|h| h.get("all"))?;
-            let request_rules = all
-                .get("request")
-                .and_then(|r| r.get("masking"))
-                .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
-                .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))?;
-            let response_rules = all
-                .get("response")
-                .and_then(|r| r.get("masking"))
-                .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
-                .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
-                .unwrap_or_else(|| request_rules.clone());
+            use crate::services::header_masking::DirectionRules;
+
+            let headers = config.get("headers")?;
+            let all = headers.get("all");
+
+            let default_rules = Arc::new(HeaderMaskingRules::from_config(
+                &HeaderMaskingConfig::default(),
+            ));
+
+            let parse_masking =
+                |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
+                    v.get("masking")
+                        .and_then(|hm| {
+                            serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok()
+                        })
+                        .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
+                };
+
+            let global_request = all
+                .and_then(|a| a.get("request"))
+                .and_then(parse_masking)
+                .unwrap_or_else(|| default_rules.clone());
+            let global_response = all
+                .and_then(|a| a.get("response"))
+                .and_then(parse_masking)
+                .unwrap_or_else(|| default_rules.clone());
+
+            let mut per_subgraph_request: HashMap<String, Arc<HeaderMaskingRules>> =
+                HashMap::new();
+            let mut per_subgraph_response: HashMap<String, Arc<HeaderMaskingRules>> =
+                HashMap::new();
+            if let Some(serde_json::Value::Object(subgraphs)) = headers.get("subgraphs") {
+                for (name, sg_config) in subgraphs {
+                    if let Some(rules) =
+                        sg_config.get("request").and_then(&parse_masking)
+                    {
+                        per_subgraph_request.insert(name.clone(), rules);
+                    }
+                    if let Some(rules) =
+                        sg_config.get("response").and_then(&parse_masking)
+                    {
+                        per_subgraph_response.insert(name.clone(), rules);
+                    }
+                }
+            }
+
             Some(Arc::new(MaskingRulesMap::new(
-                crate::services::header_masking::DirectionRules::new(
-                    request_rules,
-                    Default::default(),
-                ),
-                crate::services::header_masking::DirectionRules::new(
-                    response_rules,
-                    Default::default(),
-                ),
+                DirectionRules::new(global_request, per_subgraph_request),
+                DirectionRules::new(global_response, per_subgraph_response),
             )))
         });
 

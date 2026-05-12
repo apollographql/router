@@ -213,6 +213,15 @@ impl tower::Service<Request> for ConnectorRequestService {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
         let http_client_service_factory = self.http_client_service_factory.clone();
 
+        // Stash the originating subgraph name in context so the response side
+        // (which no longer carries the Connector) can resolve per-subgraph
+        // response masking rules.
+        request.context.extensions().with_lock(|lock| {
+            lock.insert(crate::services::header_masking::ConnectorSubgraphName(
+                original_subgraph_name.clone(),
+            ));
+        });
+
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
             request.context.extensions().with_lock(|lock| {

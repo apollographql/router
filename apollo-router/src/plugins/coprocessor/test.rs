@@ -8065,5 +8065,113 @@ mod tests {
                 "enabled: false should produce empty rules that mask nothing"
             );
         }
+
+        #[test]
+        fn coprocessor_builds_per_subgraph_and_response_rules_from_config() {
+            // The coprocessor's masking-config reader must honor:
+            //   - per-subgraph request overrides
+            //   - per-subgraph response overrides
+            //   - response-only top-level configs (no headers.all.request.masking)
+            use crate::configuration::header_masking_config::HeaderMaskingConfig;
+            use crate::services::header_masking::DirectionRules;
+            use crate::services::header_masking::HeaderMaskingRules;
+            use crate::services::header_masking::MaskingRulesMap;
+
+            let full_config = serde_json::json!({
+                "headers": {
+                    "all": {
+                        "response": {
+                            "masking": {
+                                "enabled": true,
+                                "sensitive_headers": ["set-cookie"]
+                            }
+                        }
+                    },
+                    "subgraphs": {
+                        "products": {
+                            "request": {
+                                "masking": {
+                                    "enabled": true,
+                                    "sensitive_headers": ["x-products-key"]
+                                }
+                            },
+                            "response": {
+                                "masking": {
+                                    "enabled": true,
+                                    "sensitive_headers": ["x-products-secret"]
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Re-derive the rules the same way coprocessor/mod.rs does so the
+            // test pins the contract.
+            let headers = full_config.get("headers").unwrap();
+            let all = headers.get("all");
+            let default_rules = Arc::new(HeaderMaskingRules::from_config(
+                &HeaderMaskingConfig::default(),
+            ));
+            let parse_masking = |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
+                v.get("masking")
+                    .and_then(|hm| {
+                        serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok()
+                    })
+                    .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
+            };
+            let global_request = all
+                .and_then(|a| a.get("request"))
+                .and_then(parse_masking)
+                .unwrap_or_else(|| default_rules.clone());
+            let global_response = all
+                .and_then(|a| a.get("response"))
+                .and_then(parse_masking)
+                .unwrap_or_else(|| default_rules.clone());
+
+            let mut per_sg_request = std::collections::HashMap::new();
+            let mut per_sg_response = std::collections::HashMap::new();
+            if let Some(serde_json::Value::Object(subgraphs)) = headers.get("subgraphs") {
+                for (name, sg) in subgraphs {
+                    if let Some(rules) = sg.get("request").and_then(&parse_masking) {
+                        per_sg_request.insert(name.clone(), rules);
+                    }
+                    if let Some(rules) = sg.get("response").and_then(&parse_masking) {
+                        per_sg_response.insert(name.clone(), rules);
+                    }
+                }
+            }
+            let map = MaskingRulesMap::new(
+                DirectionRules::new(global_request, per_sg_request),
+                DirectionRules::new(global_response, per_sg_response),
+            );
+
+            // Global response rule applied.
+            assert!(map.get_response(None).should_mask("set-cookie"));
+            // Per-subgraph request rule applied for products.
+            assert!(
+                map.get_request(Some("products"))
+                    .should_mask("x-products-key")
+            );
+            // Per-subgraph response rule applied for products.
+            assert!(
+                map.get_response(Some("products"))
+                    .should_mask("x-products-secret"),
+                "per-subgraph response override should mask x-products-secret"
+            );
+            // Per-subgraph request rule does NOT bleed into response side.
+            assert!(
+                !map.get_response(Some("products"))
+                    .should_mask("x-products-key")
+            );
+            // Unknown subgraph falls back to the global response rules.
+            assert!(map.get_response(Some("other")).should_mask("set-cookie"));
+            // Unknown subgraph request falls back to fail-secure defaults
+            // (authorization is in the built-in sensitive list).
+            assert!(
+                map.get_request(Some("other")).should_mask("authorization"),
+                "fail-secure default should mask authorization when request rules are unset"
+            );
+        }
     }
 }

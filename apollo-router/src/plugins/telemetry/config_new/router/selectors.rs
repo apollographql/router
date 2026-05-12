@@ -136,10 +136,8 @@ pub(crate) enum RouterSelector {
     },
     /// A header from the response
     ResponseHeader {
-        /// The name of the request header.
+        /// The name of the response header.
         response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.

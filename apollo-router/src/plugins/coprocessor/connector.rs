@@ -456,8 +456,14 @@ where
             if response_config.headers
                 && let Some(rules) = header_masking_rules.as_deref()
             {
+                let subgraph_name = response.context.extensions().with_lock(|lock| {
+                    lock.get::<crate::services::header_masking::ConnectorSubgraphName>()
+                        .map(|n| n.0.clone())
+                });
                 tracing::debug!(
-                    headers = %rules.get_response(None).mask_headers_debug(&http_response.inner.headers),
+                    headers = %rules
+                        .get_response(subgraph_name.as_deref())
+                        .mask_headers_debug(&http_response.inner.headers),
                     service = %service_name,
                     "Connector response headers (masked)"
                 );

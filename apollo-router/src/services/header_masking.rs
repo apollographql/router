@@ -9,6 +9,12 @@ use crate::configuration::header_masking_config::HeaderMaskingConfig;
 
 const MASKED_VALUE: &str = "***MASKED***";
 
+/// Context-typemap key used to thread the originating subgraph name from a
+/// connector request to its response, so per-subgraph response masking rules
+/// can be resolved after the response loses its connector field.
+#[derive(Clone, Debug)]
+pub(crate) struct ConnectorSubgraphName(pub(crate) String);
+
 /// Compiled header masking rules for efficient lookup
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HeaderMaskingRules {

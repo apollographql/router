@@ -319,9 +319,13 @@ impl Selector for ConnectorSelector {
                         // If redact is None, check global rules
                         (None, Some(_)) => {
                             let should_mask = response.context.extensions().with_lock(|lock| {
+                                let subgraph = lock
+                                    .get::<crate::services::header_masking::ConnectorSubgraphName>(
+                                    )
+                                    .map(|n| n.0.clone());
                                 lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                     .map(|m| {
-                                        m.get_response(None)
+                                        m.get_response(subgraph.as_deref())
                                             .should_mask(connector_response_header)
                                     })
                                     .unwrap_or(false)
@@ -862,6 +866,47 @@ mod tests {
             .context
             .extensions()
             .with_lock(|lock| lock.insert(map));
+        assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
+    }
+
+    #[test]
+    fn connector_response_header_masking_uses_per_subgraph_rules() {
+        use std::collections::HashMap;
+
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::ConnectorSubgraphName;
+        use crate::services::header_masking::DirectionRules;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        // Global response rules: do not mask TEST_HEADER_NAME.
+        let global = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![],
+        }));
+        // Per-subgraph response rules for "products": do mask TEST_HEADER_NAME.
+        let products = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+        }));
+        let mut per_sg: HashMap<String, Arc<HeaderMaskingRules>> = HashMap::new();
+        per_sg.insert("products".to_string(), products);
+        let map = Arc::new(MaskingRulesMap::new(
+            DirectionRules::new(global.clone(), HashMap::new()),
+            DirectionRules::new(global, per_sg),
+        ));
+
+        let response = connector_response_with_header();
+        response.context.extensions().with_lock(|lock| {
+            lock.insert(map);
+            // Simulate what the request service stashes during call().
+            lock.insert(ConnectorSubgraphName("products".to_string()));
+        });
         assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
     }
 

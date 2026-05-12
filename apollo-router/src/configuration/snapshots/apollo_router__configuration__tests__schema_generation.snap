@@ -8946,8 +8946,15 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "description": "Optional redaction pattern.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "response_header": {
-              "description": "The name of the request header.",
+              "description": "The name of the response header.",
               "type": "string"
             }
           },
