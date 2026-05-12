@@ -228,17 +228,6 @@ fn coerce_value(
     Ok(())
 }
 
-/// Whether `value` is a valid schema default for `ty` under the same coercion rules as
-/// [`coerce_value`] (used when merging inconsistent default *presence* for empty input objects).
-pub(crate) fn schema_default_value_coerces(
-    types: &IndexMap<Name, ExtendedType>,
-    value: &Node<Value>,
-    ty: &Type,
-) -> bool {
-    let mut clone = value.clone();
-    coerce_value(types, &mut clone, ty).is_ok()
-}
-
 /// Coerce default values in all the given arguments, mutating the arguments.
 /// If a default value is invalid, the whole default value is removed silently (graphql-js
 /// `printSchema` behavior for schema defaults).
