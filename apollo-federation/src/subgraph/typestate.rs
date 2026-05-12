@@ -724,24 +724,6 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn interface_objects(&self) -> Vec<ObjectTypeDefinitionPosition> {
-        let Ok(Some(interface_object_def)) = self
-            .metadata()
-            .federation_spec_definition()
-            .interface_object_directive_definition(self.schema())
-        else {
-            return vec![];
-        };
-
-        self.schema()
-            .referencers()
-            .get_directive(&interface_object_def.name)
-            .object_types
-            .iter()
-            .cloned()
-            .collect()
-    }
-
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
         if let TypeDefinitionPosition::Object(obj) = type_ {
             return self.metadata().is_interface_object_type(&obj.type_name);
