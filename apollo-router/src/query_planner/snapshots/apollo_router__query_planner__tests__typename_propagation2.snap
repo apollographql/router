@@ -4,12 +4,16 @@ expression: "serde_json::to_value(&response).unwrap()"
 ---
 {
   "data": {
-    "book": {
-      "__typename": "Book",
-      "id": "1",
-      "author": {
-        "__typename": "Author"
+    "book": null
+  },
+  "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Null value found for non-nullable type ID",
+        "path": [
+          "book"
+        ]
       }
-    }
+    ]
   }
 }

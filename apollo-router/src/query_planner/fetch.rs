@@ -200,7 +200,12 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let (mut value, had_errors) = execute_selection_set(value, requires, schema, None);
+                // If a non-nullable required field was missing, the representation is incomplete;
+                // skip the entity rather than sending a malformed representation to the subgraph.
+                if had_errors {
+                    return;
+                }
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
