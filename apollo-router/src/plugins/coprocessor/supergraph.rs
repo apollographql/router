@@ -495,9 +495,14 @@ where
                 tracing::debug!(?payload, "externalized output");
                 // Use a new context to avoid carrying request extensions into the coprocessor
                 // HTTP call, consistent with how the initial chunk is handled.
+                let start = Instant::now();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
+                let duration = start.elapsed();
+                record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+                let succeeded = co_processor_result.is_ok();
+                record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
@@ -576,8 +581,10 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::router;
     use crate::services::supergraph;
@@ -1298,6 +1305,103 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3 }, "hasNext": false }),
         );
+    }
+
+    #[tokio::test]
+    async fn deferred_chunk_metric_incremented_when_on_graphql_error_matches() {
+        // Tests that apollo.router.operations.coprocessor is recorded when a deferred
+        // supergraph response chunk matches the on_graphql_error condition, even when the
+        // first chunk did not match.
+        //
+        // Bug: record_coprocessor_operation was missing from mapped_stream, so metrics
+        // were never recorded for deferred chunks even when the coprocessor was called.
+        async {
+            let supergraph_stage = SupergraphStage {
+                request: Default::default(),
+                response: SupergraphResponseConf {
+                    condition: Condition::Eq([
+                        SelectorOrValue::Selector(SupergraphSelector::OnGraphQLError {
+                            on_graphql_error: true,
+                        }),
+                        SelectorOrValue::Value(true.into()),
+                    ]),
+                    body: BodyConf::All(true),
+                    ..Default::default()
+                },
+            };
+
+            let mut mock_supergraph_service = MockSupergraphService::new();
+            mock_supergraph_service
+                .expect_call()
+                .returning(|req: supergraph::Request| {
+                    Ok(supergraph::Response::fake_stream_builder()
+                        // Chunk 1: no errors — on_graphql_error condition is false → not called
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 1 }))
+                                .has_next(true)
+                                .build(),
+                        )
+                        // Chunk 2: has errors — on_graphql_error condition is true → coprocessor called
+                        .response(
+                            graphql::Response::builder()
+                                .error(
+                                    crate::graphql::Error::builder()
+                                        .message("deferred error")
+                                        .build(),
+                                )
+                                .has_next(false)
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
+
+            let mock_http_client =
+                mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                    Box::pin(async {
+                        let response = serde_json_bytes::json!({
+                            "version": 1,
+                            "stage": "SupergraphResponse",
+                            "control": "continue",
+                        });
+                        Ok(http::Response::builder()
+                            .status(200)
+                            .body(router::body::from_bytes(
+                                serde_json::to_string(&response).unwrap(),
+                            ))
+                            .unwrap())
+                    })
+                });
+
+            let service = supergraph_stage.as_service(
+                mock_http_client,
+                mock_supergraph_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false,
+            );
+
+            let request = supergraph::Request::canned_builder()
+                .query("query Test { hello }")
+                .build()
+                .unwrap();
+
+            let mut res = service.oneshot(request).await.unwrap();
+            // Drain the stream to force the lazy mapped_stream to run
+            while res.response.body_mut().next().await.is_some() {}
+
+            // Coprocessor should have been called exactly once — for the deferred chunk
+            // with errors. Before the fix, the metric was silently dropped.
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                1,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
     }
 
     // Helper function to create supergraph stage for validation tests
