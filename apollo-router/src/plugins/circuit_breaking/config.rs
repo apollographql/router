@@ -73,11 +73,14 @@ impl Default for CircuitBreakerConfig {
 impl CircuitBreakerConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         if self.error_threshold == 0 {
-            return Err("experimental_circuit_breaking: error_threshold must be greater than 0".into());
+            return Err(
+                "experimental_circuit_breaking: error_threshold must be greater than 0".into(),
+            );
         }
         if self.half_open_max_requests == 0 {
             return Err(
-                "experimental_circuit_breaking: half_open_max_requests must be greater than 0".into(),
+                "experimental_circuit_breaking: half_open_max_requests must be greater than 0"
+                    .into(),
             );
         }
         Ok(())
@@ -86,7 +89,10 @@ impl CircuitBreakerConfig {
 
 /// Resolve a specific input against an optional parent, falling back to
 /// built-in defaults for anything still unset.
-fn resolve(specific: &CircuitBreakerInput, parent: Option<&CircuitBreakerInput>) -> CircuitBreakerConfig {
+fn resolve(
+    specific: &CircuitBreakerInput,
+    parent: Option<&CircuitBreakerInput>,
+) -> CircuitBreakerConfig {
     CircuitBreakerConfig {
         enabled: specific
             .enabled
@@ -150,10 +156,7 @@ impl Config {
     }
 
     pub(crate) fn effective_connector_config(&self, source_name: &str) -> CircuitBreakerConfig {
-        match (
-            self.connector.sources.get(source_name),
-            &self.connector.all,
-        ) {
+        match (self.connector.sources.get(source_name), &self.connector.all) {
             (Some(specific), Some(global)) => resolve(specific, Some(global)),
             (Some(specific), None) => resolve(specific, None),
             (None, Some(global)) => resolve(global, None),

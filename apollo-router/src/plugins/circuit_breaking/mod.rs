@@ -904,27 +904,22 @@ experimental_circuit_breaking:
     fn build_connector_service(
         harness: &PluginTestHarness<CircuitBreaking>,
         response_fn: impl Fn(
-                connector::request_service::Request,
-            ) -> connector::request_service::Response
-            + Send
-            + Sync
-            + Clone
-            + 'static,
+            connector::request_service::Request,
+        ) -> connector::request_service::Response
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ) -> ServiceHandle<connector::request_service::Request, connector::request_service::BoxService>
     {
         let inner: connector::request_service::BoxService =
-            connector::request_service::BoxService::new(
-                ServiceBuilder::new().service_fn(
-                    move |req: connector::request_service::Request| {
-                        let response_fn = response_fn.clone();
-                        async move { Ok((response_fn)(req)) }
-                    },
-                ),
-            );
-        ServiceHandle::new(
-            harness
-                .connector_request_service(inner, "my_connector".to_string()),
-        )
+            connector::request_service::BoxService::new(ServiceBuilder::new().service_fn(
+                move |req: connector::request_service::Request| {
+                    let response_fn = response_fn.clone();
+                    async move { Ok((response_fn)(req)) }
+                },
+            ));
+        ServiceHandle::new(harness.connector_request_service(inner, "my_connector".to_string()))
     }
 
     #[tokio::test]
