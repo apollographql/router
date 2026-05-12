@@ -308,7 +308,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         router_service_factory,
                         all_connections_stopped_signals,
                         // Initialize the retry budget from the config we are about to apply.
-                        retries_remaining: configuration.target().reload.max_retries,
+                        // Add 1 so that max_retries reflects the number of *retries* after
+                        // the initial attempt: the first attempt (event-triggered) consumes
+                        // one slot, leaving max_retries timer-driven retries remaining.
+                        retries_remaining: configuration.target().reload.max_retries.map(|n| n + 1),
                         configuration,
                         schema,
                         license,
@@ -353,8 +356,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
                 // Any event while reloading resets the retry budget: new inputs from
                 // Uplink deserve a fresh set of attempts, and explicit Reload/RhaiReload
-                // commands should also revive an exhausted budget.
-                let retries_remaining = configuration.target().reload.max_retries;
+                // commands should also revive an exhausted budget.  Add 1 for the same
+                // reason as above — the imminent event-triggered attempt uses one slot.
+                let retries_remaining = configuration.target().reload.max_retries.map(|n| n + 1);
 
                 tracing::info!(
                     // True when there is a pending change relative to what the router is serving.
@@ -2606,6 +2610,21 @@ mod tests {
             harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial reload fails
             // Send a newer schema before the timer fires — retries immediately.
             harness.send_and_wait(UpdateSchema(example_schema())).await;
+            harness.finish().await;
+        }
+
+        // max_retries: 1 means one retry after the initial attempt — two total creates.
+        // This catches the off-by-one where the initial attempt consumes the whole budget.
+        #[test(tokio::test(start_paused = true))]
+        async fn one_retry() {
+            let one_retry = Arc::new(
+                Configuration::from_str("reload:\n  max_retries: 1")
+                    .expect("config with max_retries: 1 must be valid"),
+            );
+            let harness = Harness::new(factory(&[Ok(()), Err(()), Ok(())]), 2);
+            harness.startup_with_config(one_retry).await;
+            harness.send_and_wait(UpdateSchema(minimal_schema())).await; // initial attempt fails
+            harness.advance_and_wait(Duration::from_secs(11)).await; // one retry succeeds
             harness.finish().await;
         }
 
