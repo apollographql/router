@@ -1270,9 +1270,14 @@ where
                 //
                 // WARN: be careful if you're changing out this context to using the request's context; see
                 // above, but also validate what happens downstream for that context
+                let start = Instant::now();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
+                let duration = start.elapsed();
+                record_coprocessor_duration(PipelineStep::RouterResponse, duration);
+                let succeeded = co_processor_result.is_ok();
+                record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
                 validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
