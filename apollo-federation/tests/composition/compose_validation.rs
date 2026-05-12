@@ -679,3 +679,51 @@ fn interface_field_no_implem_error_includes_source_locations() {
     assert_eq!(locs[0].subgraph, "subgraphA");
     assert_eq!(locs[1].subgraph, "subgraphB");
 }
+
+#[test]
+fn requires_error_locations_include_requires_directive_and_incompatible_fields() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          x(arg: Int): Int @external
+          y: Int @requires(fields: "x(arg: 42)")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type T @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "REQUIRES_INVALID_FIELDS",
+            r#"[subgraphA] On field "T.y", for @requires(fields: "x(arg: 42)"): cannot provide a value for argument "arg" of field "T.x" as argument "arg" is not defined in subgraph "subgraphB""#,
+        )],
+    );
+    let failure = result.unwrap_err();
+    let locations = failure.errors[0].locations();
+    assert_eq!(
+        locations.len(),
+        2,
+        "Expected 2 locations (the @requires directive and the incompatible field), got {}: {:?}",
+        locations.len(),
+        locations,
+    );
+    assert_eq!(locations[0].subgraph, "subgraphA");
+    assert_eq!(locations[1].subgraph, "subgraphB");
+}

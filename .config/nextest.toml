@@ -125,10 +125,6 @@ or ( binary_id(=apollo-router) & test(=services::subgraph_service::tests::test_s
 or ( binary_id(=apollo-router) & test(=services::supergraph::tests::aliased_subgraph_data_rewrites_on_non_root_fetch) )
 or ( binary_id(=apollo-router) & test(=services::supergraph::tests::interface_object_typename_rewrites) )
 or ( binary_id(=apollo-router) & test(=services::supergraph::tests::only_query_interface_object_subgraph) )
-or ( binary_id(=apollo-router) & test(=uplink::license_stream::test::license_expander_claim_no_claim) )
-or ( binary_id(=apollo-router) & test(=uplink::license_stream::test::license_expander_claim_pause_claim) )
-or ( binary_id(=apollo-router) & test(=uplink::persisted_queries_manifest_stream::test::integration_test) )
-or ( binary_id(=apollo-router) & test(=uplink::schema_stream::test::integration_test) )
 '''
 
 [profile.ci]
