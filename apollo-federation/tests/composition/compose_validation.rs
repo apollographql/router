@@ -626,3 +626,56 @@ fn satisfiability_validation_handles_indirectly_reachable_keys() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
     let _supergraph = result.expect("Expected composition to succeed - satisfiability should pass");
 }
+
+#[test]
+fn interface_field_no_implem_error_includes_source_locations() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          I: [I!]
+        }
+
+        interface I {
+          a: Int
+        }
+
+        type A implements I {
+          a: Int
+          b: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        interface I {
+          b: Int
+        }
+
+        type B implements I {
+          b: Int
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_FIELD_NO_IMPLEM",
+            r#"Interface field "I.a" is declared in subgraph "subgraphA" but type "B", which implements "I" only in subgraph "subgraphB" does not have field "a"."#,
+        )],
+    );
+
+    let errors = result.expect_err("Expected composition to fail").errors;
+    let locs = errors[0].locations();
+    assert_eq!(
+        locs.len(),
+        2,
+        "Expected 2 locations (interface field def + implementing type def), got {locs:#?}"
+    );
+    assert_eq!(locs[0].subgraph, "subgraphA");
+    assert_eq!(locs[1].subgraph, "subgraphB");
+}
