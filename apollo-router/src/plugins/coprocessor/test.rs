@@ -5753,9 +5753,10 @@ mod tests {
         // internally) to drive CHUNK_CONTAINS_GRAPHQL_ERROR from the actual response content —
         // the same mechanism used in the real pipeline.
         async {
+            use futures::StreamExt as _;
+
             use crate::graphql::Error as GraphQLError;
             use crate::plugins::telemetry::config::AttributeValue;
-            use futures::StreamExt as _;
 
             // RouterStage with condition: on_graphql_error: true
             let router_stage = RouterStage {
@@ -5773,22 +5774,21 @@ mod tests {
             };
 
             // HTTP client mock: returns a simple "continue" response for coprocessor calls
-            let mock_http_client =
-                mock_with_deferred_callback(|_: http::Request<RouterBody>| {
-                    Box::pin(async {
-                        let response = json!({
-                            "version": 1,
-                            "stage": "RouterResponse",
-                            "control": "continue",
-                        });
-                        Ok(http::Response::builder()
-                            .status(200)
-                            .body(router::body::from_bytes(
-                                serde_json::to_string(&response).unwrap(),
-                            ))
-                            .unwrap())
-                    })
-                });
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = json!({
+                        "version": 1,
+                        "stage": "RouterResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
 
             // Mock router service returning a 2-chunk response. The response is built using
             // supergraph::Response::new_from_response, which calls check_for_errors internally.
@@ -5810,18 +5810,16 @@ mod tests {
                             .build(),
                         // Chunk 2: response with errors — condition will fire
                         Response::builder()
-                            .errors(vec![GraphQLError::builder()
-                                .message("deferred error")
-                                .build()])
+                            .errors(vec![
+                                GraphQLError::builder().message("deferred error").build(),
+                            ])
                             .build(),
                     ];
 
                     // new_from_response applies check_for_errors, which lazily sets
                     // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
                     let sg_response = supergraph::Response::new_from_response(
-                        http::Response::new(
-                            futures::stream::iter(graphql_chunks).boxed(),
-                        ),
+                        http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
                         ctx.clone(),
                     );
 
@@ -5863,11 +5861,7 @@ mod tests {
             // The coprocessor should have been called exactly once — for the deferred
             // chunk that contained GraphQL errors. Before the fix, the metric was silently
             // dropped because `executed` was already checked (as false) before the stream ran.
-            assert_coprocessor_operations_metrics(&[(
-                PipelineStep::RouterResponse,
-                1,
-                Some(true),
-            )]);
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
         }
         .with_metrics()
         .await;

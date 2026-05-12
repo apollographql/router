@@ -1360,22 +1360,21 @@ mod tests {
                         .unwrap())
                 });
 
-            let mock_http_client =
-                mock_with_deferred_callback(|_: http::Request<RouterBody>| {
-                    Box::pin(async {
-                        let response = serde_json_bytes::json!({
-                            "version": 1,
-                            "stage": "SupergraphResponse",
-                            "control": "continue",
-                        });
-                        Ok(http::Response::builder()
-                            .status(200)
-                            .body(router::body::from_bytes(
-                                serde_json::to_string(&response).unwrap(),
-                            ))
-                            .unwrap())
-                    })
-                });
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = serde_json_bytes::json!({
+                        "version": 1,
+                        "stage": "SupergraphResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
 
             let service = supergraph_stage.as_service(
                 mock_http_client,

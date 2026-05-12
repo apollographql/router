@@ -475,16 +475,16 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let start = Instant::now();
-                let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
-                    .await;
-                let duration = start.elapsed();
-                record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::ExecutionResponse);
+                    payload
+                        .call(
+                            generator_client,
+                            &generator_coprocessor_url,
+                            generator_map_context.clone(),
+                        )
+                        .await
+                };
                 let succeeded = co_processor_result.is_ok();
                 record_coprocessor_operation(PipelineStep::ExecutionResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
@@ -1136,22 +1136,21 @@ mod tests {
                         .unwrap())
                 });
 
-            let mock_http_client =
-                mock_with_deferred_callback(|_: http::Request<RouterBody>| {
-                    Box::pin(async {
-                        let response = serde_json_bytes::json!({
-                            "version": 1,
-                            "stage": "ExecutionResponse",
-                            "control": "continue",
-                        });
-                        Ok(http::Response::builder()
-                            .status(200)
-                            .body(router::body::from_bytes(
-                                serde_json::to_string(&response).unwrap(),
-                            ))
-                            .unwrap())
-                    })
-                });
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = serde_json_bytes::json!({
+                        "version": 1,
+                        "stage": "ExecutionResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
 
             let service = execution_stage.as_service(
                 mock_http_client,
