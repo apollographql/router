@@ -1,6 +1,7 @@
 use test_log::test;
 
 use super::ServiceDefinition;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 
 #[test]
@@ -1405,4 +1406,99 @@ fn nullability_mismatch_is_not_ok_if_argument_is_non_nullable() {
         "Expected error message about type mismatch, but got: {}",
         error_message
     );
+}
+
+/// Regression test: when a field has `@fromContext` on an argument and the
+/// same field exists in multiple subgraphs with the same type, `needs_join_field`
+/// must still return true so `@join__field` (with `contextArguments`) is emitted.
+///
+/// The bug: `@fromContext` is applied to field **arguments**, so `DirectiveReferencers`
+/// stores them in `object_field_arguments`. But `needs_join_field` checked
+/// `object_fields` — the wrong set. JS avoids this by navigating `.parent.parent`
+/// (argument → field) when collecting `fieldsWithFromContext`.
+///
+///     // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
+///     const field = application.parent.parent; // argument → field
+#[test]
+fn from_context_field_in_all_subgraphs_preserves_join_field() {
+    use apollo_federation::subgraph::typestate::Subgraph;
+
+    // s1: owns T with @context, U.f has @fromContext on its argument
+    let s1 = Subgraph::parse(
+        "s1",
+        "http://s1",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable", "@context", "@fromContext"])
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable on OBJECT | FIELD_DEFINITION
+            directive @context(name: String!) repeatable on OBJECT | INTERFACE | UNION
+            directive @fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+            scalar federation__ContextFieldValue
+
+            type Query {
+                t: T!
+            }
+
+            type T @key(fields: "id") @context(name: "ctx") {
+                id: ID!
+                u: U!
+                prop: String!
+            }
+
+            type U @key(fields: "id") {
+                id: ID!
+                f(a: String @fromContext(field: "$ctx { prop }")): Int! @shareable
+            }
+        "#,
+    )
+    .unwrap();
+
+    // s2: also has U.f with same type but no @fromContext
+    let s2 = Subgraph::parse(
+        "s2",
+        "http://s2",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable"])
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable on OBJECT | FIELD_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+
+            type U @key(fields: "id") {
+                id: ID!
+                f: Int! @shareable
+            }
+        "#,
+    )
+    .unwrap();
+
+    let supergraph = compose(vec![s1, s2]).expect("composition should succeed");
+    insta::assert_snapshot!(supergraph.schema().schema().to_string());
+
+    let type_u = supergraph
+        .schema()
+        .schema()
+        .types
+        .get("U")
+        .expect("U exists in the schema");
+    insta::assert_snapshot!(type_u.to_string(), @r#"
+    type U @join__type(graph: S1, key: "id") @join__type(graph: S2, key: "id") {
+      id: ID!
+      f: Int! @join__field(graph: S1, contextArguments: [{context: "s1__ctx", name: "a", type: "String", selection: "{ prop }"}]) @join__field(graph: S2)
+    }
+    "#);
 }

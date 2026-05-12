@@ -485,7 +485,51 @@ mod fieldset_based_directives {
             err,
             [(
                 "REQUIRES_INVALID_FIELDS",
-                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T". If the field is defined in another subgraph, you need to add it to this subgraph with @external."#,
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id unknown") {
+                id: ID!
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS",
+                r#"[S] On type "T", for @key(fields: "id unknown"): Cannot query field "unknown" on type "T" (the field should either be added to this subgraph or, if it should not be resolved by this subgraph, you need to add it to this subgraph with @external)."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "unknown")
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "PROVIDES_INVALID_FIELDS",
+                r#"[S] On field "Query.t", for @provides(fields: "unknown"): Cannot query field "unknown" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
             )]
         );
     }

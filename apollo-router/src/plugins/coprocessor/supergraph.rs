@@ -238,18 +238,21 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SupergraphRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -404,18 +407,17 @@ where
 
         // Second, call our co-processor and get a reply.
         tracing::debug!(?payload, "externalized output");
-        let start = Instant::now();
-
         // We use a new context here to avoid any risk of carrying extensions to coprocessor calls
         // that we don't intend for coprocessor calls; if in the future we change it, make sure to
         // understand what could be sent to coprocessors and how that might affect their behavior
-        let co_processor_result = payload
-            .call(http_client.clone(), &coprocessor_url, Context::new())
-            .await;
+        let co_processor_result = {
+            let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
+            payload
+                .call(http_client.clone(), &coprocessor_url, Context::new())
+                .await
+        };
         // Indicate the stage was executed to raise execution metric on parent
         *executed = true;
-        let duration = start.elapsed();
-        record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
         tracing::debug!(?co_processor_result, "co-processor returned");
         let co_processor_output = co_processor_result?;
@@ -495,12 +497,12 @@ where
                 tracing::debug!(?payload, "externalized output");
                 // Use a new context to avoid carrying request extensions into the coprocessor
                 // HTTP call, consistent with how the initial chunk is handled.
-                let start = Instant::now();
-                let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url, Context::new())
-                    .await;
-                let duration = start.elapsed();
-                record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
+                    payload
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
+                        .await
+                };
                 let succeeded = co_processor_result.is_ok();
                 record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
