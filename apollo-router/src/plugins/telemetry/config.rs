@@ -183,8 +183,7 @@ impl MetricView {
             rename: None,
             description: None,
             unit: None,
-            aggregation: histogram_buckets
-                .map(|buckets| MetricAggregation::Histogram { buckets }),
+            aggregation: histogram_buckets.map(|buckets| MetricAggregation::Histogram { buckets }),
             allowed_attribute_keys: None,
             cardinality_limit,
         }
@@ -1013,11 +1012,7 @@ mod tests {
 
     #[test]
     fn test_merge_user_overrides_all_fields() {
-        let default = MetricView::default_view(
-            "my.histogram",
-            Some(vec![0.1, 0.5, 1.0]),
-            None,
-        );
+        let default = MetricView::default_view("my.histogram", Some(vec![0.1, 0.5, 1.0]), None);
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: Some("renamed.histogram".to_string()),
@@ -1051,11 +1046,7 @@ mod tests {
     #[test]
     fn test_merge_user_specifies_nothing_preserves_defaults() {
         let default_buckets = vec![0.1, 0.5, 1.0];
-        let default = MetricView::default_view(
-            "my.histogram",
-            Some(default_buckets.clone()),
-            None,
-        );
+        let default = MetricView::default_view("my.histogram", Some(default_buckets.clone()), None);
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: None,
@@ -1123,11 +1114,7 @@ mod tests {
 
     #[test]
     fn test_merge_user_drop_overrides_default_histogram() {
-        let default = MetricView::default_view(
-            "noisy.metric",
-            Some(vec![0.1, 0.5, 1.0]),
-            None,
-        );
+        let default = MetricView::default_view("noisy.metric", Some(vec![0.1, 0.5, 1.0]), None);
         let user = MetricView {
             name: "noisy.metric".to_string(),
             rename: None,
@@ -1225,11 +1212,8 @@ mod tests {
         let default_buckets = vec![0.001, 0.01, 0.1, 1.0, 10.0];
 
         // Create a default view with histogram buckets
-        let default_view = MetricView::default_view(
-            "test.histogram",
-            Some(default_buckets.clone()),
-            None,
-        );
+        let default_view =
+            MetricView::default_view("test.histogram", Some(default_buckets.clone()), None);
 
         // User view specifies only description, not aggregation
         let user_view = MetricView {
@@ -1303,11 +1287,7 @@ mod tests {
         let user_buckets = vec![1.0, 5.0, 10.0, 50.0];
 
         // Create a default view with histogram buckets
-        let default_view = MetricView::default_view(
-            "test.histogram",
-            Some(default_buckets),
-            None,
-        );
+        let default_view = MetricView::default_view("test.histogram", Some(default_buckets), None);
 
         // User view specifies custom aggregation - should override defaults
         let user_view = MetricView {
@@ -1355,5 +1335,4 @@ mod tests {
             "cardinality_limit: 0 should be rejected"
         );
     }
-
 }
