@@ -99,7 +99,7 @@ async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
         .update_schema(&PathBuf::from("tests/fixtures/broken-supergraph.graphql"))
         .await;
     router
-        .wait_for_log_message("error while reloading, continuing with previous configuration")
+        .wait_for_log_message("error while reloading, still running with previous configuration")
         .await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
