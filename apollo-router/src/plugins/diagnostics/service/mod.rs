@@ -183,9 +183,7 @@ fn sha256_hex(input: &str) -> String {
 }
 
 /// GET /system_info - Return static router system info plus live config/schema hashes as JSON
-async fn handle_router_system_info_json(
-    Extension(state): Extension<DiagnosticsState>,
-) -> Response {
+async fn handle_router_system_info_json(Extension(state): Extension<DiagnosticsState>) -> Response {
     match get_router_system_info() {
         Some(info) => {
             let with_hashes = RouterSystemInfoWithHashes {
