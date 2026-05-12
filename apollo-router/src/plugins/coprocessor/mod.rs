@@ -1277,22 +1277,32 @@ where
                         .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
-                let succeeded = co_processor_result.is_ok();
-                record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
-                let co_processor_output = co_processor_result?;
-                validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
+                let result: Result<Bytes, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::RouterResponse,
+                    )?;
 
-                let final_bytes: Bytes = match co_processor_output.body {
-                    Some(bytes) => bytes.into(),
-                    None => bytes.into(),
-                };
+                    let final_bytes: Bytes = match co_processor_output.body {
+                        Some(bytes) => bytes.into(),
+                        None => bytes.into(),
+                    };
 
-                if let Some(ctx) = co_processor_output.context {
-                    update_context_from_coprocessor(&generator_map_context, ctx, &context_conf)?;
+                    if let Some(ctx) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            ctx,
+                            &context_conf,
+                        )?;
+                    }
+
+                    Ok(final_bytes)
                 }
-
-                Ok(final_bytes)
+                .await;
+                record_coprocessor_operation(PipelineStep::RouterResponse, result.is_ok());
+                result
             }
         });
 

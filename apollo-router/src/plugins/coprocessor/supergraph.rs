@@ -503,45 +503,47 @@ where
                         .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
-                let succeeded = co_processor_result.is_ok();
-                record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
                 tracing::debug!(?co_processor_result, "co-processor returned");
-                let co_processor_output = co_processor_result?;
+                let result: Result<graphql::Response, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
 
-                validate_coprocessor_output(
-                    &co_processor_output,
-                    PipelineStep::SupergraphResponse,
-                )?;
-
-                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
-                let incoming_payload_was_valid =
-                    crate::plugins::coprocessor::was_incoming_payload_valid(
-                        &deferred_response,
-                        &response_config.body,
-                    );
-
-                // Third, process our reply and act on the contents. Our processing logic is
-                // that we replace "bits" of our incoming response with the updated bits if they
-                // are present in our co_processor_output. If they aren't present, just use the
-                // bits that we sent to the co_processor.
-                let new_deferred_response = handle_graphql_response(
-                    deferred_response,
-                    co_processor_output.body,
-                    response_validation,
-                    incoming_payload_was_valid,
-                    &response_config.body,
-                )?;
-
-                if let Some(context) = co_processor_output.context {
-                    update_context_from_coprocessor(
-                        &generator_map_context,
-                        context,
-                        &response_config_context,
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::SupergraphResponse,
                     )?;
-                }
 
-                // We return the deferred_response into our stream of response chunks
-                Ok(new_deferred_response)
+                    // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                    let incoming_payload_was_valid =
+                        crate::plugins::coprocessor::was_incoming_payload_valid(
+                            &deferred_response,
+                            &response_config.body,
+                        );
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+                    let new_deferred_response = handle_graphql_response(
+                        deferred_response,
+                        co_processor_output.body,
+                        response_validation,
+                        incoming_payload_was_valid,
+                        &response_config.body,
+                    )?;
+
+                    if let Some(context) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            context,
+                            &response_config_context,
+                        )?;
+                    }
+
+                    Ok(new_deferred_response)
+                }
+                .await;
+                record_coprocessor_operation(PipelineStep::SupergraphResponse, result.is_ok());
+                result
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {
