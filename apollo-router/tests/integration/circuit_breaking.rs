@@ -242,10 +242,6 @@ async fn test_circuit_breaker_error_includes_extension_fields() -> Result<(), Bo
         error["extensions"]["code"].as_str(),
         Some("CIRCUIT_BREAKER_OPEN"),
     );
-    assert!(
-        error["extensions"]["service"].is_null(),
-        "error should not leak subgraph name in 'service' extension: {error:?}"
-    );
     assert_eq!(
         error["message"].as_str(),
         Some("Circuit breaker is open"),

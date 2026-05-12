@@ -939,6 +939,123 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "CircuitBreakerInput": {
+      "additionalProperties": false,
+      "description": "Serde-facing circuit breaker configuration where every field is optional.\n`None` means \"not specified by the user\" and will be inherited from the\nparent scope (global `all`) or fall back to the built-in default.",
+      "properties": {
+        "enabled": {
+          "default": null,
+          "description": "Whether circuit breaking is enabled.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "error_threshold": {
+          "default": null,
+          "description": "Number of errors within the sliding window required to trip the circuit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "half_open_max_requests": {
+          "default": null,
+          "description": "Maximum concurrent probe requests allowed in the half-open state.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether to enforce (reject requests) or just measure (log only)."
+        },
+        "recovery_timeout": {
+          "default": null,
+          "description": "How long the circuit stays open before transitioning to half-open.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window": {
+          "default": null,
+          "description": "Duration of the sliding error-counting window.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerMode": {
+      "description": "Mode controlling whether the circuit breaker enforces or just observes.",
+      "oneOf": [
+        {
+          "const": "measure",
+          "description": "Track and log state transitions but never reject requests.",
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "Actively reject requests when the circuit is open.",
+          "type": "string"
+        }
+      ]
+    },
+    "CircuitBreakingConfig": {
+      "additionalProperties": false,
+      "description": "Top-level plugin configuration with `all` + per-subgraph overrides.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default circuit breaker settings applied to all subgraphs."
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCircuitBreakerConfig"
+            }
+          ],
+          "default": {
+            "all": null,
+            "sources": {}
+          },
+          "description": "Circuit breaker settings for connector sources."
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerInput"
+          },
+          "default": {},
+          "description": "Per-subgraph circuit breaker overrides.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -2194,6 +2311,33 @@ expression: "&schema"
       "required": [
         "urls"
       ],
+      "type": "object"
+    },
+    "ConnectorCircuitBreakerConfig": {
+      "additionalProperties": false,
+      "description": "Circuit breaker configuration scoped to connector sources.",
+      "properties": {
+        "all": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default circuit breaker settings applied to all connector sources."
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerInput"
+          },
+          "default": {},
+          "description": "Per-source circuit breaker overrides, keyed by source config key\n(e.g. `\"subgraph_name.source_name\"`).",
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "ConnectorConnectorLimitsConfiguration": {
@@ -12943,6 +13087,9 @@ expression: "&schema"
         "force_schema_reload": null
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+    },
+    "experimental_circuit_breaking": {
+      "$ref": "#/definitions/CircuitBreakingConfig"
     },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
