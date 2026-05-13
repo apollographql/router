@@ -305,13 +305,125 @@ async fn get_batch_router_service(
     )
 }
 
+/// Canonicalise span ordering inside an `ExportTraceServiceRequest` so insta
+/// snapshots are stable across runs.
+///
+/// **Why this exists.** The OTLP HTTP exporter ships spans in the order the
+/// tracing-opentelemetry layer hands them to the batch span processor, which
+/// is the order their associated tokio task drops the `EnteredSpan` guard.
+/// Under `flavor = "multi_thread"` two sibling spans (e.g. `parse_query`
+/// scheduled on the compute-job pool and the supergraph-side `compute_job` /
+/// `compute_job.execution` spans on a different worker) can finish in either
+/// relative order, which permutes the `spans` vec the test asserts on. The
+/// snapshot content is byte-for-byte identical otherwise — only the array
+/// ordering changes — so the cure is to canonicalise the order before
+/// asserting. See blog-details.md / T10 (non-deterministic ordering).
+///
+/// **Shape chosen.** A hierarchical DFS rooted at each span whose
+/// `parent_span_id` is empty (or whose parent is not present in this batch).
+/// At every node, children are sorted by
+/// `(start_time_unix_nano, end_time_unix_nano, name, span_id)`. This keeps
+/// parents adjacent to their children (so the rendered snapshot still reads
+/// as a trace tree) while making sibling ordering deterministic across
+/// runs. Span timestamps are not yet redacted at this point, so the sort
+/// key carries real temporal information; the insta redactions later in
+/// `assert_report!` collapse the keys to `[start_time]` etc. in the
+/// rendered yaml.
+fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
+    use std::collections::HashMap;
+
+    use opentelemetry_proto::tonic::trace::v1::Span;
+
+    for resource_spans in &mut report.resource_spans {
+        for scope_spans in &mut resource_spans.scope_spans {
+            // Take the spans out so we can re-insert them in canonical order.
+            let original: Vec<Span> = std::mem::take(&mut scope_spans.spans);
+            if original.is_empty() {
+                continue;
+            }
+
+            // Stable index from span_id -> position in `original`, so the
+            // DFS can collect indices instead of cloning Spans.
+            let id_to_idx: HashMap<Vec<u8>, usize> = original
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.span_id.clone(), i))
+                .collect();
+
+            // parent_span_id -> Vec<idx of child in `original`>. Roots key
+            // off an empty parent_span_id or a parent_span_id that doesn't
+            // resolve inside this batch (defensive — shouldn't happen for
+            // these tests, but keeps a stray span from being dropped).
+            let mut children_of: HashMap<Vec<u8>, Vec<usize>> = HashMap::new();
+            let mut roots: Vec<usize> = Vec::new();
+            for (idx, span) in original.iter().enumerate() {
+                if span.parent_span_id.is_empty() || !id_to_idx.contains_key(&span.parent_span_id) {
+                    roots.push(idx);
+                } else {
+                    children_of
+                        .entry(span.parent_span_id.clone())
+                        .or_default()
+                        .push(idx);
+                }
+            }
+
+            // Sort a slice of indices into `original` by the canonical key.
+            let sort_key = |idx: &usize| -> (u64, u64, String, Vec<u8>) {
+                let s = &original[*idx];
+                (
+                    s.start_time_unix_nano,
+                    s.end_time_unix_nano,
+                    s.name.clone(),
+                    s.span_id.clone(),
+                )
+            };
+            roots.sort_by_key(sort_key);
+            for v in children_of.values_mut() {
+                v.sort_by_key(sort_key);
+            }
+
+            // DFS: visit each root, then its children in sorted order, etc.
+            // Iterative to avoid blowing the stack on pathological trees.
+            let mut ordered: Vec<usize> = Vec::with_capacity(original.len());
+            let mut stack: Vec<usize> = roots.into_iter().rev().collect();
+            while let Some(idx) = stack.pop() {
+                ordered.push(idx);
+                let span_id = &original[idx].span_id;
+                if let Some(kids) = children_of.get(span_id) {
+                    // Push in reverse so they come off the stack in sorted
+                    // order.
+                    for child in kids.iter().rev() {
+                        stack.push(*child);
+                    }
+                }
+            }
+
+            // Reconstruct the spans vec in DFS order. Wrap each span in
+            // Option so we can `.take()` it exactly once even if the input
+            // contains duplicate span_ids (which would be a bug, but the
+            // sort shouldn't silently drop spans on its behalf).
+            let mut slots: Vec<Option<Span>> = original.into_iter().map(Some).collect();
+            scope_spans.spans = ordered
+                .into_iter()
+                .filter_map(|idx| slots[idx].take())
+                .collect();
+        }
+    }
+}
+
 macro_rules! assert_report {
         ($report: expr)=> {
             assert_report!($report, false)
         };
         ($report: expr, $batch: literal)=> {
+            // Take ownership locally so we can canonicalise span ordering
+            // without forcing every call site to declare `let mut report`.
+            // Without the sort, the OTLP exporter's spans vec is permuted
+            // by tokio-task drop order — see `sort_spans_for_snapshot`.
+            let mut report = $report;
+            sort_spans_for_snapshot(&mut report);
             insta::with_settings!({sort_maps => true}, {
-                    insta::assert_yaml_snapshot!($report, {
+                    insta::assert_yaml_snapshot!(report, {
                         ".**.attributes" => insta::sorted_redaction(),
                         ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
                             let mut redacted_attributes = vec![
