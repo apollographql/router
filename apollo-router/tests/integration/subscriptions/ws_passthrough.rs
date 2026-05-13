@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+use std::time::Instant;
 
 use regex::Regex;
 use tower::BoxError;
@@ -15,6 +16,80 @@ use crate::integration::subscriptions::create_sub_query;
 use crate::integration::subscriptions::start_coprocessor_server;
 use crate::integration::subscriptions::start_subscription_server_with_payloads;
 use crate::integration::subscriptions::verify_subscription_events;
+
+/// Poll `/metrics` at ~25ms cadence until `predicate(&body)` returns true or
+/// `deadline` elapses. Returns the body that satisfied the predicate.
+///
+/// On expiry, panics with the last-seen body and elapsed time. This is the
+/// uniform fix for client-side observability races against out-of-process
+/// router events: the router is a child process, so cross-process `Notify`
+/// doesn't apply, and we must deadline-bound an externally observable
+/// predicate (contract C6).
+///
+/// Module-private by design. If a second consumer appears, lift to
+/// `tests/common.rs` in a follow-up. Premature lifting is what the
+/// project's anti-fan-out rule prevents.
+async fn poll_metrics_until<F>(
+    router: &IntegrationTest,
+    deadline: Duration,
+    predicate: F,
+) -> String
+where
+    F: Fn(&str) -> bool,
+{
+    let start = Instant::now();
+    let mut last_body = String::new();
+    while start.elapsed() < deadline {
+        match router.get_metrics_response().await {
+            Ok(resp) => match resp.text().await {
+                Ok(body) => {
+                    if predicate(&body) {
+                        return body;
+                    }
+                    last_body = body;
+                }
+                Err(e) => {
+                    last_body = format!("<failed to read body: {e}>");
+                }
+            },
+            Err(e) => {
+                last_body = format!("<failed to fetch /metrics: {e}>");
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "poll_metrics_until: predicate not satisfied within {:?} (elapsed {:?}); last body:\n{}",
+        deadline,
+        start.elapsed(),
+        last_body,
+    );
+}
+
+/// Deadline-poll an in-process `AtomicBool` that is set by the mock WS
+/// server's close handler in `tests/integration/subscriptions/mod.rs`.
+///
+/// `is_closed` is set by a separate in-process task (the server-side close
+/// handler), so a one-shot `assert!` immediately after the client stream
+/// terminates races with the handler. Cadence 25ms, default deadline 5s.
+/// On expiry, panics with `test_name` for diagnostic context (per C6).
+async fn assert_is_closed_within(
+    is_closed: &Arc<AtomicBool>,
+    deadline: Duration,
+    test_name: &'static str,
+) {
+    let start = Instant::now();
+    while start.elapsed() < deadline
+        && !is_closed.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        is_closed.load(std::sync::atomic::Ordering::Relaxed),
+        "is_closed not set within {deadline:?} in {test_name} (elapsed {:?})",
+        start.elapsed(),
+    );
+}
 
 /// Creates an expected subscription event payload for a schema reload
 fn create_expected_schema_reload_payload() -> serde_json::Value {
@@ -265,7 +340,14 @@ async fn test_subscription_ws_passthrough(
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): `is_closed` is set by the mock WS server's close handler
+    // in an in-process task; deadline-poll instead of one-shot assert.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough",
+    )
+    .await;
 
     Ok(())
 }
@@ -340,7 +422,13 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
 
     // Check for errors in router logs (allow expected coprocessor error)
     router.assert_no_error_logs();
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_with_coprocessor",
+    )
+    .await;
 
     Ok(())
 }
@@ -426,7 +514,13 @@ async fn test_subscription_ws_passthrough_error_payload(
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_error_payload",
+    )
+    .await;
 
     Ok(())
 }
@@ -514,7 +608,13 @@ async fn test_subscription_ws_passthrough_pure_error_payload(
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_pure_error_payload",
+    )
+    .await;
 
     Ok(())
 }
@@ -611,7 +711,13 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 
     // Check for errors in router logs
     router.assert_no_error_logs();
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_pure_error_payload_with_coprocessor",
+    )
+    .await;
 
     Ok(())
 }
@@ -680,21 +786,30 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
 
     router.assert_reloaded().await;
 
-    let metrics = router.get_metrics_response().await?.text().await?;
-    let sum_metric_counts = |regex: &Regex| {
+    // Race fix (C6): same pattern as Phase 11 site 1 — after
+    // `assert_reloaded()` the test scrapes `/metrics` and asserts
+    // `total_active + total_terminating == 1`. During reload it transiently
+    // sees `active=1, terminating=1` (2 vs 1) because connection bookkeeping
+    // is updated asynchronously from the router-side reload notification.
+    let sum_metric_counts = |regex: &Regex, metrics: &str| -> usize {
         regex
-            .captures_iter(&metrics)
+            .captures_iter(metrics)
             .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
             .sum()
     };
     let terminating =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_terminating: usize = sum_metric_counts(&terminating);
     let active = Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}] ([0-9]+)"#)
         .expect("regex");
-    let total_active: usize = sum_metric_counts(&active);
-
+    let metrics = poll_metrics_until(&router, Duration::from_secs(10), |body| {
+        let total_active = sum_metric_counts(&active, body);
+        let total_terminating = sum_metric_counts(&terminating, body);
+        total_active == 1 && total_terminating == 0
+    })
+    .await;
+    let total_active: usize = sum_metric_counts(&active, &metrics);
+    let total_terminating: usize = sum_metric_counts(&terminating, &metrics);
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
@@ -706,7 +821,13 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
 
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_on_config_reload",
+    )
+    .await;
 
     info!(
         "✅ Passthrough subscription mode test completed successfully with {} events",
@@ -780,21 +901,30 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
 
     router.assert_reloaded().await;
 
-    let metrics = router.get_metrics_response().await?.text().await?;
-    let sum_metric_counts = |regex: &Regex| {
+    // Race fix (C6, Phase 11 site 1): after `assert_reloaded()` the test scrapes
+    // `/metrics` and asserts `total_active + total_terminating == 1`. During
+    // reload it transiently sees `active=1, terminating=1` (2 vs 1) because
+    // connection bookkeeping is updated asynchronously from the router-side
+    // reload notification. Deadline-poll the externally observable predicate.
+    let sum_metric_counts = |regex: &Regex, metrics: &str| -> usize {
         regex
-            .captures_iter(&metrics)
+            .captures_iter(metrics)
             .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
             .sum()
     };
     let terminating =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_terminating: usize = sum_metric_counts(&terminating);
     let active = Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}] ([0-9]+)"#)
         .expect("regex");
-    let total_active: usize = sum_metric_counts(&active);
-
+    let metrics = poll_metrics_until(&router, Duration::from_secs(10), |body| {
+        let total_active = sum_metric_counts(&active, body);
+        let total_terminating = sum_metric_counts(&terminating, body);
+        total_active == 1 && total_terminating == 0
+    })
+    .await;
+    let total_active: usize = sum_metric_counts(&active, &metrics);
+    let total_terminating: usize = sum_metric_counts(&terminating, &metrics);
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
@@ -805,7 +935,13 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
 
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_on_schema_reload",
+    )
+    .await;
 
     info!(
         "✅ Passthrough subscription mode test completed successfully with {} events",
@@ -874,27 +1010,36 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
         response_bis.status()
     );
 
-    let metrics = router.get_metrics_response().await?.text().await?;
-    let sum_metric_counts = |regex: &Regex| {
-        regex
-            .captures_iter(&metrics)
-            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
-            .sum()
-    };
-
     let stream = response.bytes_stream();
 
     let stream_bis = response_bis.bytes_stream();
 
+    // Race fix (C6, Phase 11 site 2): subscription counters
+    // (`subscriptions_deduplicated` true/false) are incremented in the router
+    // after HTTP response headers go out, so a one-shot scrape immediately
+    // after both responses succeed races the increment. Deadline-poll until
+    // both counters reach 1.
+    let sum_metric_counts = |regex: &Regex, metrics: &str| -> usize {
+        regex
+            .captures_iter(metrics)
+            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
+            .sum()
+    };
     let deduplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="true".+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_deduplicated_sub: usize = sum_metric_counts(&deduplicated_sub);
-    assert_eq!(total_deduplicated_sub, 1);
     let duplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="false".+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_duplicated_sub: usize = sum_metric_counts(&duplicated_sub);
+    let metrics = poll_metrics_until(&router, Duration::from_secs(10), |body| {
+        let total_deduplicated_sub = sum_metric_counts(&deduplicated_sub, body);
+        let total_duplicated_sub = sum_metric_counts(&duplicated_sub, body);
+        total_deduplicated_sub == 1 && total_duplicated_sub == 1
+    })
+    .await;
+    let total_deduplicated_sub: usize = sum_metric_counts(&deduplicated_sub, &metrics);
+    assert_eq!(total_deduplicated_sub, 1);
+    let total_duplicated_sub: usize = sum_metric_counts(&duplicated_sub, &metrics);
     assert_eq!(total_duplicated_sub, 1);
 
     // Trick to close the subscription server side
@@ -917,7 +1062,13 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
 
     router.graceful_shutdown().await;
 
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process `is_closed` flag.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_dedup",
+    )
+    .await;
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
 
@@ -1099,7 +1250,13 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     router.graceful_shutdown().await;
 
     // Check the subscription event listener is closed.
-    assert!(is_subscription_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6): deadline-poll the in-process flag.
+    assert_is_closed_within(
+        &is_subscription_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_dedup_close_early",
+    )
+    .await;
     // Check for errors in router logs
     router.assert_log_not_contained("connection shutdown exceeded, forcing close");
 
@@ -1205,7 +1362,17 @@ async fn test_subscription_ws_passthrough_with_non_ascii_headers(
     // Check for errors in router logs
     router.assert_no_error_logs();
 
-    assert!(is_closed.load(std::sync::atomic::Ordering::Relaxed));
+    // Race fix (C6, Phase 11 site 3): `is_closed` is set by the mock WS
+    // server's close handler in `tests/integration/subscriptions/mod.rs`,
+    // which runs in a separate in-process task. After
+    // `verify_subscription_events` returns, the close handler may not yet
+    // have observed the close. Deadline-poll the bool.
+    assert_is_closed_within(
+        &is_closed,
+        Duration::from_secs(5),
+        "test_subscription_ws_passthrough_with_non_ascii_headers",
+    )
+    .await;
 
     info!("WebSocket subscription with non-ASCII headers test completed successfully");
 
