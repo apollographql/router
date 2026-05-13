@@ -775,8 +775,16 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     );
 
     let stream = response.bytes_stream();
+    // Round-3 follow-up (sibling to Phase 11's metrics-scrape race): the
+    // leading `Object {}` heartbeat emitted by `protocols::multipart` is
+    // timer-driven (10ms `HEARTBEAT_INTERVAL` in test builds) and races the
+    // mock subgraph's 10ms-interval data events. Under load the first data
+    // event can win the `select(stream, heartbeat)` race and the heartbeat
+    // arrives between data events instead of as the leading frame, causing
+    // an ordering mismatch in `verify_subscription_events`. Heartbeats
+    // carry no semantic content here — filter them out (`include_heartbeats
+    // = false`) and assert ordering of data + close events only.
     let expected_events = vec![
-        create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload(2),
         create_expected_config_reload_payload(),
@@ -814,7 +822,7 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     assert_eq!(total_active, 1);
     assert_eq!(total_active + total_terminating, 1);
 
-    verify_subscription_events(stream, expected_events, true).await;
+    verify_subscription_events(stream, expected_events, false).await;
 
     router.graceful_shutdown().await;
     // router.assert_shutdown().await;
