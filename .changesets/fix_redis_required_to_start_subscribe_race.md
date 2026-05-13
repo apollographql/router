@@ -12,4 +12,4 @@ This was a subscribe-after-publish race that surfaced as a 120 s timeout on the 
 
 `create_client_pool` now mirrors fred's own `Pool::init` shape: when `required_to_start` is set, the per-client connect-notification receivers are collected *before* `connect_pool()` is called. We then await each receiver in turn. The broader connection lifecycle (separate per-client `ConnectHandle`s for the watcher task, reconnect policy, pool recreation) is unchanged.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9412
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9418
