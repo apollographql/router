@@ -41,6 +41,12 @@ use tokio::task::JoinHandle;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::RequestDecompressionLayer;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+use wiremock::matchers::path_regex;
 
 mod tracing_common;
 
@@ -141,12 +147,119 @@ async fn get_router_service(
     )
 }
 
+/// Spin up a localhost wiremock server that mimics the subset of the
+/// `https://jsonplaceholder.typicode.com/` REST surface that
+/// `tests/fixtures/supergraph_connect.graphql` exercises:
+///
+/// - `GET /posts` — list endpoint used by `query{posts{id body title}}`.
+///   Returns a small deterministic payload (2 posts) so the resulting OTel
+///   trace has a fixed, hermetic shape regardless of network reachability.
+/// - `GET /posts/{id}` — entity fetch for the `post(id:)` field.
+/// - `GET /missing*` — the `forceError` connector source path; always 404
+///   so the `connector_error` test exercises the error path deterministically.
+/// - `GET /health*` — the `routerHealth` connector source path; always 200
+///   so any incidental health probe doesn't introduce non-determinism.
+///
+/// The server is leaked (`Box::leak`) so it lives for the duration of the
+/// process — same pattern Apollo's test harness uses for the OTLP/Apollo
+/// collector mocks above. Tests in this file are serialised by the
+/// `serial-apollo-telemetry-integration` nextest group, so leaking is safe.
+///
+/// Used by `get_connector_router_service` to replace the live-network
+/// egress these tests previously relied on. Without this mock the tests
+/// flaked whenever CI couldn't reach `jsonplaceholder.typicode.com` (and
+/// the snapshot encoded a non-deterministic `connect_request` count
+/// matching whatever the live API happened to return).
+async fn start_connector_mock_server() -> MockServer {
+    let server = wiremock::MockServer::builder().start().await;
+
+    // `GET /posts` — return a 2-element list. Deterministic.
+    Mock::given(method("GET"))
+        .and(path("/posts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "title": "first", "body": "first body"},
+            {"id": 2, "title": "second", "body": "second body"},
+        ])))
+        .mount(&server)
+        .await;
+
+    // `GET /posts/{id}` — single-post entity fetch.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/posts/\d+$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "title": "first", "body": "first body"
+        })))
+        .mount(&server)
+        .await;
+
+    // `GET /missing*` — `forceError` source path. Always 404 so the
+    // `connector_error` test exercises the error path deterministically.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    // `GET /health*` — `routerHealth` source. Not exercised by the current
+    // test queries but mocked for completeness so any incidental request
+    // doesn't reach off-host.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    server
+}
+
 async fn get_connector_router_service(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     use_legacy_request_span: bool,
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
+    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+
+    // Stand up a localhost wiremock to replace the real
+    // `https://jsonplaceholder.typicode.com/` egress the connector schema
+    // hardcodes. The server is leaked so its lifetime matches the test
+    // process (these tests are serialised at the binary level).
+    let connector_mock = start_connector_mock_server().await;
+    let mock_url = connector_mock.uri();
+    // Leak so the server stays alive for the duration of the test (and
+    // any other test in this binary) without us threading a guard through
+    // the BoxCloneService return type.
+    let _ = Box::leak(Box::new(connector_mock));
+
+    // Inject `connectors.sources.<subgraph>.<sourceName>.override_url`
+    // entries so the runtime rewrites the connector source baseURL to the
+    // mock. The runtime override propagates into the `connect` span's
+    // `apollo.connector.source.detail` attribute, so that attribute is
+    // redacted by `assert_report!` (see the `redacted_attributes` list)
+    // to keep the snapshot hermetic across the random port wiremock
+    // chooses.
+    if let Some(obj) = config.as_object_mut() {
+        let connectors = obj
+            .entry("connectors".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let sources = connectors
+            .as_object_mut()
+            .expect("connectors must be an object")
+            .entry("sources".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let sources_obj = sources
+            .as_object_mut()
+            .expect("connectors.sources must be an object");
+        // Subgraph name is `posts` (see `enum join__Graph` in
+        // tests/fixtures/supergraph_connect.graphql).
+        sources_obj.insert(
+            "posts.jsonPlaceholder".to_string(),
+            serde_json::json!({"override_url": format!("{mock_url}/")}),
+        );
+        sources_obj.insert(
+            "posts.routerHealth".to_string(),
+            serde_json::json!({"override_url": format!("{mock_url}/")}),
+        );
+    }
 
     let builder = TestHarness::builder()
         .try_log_level("INFO")
@@ -214,6 +327,15 @@ macro_rules! assert_report {
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
                                 "graphql.error.path",
+                                // The `connector` and `connector_error` tests stand
+                                // up an ephemeral wiremock server (see
+                                // `start_connector_mock_server`) and inject its URL
+                                // via `connectors.sources.*.override_url`, so the
+                                // `connect` span's `apollo.connector.source.detail`
+                                // attribute renders as the random localhost port
+                                // the OS gave us. Redact so the snapshot stays
+                                // hermetic across runs.
+                                "apollo.connector.source.detail",
                             ];
                             if $batch {
                                 redacted_attributes.append(&mut vec![

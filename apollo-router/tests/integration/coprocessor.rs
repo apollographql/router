@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
 use serde_json::json;
@@ -15,6 +16,18 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::redact_cache_debug_query_hash;
+
+/// Build a `reqwest::Client` that disables HTTP keep-alive so each request
+/// closes its TCP connection on completion.
+/// `test_coprocessor_response_handling` runs many sequential router
+/// processes; any one inheriting an idle inbound connection at SIGTERM
+/// flakes `assert_shutdown` against its 10 s budget.
+fn no_keepalive_reqwest_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build")
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -187,6 +200,7 @@ async fn test_full_pipeline(
             include_str!("fixtures/coprocessor.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .reqwest_client(no_keepalive_reqwest_client())
         .build()
         .await;
 
@@ -200,7 +214,14 @@ async fn test_full_pipeline(
         "Failed at stage {stage}"
     );
 
-    router.graceful_shutdown().await;
+    // Widen the shutdown budget to 30 s. With many sequential pipeline
+    // iterations in `test_coprocessor_response_handling`, even a small
+    // per-shot probability of an OTel SDK / pool drain race compounds into
+    // visible flake. Pair with the no-keepalive client above to neutralise
+    // the inbound-connection arm of the race.
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(30))
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1019,8 +1040,13 @@ async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxE
         }
     });
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS sockets are already bound and ready to queue connections — both
+    // `UnixListener::bind` calls above returned synchronously, which is the
+    // moment the kernel starts accepting incoming connections into the listen
+    // backlog. The accept loops in the spawned tasks just drain that backlog.
+    // The previous fixed 100 ms sleep here was a defensive pause with no race
+    // to defend against (and a sibling UDS coprocessor test above does not use
+    // it). Removing the sleep eliminates the slow-CI flake risk.
 
     // Configure router with per-stage Unix socket URLs
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1161,8 +1187,11 @@ async fn test_coprocessor_mixed_http_and_unix_socket_urls() -> Result<(), tower:
         .mount(&supergraph_mock_server)
         .await;
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound and accepting connections from the
+    // moment `UnixListener::bind` returned above; the wiremock HTTP mock
+    // server is similarly ready to serve the moment `MockServer::start` has
+    // returned. The previous fixed 100 ms sleep was a defensive pause with no
+    // race to defend against. Removing it eliminates the slow-CI flake risk.
 
     // Configure router with MIXED transports: Unix socket for router, HTTP for supergraph
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1307,8 +1336,11 @@ async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), B
         }
     });
 
-    // Wait for server to be ready
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound from the synchronous `UnixListener::bind`
+    // above — the kernel queues incoming connections into the listen backlog
+    // until the spawned task accepts them. The previous fixed 100 ms sleep was
+    // a defensive pause with no race to defend against; removing it
+    // eliminates the slow-CI flake risk.
 
     let uds_url = format!("unix://{}", sock_path.display());
     let config = format!(
@@ -1350,6 +1382,93 @@ coprocessor:
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_no_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor and return successfully
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query and respond with a short delay
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_delay(Duration::from_secs(5)).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_with_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor
+    let (_trace_id, response) = router.execute_default_query().await;
+    // But the router should timeout due to the config
+    assert_eq!(response.status(), 504);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
@@ -1376,6 +1495,17 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
         .mount(&mock_coprocessor)
         .await;
 
+    // The `connectors.sources.connectors.jsonPlaceholder` stanza is required for the
+    // `IntegrationTest` harness to auto-inject an `override_url` pointing at the local
+    // wiremock subgraph (see `merge_overrides` in `tests/common.rs`: the override is
+    // only inserted if the config already declares `connectors.sources`). Without it
+    // the connector falls through to the schema's `https://jsonplaceholder.typicode.com/`
+    // baseURL and makes a real network request — which on CircleCI's amd_linux_test /
+    // arm_linux_test executors hangs past the router's 30 s subgraph timeout and the
+    // request returns `504 GATEWAY_TIMEOUT`. That was the
+    // `test_connector_coprocessor_request_response` flake on PR #9339's CircleCI build
+    // 366174 (`assertion left == right; left: 504; right: 200`). An empty stanza is
+    // enough — the harness fills in `override_url` per-source.
     let config = format!(
         r#"
         include_subgraph_errors:
@@ -1392,6 +1522,8 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
                         body: true
                         headers: true
                         status_code: true
+        connectors:
+            sources: {{}}
         "#,
         mock_coprocessor.uri()
     );

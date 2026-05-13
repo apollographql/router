@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8276,6 +8277,31 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Reload": {
+      "additionalProperties": false,
+      "description": "Configuration for router reload behavior.",
+      "properties": {
+        "max_retries": {
+          "default": 5,
+          "description": "Maximum number of automatic retry attempts when a reload fails.\n`0` disables automatic retries entirely.\n`null` allows unlimited retries.\nDefaults to 5 — an arbitrary but conservative limit to prevent a\nbad publish from causing endless reload attempts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Base delay between retry attempts. A random jitter of up to 25% is\nadded automatically to spread retries across router instances.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Remove": {
       "description": "Remove header",
       "oneOf": [
@@ -13041,6 +13067,21 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/definitions/Config7"
+    },
+    "reload": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Reload"
+        }
+      ],
+      "default": {
+        "max_retries": 5,
+        "retry_delay": {
+          "nanos": 0,
+          "secs": 10
+        }
+      },
+      "description": "Reload configuration"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

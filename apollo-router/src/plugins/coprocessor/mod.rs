@@ -6,7 +6,6 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -648,13 +647,12 @@ pub(crate) fn update_context_from_coprocessor(
     Ok(())
 }
 
-fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
-    f64_histogram!(
+fn get_coprocessor_timer(stage: PipelineStep) -> crate::metrics::HistogramTimerGuard {
+    f64_histogram_timer!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
-        duration.as_secs_f64(),
         coprocessor.stage = stage.to_string()
-    );
+    )
 }
 
 fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
@@ -987,7 +985,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -995,13 +992,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::RouterRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -1171,7 +1172,6 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1179,13 +1179,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::RouterResponse);
+        payload
+            .call(http_client.clone(), &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1372,7 +1376,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1380,13 +1383,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SubgraphRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1537,7 +1544,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1545,13 +1551,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SubgraphResponse);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

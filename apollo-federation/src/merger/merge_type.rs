@@ -108,6 +108,10 @@ impl Merger {
                 continue;
             };
 
+            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+            //   extensions defined using federation @extends directive. Since fixing it would be
+            //   a breaking change that could affect some customers, we are keeping current behavior
+            //   to match JavaScript logic. We should fix this in the future versions.
             if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
