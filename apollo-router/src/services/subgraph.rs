@@ -611,7 +611,9 @@ mod tests {
                     .unwrap(),
             )
             .build();
-        req.subgraph_request.extensions_mut().insert(TestExtension(42));
+        req.subgraph_request
+            .extensions_mut()
+            .insert(TestExtension(42));
 
         let cloned = req.clone();
         assert_eq!(
