@@ -467,18 +467,12 @@ fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
                     v.sort_by(|&(a_idx, a_pos), &(b_idx, b_pos)| {
                         let a = &original[a_idx];
                         let b = &original[b_idx];
-                        (
-                            a.start_time_unix_nano,
-                            a.end_time_unix_nano,
-                            &a.name,
-                            a_pos,
-                        )
-                            .cmp(&(
-                                b.start_time_unix_nano,
-                                b.end_time_unix_nano,
-                                &b.name,
-                                b_pos,
-                            ))
+                        (a.start_time_unix_nano, a.end_time_unix_nano, &a.name, a_pos).cmp(&(
+                            b.start_time_unix_nano,
+                            b.end_time_unix_nano,
+                            &b.name,
+                            b_pos,
+                        ))
                     });
                 };
                 sort_siblings(&mut group_roots);
@@ -489,8 +483,7 @@ fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
                 // DFS: visit each (group) root, then its children in sorted
                 // order. Iterative to avoid blowing the stack on
                 // pathological trees.
-                let mut stack: Vec<usize> =
-                    group_roots.iter().rev().map(|(idx, _)| *idx).collect();
+                let mut stack: Vec<usize> = group_roots.iter().rev().map(|(idx, _)| *idx).collect();
                 while let Some(idx) = stack.pop() {
                     ordered.push(idx);
                     let span_id = &original[idx].span_id;
