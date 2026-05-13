@@ -37,6 +37,19 @@ jobs:
         # Use the project's pinned toolchain from rust-toolchain.toml.
         run: rustup show active-toolchain || rustup toolchain install
 
+      - name: Install system dependencies
+        # `apollo-router` has a Linux-only dev-dependency on `rstack` (with the
+        # `dw` feature), which transitively pulls in `dw-sys`. Building it
+        # requires `libdw-dev` (provided by elfutils). Without it,
+        # `cargo nextest list --tests` -- which runs `cargo test --no-run`
+        # to compile the test binaries before listing -- fails on
+        # `ubuntu-latest` runners (libdw is not preinstalled). Other CI lanes
+        # build apollo-router under CircleCI's images, which already ship
+        # libdw, so this lane is the only one that needs an explicit install.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdw-dev
+
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
