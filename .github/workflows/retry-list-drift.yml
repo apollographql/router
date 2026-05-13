@@ -43,12 +43,16 @@ jobs:
         # requires `libdw-dev` (provided by elfutils). Without it,
         # `cargo nextest list --tests` -- which runs `cargo test --no-run`
         # to compile the test binaries before listing -- fails on
-        # `ubuntu-latest` runners (libdw is not preinstalled). Other CI lanes
-        # build apollo-router under CircleCI's images, which already ship
-        # libdw, so this lane is the only one that needs an explicit install.
+        # `ubuntu-latest` runners (libdw is not preinstalled).
+        #
+        # `apollo-router`'s build script also invokes `protoc` (via
+        # `tonic-prost-build`) to codegen tonic stubs, so `protobuf-compiler`
+        # is required too. Other CI lanes build apollo-router under
+        # CircleCI's images, which already ship libdw and protoc, so this
+        # lane is the only one that needs an explicit install.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev
+          sudo apt-get install -y libdw-dev protobuf-compiler
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
