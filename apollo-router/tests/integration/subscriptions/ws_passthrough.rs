@@ -1155,28 +1155,35 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
         response_bis.status()
     );
 
-    let metrics = router.get_metrics_response().await?.text().await?;
-    let sum_metric_counts = |regex: &Regex| {
-        regex
-            .captures_iter(&metrics)
-            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
-            .sum()
-    };
-
     let stream = response.bytes_stream();
     let stream_bis = response_bis.bytes_stream();
 
-    // Check that both the original (deduplicated) and the duplicate subscription
-    // are reflected in metrics.
+    // Race fix (Phase 11 follow-up): subscription counters
+    // (`subscriptions_deduplicated` true/false) are incremented in the router
+    // after HTTP response headers go out, so a one-shot scrape immediately
+    // after both responses succeed races the increment. Deadline-poll until
+    // both counters reach 1. Mirrors the pattern at line ~1010 above.
+    let sum_metric_counts = |regex: &Regex, metrics: &str| -> usize {
+        regex
+            .captures_iter(metrics)
+            .flat_map(|cap| cap.get(1).unwrap().as_str().parse::<usize>())
+            .sum()
+    };
     let deduplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="true".+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_deduplicated_sub: usize = sum_metric_counts(&deduplicated_sub);
-    assert_eq!(total_deduplicated_sub, 1);
     let duplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="false".+[}] ([0-9]+)"#)
             .expect("regex");
-    let total_duplicated_sub: usize = sum_metric_counts(&duplicated_sub);
+    let metrics = poll_metrics_until(&router, Duration::from_secs(10), |body| {
+        let total_deduplicated_sub = sum_metric_counts(&deduplicated_sub, body);
+        let total_duplicated_sub = sum_metric_counts(&duplicated_sub, body);
+        total_deduplicated_sub == 1 && total_duplicated_sub == 1
+    })
+    .await;
+    let total_deduplicated_sub: usize = sum_metric_counts(&deduplicated_sub, &metrics);
+    assert_eq!(total_deduplicated_sub, 1);
+    let total_duplicated_sub: usize = sum_metric_counts(&duplicated_sub, &metrics);
     assert_eq!(total_duplicated_sub, 1);
 
     // We'll start consuming both subscriptions, but cancel the first one as soon as a message is
