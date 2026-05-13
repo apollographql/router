@@ -40,7 +40,7 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 
 <Note>
 
-The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them. You must explicitly configure an instrument for different behavior. 
+The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them, setting them to `true`. You must explicitly configure an instrument for different behavior. 
 
 </Note>
 
@@ -51,18 +51,18 @@ telemetry:
   instrumentation:
     instruments:
       router:
-        http.server.active_requests: true # (default false)
-        http.server.request.body.size: true # (default false)
-        http.server.request.duration: true # (default false)
-        http.server.response.body.size: true # (default false)
+        http.server.active_requests: false # (default true)
+        http.server.request.body.size: false # (default true)
+        http.server.request.duration: false # (default true)
+        http.server.response.body.size: false # (default true)
       subgraph:
-        http.client.request.body.size: true # (default false)
-        http.client.request.duration: true # (default false)
-        http.client.response.body.size: true # (default false)
+        http.client.request.body.size: false # (default true)
+        http.client.request.duration: false # (default true)
+        http.client.response.body.size: false # (default true)
       connector:
-        http.client.request.body.size: true # (default false)
-        http.client.request.duration: true # (default false)
-        http.client.response.body.size: true # (default false)
+        http.client.request.body.size: false # (default true)
+        http.client.request.duration: false # (default true)
+        http.client.response.body.size: false # (default true)
 ```
 
 They can be customized by attaching or removing attributes. See [attributes](#attributes) to learn more about configuring attributes.
