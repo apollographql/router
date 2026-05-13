@@ -29,11 +29,7 @@ use crate::integration::subscriptions::verify_subscription_events;
 /// Module-private by design. If a second consumer appears, lift to
 /// `tests/common.rs` in a follow-up. Premature lifting is what the
 /// project's anti-fan-out rule prevents.
-async fn poll_metrics_until<F>(
-    router: &IntegrationTest,
-    deadline: Duration,
-    predicate: F,
-) -> String
+async fn poll_metrics_until<F>(router: &IntegrationTest, deadline: Duration, predicate: F) -> String
 where
     F: Fn(&str) -> bool,
 {
@@ -79,9 +75,7 @@ async fn assert_is_closed_within(
     test_name: &'static str,
 ) {
     let start = Instant::now();
-    while start.elapsed() < deadline
-        && !is_closed.load(std::sync::atomic::Ordering::Relaxed)
-    {
+    while start.elapsed() < deadline && !is_closed.load(std::sync::atomic::Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     assert!(
