@@ -10,6 +10,34 @@
 #
 # Frankly, it may be best to just retry all tests in the apollo-router::integration_tests
 # module, as they have a high failure rate, in general.
+# Intentional retention rationale for `subscriptions::ws_passthrough::*`:
+# Stress test (2026-05-13, 10 local iterations on macOS) flaked in 4/10 iterations
+# across three distinct sites within this module. Each was rescued by
+# `retries = 2`. Even after Phase 6 Steps 1+2+3+5 landed (PR #9341 — server
+# readiness polls, callback formula-sleep removal, `Arc<Notify>` dedup race fix
+# for `*_dedup_close_early`), other tests in this file still surface real-time
+# races that the harness facilities in scope for this de-flake project cannot
+# reach:
+#
+#   * `test_subscription_ws_passthrough_on_schema_reload` (line ~799) — asserts
+#     `apollo_router_open_connections{state=terminating}` has drained to 0
+#     immediately after `assert_reloaded().await`, racing connection-shutdown
+#     bookkeeping against the metric snapshot. Observed left=2 right=1.
+#   * `test_subscription_ws_passthrough_dedup` (line ~893) — reads
+#     `apollo_router_operations_subscriptions_total{subscriptions_deduplicated="true"}`
+#     before the dedup counter increment has been observed; got 0 when 1 was
+#     expected.
+#   * `test_subscription_ws_passthrough_with_non_ascii_headers` (line ~1208) —
+#     checks an `AtomicBool` flipped by the WS server's close handler before
+#     the server has observed the close.
+#
+# All three are kernel-side timing races (atomic visibility / metrics scrape
+# vs. teardown task scheduling), not amenable to a `tokio::time::pause()` fix.
+# They belong to Phase 10's "real-time race" cohort (blog Arc 6f) and need
+# either explicit "drained" signaling on the router side or a metrics
+# poll-with-deadline harness extension. Glob kept (not enumerated) because the
+# failure mode is module-wide and any test in the file is a plausible next
+# victim. Remove this entry once the underlying signaling lands.
 retries = 2
 filter = '''
    ( binary_id(=apollo-router::integration_tests) & test(#integration::subscriptions::ws_passthrough::*) )
