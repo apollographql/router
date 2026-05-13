@@ -198,3 +198,34 @@ fn compose_removes_federation_directives() {
             .schema()
     ));
 }
+
+/// `Supergraph::compose` uses `merge.rs`, not `composition::compose` / `merger/merger.rs`.
+/// Non-coercible `{}` defaults are stripped before the supergraph is finalized (FED-1001).
+#[test]
+fn supergraph_compose_strips_invalid_empty_object_argument_default() {
+    const SDL: &str = r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key"])
+
+            type Query {
+              audits(filter: AuditsFilterV2 = {}): String
+            }
+
+            type T @key(fields: "id") {
+              id: ID!
+            }
+
+            input AuditsFilterV2 {
+              startDate: String!
+              endDate: String!
+              carrierId: String!
+            }
+    "#;
+    let s1 = Subgraph::parse_and_expand("S1", "https://s1", SDL).unwrap();
+    let s2 = Subgraph::parse_and_expand("S2", "https://s2", SDL).unwrap();
+    let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
+    let sdl = print_sdl(supergraph.schema.schema());
+    assert!(
+        !sdl.contains("filter: AuditsFilterV2 = {}"),
+        "legacy merge path should omit invalid empty-object default (FED-1001), got:\n{sdl}"
+    );
+}

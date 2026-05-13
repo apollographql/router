@@ -4,6 +4,44 @@ use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 use test_log::test;
 
+// FED-1001: subgraph parse must preserve `= {}` even when the input type has required fields.
+// graphql-js keeps the default in the upgraded subgraph SDL; RS was stripping it at parse time.
+#[test]
+fn parse_preserves_empty_object_argument_default_with_required_input_fields() {
+    let subgraph = Subgraph::parse(
+        "CarrierMicroserviceAPI",
+        "http://carrier",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+        type Query {
+          audits(filter: AuditsFilterV2 = {}): String
+        }
+
+        input AuditsFilterV2 {
+          carrierId: String!
+          endDate: String!
+          startDate: String!
+        }
+        "#,
+    )
+    .expect("parses schema")
+    .expand_links()
+    .expect("expands schema");
+
+    let [validated]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
+        .expect("upgrades schema")
+        .try_into()
+        .expect("Expected 1 element");
+
+    let sdl = validated.validated_schema().schema().to_string();
+    assert!(
+        sdl.contains("filter: AuditsFilterV2 = {}"),
+        "upgraded subgraph SDL should preserve `= {{}}` for AuditsFilterV2 (FED-1001)\n\nGot:\n{sdl}"
+    );
+}
+
 // =============================================================================
 // Fed1 Schema Upgrade Tests
 // =============================================================================

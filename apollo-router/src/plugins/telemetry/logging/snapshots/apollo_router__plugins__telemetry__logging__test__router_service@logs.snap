@@ -5,3 +5,11 @@ expression: yaml
 - fields: {}
   level: INFO
   message: response
+  span:
+    apollo_private.request: true
+    name: router
+    otel.kind: SERVER
+  spans:
+    - apollo_private.request: true
+      name: router
+      otel.kind: SERVER

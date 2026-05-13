@@ -10,6 +10,7 @@ use tracing::instrument;
 use tracing::trace;
 
 use crate::api_schema;
+use crate::composition::CompositionFailure;
 use crate::composition::CompositionOptions;
 use crate::composition::satisfiability::validation_traversal::ValidationTraversal;
 use crate::error::CompositionError;
@@ -27,17 +28,20 @@ use crate::supergraph::Supergraph;
 pub fn validate_satisfiability(
     mut supergraph: Supergraph<Merged>,
     options: &CompositionOptions,
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let supergraph_schema = supergraph.schema().clone();
     let mut errors = vec![];
     let mut hints = supergraph.hints_mut().drain(..).collect();
-    validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints).map_err(|e| {
-        vec![CompositionError::InternalError {
-            message: e.to_string(),
-        }]
-    })?;
+    if let Err(e) = validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints) {
+        return Err(CompositionFailure {
+            errors: vec![CompositionError::InternalError {
+                message: e.to_string(),
+            }],
+            hints,
+        });
+    }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(CompositionFailure { errors, hints });
     }
     Ok(Supergraph::<Satisfiable>::new(supergraph_schema, hints))
 }

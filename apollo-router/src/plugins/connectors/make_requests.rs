@@ -8,6 +8,7 @@ use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::make_request;
 use apollo_federation::connectors::runtime::inputs::RequestInputs;
 use apollo_federation::connectors::runtime::key::ResponseKey;
@@ -64,19 +65,25 @@ fn request_params_to_requests(
     let mut results = vec![];
     for response_key in request_params {
         let connector = connector.clone();
-        let (transport_request, mapping_problems) = make_request(
-            &connector.transport,
-            response_key
-                .inputs()
-                .clone()
-                .merger(&connector.request_variable_keys)
-                .config(connector.config.as_ref())
-                .context(context)
-                .request(&connector.request_headers, supergraph_request.headers())
-                .merge(),
-            supergraph_request.headers(),
-            debug,
-        )?;
+
+        let (transport_request, mapping_problems) =
+            if let Some(transport) = connector.transport.as_ref() {
+                make_request(
+                    transport,
+                    response_key
+                        .inputs()
+                        .clone()
+                        .merger(&connector.request_variable_keys)
+                        .config(connector.config.as_ref())
+                        .context(context)
+                        .request(&connector.request_headers, supergraph_request.headers())
+                        .merge(),
+                    supergraph_request.headers(),
+                    debug,
+                )?
+            } else {
+                (TransportRequest::MappingOnly, Vec::new())
+            };
 
         results.push(Request {
             context: context.clone(),
@@ -591,11 +598,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -663,11 +670,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -764,11 +771,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -878,11 +885,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
@@ -991,11 +998,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
@@ -1085,11 +1092,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("field { field }").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1201,11 +1208,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1352,11 +1359,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1500,11 +1507,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1612,11 +1619,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1711,11 +1718,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1815,11 +1822,11 @@ mod tests {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
@@ -1921,7 +1928,7 @@ mod tests {
             spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             schema_subtypes_map: Connector::subtypes_map_from_schema(&subgraph_schema),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: StringTemplate::parse_with_spec(
                     "/path?id={$this.id}",
@@ -1929,7 +1936,7 @@ mod tests {
                 )
                 .unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse_with_spec("id field", DEFAULT_CONNECT_SPEC).unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
@@ -1995,11 +2002,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -2025,7 +2032,9 @@ mod tests {
         .unwrap()
         .into_iter()
         .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
+            let TransportRequest::Http(http_request) = req.transport_request else {
+                panic!("expected Http transport request");
+            };
             let (parts, _body) = http_request.inner.into_parts();
             let new_req =
                 http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());

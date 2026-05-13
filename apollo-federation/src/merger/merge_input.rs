@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-
 use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use tracing::instrument;
@@ -185,9 +183,9 @@ impl Merger {
             InputObjectFieldDefinitionPosition,
             Sources<InputObjectFieldDefinitionPosition>,
         > = Default::default();
-        let mut fields_to_add: HashMap<usize, HashSet<InputObjectFieldDefinitionPosition>> =
+        let mut fields_to_add: IndexMap<usize, IndexSet<InputObjectFieldDefinitionPosition>> =
             Default::default();
-        let mut field_types: HashMap<InputObjectFieldDefinitionPosition, Node<Type>> =
+        let mut field_types: IndexMap<InputObjectFieldDefinitionPosition, Node<Type>> =
             Default::default();
         let mut extra_sources: Sources<InputObjectFieldDefinitionPosition> = Default::default();
 

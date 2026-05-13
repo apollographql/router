@@ -5,9 +5,15 @@
 //!  - There are timings (sleeps) which work as things are implemented right now, but
 //!    may be sources of problems in the future.
 //!
-//!  - There is a global TEST lock which forces these tests to execute serially to stop router
-//!    global tracing effect from breaking the tests. DO NOT BE TEMPTED to remove this TEST lock to
-//!    try and speed things up (unless you have time and patience to re-work a lot of test code).
+//!  - These tests must execute serially across this binary AND across the
+//!    sibling `apollo_otel_traces` / `apollo_otel_http_proxy` binaries, because
+//!    they each install process-wide OpenTelemetry tracer/meter providers and
+//!    Apollo Studio mock collectors that would otherwise stomp each other.
+//!    Serialization is enforced by the `serial-apollo-telemetry-integration`
+//!    nextest test-group in `.config/nextest.toml` (an in-source mutex cannot
+//!    do this because each `tests/*.rs` is a separate binary).
+//!    DO NOT run these tests with bare `cargo test` -- only `cargo nextest`
+//!    honours the group; bare `cargo test` will race the global state.
 //!
 //!  - There are assumptions about the different ways in which traces and metrics work. The main
 //!    limitation with these tests is that you are unlikely to get a single report containing all the
@@ -21,6 +27,7 @@ use std::future::Future;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use apollo_router::TestHarness;
@@ -50,7 +57,6 @@ mod tracing_common;
 static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(|| {
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
-static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
 async fn config(
     use_legacy_request_span: bool,
@@ -374,7 +380,6 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
         reports.clone(),
@@ -410,8 +415,9 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
+    // Poll until the expected report arrives. The old 10 × 100 ms window was too tight for CI.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
         let my_reports = reports.lock().await;
         let report = my_reports.iter().find(filter);
         if report.is_some() && matches!(found_report, Ok(None)) {
@@ -419,7 +425,11 @@ where
             break;
         }
         drop(my_reports);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for matching report"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     task.abort();
 
@@ -434,7 +444,6 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     request: router::Request,
     filter: T,
 ) -> u64 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
         get_batch_router_service(reports.clone(), mocked, false, false, false, None).await;
@@ -449,25 +458,29 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     // Drain the response (and throw it away)
     let _found_report = response.response.into_body().collect().await;
 
-    // Give the server a little time to export something
-    // If this test fails, consider increasing this time.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let mut request_count = 0;
-
-    // In a more ideal world we would have an implementation of `AddAssign<&reports::Report>
-    // However we don't. Let's do the minimal amount of checking and ensure that at least the
-    // number of requests can be tested. Clearly, this doesn't test all of the stats, but it's a
-    // fairly reliable check and at least we are testing something.
-    for report in reports.lock().await.iter().filter(filter) {
-        let stats = &report
-            .traces_per_query
-            .values()
-            .next()
-            .expect("has something")
-            .stats_with_context;
-        request_count += stats[0].query_latency_stats.as_ref().unwrap().request_count;
-    }
+    // Poll until at least one matching report with stats arrives. The old fixed 500 ms sleep
+    // was too short under CI load.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let request_count = loop {
+        let mut count = 0;
+        for report in reports.lock().await.iter().filter(filter) {
+            let stats = &report
+                .traces_per_query
+                .values()
+                .next()
+                .expect("has something")
+                .stats_with_context;
+            count += stats[0].query_latency_stats.as_ref().unwrap().request_count;
+        }
+        if count > 0 {
+            break count;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for batch stats reports"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
     task.abort();
     request_count
 }

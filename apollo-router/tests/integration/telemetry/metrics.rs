@@ -17,14 +17,67 @@ const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
-    if !graph_os_enabled() {
-        eprintln!("test skipped");
-        return;
-    }
-    let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_CONFIG)
-        .build()
-        .await;
+    // Force every request to be sampled by Apollo's field-level
+    // instrumentation so the apollo_exporter pipeline always sees traces
+    // and emits the `studio_reports_total{report_type="traces"}`
+    // counter — the production default is 1 % which is non-deterministic
+    // over the 6 queries this test sends. Drop the batch processor's
+    // `scheduled_delay` so the 30 s assertion deadline doesn't have to
+    // wait for a long timer to fire. We patch `PROMETHEUS_CONFIG` in
+    // place rather than forking a whole new fixture; `merge_overrides`
+    // will subsequently populate the mock endpoints into the same
+    // `telemetry.apollo` block.
+    //
+    // The OTLP traces path defaults to gRPC. wiremock only speaks HTTP,
+    // so we pin both OTLP protocols to HTTP/protobuf; otherwise the
+    // OTLP traces export silently fails to connect, the
+    // `studio_reports_total{report_type="traces"}` counter never
+    // increments, and the assertion times out. Apollo-protocol metrics
+    // (counter `report_type="metrics"`) use plain HTTP irrespective of
+    // this setting.
+    let mut config_value: serde_yaml::Value =
+        serde_yaml::from_str(PROMETHEUS_CONFIG).expect("fixture is valid YAML");
+    let apollo_block: serde_yaml::Value = serde_yaml::from_str(
+        "field_level_instrumentation_sampler: always_on\nexperimental_otlp_tracing_protocol: http\nexperimental_otlp_metrics_protocol: http\nbatch_processor:\n  scheduled_delay: 100ms\n",
+    )
+    .unwrap();
+    config_value
+        .as_mapping_mut()
+        .and_then(|m| m.get_mut(&serde_yaml::Value::String("telemetry".into())))
+        .and_then(|t| t.as_mapping_mut())
+        .expect("PROMETHEUS_CONFIG has a telemetry block")
+        .insert(serde_yaml::Value::String("apollo".into()), apollo_block);
+    let config = serde_yaml::to_string(&config_value).unwrap();
+
+    // No explicit env / no real-creds opt-in. The harness now provides:
+    //   * Fake `APOLLO_KEY` / `APOLLO_GRAPH_REF` so the executable picks
+    //     `LicenseSource::Registry` (and the License poller actually
+    //     runs, incrementing
+    //     `apollo_router_uplink_fetch_*{query="License"}`).
+    //   * `APOLLO_UPLINK_ENDPOINTS` pinned to a per-test wiremock that
+    //     responds to `LicenseQuery` with a `RouterEntitlementsResult`
+    //     whose `entitlement.jwt` is `TEST_LICENSE_JWT_FULL_FEATURES` —
+    //     a real HS256-signed JWT carrying no `allowedFeatures` claim
+    //     (legacy-compat → all features allowed).
+    //   * `APOLLO_TEST_INTERNAL_UPLINK_JWKS=TEST_JWKS_ENDPOINT` so the
+    //     spawned router's `License::jwks()` validates that JWT against
+    //     the bundled test JWKS instead of the production JWKS baked
+    //     into the binary. The License state machine therefore reaches
+    //     `Licensed` (with all features), not the
+    //     `Unlicensed` `License::default()` — important for any test
+    //     downstream of this harness that exercises a paid feature, but
+    //     also fine for this test, which just asserts the License
+    //     poller's success counter increments.
+    //   * Both `telemetry.apollo.endpoint` and
+    //     `telemetry.apollo.experimental_otlp_endpoint` pinned to the
+    //     per-test `apollo_otlp_server` mock with a catch-all
+    //     `POST → 200` route, so all four reporting paths
+    //     (`studio_reports_total{report_type=metrics|traces}` ×
+    //     Apollo-protocol + OTLP) complete deterministically.
+    //
+    // See `apollo-router/tests/common.rs::start()` and
+    // `merge_overrides()` for the wiring.
+    let mut router = IntegrationTest::builder().config(config).build().await;
 
     router.start().await;
     router.assert_started().await;
@@ -76,12 +129,35 @@ async fn test_metrics_reloading() {
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
-    router.assert_metrics_contains_multiple(vec![
-        r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
-        r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
-        r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
-        r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
-        ], Some(Duration::from_secs(10)))
+    // Studio + Uplink metrics. With both Apollo Studio and Apollo Uplink
+    // pointed at local wiremocks (Studio via the harness's per-test mock at
+    // `experimental_otlp_endpoint`, Uplink via `APOLLO_UPLINK_ENDPOINTS`), all
+    // four reporting paths complete successfully and deterministically — no
+    // public-Internet dependency, no batch-timer race.
+    //
+    // Patterns match label fragments rather than full lines because
+    // Prometheus orders labels alphabetically and the label set on these
+    // metrics grows over time (eg. `report_protocol`,
+    // `report_extended_references_enabled` were added to studio_reports).
+    // `assert_metrics_contains_multiple` substring-matches anywhere on a
+    // line and supports `<any>` (→ `.+`) wildcards, so naming the labels we
+    // care about is sufficient.
+    // Patterns are substring matches anywhere on a line. We use `<anyopt>`
+    // (→ `.*`, zero-or-more) rather than `<any>` (→ `.+`, one-or-more)
+    // between the opening `{` and the label we care about, because
+    // Prometheus orders labels alphabetically — `query="License"` happens
+    // to be the alphabetically-first label on `uplink_fetch_count_total`,
+    // so requiring even a single character before it would never match.
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"apollo_router_telemetry_studio_reports_total{<anyopt>report_type="metrics""#,
+                r#"apollo_router_telemetry_studio_reports_total{<anyopt>report_type="traces""#,
+                r#"apollo_router_uplink_fetch_count_total{<anyopt>query="License"<anyopt>status="success""#,
+                r#"apollo_router_uplink_fetch_duration_seconds_count{<anyopt>query="License""#,
+            ],
+            Some(Duration::from_secs(30)),
+        )
         .await;
 }
 

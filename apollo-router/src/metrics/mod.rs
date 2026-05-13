@@ -73,6 +73,7 @@ use std::marker::PhantomData;
 #[cfg(test)]
 use std::pin::Pin;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 #[cfg(test)]
 use futures::FutureExt;
@@ -140,13 +141,60 @@ where
     }
 }
 
-/// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+/// A RAII guard for an f64 histogram that automatically records elapsed time on drop.
+///
+/// This guard implements the RAII (Resource Acquisition Is Initialization) pattern
+/// to measure the duration of an operation. The start time is recorded when the
+/// guard is created; when the guard is dropped, it records the elapsed duration
+/// in seconds to the underlying histogram.
+///
+/// `f64` is used (rather than an integer type) so that sub-second durations are
+/// captured with full precision rather than being rounded to the nearest second.
+///
+/// It is essential that the same instrument is used throughout the lifetime of
+/// the guard; otherwise measurement drift can occur.
+#[doc(hidden)]
+#[must_use = "without holding the guard the timer records nothing"]
+pub struct HistogramTimerGuard {
+    histogram: opentelemetry::metrics::Histogram<f64>,
+    attributes: Vec<opentelemetry::KeyValue>,
+    start: Instant,
+}
+
+impl HistogramTimerGuard {
+    #[doc(hidden)]
+    pub fn new(
+        histogram: std::sync::Arc<opentelemetry::metrics::Histogram<f64>>,
+        attributes: &[opentelemetry::KeyValue],
+    ) -> Self {
+        // It is essential that we take the histogram out of the arc rather than cloning the arc.
+        // Instruments rely on weak references to allow callsite invalidation on config reload.
+        // Holding the Arc directly would keep a strong reference and prevent invalidation.
+        Self {
+            histogram: (*histogram).clone(),
+            attributes: attributes.to_vec(),
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for HistogramTimerGuard {
+    /// Records the elapsed time in seconds when the guard is dropped.
+    ///
+    /// The duration is measured from when the guard was created to when it is dropped.
+    fn drop(&mut self) {
+        self.histogram
+            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+    }
+}
+
+/// Noop guard won't do anything. it serves to unify the logic with UpDownCounterGuard and HistogramTimerGuard
 #[doc(hidden)]
 pub struct NoopGuard<I, T> {
     _phantom: PhantomData<(I, T)>,
 }
 impl<I, T> NoopGuard<I, T> {
-    /// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+    /// Noop guard won't do anything. it serves to unify the logic with UpDownCounterGuard and HistogramTimerGuard
     #[doc(hidden)]
     pub fn new(_instrument: I, _value: T, _attributes: &[opentelemetry::KeyValue]) -> Self {
         NoopGuard {
@@ -1196,13 +1244,77 @@ macro_rules! u64_histogram_with_unit {
     };
 }
 
+/// Get or create an f64 histogram timer metric and return a guard that records elapsed time on drop.
+///
+/// The metric must include a description. Unlike other histogram macros, no value is passed
+/// directly — instead, the macro returns a [`HistogramTimerGuard`] that starts a timer on
+/// creation and records the elapsed duration in seconds (`"s"`) when dropped.
+///
+/// **Deprecated:** This macro does not record an explicit unit. Use
+/// [`f64_histogram_timer_with_unit!`] instead, which explicitly records the unit as `"s"`.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_histogram_timer_with_unit` instead")]
+macro_rules! f64_histogram_timer {
+    ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, stringify!($($name).+), $description, parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, [])
+    };
+}
+
+/// Get or create an f64 histogram timer metric and return a guard that records elapsed time on drop.
+///
+/// The metric must include a description. No value is passed directly — instead, the macro
+/// returns a [`HistogramTimerGuard`] that starts a timer on creation and records the elapsed
+/// duration in seconds when dropped. The unit is always `"s"` (seconds) per the
+/// [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+///
+/// # Example
+///
+/// ```ignore
+/// let _timer = f64_histogram_timer_with_unit!(
+///     "apollo.router.operation.duration",
+///     "Time to process an operation",
+///     "attr" = "val"
+/// );
+/// // ... do work ...
+/// // elapsed seconds are recorded to the histogram when _timer is dropped
+/// ```
+#[allow(unused_macros)]
+macro_rules! f64_histogram_timer_with_unit {
+    ($($name:ident).+, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, stringify!($($name).+), $description, "s", parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal, $($attrs:tt)*) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, "s", parse_attributes!($($attrs)*))
+    };
+
+    ($name:literal, $description:literal) => {
+        metric!(f64, histogram, crate::metrics::HistogramTimerGuard, $name, $description, "s", [])
+    };
+}
+
 thread_local! {
     // This is used exactly once in testing callsite caching.
     #[cfg(test)]
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
-macro_rules! metric {
-    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
+
+macro_rules! get_or_create_metric {
+    ($ty:ident, $instrument:ident, $name:expr, $description:literal, $unit:literal) => {
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
         // Otherwise we create a new instrument and update the static.
@@ -1242,7 +1354,7 @@ macro_rules! metric {
                             parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
                         .lock();
-                    let instrument = if let Some(instrument) = instrument_guard.upgrade() {
+                    if let Some(instrument) = instrument_guard.upgrade() {
                         // Fast path, we got the instrument, drop the mutex guard immediately.
                         drop(instrument_guard);
                         instrument
@@ -1254,10 +1366,7 @@ macro_rules! metric {
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
                         drop(instrument_guard);
                         instrument_ref
-                    };
-                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
-                    instrument.$mutation($value, attrs);
-                    $guard::new(instrument.clone(), $value, attrs)
+                    }
                 }
                 else {
                     // This is only for testing.
@@ -1266,17 +1375,43 @@ macro_rules! metric {
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
                     let instrument = create_instrument_fn(meter);
-                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
-                    instrument.$mutation($value, attrs);
-                    $guard::new(std::sync::Arc::new(instrument.clone()), $value, attrs)
+                    std::sync::Arc::new(instrument)
                 }
+            }
+        }
+    };
+}
+
+macro_rules! metric {
+    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
+        paste::paste! {
+            {
+                let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let attrs: &[opentelemetry::KeyValue] = &$attrs;
+                instrument.$mutation($value, attrs);
+                $guard::new(instrument.clone(), $value, attrs)
             }
         }
     };
 
     ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
         metric!($ty, $instrument, $guard, $mutation, $name, $description, "", $value, $attrs)
-    }
+    };
+
+    // metrics that do _not_ perform a mutation on instantiation
+    ($ty:ident, $instrument:ident, $guard: ty, $name:expr, $description:literal, $unit:literal, $attrs:expr) => {
+        paste::paste! {
+            {
+                let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let attrs: &[opentelemetry::KeyValue] = &$attrs;
+                $guard::new(instrument.clone(), attrs)
+            }
+        }
+    };
+
+    ($ty:ident, $instrument:ident, $guard: ty, $name:expr, $description:literal, $attrs: expr) => {
+        metric!($ty, $instrument, $guard, $name, $description, "", $attrs)
+    };
 }
 
 #[cfg(test)]

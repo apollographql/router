@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -733,6 +734,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +746,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +997,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {
@@ -8278,6 +8277,31 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Reload": {
+      "additionalProperties": false,
+      "description": "Configuration for router reload behavior.",
+      "properties": {
+        "max_retries": {
+          "default": 5,
+          "description": "Maximum number of automatic retry attempts when a reload fails.\n`0` disables automatic retries entirely.\n`null` allows unlimited retries.\nDefaults to 5 — an arbitrary but conservative limit to prevent a\nbad publish from causing endless reload attempts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Base delay between retry attempts. A random jitter of up to 25% is\nadded automatically to spread retries across router instances.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Remove": {
       "description": "Remove header",
       "oneOf": [
@@ -11360,6 +11384,14 @@ expression: "&schema"
           "description": "Enable subscription",
           "type": "boolean"
         },
+        "max_lifetime": {
+          "default": null,
+          "description": "Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "max_opened_subscriptions": {
           "default": null,
           "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",
@@ -13035,6 +13067,21 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/definitions/Config7"
+    },
+    "reload": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Reload"
+        }
+      ],
+      "default": {
+        "max_retries": 5,
+        "retry_delay": {
+          "nanos": 0,
+          "secs": 10
+        }
+      },
+      "description": "Reload configuration"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

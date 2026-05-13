@@ -1,7 +1,6 @@
 //! Connector coprocessor stage implementation
 
 use std::ops::ControlFlow;
-use std::time::Instant;
 
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
@@ -21,8 +20,8 @@ use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
 use super::NewContextConf;
+use super::get_coprocessor_timer;
 use super::internalize_header_map;
-use super::record_coprocessor_duration;
 use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
@@ -248,8 +247,10 @@ where
         return Ok(ControlFlow::Continue(request));
     }
 
-    // Extract the transport request parts
-    let TransportRequest::Http(http_request) = request.transport_request;
+    // Mapping-only connectors have no HTTP transport request to intercept
+    let TransportRequest::Http(http_request) = request.transport_request else {
+        return Ok(ControlFlow::Continue(request));
+    };
     let debug = http_request.debug;
     let (parts, body) = http_request.inner.into_parts();
 
@@ -278,17 +279,20 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ConnectorRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ConnectorRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -381,10 +385,10 @@ where
     }
 
     // Reconstruct the transport request
-    request.transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+    request.transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
         inner: http::Request::from_parts(new_parts, new_body),
         debug,
-    });
+    }));
 
     Ok(ControlFlow::Continue(request))
 }
@@ -428,7 +432,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Err(_) => (None, None),
+        Ok(TransportResponse::MappingOnly) | Err(_) => (None, None),
     };
 
     // Extract body from mapped response
@@ -457,17 +461,20 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ConnectorResponse);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ConnectorResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

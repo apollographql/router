@@ -139,7 +139,9 @@ pub(crate) fn apply_config(
             if let Some(uri) = source_config.override_url.as_ref() {
                 // Discards potential StringTemplate parsing error as URI should
                 // always be a valid template string.
-                connector.transport.source_template = uri.to_string().parse().ok();
+                if let Some(transport) = connector.transport.as_mut() {
+                    transport.source_template = uri.to_string().parse().ok();
+                }
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);
@@ -161,7 +163,9 @@ pub(crate) fn apply_config(
             if let Some(uri) = source_config.override_url.as_ref() {
                 // Discards potential StringTemplate parsing error as
                 // URI should always be a valid template string.
-                connector.transport.source_template = uri.to_string().parse().ok();
+                if let Some(transport) = connector.transport.as_mut() {
+                    transport.source_template = uri.to_string().parse().ok();
+                }
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);
