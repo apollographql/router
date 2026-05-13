@@ -969,7 +969,27 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
 
     // Create fixed payloads for consistent testing
     let custom_payloads = vec![create_user_data_payload(1), create_user_data_payload(2)];
-    let interval_ms = 50;
+    // Race fix (round-3 follow-up to b89aa75fc): the serialized-dispatch fix
+    // moved the second subscription's `create_or_subscribe` call (and thus
+    // its broadcast::Receiver attachment) *after* the first subscription's
+    // metric counter increment. The mock WS server starts emitting data
+    // events `interval_ms` after the first subscribe message arrives at the
+    // subgraph. tokio::broadcast does not replay messages sent before a
+    // receiver subscribes (see tokio::sync::broadcast::Sender::subscribe
+    // docs — values sent before the subscribe call are not seen by the new
+    // receiver), so if `interval_ms` is shorter than the wall-clock time
+    // between sub-1's WS handshake and sub-2's broadcast subscribe, sub-2
+    // misses early data events and `verify_subscription_events` panics at
+    // `mod.rs:266` with "Received N events but expected M. Stream may have
+    // terminated early." (CircleCI 370457 amd, 4.535s wall, "Received 3
+    // events but expected 4"; flake-bash branch 3-7.)
+    //
+    // 1 second comfortably exceeds the observed sub-1-WS-handshake to
+    // sub-2-broadcast-attach interval (~100ms on the failing trace —
+    // 25.300 handshake → ~25.4 sub-2 metric poll). The mock now waits
+    // 1s before its first event, by which time both subscribers are
+    // guaranteed to be attached to the shared broadcast channel.
+    let interval_ms = 1000;
     let is_closed = Arc::new(AtomicBool::new(false));
 
     // Start subscription server with fixed payloads, but do not terminate the connection
