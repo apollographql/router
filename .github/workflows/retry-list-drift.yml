@@ -1,0 +1,58 @@
+name: retry-list drift detection
+
+# Audits `.config/nextest.toml`'s retry-list filter to ensure every
+# `test(=<name>)` entry still corresponds to a live test in the
+# apollo-router crate.  Phase 9 of the de-flake project found that
+# 14 of 30 retry-list entries had silently become "paper tigers" -
+# the underlying test had been renamed or removed but the filter
+# entry was left behind.  Catching that drift on PR keeps the list
+# honest.
+#
+# Only exact-match (`test(=...)`) entries are checked.  Glob entries
+# (`test(#...)`) are skipped by design - matching zero tests is not
+# necessarily drift for a glob.
+
+on:
+  pull_request:
+    paths:
+      - '.config/nextest.toml'
+      - 'scripts/check_retry_list_drift.sh'
+      - '.github/workflows/retry-list-drift.yml'
+
+# Cancel in-flight runs for the same PR on push.
+concurrency:
+  group: retry-list-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift_check:
+    name: check for dead retry-list entries
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # Use the project's pinned toolchain from rust-toolchain.toml.
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Cache cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: retry-list-drift-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            retry-list-drift-${{ runner.os }}-
+
+      - name: Run drift check
+        run: ./scripts/check_retry_list_drift.sh
