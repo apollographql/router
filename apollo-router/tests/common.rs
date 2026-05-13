@@ -1195,6 +1195,52 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
+                    // Filter out OpenTelemetry SDK MeterProvider Drop lines
+                    // before strict-struct deserialisation.
+                    //
+                    // Upstream `opentelemetry-0.31.0`'s `otel_error!` macro
+                    // (`src/global/internal_logging.rs:202-228`) expands to
+                    // a `tracing::error!` call that supplies BOTH an empty
+                    // string as the event's display body AND an explicit
+                    // `message = ...` kv field. `tracing-subscriber`'s JSON
+                    // formatter serialises both, producing a JSON object
+                    // with two `"message"` keys. `serde_json::from_str::<Log>`
+                    // rejects duplicate struct fields
+                    // (`serde::de::Error::duplicate_field`), which previously
+                    // panicked the spawn task here, dropped the
+                    // `collect_stdio` `oneshot::Sender`, and made every
+                    // `collect_stdio`-using test fail with
+                    // `RecvError(())`. The triggering emission is gated on
+                    // `MeterProvider::shutdown()` returning `Err` during
+                    // `Drop` — a tokio-runtime-shutdown race in the SDK,
+                    // independent of router behaviour
+                    // (`opentelemetry_sdk-0.31.0/src/metrics/meter_provider.rs:170-175`).
+                    //
+                    // Filtering at the test-harness boundary (rather than
+                    // changing the router-wide JSON formatter) keeps the
+                    // blast radius local to the in-test stdout collector.
+                    //
+                    // The prefix match is `MeterProvider.Drop` (no
+                    // trailing dot) so the filter catches both the
+                    // bare `name="MeterProvider.Drop"` emission from
+                    // `otel_info!` (`meter_provider.rs:166-168`,
+                    // `MeterProvider` dropped without `shutdown_invoked`)
+                    // and the suffixed `name="MeterProvider.Drop.ShutdownFailed"`
+                    // / `name="MeterProvider.Drop.AlreadyShutdown"`
+                    // emissions from `otel_error!` / `otel_debug!`. All
+                    // share the same trailing-`""` Display-body
+                    // expansion at `internal_logging.rs:202-228` (and
+                    // `:42-62` for `otel_info!`) and therefore the
+                    // same duplicate-`message`-key surface.
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
+                        && value
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|name| name.starts_with("MeterProvider.Drop"))
+                    {
+                        let _ = stdio_tx.send(line).await;
+                        continue;
+                    }
                     let Ok(log) = serde_json::from_str::<Log>(&line) else {
                         panic!(
                             "line: '{line}' isn't JSON, might you have some debug output in the logging?"
@@ -1526,9 +1572,29 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
+    /// Like `graceful_shutdown` but lets the caller widen the
+    /// `assert_shutdown` budget. Use only for tests with a documented
+    /// shutdown-drain race that the default 10 s budget cannot beat.
+    /// Prefer fixing the underlying race when possible.
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn graceful_shutdown_with_deadline(&mut self, deadline: Duration) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGTERM);
+        }
+        self.assert_shutdown_with_deadline(deadline).await;
+    }
+
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
         // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    #[cfg(target_os = "windows")]
+    pub async fn graceful_shutdown_with_deadline(&mut self, _deadline: Duration) {
+        // Windows has no SIGTERM; forward to the non-graceful kill path.
         self.kill().await
     }
 
@@ -1945,9 +2011,25 @@ impl IntegrationTest {
         // a `connection_shutdown_timeout` default to prevent the 60 s
         // production default from hanging tests that hold HTTP/2 client
         // connections open past the response (see `merge_overrides`).
+        self.assert_shutdown_with_deadline(Duration::from_secs(10))
+            .await;
+    }
+
+    /// Variant of `assert_shutdown` that lets a specific test widen the
+    /// shutdown-budget when its shutdown path has a documented drain race
+    /// the default 10 s budget cannot beat.
+    ///
+    /// Used by tests that trip the default 10 s deadline with a known
+    /// fingerprint (typically a hyper-client pool drain race or
+    /// OpenTelemetry SDK shutdown ordering bug, neither of which can be
+    /// pinned without Linux `dump_stack_traces`). Widening the budget
+    /// per-test rather than via the shared default keeps the rest of the
+    /// harness honest about shutdown regressions.
+    #[allow(dead_code)]
+    pub async fn assert_shutdown_with_deadline(&mut self, deadline: Duration) {
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
-        while now.elapsed() < Duration::from_secs(10) {
+        while now.elapsed() < deadline {
             match router.try_wait() {
                 Ok(Some(_)) => {
                     self.router = None;
