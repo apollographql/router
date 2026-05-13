@@ -176,7 +176,6 @@ impl Request {
 impl Clone for Request {
     fn clone(&self) -> Self {
         // http::Request is not clonable so we have to rebuild a new one
-        // we don't use the extensions field for now
         let mut builder = http::Request::builder()
             .method(self.subgraph_request.method())
             .version(self.subgraph_request.version())
@@ -191,7 +190,10 @@ impl Clone for Request {
                     .map(|(name, value)| (name.clone(), value.clone())),
             );
         }
-        let subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
+        let mut subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
+        // Copy extensions so per-request data (e.g. SigV4 signing params) is preserved
+        // across clones made for APQ retries.
+        *subgraph_request.extensions_mut() = self.subgraph_request.extensions().clone();
 
         Self {
             supergraph_request: self.supergraph_request.clone(),
@@ -590,6 +592,32 @@ mod tests {
             req_with_claims_a.to_sha256(&ignored_headers, true),
             req_with_claims_b.to_sha256(&ignored_headers, true),
             "requests with different JWT claims must hash identically when ignore_auth_context is true"
+        );
+    }
+
+    #[test]
+    fn test_clone_preserves_subgraph_request_extensions() {
+        // APQ retries clone the SubgraphRequest to keep it around for a potential
+        // retry. Extensions on the inner subgraph HTTP request (e.g. SigV4 signing
+        // params inserted by the authentication plugin) must survive that clone,
+        // otherwise the retried request will be sent unsigned.
+        #[derive(Clone, PartialEq, Debug)]
+        struct TestExtension(u32);
+
+        let mut req = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        req.subgraph_request.extensions_mut().insert(TestExtension(42));
+
+        let cloned = req.clone();
+        assert_eq!(
+            cloned.subgraph_request.extensions().get::<TestExtension>(),
+            Some(&TestExtension(42)),
+            "subgraph_request extensions must be preserved when SubgraphRequest is cloned"
         );
     }
 }
