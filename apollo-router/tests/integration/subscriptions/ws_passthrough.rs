@@ -987,32 +987,26 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
 
     // Use the configured query that matches our server configuration
     let query = create_sub_query(interval_ms, custom_payloads.len());
-    let ((_, response), (_, response_bis)) = futures::join!(
-        router.run_subscription(&query),
-        router.run_subscription(&query)
-    );
 
-    // Expect the router to handle the subscription successfully
-    assert!(
-        response.status().is_success(),
-        "Subscription request failed with status: {}",
-        response.status()
-    );
-    assert!(
-        response_bis.status().is_success(),
-        "Subscription request failed with status: {}",
-        response_bis.status()
-    );
-
-    let stream = response.bytes_stream();
-
-    let stream_bis = response_bis.bytes_stream();
-
-    // Race fix (C6, Phase 11 site 2): subscription counters
-    // (`subscriptions_deduplicated` true/false) are incremented in the router
-    // after HTTP response headers go out, so a one-shot scrape immediately
-    // after both responses succeed races the increment. Deadline-poll until
-    // both counters reach 1.
+    // Race fix (C6, Phase 11 follow-up): the original code fired both
+    // subscriptions via `futures::join!` and then deadline-polled
+    // `subscriptions_deduplicated` true/false counters. The poll fixed the
+    // counter-increment race (Phase 11 site 2), but exposed a *deeper*
+    // race: when both client requests reach the subgraph subscription plugin
+    // concurrently, the subgraph request hashes can diverge (e.g. via
+    // auto-added per-connection headers), causing both calls to
+    // `create_or_subscribe` to return `created=true`. Then BOTH are counted
+    // as `deduplicated="false"` (count=2, deduplicated="true" count=0), the
+    // predicate `true==1 && false==1` never converges, and the 10s deadline
+    // panics (CircleCI 370144 amd, 11.784s; flake-bash branches 6+1).
+    //
+    // The structural fix is to dispatch the two subscriptions serially:
+    // fire the first, deadline-poll until it is observable in metrics
+    // (`deduplicated="false"` reaches 1, i.e. the create has completed and
+    // the topic is registered), then fire the second and deadline-poll
+    // until it deduplicates (`deduplicated="true"` reaches 1). The second
+    // request now reliably hashes against a registered topic, so the
+    // notification layer returns `created=false` for it.
     let sum_metric_counts = |regex: &Regex, metrics: &str| -> usize {
         regex
             .captures_iter(metrics)
@@ -1025,6 +1019,34 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
     let duplicated_sub =
         Regex::new(r#"(?m)^apollo_router_operations_subscriptions_total[{].+subscriptions_deduplicated="false".+[}] ([0-9]+)"#)
             .expect("regex");
+
+    // First subscription: must complete create-or-subscribe (creator)
+    // before the second arrives. The counter increment happens after the
+    // HTTP response headers go out, so we still need a deadline-poll, but
+    // we await it *before* firing the second request.
+    let (_, response) = router.run_subscription(&query).await;
+    assert!(
+        response.status().is_success(),
+        "Subscription request failed with status: {}",
+        response.status()
+    );
+    let _ = poll_metrics_until(&router, Duration::from_secs(10), |body| {
+        sum_metric_counts(&duplicated_sub, body) == 1
+    })
+    .await;
+
+    // Second subscription: the registered topic now exists, so this call
+    // returns `created=false` (deduplicated).
+    let (_, response_bis) = router.run_subscription(&query).await;
+    assert!(
+        response_bis.status().is_success(),
+        "Subscription request failed with status: {}",
+        response_bis.status()
+    );
+
+    let stream = response.bytes_stream();
+    let stream_bis = response_bis.bytes_stream();
+
     let metrics = poll_metrics_until(&router, Duration::from_secs(10), |body| {
         let total_deduplicated_sub = sum_metric_counts(&deduplicated_sub, body);
         let total_duplicated_sub = sum_metric_counts(&duplicated_sub, body);
