@@ -330,8 +330,9 @@ async fn get_batch_router_service(
 /// `assert_report!` collapse the keys to `[start_time]` etc. in the
 /// rendered yaml.
 fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
-    use opentelemetry_proto::tonic::trace::v1::Span;
     use std::collections::HashMap;
+
+    use opentelemetry_proto::tonic::trace::v1::Span;
 
     for resource_spans in &mut report.resource_spans {
         for scope_spans in &mut resource_spans.scope_spans {
@@ -356,9 +357,7 @@ fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
             let mut children_of: HashMap<Vec<u8>, Vec<usize>> = HashMap::new();
             let mut roots: Vec<usize> = Vec::new();
             for (idx, span) in original.iter().enumerate() {
-                if span.parent_span_id.is_empty()
-                    || !id_to_idx.contains_key(&span.parent_span_id)
-                {
+                if span.parent_span_id.is_empty() || !id_to_idx.contains_key(&span.parent_span_id) {
                     roots.push(idx);
                 } else {
                     children_of
@@ -403,8 +402,7 @@ fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
             // Option so we can `.take()` it exactly once even if the input
             // contains duplicate span_ids (which would be a bug, but the
             // sort shouldn't silently drop spans on its behalf).
-            let mut slots: Vec<Option<Span>> =
-                original.into_iter().map(Some).collect();
+            let mut slots: Vec<Option<Span>> = original.into_iter().map(Some).collect();
             scope_spans.spans = ordered
                 .into_iter()
                 .filter_map(|idx| slots[idx].take())
