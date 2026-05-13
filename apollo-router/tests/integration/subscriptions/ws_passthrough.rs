@@ -497,14 +497,21 @@ async fn test_subscription_ws_passthrough_error_payload(
     );
 
     let stream = response.1.bytes_stream();
-    // Now we're storing raw responses, so expect the actual multipart response structure
-    // First event is an empty object (subscription initialization), followed by data events
+    // Race fix (round-3 flake-bash branch 3-2, CircleCI 370401): the router's
+    // multipart subscription transport emits `{}` heartbeats every 10ms in
+    // test builds (see `HEARTBEAT_INTERVAL` in
+    // `apollo-router/src/protocols/multipart.rs`). The mock subscription
+    // server's event interval is also 10ms, so a heartbeat tick can fire
+    // between data events, producing `[user1, {}, user2]` instead of the
+    // expected `[{}, user1, user2]`. Heartbeat interleaving is by design;
+    // this test only cares about data event content + ordering, so filter
+    // heartbeats (`include_heartbeats: false`) and drop the leading `{}`
+    // from `expected_events`.
     let expected_events = vec![
-        create_initial_empty_response(),
         create_expected_user_payload(1),
         create_expected_user_payload_missing_reviews(2),
     ];
-    let _subscription_events = verify_subscription_events(stream, expected_events, true).await;
+    let _subscription_events = verify_subscription_events(stream, expected_events, false).await;
 
     // Check for errors in router logs
     router.assert_no_error_logs();
