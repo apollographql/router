@@ -232,9 +232,8 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.38.0", features = [
+sysinfo = { version = "0.39.1", features = [
     "system",
-    "windows",
 ], default-features = false }
 thiserror = "2.0.0"
 tokio.workspace = true
