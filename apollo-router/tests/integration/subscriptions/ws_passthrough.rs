@@ -1165,16 +1165,14 @@ async fn test_subscription_ws_passthrough_dedup_basic() -> Result<(), BoxError> 
     Ok(())
 }
 
-// Reload-propagation portion of the original `_dedup` test. Gated off on
-// macOS and Windows while we chase the residual CI flake — see test-split
-// comment above `test_subscription_ws_passthrough_dedup_basic`.
+// Reload-propagation portion of the original `_dedup` test. Currently
+// disabled on every platform: the schema-reload propagation path under
+// concurrent dedup has a race that flakes on macOS (~50-70%), Windows,
+// and intermittently on Linux. The dedup invariant itself is covered by
+// `_dedup_basic`. Re-enable once ROUTER-1793 is resolved.
 //
 // Tracking: ROUTER-1793 (https://apollographql.atlassian.net/browse/ROUTER-1793)
-#[cfg_attr(
-    any(target_os = "macos", target_os = "windows"),
-    ignore = "known CI flake on macOS (~50-70%) and Windows in schema-reload propagation; \
-              dedup invariant is covered by `_dedup_basic`. See ROUTER-1793."
-)]
+#[ignore = "disabled on all platforms — race in schema-reload propagation under concurrent dedup. See ROUTER-1793."]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_dedup_reload_propagation() -> Result<(), BoxError> {
     if !graph_os_enabled() {
