@@ -11,7 +11,6 @@ preview_file_uploads:
 # than a typical file. This is used to test that http_max_request_bytes is enforced
 # at the content level (operations field only), not at the HTTP frame level.
 limits:
-  router:
-    http_max_request_bytes: 500
+  http_max_request_bytes: 500
 include_subgraph_errors:
   all: true
