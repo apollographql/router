@@ -354,6 +354,8 @@ async fn call_websocket(
                             Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
                                 stream_completed_normally = new_completed_normally;
+                                // Reset so a future disconnect gets a fresh attempt budget.
+                                attempt = 0;
                                 break 'reconnect;
                             }
                             Err(err) => {
