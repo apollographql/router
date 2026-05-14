@@ -1182,7 +1182,6 @@ mod tests {
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::configuration::shared::Client as ClientConfiguration;
-    use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
