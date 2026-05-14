@@ -1,10 +1,13 @@
 //! Tests for this functionality are still mostly in the `crate::services::supergraph::tests` module.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use futures::FutureExt;
+use futures::Stream;
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
@@ -16,6 +19,7 @@ use tracing::Span;
 use tracing::field;
 use tracing_futures::Instrument;
 
+use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
@@ -34,6 +38,7 @@ use crate::services::SupergraphRequest;
 use crate::services::execution;
 use crate::services::execution::QueryPlan;
 use crate::services::subgraph::BoxGqlStream;
+use crate::spec::Schema;
 
 pub(crate) const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_CONFIG_RELOAD";
 pub(crate) const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
@@ -102,6 +107,41 @@ where
             let execution_service_cloned = inner.clone();
             let cloned_supergraph_req =
                 clone_supergraph_request(&req.supergraph_request, context.clone());
+
+            // Race fix (subscribe-before-publish, A3 candidate #2): subscribe to
+            // the schema/configuration broadcast channels *here*, synchronously
+            // in `call()`, *before* spawning the side-channel task and before
+            // returning the inner future that drives the subgraph request.
+            //
+            // `subscribe_schema()` / `subscribe_configuration()` wrap a fresh
+            // `tokio::broadcast::Receiver`. The broadcast is non-replaying:
+            // messages sent before `subscribe` returns are not delivered to
+            // the new receiver. Previously these calls lived inside
+            // `subscription_task` *after* two `.await` points
+            // (`rx.recv().await` for subscription params and
+            // `receiver.next().await` for the subgraph stream), so by the
+            // time the task subscribed the subgraph plugin had already
+            // incremented `apollo.router.operations.subscriptions` (where
+            // the test deadline-polls before triggering the reload). On
+            // slow runners (CircleCI `m4pro.large`, 6 vCPU under
+            // hypervisor jitter) the test's `replace_schema_string` could
+            // fire `broadcast_schema` *before* the spawned task reached
+            // the subscribe call, dropping the schema-reload message on
+            // the floor. Sub-1 then sees `receiver.next() == None`
+            // (factory drop) without the schema broadcast ever arriving
+            // on its receiver, the 1s grace window in the None arm
+            // times out, and the client receives 3 events instead of 4
+            // ("Received 3 events but expected 4. Stream may have
+            // terminated early." at `tests/integration/subscriptions/mod.rs:266`).
+            //
+            // Subscribing here guarantees both receivers are attached to
+            // the broadcast channels before the subgraph subscription
+            // request is even dispatched, so any subsequent
+            // `broadcast_schema` / `broadcast_configuration` call (from
+            // the test or the state machine) is delivered.
+            let configuration_updated_rx = Box::pin(notify.subscribe_configuration());
+            let schema_updated_rx = Box::pin(notify.subscribe_schema());
+
             // Spawn the side-channel task for subscription.
             tokio::spawn(async move {
                 subscription_task(
@@ -109,8 +149,9 @@ where
                     context,
                     query_plan,
                     subs_rx,
-                    notify,
                     cloned_supergraph_req,
+                    configuration_updated_rx,
+                    schema_updated_rx,
                 )
                 .await;
             });
@@ -161,8 +202,9 @@ async fn subscription_task(
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
-    notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
+    mut configuration_updated_rx: Pin<Box<dyn Stream<Item = Weak<Configuration>> + Send>>,
+    mut schema_updated_rx: Pin<Box<dyn Stream<Item = Arc<Schema>> + Send>>,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -226,8 +268,10 @@ async fn subscription_task(
         OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
     }
 
-    let mut configuration_updated_rx = notify.subscribe_configuration();
-    let mut schema_updated_rx = notify.subscribe_schema();
+    // Note: `configuration_updated_rx` and `schema_updated_rx` are now
+    // subscribed in `SubscriptionExecutionService::call` (before the spawn)
+    // and passed in as parameters. See the comment in `call` for the race
+    // this fix addresses.
 
     let mut timeout = if supergraph_req
         .context
