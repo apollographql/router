@@ -348,21 +348,16 @@ async fn subscription_task(
                         // channels: if either has a value ready, emit the
                         // corresponding fatal-error payload so the client
                         // observes the schema/config reload instead of a bare
-                        // EOF. Uses a 1s grace window because the broadcast
+                        // EOF. Uses a 100ms grace window because the broadcast
                         // send is synchronous immediately after factory drop
                         // (state_machine.rs:457-470), but the cross-task wake
-                        // can lag substantially on slower runners (e.g.
-                        // CircleCI's m4pro.large macOS executor, 6 vCPU)
-                        // under CI scheduling jitter; a 100ms window was
-                        // observed to expire before the schema broadcast
-                        // landed, causing the task to break without
-                        // dispatching the reload error. Non-reload
-                        // terminations pay this 1s once at end-of-stream,
-                        // which is well below any test assertion deadline
-                        // and dwarfed by the 5s heartbeat grace already in
-                        // the verifier.
+                        // can lag by a few ms on macOS under CI scheduling
+                        // jitter. Non-reload terminations pay this 100ms once
+                        // at end-of-stream, which is well below any test
+                        // assertion deadline and dwarfed by the 5s heartbeat
+                        // grace already in the verifier.
                         let _ = tokio::time::timeout(
-                            std::time::Duration::from_millis(1000),
+                            std::time::Duration::from_millis(100),
                             async {
                                 tokio::select! {
                                     biased;
