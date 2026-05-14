@@ -1209,13 +1209,8 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
-<<<<<<< HEAD
- "tokio-tungstenite",
- "tower 0.5.2",
-=======
  "tokio-tungstenite 0.28.0",
- "tower",
->>>>>>> 4f85e2c1 (Fix/router 1485 (#9051))
+ "tower 0.5.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -7529,10 +7524,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
-<<<<<<< HEAD
  "rand 0.9.3",
-=======
- "rand 0.9.2",
  "sha1",
  "thiserror 2.0.17",
  "utf-8",
@@ -7549,8 +7541,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
- "rand 0.9.2",
->>>>>>> 4f85e2c1 (Fix/router 1485 (#9051))
+ "rand 0.9.3",
  "rustls",
  "rustls-pki-types",
  "sha1",
