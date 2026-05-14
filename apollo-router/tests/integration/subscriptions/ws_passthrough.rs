@@ -1178,50 +1178,46 @@ async fn test_subscription_ws_passthrough_dedup_basic() -> Result<(), BoxError> 
 //
 // Why it's disabled: there is a race in the schema-reload propagation
 // path under concurrent dedup. The failure mode is byte-identical
-// across many runs — `sub-1` (the original subscriber, not the
+// across many CI runs — `sub-1` (the original subscriber, not the
 // deduplicated follower) receives only 3 of the 4 expected events. The
 // stream closes cleanly with `None` after exactly 3 events; the 4th
 // (the schema-reload error event) is missing. The producer side cuts
 // short — this is not a consumer timeout.
 //
-// Platform behavior we observed in flake-bash rounds 8–14:
-//   * CircleCI macOS (`m4pro.large`, 6 vCPU, arm64): 50–90% fail
-//   * Windows: confirmed flaky after round-13
-//   * amd_linux / arm_linux: rare but real (one branch flaked in
-//     round-14, plus `_dedup_basic` also flaked there once — implying
-//     the dedup-setup path may have a sibling race independent of the
-//     reload propagation)
-//   * Local macOS arm64 dev hardware (10+ cores): 10/10 pass — the
-//     race cannot be reproduced outside CI.
+// Platform behavior: high failure rate on CI macOS, also observed on
+// Windows and intermittently on Linux. The dedup-setup path appears to
+// have a related but separate race as well — the sibling `_dedup_basic`
+// test has occasionally flaked on Linux without exercising the reload
+// step. The race cannot be reproduced on local macOS arm64 dev
+// hardware. It appears scheduler-jitter-sensitive but is fundamentally
+// platform-agnostic.
 //
-// What was tried before disabling (all attempted on PR #9418):
-//   1. Test-side spawned-task drain of bytes_streams across
-//      `replace_schema_string` — verified locally 10/10, no effect
-//      on CI. (Backed out as speculation.)
-//   2. Production 100ms grace window in `subscription_task`
-//      `receiver.next() == None` arm — verified locally, no effect on
-//      CI. (Backed out.)
-//   3. Extended that grace to 1s — no effect. (Backed out.)
-//   4. Production fix: subscribe to schema/config broadcasts inside
-//      `SubscriptionExecutionService::call` BEFORE `tokio::spawn`, so
-//      receivers exist before any broadcast can fire. This closes a
-//      real subscribe-after-publish race on a non-replaying
-//      `tokio::broadcast` and is preserved as a correctness fix, but
-//      did not stop this test from flaking.
+// Approaches attempted (all left the CI failure shape byte-identical):
+//   1. Test-side: spawn a task that drains the response `bytes_stream`s
+//      concurrently with `replace_schema_string`, so both streams stay
+//      consumed during teardown. Verified locally, no effect on CI.
+//   2. Production: add a short grace window in `subscription_task`'s
+//      `receiver.next() == None` arm so a pending schema/config reload
+//      broadcast has a chance to land before the task exits. Tried 100ms
+//      and 1s. Verified locally, no effect on CI.
+//   3. Production: move the schema/config broadcast subscription
+//      synchronously into `SubscriptionExecutionService::call`, BEFORE
+//      `tokio::spawn`, so the receivers exist before any broadcast can
+//      fire. This closes a real subscribe-after-publish race on a
+//      non-replaying `tokio::broadcast` (landed as a correctness
+//      improvement independent of this flake) — but did not stop this
+//      test from flaking.
 //
-// All four fixes left the failure shape byte-identical, indicating the
+// All approaches left the failure shape byte-identical, indicating the
 // race lives somewhere we haven't yet identified. The most likely
-// remaining suspects are (a) the factory-drop / `broadcast_schema()`
-// ordering in `apollo-router/src/state_machine.rs` (the broadcast can
-// race the receiver-close cascade), and (b) heartbeat-interleave or
-// EOF-terminator ordering in the multipart pipeline under load. The
-// dedup invariant itself is independently covered by
-// `test_subscription_ws_passthrough_dedup_basic`.
+// remaining suspects are (a) the factory-drop ordering with respect to
+// `broadcast_schema()` in `apollo-router/src/state_machine.rs` (the
+// broadcast can race the receiver-close cascade), and (b)
+// heartbeat-interleave or EOF-terminator ordering in the multipart
+// pipeline under load. The dedup invariant itself is independently
+// covered by `test_subscription_ws_passthrough_dedup_basic`.
 //
-// Re-enabling: see acceptance criteria in ROUTER-1793. Briefly: identify
-// the race, apply a fix, then prove out 30+ consecutive green runs of
-// this test on CircleCI across macOS / Linux amd64 / Linux arm64 /
-// Windows via empty-commit flake-bash rounds before lifting the gate.
+// Re-enabling: see acceptance criteria in ROUTER-1793.
 //
 // Tracking: ROUTER-1793 — https://apollographql.atlassian.net/browse/ROUTER-1793
 #[ignore = "ROUTER-1793: cross-platform race in dedup schema-reload propagation. Dedup invariant is covered by `_dedup_basic`."]
