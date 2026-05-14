@@ -112,7 +112,6 @@ impl ConnectorStage {
         service: request_service::BoxService,
         default_url: String,
         service_name: String,
-        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> request_service::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -127,16 +126,18 @@ impl ConnectorStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let service_name = service_name.clone();
-            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: request_service::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let service_name = service_name.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_connector_request_stage(
@@ -165,7 +166,6 @@ impl ConnectorStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
-            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureWithRequestDataLayer::new(
                 |req: &request_service::Request| req.context.clone(),
@@ -174,10 +174,12 @@ impl ConnectorStage {
                     let coprocessor_url = coprocessor_url.clone();
                     let response_config = response_config.clone();
                     let service_name = service_name.clone();
-                    let header_masking_rules = header_masking_rules.clone();
 
                     async move {
                         let response: request_service::Response = fut.await?;
+                        let header_masking_rules = context
+                            .extensions()
+                            .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                         let mut succeeded = true;
                         let mut executed = false;
@@ -353,6 +355,7 @@ where
 
         let res = request_service::Response {
             context: request.context.clone(),
+            subgraph_name: request.connector.id.subgraph_name.to_string(),
             transport_result: Err(ConnectorError::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error: runtime_error,
@@ -456,13 +459,9 @@ where
             if response_config.headers
                 && let Some(rules) = header_masking_rules.as_deref()
             {
-                let subgraph_name = response.context.extensions().with_lock(|lock| {
-                    lock.get::<crate::services::header_masking::ConnectorSubgraphName>()
-                        .map(|n| n.0.clone())
-                });
                 tracing::debug!(
                     headers = %rules
-                        .get_response(subgraph_name.as_deref())
+                        .get_response(Some(&response.subgraph_name))
                         .mask_headers_debug(&http_response.inner.headers),
                     service = %service_name,
                     "Connector response headers (masked)"

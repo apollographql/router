@@ -89,6 +89,11 @@ pub struct Response {
     /// The request context
     pub(crate) context: Context,
 
+    /// Originating federation subgraph name for this connector call. Carried
+    /// on the response (rather than passed through shared context) so parallel
+    /// connector calls don't race when resolving per-subgraph response rules.
+    pub(crate) subgraph_name: String,
+
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -99,6 +104,7 @@ pub struct Response {
 impl Response {
     pub(crate) fn error_new(
         context: Context,
+        subgraph_name: String,
         error: Error,
         message: impl Into<String>,
         response_key: ResponseKey,
@@ -113,6 +119,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name,
             transport_result: Err(error),
             mapped_response,
         }
@@ -143,6 +150,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name: String::new(),
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
@@ -213,15 +221,6 @@ impl tower::Service<Request> for ConnectorRequestService {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
         let http_client_service_factory = self.http_client_service_factory.clone();
 
-        // Stash the originating subgraph name in context so the response side
-        // (which no longer carries the Connector) can resolve per-subgraph
-        // response masking rules.
-        request.context.extensions().with_lock(|lock| {
-            lock.insert(crate::services::header_masking::ConnectorSubgraphName(
-                original_subgraph_name.clone(),
-            ));
-        });
-
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
             request.context.extensions().with_lock(|lock| {
@@ -272,6 +271,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     }
                     Ok(Response {
                         context: request.context,
+                        subgraph_name: original_subgraph_name,
                         transport_result: Ok(TransportResponse::MappingOnly),
                         mapped_response: mapped,
                     })

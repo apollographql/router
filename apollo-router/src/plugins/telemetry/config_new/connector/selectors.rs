@@ -79,8 +79,6 @@ pub(crate) enum ConnectorSelector {
     HttpRequestHeader {
         /// The name of a connector HTTP request header.
         connector_http_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -318,13 +316,11 @@ impl Selector for ConnectorSelector {
                         (Some(_), Some(_)) => Some("***MASKED***".to_string()),
                         // If redact is None, check global rules
                         (None, Some(_)) => {
+                            let subgraph = response.subgraph_name.as_str();
                             let should_mask = response.context.extensions().with_lock(|lock| {
-                                let subgraph = lock
-                                    .get::<crate::services::header_masking::ConnectorSubgraphName>()
-                                    .map(|n| n.0.clone());
                                 lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
                                     .map(|m| {
-                                        m.get_response(subgraph.as_deref())
+                                        m.get_response(Some(subgraph))
                                             .should_mask(connector_response_header)
                                     })
                                     .unwrap_or(false)
@@ -605,6 +601,7 @@ mod tests {
     ) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name: String::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -626,6 +623,7 @@ mod tests {
     fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name: String::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -643,8 +641,13 @@ mod tests {
     }
 
     fn connector_response_with_header() -> Response {
+        connector_response_with_header_for_subgraph(String::new())
+    }
+
+    fn connector_response_with_header_for_subgraph(subgraph_name: String) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name,
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
@@ -873,7 +876,6 @@ mod tests {
         use std::collections::HashMap;
 
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
-        use crate::services::header_masking::ConnectorSubgraphName;
         use crate::services::header_masking::DirectionRules;
         use crate::services::header_masking::HeaderMaskingRules;
         use crate::services::header_masking::MaskingRulesMap;
@@ -900,11 +902,9 @@ mod tests {
             DirectionRules::new(global, per_sg),
         ));
 
-        let response = connector_response_with_header();
+        let response = connector_response_with_header_for_subgraph("products".to_string());
         response.context.extensions().with_lock(|lock| {
             lock.insert(map);
-            // Simulate what the request service stashes during call().
-            lock.insert(ConnectorSubgraphName("products".to_string()));
         });
         assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
     }

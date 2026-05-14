@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2423,6 +2422,13 @@ expression: "&schema"
             },
             "default": {
               "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "redact": {
+              "description": "Optional redaction pattern.",
               "type": [
                 "string",
                 "null"

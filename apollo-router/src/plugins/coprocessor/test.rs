@@ -222,7 +222,6 @@ mod tests {
             "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -299,7 +298,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -364,7 +362,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -428,7 +425,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -485,7 +481,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -629,7 +624,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -783,7 +777,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -951,7 +944,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1036,7 +1028,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1101,7 +1092,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1159,7 +1149,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1278,7 +1267,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1395,7 +1383,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1524,7 +1511,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1674,7 +1660,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let mut request = subgraph::Request::fake_builder().build();
@@ -1812,7 +1797,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -1892,7 +1876,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1984,7 +1967,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2084,7 +2066,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -2235,7 +2216,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2384,7 +2364,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2519,7 +2498,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2651,7 +2629,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -2728,7 +2705,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2815,7 +2791,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -2951,7 +2926,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -3033,7 +3007,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation - doesn't matter for router stage
-                None,
             )
             .boxed();
 
@@ -3065,7 +3038,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
-                None,
             )
             .boxed();
 
@@ -3090,7 +3062,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
-                None,
             )
             .boxed();
 
@@ -3116,7 +3087,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
-                None,
             )
             .boxed();
 
@@ -3142,7 +3112,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
-                None,
             )
             .boxed();
 
@@ -3167,7 +3136,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
-                None,
             )
             .boxed();
 
@@ -3193,7 +3161,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
-                None,
             )
             .boxed();
 
@@ -3412,7 +3379,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
-                None,
             )
             .boxed();
 
@@ -3444,7 +3410,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
-                None,
             )
             .boxed();
 
@@ -3894,7 +3859,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3918,7 +3882,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3940,7 +3903,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3964,7 +3926,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -3988,7 +3949,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4010,7 +3970,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4031,7 +3990,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4053,7 +4011,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4074,7 +4031,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4092,7 +4048,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4110,7 +4065,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4131,7 +4085,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4216,7 +4169,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4303,7 +4255,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4376,7 +4327,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4462,7 +4412,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true,
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -4555,7 +4504,6 @@ mod tests {
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Disable response validation since coprocessor returns only extensions
-            None,
         );
 
         let request = subgraph::Request::fake_builder().build();
@@ -5322,7 +5270,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5352,7 +5299,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5382,7 +5328,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5409,7 +5354,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5436,7 +5380,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5453,7 +5396,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     false, // Validation disabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5482,7 +5424,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5512,7 +5453,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5542,7 +5482,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5559,7 +5498,6 @@ mod tests {
                     "http://test".to_string(),
                     "my_service".to_string(),
                     true, // Validation enabled
-                    None,
                 );
 
                 let _request = subgraph::Request::fake_builder().build();
@@ -5592,7 +5530,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5622,7 +5559,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5653,7 +5589,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5684,7 +5619,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5715,7 +5649,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5736,7 +5669,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5769,7 +5701,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
-                        None,
                     )
                     .boxed();
 
@@ -5799,7 +5730,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5833,7 +5763,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -5854,7 +5783,6 @@ mod tests {
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false, // response_validation - doesn't matter for router stage
-                        None,
                     )
                     .boxed();
 
@@ -6496,7 +6424,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6548,7 +6475,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6600,7 +6526,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             // Create a request with a non-JSON body
@@ -6665,7 +6590,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6741,7 +6665,6 @@ mod tests {
                 inner_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6798,7 +6721,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6847,7 +6769,6 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
-                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6901,7 +6822,6 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
-                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -6949,7 +6869,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -6993,7 +6912,6 @@ mod tests {
                         mock_connector_service.boxed(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
-                        None,
                     );
 
                     let request = create_test_connector_request();
@@ -7052,7 +6970,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7101,7 +7018,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7160,7 +7076,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7222,7 +7137,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7269,7 +7183,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7315,7 +7228,6 @@ mod tests {
                 mock_connector_service.boxed(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7332,9 +7244,11 @@ mod tests {
         fn create_error_connector_service()
         -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
         {
-            tower::service_fn(|req: request_service::Request| async {
+            tower::service_fn(|req: request_service::Request| async move {
+                let subgraph_name = req.connector.id.subgraph_name.to_string();
                 Ok(request_service::Response {
                     context: req.context,
+                    subgraph_name,
                     transport_result: Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),
@@ -7384,7 +7298,6 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7434,7 +7347,6 @@ mod tests {
                 create_error_connector_service(),
                 "http://test".to_string(),
                 "my_connector_source".to_string(),
-                None,
             );
 
             let request = create_test_connector_request();
@@ -7517,12 +7429,12 @@ mod tests {
                     },
                 ),
             );
-            let masking_rules = Some(Arc::new(
+            let masking_rules = Arc::new(
                 crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
                 ),
-            ));
+            );
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7530,7 +7442,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
-                masking_rules,
             );
 
             // Send a request with sensitive headers
@@ -7540,6 +7451,10 @@ mod tests {
                 .header("user-agent", "test-agent")
                 .build()
                 .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
 
             let _response = service.oneshot(request).await.unwrap();
 
@@ -7647,12 +7562,12 @@ mod tests {
                     },
                 ),
             );
-            let masking_rules = Some(Arc::new(
+            let masking_rules = Arc::new(
                 crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
                 ),
-            ));
+            );
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
@@ -7660,7 +7575,6 @@ mod tests {
                 "http://test".to_string(),
                 "test_subgraph".to_string(),
                 false,
-                masking_rules,
             );
 
             let request = subgraph::Request::fake_builder()
@@ -7672,6 +7586,10 @@ mod tests {
                         .unwrap(),
                 )
                 .build();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
 
             let _response = service.oneshot(request).await.unwrap();
 
@@ -7742,8 +7660,7 @@ mod tests {
                 })
             });
 
-            // No masking rules (disabled)
-            let masking_rules = None;
+            // No masking rules (disabled): leave context empty.
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7751,7 +7668,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
-                masking_rules,
             );
 
             let request = router::Request::fake_builder()
@@ -7840,12 +7756,12 @@ mod tests {
                     },
                 ),
             );
-            let masking_rules = Some(Arc::new(
+            let masking_rules = Arc::new(
                 crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
                 ),
-            ));
+            );
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7853,7 +7769,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
-                masking_rules,
             );
 
             let request = router::Request::fake_builder()
@@ -7863,6 +7778,10 @@ mod tests {
                 .header("x-custom-header", "custom-value")
                 .build()
                 .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
 
             let _response = service.oneshot(request).await.unwrap();
 
@@ -7968,12 +7887,12 @@ mod tests {
                     },
                 ),
             );
-            let masking_rules = Some(Arc::new(
+            let masking_rules = Arc::new(
                 crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
                 ),
-            ));
+            );
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7981,7 +7900,6 @@ mod tests {
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
-                masking_rules,
             );
 
             let request = router::Request::fake_builder()
@@ -7990,6 +7908,10 @@ mod tests {
                 .header("authorization", "Bearer public-token") // Not in custom list
                 .build()
                 .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
 
             let _response = service.oneshot(request).await.unwrap();
 

@@ -28,7 +28,6 @@ use tower::timeout::TimeoutLayer;
 use tower::util::MapFutureLayer;
 
 use crate::Context;
-use crate::configuration::header_masking_config::HeaderMaskingConfig;
 use crate::configuration::shared::Client;
 use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
@@ -50,7 +49,6 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
-use crate::services::header_masking::HeaderMaskingRules;
 use crate::services::header_masking::MaskingRulesMap;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
@@ -198,62 +196,11 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
-        // Read masking config from headers.all.{request,response}.masking and
-        // headers.subgraphs.<name>.{request,response}.masking. The coprocessor
-        // mirrors the headers-plugin layout so request stages get request
-        // rules and response stages get response rules, with per-subgraph
-        // overrides falling back to the global default for each direction.
-        let header_masking_rules = init.full_config.as_ref().and_then(|config| {
-            use crate::services::header_masking::DirectionRules;
-
-            let headers = config.get("headers")?;
-            let all = headers.get("all");
-
-            let default_rules = Arc::new(HeaderMaskingRules::from_config(
-                &HeaderMaskingConfig::default(),
-            ));
-
-            let parse_masking = |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
-                v.get("masking")
-                    .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
-                    .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
-            };
-
-            let global_request = all
-                .and_then(|a| a.get("request"))
-                .and_then(parse_masking)
-                .unwrap_or_else(|| default_rules.clone());
-            let global_response = all
-                .and_then(|a| a.get("response"))
-                .and_then(parse_masking)
-                .unwrap_or_else(|| default_rules.clone());
-
-            let mut per_subgraph_request: HashMap<String, Arc<HeaderMaskingRules>> = HashMap::new();
-            let mut per_subgraph_response: HashMap<String, Arc<HeaderMaskingRules>> =
-                HashMap::new();
-            if let Some(serde_json::Value::Object(subgraphs)) = headers.get("subgraphs") {
-                for (name, sg_config) in subgraphs {
-                    if let Some(rules) = sg_config.get("request").and_then(&parse_masking) {
-                        per_subgraph_request.insert(name.clone(), rules);
-                    }
-                    if let Some(rules) = sg_config.get("response").and_then(&parse_masking) {
-                        per_subgraph_response.insert(name.clone(), rules);
-                    }
-                }
-            }
-
-            Some(Arc::new(MaskingRulesMap::new(
-                DirectionRules::new(global_request, per_subgraph_request),
-                DirectionRules::new(global_response, per_subgraph_response),
-            )))
-        });
-
-        CoprocessorPlugin::new(
-            client,
-            init.config,
-            init.supergraph_sdl,
-            header_masking_rules,
-        )
+        // Masking rules are published by the headers plugin into request
+        // context at router-service time; each coprocessor stage reads them
+        // from context per-request rather than from plugin init, since
+        // `init.full_config` is only populated for `apollo.telemetry`.
+        CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -317,7 +264,6 @@ where
     http_client: C,
     configuration: Conf,
     sdl: Arc<String>,
-    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 }
 
 impl<C> CoprocessorPlugin<C>
@@ -329,17 +275,11 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    fn new(
-        http_client: C,
-        configuration: Conf,
-        sdl: Arc<String>,
-        header_masking_rules: Option<Arc<MaskingRulesMap>>,
-    ) -> Result<Self, BoxError> {
+    fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
             http_client,
             configuration,
             sdl,
-            header_masking_rules,
         })
     }
 
@@ -350,7 +290,6 @@ where
             self.configuration.url.clone(),
             self.sdl.clone(),
             self.configuration.response_validation,
-            self.header_masking_rules.clone(),
         )
     }
 
@@ -364,7 +303,6 @@ where
             self.configuration.url.clone(),
             self.sdl.clone(),
             self.configuration.response_validation,
-            self.header_masking_rules.clone(),
         )
     }
 
@@ -378,7 +316,6 @@ where
             self.configuration.url.clone(),
             self.sdl.clone(),
             self.configuration.response_validation,
-            self.header_masking_rules.clone(),
         )
     }
 
@@ -389,7 +326,6 @@ where
             self.configuration.url.clone(),
             name.to_string(),
             self.configuration.response_validation,
-            self.header_masking_rules.clone(),
         )
     }
 
@@ -403,7 +339,6 @@ where
             service,
             self.configuration.url.clone(),
             source_name.to_string(),
-            self.header_masking_rules.clone(),
         )
     }
 }
@@ -752,7 +687,6 @@ impl RouterStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> router::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -767,16 +701,18 @@ impl RouterStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
-            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: router::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let sdl = sdl.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_router_request_stage(
@@ -806,16 +742,18 @@ impl RouterStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
-            let header_masking_rules = header_masking_rules.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let response: router::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_router_response_stage(
@@ -890,7 +828,6 @@ impl SubgraphStage {
         default_url: String,
         service_name: String,
         response_validation: bool,
-        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> subgraph::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -905,15 +842,17 @@ impl SubgraphStage {
             let http_client = http_client.clone();
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let service_name = service_name.clone();
-            let header_masking_rules = header_masking_rules.clone();
             AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let service_name = service_name.clone();
                 let request_config = request_config.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_subgraph_request_stage(
@@ -943,17 +882,19 @@ impl SubgraphStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
-            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
                 let service_name = service_name.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let response: subgraph::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;

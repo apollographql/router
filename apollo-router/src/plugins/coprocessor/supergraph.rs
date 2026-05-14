@@ -77,7 +77,6 @@ impl SupergraphStage {
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-        header_masking_rules: Option<Arc<MaskingRulesMap>>,
     ) -> supergraph::BoxService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -92,16 +91,18 @@ impl SupergraphStage {
             let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
-            let header_masking_rules = header_masking_rules.clone();
 
             AsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
                 let sdl = sdl.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_supergraph_request_stage(
@@ -131,17 +132,19 @@ impl SupergraphStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
-            let header_masking_rules = header_masking_rules.clone();
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
                 let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
-                let header_masking_rules = header_masking_rules.clone();
 
                 async move {
                     let response: supergraph::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;
@@ -795,7 +798,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -875,7 +877,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::fake_builder()
@@ -954,7 +955,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let crate::services::supergraph::Response { context, .. } =
@@ -1071,7 +1071,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder().build().unwrap();
@@ -1188,7 +1187,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1307,7 +1305,6 @@ mod tests {
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
-            None,
         );
 
         let request = supergraph::Request::canned_builder()
@@ -1524,7 +1521,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1544,7 +1540,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1567,7 +1562,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1587,7 +1581,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1612,7 +1605,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1637,7 +1629,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1657,7 +1648,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1679,7 +1669,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1702,7 +1691,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1721,7 +1709,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1739,7 +1726,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
@@ -1757,7 +1743,6 @@ mod tests {
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
-            None,
         );
 
         let request = supergraph::Request::fake_builder().build().unwrap();
