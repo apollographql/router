@@ -1262,13 +1262,13 @@ impl Merger {
 
             // validate the "from" argument
             let source_subgraph_name = self.get_override_from_argument(override_directive)?;
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
             if !self.names.contains(&source_subgraph_name) {
                 // error: unknown target
                 result.set_override_with_unknown_target(idx);
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
-                let default_range =
-                    LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
@@ -1304,7 +1304,10 @@ impl Merger {
                         "Field \"{}\" on subgraph \"{}\" no longer exists in the from subgraph. The @override directive can be removed.",
                         dest, subgraph_name
                     ),
-                    locations: Default::default(),
+                    locations: vec![SubgraphLocation {
+                        subgraph: subgraph_name.clone(),
+                        range: default_range.clone(),
+                    }],
                 });
             } else {
                 // Get the source subgraph index
@@ -1361,7 +1364,10 @@ impl Merger {
                             "Field \"{}\" on subgraph \"{}\" is not resolved anymore by the from subgraph (it is marked \"@external\" in \"{}\"). The @override directive can be removed.",
                             dest, subgraph_name, source_subgraph_name
                         ),
-                        locations: Default::default(),
+                        locations: vec![SubgraphLocation {
+                            subgraph: subgraph_name.clone(),
+                            range: default_range.clone(),
+                        }],
                     });
                 } else if overridden_field_is_referenced {
                     result.set_used_overridden(from_idx);
@@ -1373,7 +1379,10 @@ impl Merger {
                                 "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
                                 dest, source_subgraph_name
                             ),
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 } else {
@@ -1386,7 +1395,10 @@ impl Merger {
                                 "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
                                 dest, source_subgraph_name
                             ),
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 }
@@ -1434,7 +1446,10 @@ impl Merger {
                         self.error_reporter.add_hint(CompositionHint {
                             definition: HintCode::OverrideMigrationInProgress.definition(),
                             message,
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 }
