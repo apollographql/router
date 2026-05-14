@@ -8,6 +8,7 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
@@ -750,13 +751,24 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 
     pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
-        self.schema()
+        let locations: Locations = self
+            .schema()
             .node_locations(node)
             .map(|range| SubgraphLocation {
                 subgraph: self.name.clone(),
                 range,
             })
-            .collect()
+            .collect();
+        if locations.is_empty() {
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
+            vec![SubgraphLocation {
+                subgraph: self.name.clone(),
+                range: default_range,
+            }]
+        } else {
+            locations
+        }
     }
 }
 
