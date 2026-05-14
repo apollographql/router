@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::executable;
 use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
@@ -49,6 +51,7 @@ use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::spec::Fragments;
+use crate::spec::IncludeSkip;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -78,7 +81,7 @@ impl QueryPlan {
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
-        let skipped_entity_paths: Mutex<Vec<Path>> = Mutex::new(Vec::new());
+        let skipped_entity_paths: Mutex<Vec<(Path, Arc<ResponseKeyTree>)>> = Mutex::new(Vec::new());
 
         let (value, mut errors) = self
             .root
@@ -109,22 +112,14 @@ impl QueryPlan {
             );
         }
 
-        // End-of-execution pass: walk the user's operation against the final
-        // merged data and emit `UNSATISFIED_FETCH_CONDITION` for each missing
-        // leaf that sits under a recorded skipped entity path.
-        let skipped_paths = std::mem::take(&mut *skipped_entity_paths.lock());
-        if !skipped_paths.is_empty() {
-            collect_unsatisfied_fetch_errors(
-                &self.query.operation.selection_set,
-                &self.query.fragments,
-                schema.as_ref(),
-                &supergraph_request.body().variables,
-                &value,
-                &Path::empty(),
-                &skipped_paths,
-                &mut errors,
-            );
-        }
+        emit_unsatisfied_fetch_errors(
+            std::mem::take(&mut *skipped_entity_paths.lock()),
+            &self.query,
+            schema.as_ref(),
+            &supergraph_request.body().variables,
+            &value,
+            &mut errors,
+        );
 
         Response::builder().data(value).errors(errors).build()
     }
@@ -150,11 +145,13 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
-    /// Entity-level paths whose `_entities` fetch was skipped because a
-    /// required input was unsatisfied. Accumulated across the entire
-    /// execution; consumed at end-of-execution to generate
-    /// `UNSATISFIED_FETCH_CONDITION` errors against the final merged data.
-    pub(crate) skipped_entity_paths: &'a Mutex<Vec<Path>>,
+    /// Entries describing entities whose `_entities` fetch was skipped because
+    /// a required input was unsatisfied. Each entry pairs the entity-root path
+    /// with a tree of response keys the skipped fetch would have produced for
+    /// that entity (filtered by `__typename`). Accumulated across execution;
+    /// consumed at end-of-execution to generate `UNSATISFIED_FETCH_CONDITION`
+    /// errors against the final merged data.
+    pub(crate) skipped_entity_paths: &'a Mutex<Vec<(Path, Arc<ResponseKeyTree>)>>,
 }
 
 impl PlanNode {
@@ -330,13 +327,15 @@ impl PlanNode {
                             &fetch_node.context_rewrites,
                         );
 
-                        // Record skipped entity paths; error generation is deferred to
-                        // end-of-execution where the final merged data is available.
                         if !unsatisfied_paths.is_empty() {
-                            parameters
-                                .skipped_entity_paths
-                                .lock()
-                                .extend(unsatisfied_paths);
+                            record_skipped_entities(
+                                unsatisfied_paths,
+                                fetch_node,
+                                parent_value,
+                                parameters.schema.as_ref(),
+                                &parameters.supergraph_request.body().variables,
+                                parameters.skipped_entity_paths,
+                            );
                         }
 
                         match opt_variables {
@@ -623,7 +622,8 @@ impl DeferredNode {
             }
 
             let deferred_fetches = HashMap::new();
-            let deferred_skipped_paths: Mutex<Vec<Path>> = Mutex::new(Vec::new());
+            let deferred_skipped_paths: Mutex<Vec<(Path, Arc<ResponseKeyTree>)>> =
+                Mutex::new(Vec::new());
 
             if let Some(node) = deferred_inner {
                 let (mut v, mut err) = node
@@ -661,20 +661,14 @@ impl DeferredNode {
                     errors.extend(primary_errors)
                 }
 
-                // End-of-chunk pass for this deferred response.
-                let skipped_paths = std::mem::take(&mut *deferred_skipped_paths.lock());
-                if !skipped_paths.is_empty() {
-                    collect_unsatisfied_fetch_errors(
-                        &query.operation.selection_set,
-                        &query.fragments,
-                        &sc,
-                        &orig.body().variables,
-                        &v,
-                        &Path::empty(),
-                        &skipped_paths,
-                        &mut err,
-                    );
-                }
+                emit_unsatisfied_fetch_errors(
+                    std::mem::take(&mut *deferred_skipped_paths.lock()),
+                    &query,
+                    &sc,
+                    &orig.body().variables,
+                    &v,
+                    &mut err,
+                );
 
                 if let Err(e) = tx
                     .send(
@@ -723,19 +717,352 @@ impl DeferredNode {
     }
 }
 
-/// End-of-execution walker: traverse the user's selection set against the final
-/// merged response data and emit `UNSATISFIED_FETCH_CONDITION` for each missing
-/// field whose path sits under an entry in `skipped_paths`.
+// ──────────────────────────────────────────────────────────────────────────
+// Skipped-entity error generation
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Tree of response keys produced by a subgraph fetch for one entity, filtered
+/// to fragments matching the entity's `__typename` and not excluded by
+/// `@skip`/`@include`. The walker uses this at end-of-execution to tell
+/// "missing because this fetch was skipped" apart from "missing for some
+/// other reason" (e.g. a coprocessor stripped the field from a different
+/// fetch). An empty `children` map with `is_list_stop: false` is a scalar/enum
+/// leaf; `is_list_stop: true` marks a list-typed field — anything under the
+/// list is considered covered (we have no per-index info inside the tree).
+#[derive(Default, Debug)]
+pub(crate) struct ResponseKeyTree {
+    is_list_stop: bool,
+    children: HashMap<Name, ResponseKeyTree>,
+}
+
+impl ResponseKeyTree {
+    fn is_empty(&self) -> bool {
+        self.children.is_empty() && !self.is_list_stop
+    }
+}
+
+/// For each entity in `unsatisfied_paths`, build the `ResponseKeyTree` of
+/// response keys the skipped fetch would have produced for that entity
+/// (filtered by the entity's `__typename`) and append it to `accumulator`.
 ///
-/// `skipped_paths` is the accumulator filled by `PlanNode::Fetch` execution:
-/// one path per entity whose `_entities` fetch was skipped because a required
-/// input was unsatisfied (paths are entity-root, not per-leaf).
+/// Trees are deduped per `__typename` so a batched `_entities` skip of N
+/// entities of the same type costs one tree build and N `Arc::clone`s.
+fn record_skipped_entities(
+    unsatisfied_paths: Vec<Path>,
+    fetch_node: &FetchNode,
+    parent_value: &Value,
+    schema: &Schema,
+    variables: &Object,
+    accumulator: &Mutex<Vec<(Path, Arc<ResponseKeyTree>)>>,
+) {
+    let mut accumulator = accumulator.lock();
+    let mut tree_cache: HashMap<Option<String>, Option<Arc<ResponseKeyTree>>> = HashMap::new();
+    for entity_path in unsatisfied_paths {
+        let entity_data = get_value_at_path(parent_value, &entity_path);
+        let entity_type_key = typename_of(entity_data).map(str::to_owned);
+        let tree = tree_cache
+            .entry(entity_type_key.clone())
+            .or_insert_with(|| {
+                entity_response_key_tree(fetch_node, entity_type_key.as_deref(), schema, variables)
+                    .map(Arc::new)
+            });
+        if let Some(tree) = tree {
+            accumulator.push((entity_path, tree.clone()));
+        }
+    }
+}
+
+/// Build a tree of response keys for a subgraph `_entities` fetch, filtered
+/// to fragments matching `entity_type` and not excluded by `@skip`/`@include`.
+/// Returns `None` when the operation isn't an `_entities` fetch or the tree
+/// would be empty.
+fn entity_response_key_tree(
+    fetch_node: &FetchNode,
+    entity_type: Option<&str>,
+    schema: &Schema,
+    variables: &Object,
+) -> Option<ResponseKeyTree> {
+    let parsed = fetch_node.operation.as_parsed().ok()?;
+    let operation = parsed
+        .operations
+        .anonymous
+        .as_ref()
+        .or_else(|| parsed.operations.named.values().next())?;
+
+    let mut tree = ResponseKeyTree::default();
+    for sel in &operation.selection_set.selections {
+        if let executable::Selection::Field(f) = sel
+            && f.name.as_str() == "_entities"
+        {
+            collect_response_key_tree(
+                &f.selection_set,
+                parsed,
+                entity_type,
+                schema,
+                variables,
+                &mut tree,
+            );
+        }
+    }
+    if tree.is_empty() { None } else { Some(tree) }
+}
+
+/// Recursively populate `tree` from a subgraph selection set. Descends through
+/// inline fragments and named fragment spreads, filtering by `entity_type`
+/// against each fragment's type condition. Skips `__typename`. Stops at
+/// list-typed fields (marks `is_list_stop`) since the tree has no array
+/// indices.
+fn collect_response_key_tree(
+    selection_set: &executable::SelectionSet,
+    document: &executable::ExecutableDocument,
+    entity_type: Option<&str>,
+    schema: &Schema,
+    variables: &Object,
+    tree: &mut ResponseKeyTree,
+) {
+    for sel in &selection_set.selections {
+        match sel {
+            executable::Selection::Field(f) => {
+                if IncludeSkip::parse(&f.directives).should_skip(variables) {
+                    continue;
+                }
+                let key = f.response_key();
+                if key.as_str() == TYPENAME {
+                    continue;
+                }
+                let entry = tree.children.entry(key.clone()).or_default();
+                if f.ty().is_list() {
+                    entry.is_list_stop = true;
+                } else if !f.selection_set.selections.is_empty() {
+                    collect_response_key_tree(
+                        &f.selection_set,
+                        document,
+                        None,
+                        schema,
+                        variables,
+                        entry,
+                    );
+                }
+            }
+            executable::Selection::InlineFragment(frag) => {
+                if IncludeSkip::parse(&frag.directives).should_skip(variables) {
+                    continue;
+                }
+                let matches = frag
+                    .type_condition
+                    .as_ref()
+                    .is_none_or(|cond| type_condition_matches(schema, entity_type, cond.as_str()));
+                if matches {
+                    collect_response_key_tree(
+                        &frag.selection_set,
+                        document,
+                        entity_type,
+                        schema,
+                        variables,
+                        tree,
+                    );
+                }
+            }
+            executable::Selection::FragmentSpread(spread) => {
+                if IncludeSkip::parse(&spread.directives).should_skip(variables) {
+                    continue;
+                }
+                if let Some(fragment) = document.fragments.get(&spread.fragment_name)
+                    && type_condition_matches(
+                        schema,
+                        entity_type,
+                        fragment.type_condition().as_str(),
+                    )
+                {
+                    collect_response_key_tree(
+                        &fragment.selection_set,
+                        document,
+                        entity_type,
+                        schema,
+                        variables,
+                        tree,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Walk a JSON value to the location named by `path`, returning `&Value::Null`
+/// for any missing segment so callers can chain without `Option`.
+fn get_value_at_path<'a>(value: &'a Value, path: &Path) -> &'a Value {
+    path.iter()
+        .fold(value, |current, segment| match (segment, current) {
+            (PathElement::Key(k, _), Value::Object(obj)) => {
+                obj.get(k.as_str()).unwrap_or(&Value::Null)
+            }
+            (PathElement::Index(i), Value::Array(arr)) => arr.get(*i).unwrap_or(&Value::Null),
+            _ => &Value::Null,
+        })
+}
+
+fn typename_of(value: &Value) -> Option<&str> {
+    match value {
+        Value::Object(obj) => obj.get(TYPENAME).and_then(|v| v.as_str()),
+        _ => None,
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Skip tree
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Unified tree mirroring response navigation, with skipped-fetch coverage
+/// folded in. Built once at end-of-execution from all `(entity_path, tree)`
+/// entries; consulted by the walker via a `SkipState` cursor that advances
+/// in lockstep with the response-data walk. Coverage check is O(1) per leaf.
 ///
-/// A path is considered "under a skipped path" if some prefix equals an entry
-/// in `skipped_paths`. A field is considered "missing" if either it's absent
-/// from the value object or it's present-but-null. Missing fields that aren't
-/// under any skipped path are left alone — they're either explained by an
-/// existing subgraph error, or fall outside this PR's scope.
+/// Two kinds of navigation: by response key (composite descent) and by array
+/// index (list element descent). A node carries:
+/// - `covered`: a leaf-level skipped fetch ends here.
+/// - `covers_all_below`: a list-stop leaf in a `ResponseKeyTree` was grafted
+///   here, so anything reachable from this node is covered.
+#[derive(Default, Debug)]
+struct SkipTreeNode {
+    covered: bool,
+    covers_all_below: bool,
+    by_key: HashMap<String, SkipTreeNode>,
+    by_index: HashMap<usize, SkipTreeNode>,
+}
+
+impl SkipTreeNode {
+    fn build(skipped: &[(Path, Arc<ResponseKeyTree>)]) -> Self {
+        let mut root = SkipTreeNode::default();
+        for (entity_path, tree) in skipped {
+            // Navigate to the entity_path, creating intermediate nodes.
+            let mut cursor = &mut root;
+            for segment in entity_path.iter() {
+                match segment {
+                    PathElement::Key(k, _) => {
+                        cursor = cursor.by_key.entry(k.clone()).or_default();
+                    }
+                    PathElement::Index(i) => {
+                        cursor = cursor.by_index.entry(*i).or_default();
+                    }
+                    // Flatten/Fragment shouldn't appear in entity paths recorded by
+                    // `Variables::new`; if they do, skip gracefully.
+                    _ => return root,
+                }
+            }
+            graft_response_key_tree(cursor, tree);
+        }
+        root
+    }
+}
+
+/// Copy a `ResponseKeyTree`'s structure into a `SkipTreeNode`,
+/// preserving list-stop semantics as `covers_all_below`.
+fn graft_response_key_tree(target: &mut SkipTreeNode, tree: &ResponseKeyTree) {
+    if tree.is_list_stop {
+        target.covers_all_below = true;
+        return;
+    }
+    if tree.children.is_empty() {
+        target.covered = true;
+        return;
+    }
+    for (key, child) in &tree.children {
+        let target_child = target.by_key.entry(key.as_str().to_owned()).or_default();
+        graft_response_key_tree(target_child, child);
+    }
+}
+
+/// Cursor into a `SkipTreeNode`, advanced in lockstep with the response-data
+/// walk. `AllBelow` is a sticky synthetic state propagated from list-stop
+/// grafts.
+#[derive(Copy, Clone)]
+enum SkipState<'a> {
+    None,
+    AllBelow,
+    At(&'a SkipTreeNode),
+}
+
+impl<'a> SkipState<'a> {
+    fn root(tree: &'a SkipTreeNode) -> Self {
+        Self::At(tree)
+    }
+
+    fn descend_key(self, key: &str) -> Self {
+        match self {
+            Self::AllBelow => Self::AllBelow,
+            Self::At(t) if t.covers_all_below => Self::AllBelow,
+            Self::At(t) => match t.by_key.get(key) {
+                Some(child) => Self::At(child),
+                None => Self::None,
+            },
+            Self::None => Self::None,
+        }
+    }
+
+    fn descend_index(self, i: usize) -> Self {
+        match self {
+            Self::AllBelow => Self::AllBelow,
+            Self::At(t) if t.covers_all_below => Self::AllBelow,
+            Self::At(t) => match t.by_index.get(&i) {
+                Some(child) => Self::At(child),
+                // No per-index branch → pass through the same composite node:
+                // a tree built from "friends { name }" (no list-stop) has the
+                // walker at the `friends` node when entering the array, and
+                // the inner-element walk should continue from that same node
+                // (which has `name` as a child).
+                None => Self::At(t),
+            },
+            Self::None => Self::None,
+        }
+    }
+
+    fn is_covered(&self) -> bool {
+        match self {
+            Self::AllBelow => true,
+            Self::At(t) => t.covered || t.covers_all_below,
+            Self::None => false,
+        }
+    }
+}
+
+/// End-of-execution entry point: fold the per-entity `(Path, ResponseKeyTree)`
+/// entries into a single `SkipTreeNode`, then walk the user's operation
+/// against `value` and append `UNSATISFIED_FETCH_CONDITION` errors to
+/// `errors`. No-op when `skipped` is empty so callers can invoke
+/// unconditionally.
+///
+/// Both the primary response (in `QueryPlan::execute`) and each `@defer`
+/// chunk (in `DeferredNode::execute`) call this with their own accumulator.
+fn emit_unsatisfied_fetch_errors(
+    skipped: Vec<(Path, Arc<ResponseKeyTree>)>,
+    query: &Query,
+    schema: &Schema,
+    variables: &Object,
+    value: &Value,
+    errors: &mut Vec<Error>,
+) {
+    if skipped.is_empty() {
+        return;
+    }
+    let master = SkipTreeNode::build(&skipped);
+    collect_unsatisfied_fetch_errors(
+        &query.operation.selection_set,
+        &query.fragments,
+        schema,
+        variables,
+        value,
+        &Path::empty(),
+        SkipState::root(&master),
+        errors,
+    );
+}
+
+/// End-of-execution walker: traverse the user's selection set against the
+/// final merged response data and emit `UNSATISFIED_FETCH_CONDITION` for each
+/// missing field whose `SkipState` cursor reports coverage.
+///
+/// Walking the master skip tree in lockstep with the response walk turns the
+/// per-leaf coverage check into O(1) — one HashMap lookup per descend step.
 #[allow(clippy::too_many_arguments)]
 fn collect_unsatisfied_fetch_errors(
     selection_set: &[Selection],
@@ -744,7 +1071,7 @@ fn collect_unsatisfied_fetch_errors(
     variables: &Object,
     value: &Value,
     current_path: &Path,
-    skipped_paths: &[Path],
+    skip: SkipState<'_>,
     output: &mut Vec<Error>,
 ) {
     let current_type = value
@@ -770,17 +1097,17 @@ fn collect_unsatisfied_fetch_errors(
                 let response_key = alias.as_ref().unwrap_or(name).as_str();
                 let field_value = value.as_object().and_then(|o| o.get(response_key));
 
-                // Treat absent OR null as "missing".
                 let missing = match field_value {
                     None => true,
                     Some(v) => v.is_null(),
                 };
 
-                let mut field_path = current_path.clone();
-                field_path.push(PathElement::Key(response_key.to_string(), None));
+                let field_skip = skip.descend_key(response_key);
 
                 if missing {
-                    if is_under_skipped_path(&field_path, skipped_paths) {
+                    if field_skip.is_covered() {
+                        let mut field_path = current_path.clone();
+                        field_path.push(PathElement::Key(response_key.to_string(), None));
                         output.push(
                             Error::builder()
                                 .message("Could not fetch field")
@@ -792,10 +1119,11 @@ fn collect_unsatisfied_fetch_errors(
                     continue;
                 }
 
-                // Composite: recurse into the field's value if it has a sub-selection.
                 if let Some(sub_sel) = sub
                     && let Some(field_value) = field_value
                 {
+                    let mut field_path = current_path.clone();
+                    field_path.push(PathElement::Key(response_key.to_string(), None));
                     descend_into_value(
                         sub_sel,
                         fragments,
@@ -803,7 +1131,7 @@ fn collect_unsatisfied_fetch_errors(
                         variables,
                         field_value,
                         &field_path,
-                        skipped_paths,
+                        field_skip,
                         output,
                     );
                 }
@@ -827,7 +1155,7 @@ fn collect_unsatisfied_fetch_errors(
                         variables,
                         value,
                         current_path,
-                        skipped_paths,
+                        skip,
                         output,
                     );
                 }
@@ -853,7 +1181,7 @@ fn collect_unsatisfied_fetch_errors(
                         variables,
                         value,
                         current_path,
-                        skipped_paths,
+                        skip,
                         output,
                     );
                 }
@@ -862,8 +1190,6 @@ fn collect_unsatisfied_fetch_errors(
     }
 }
 
-/// Recurse into a field's value; if it's an array, iterate per-index with
-/// `PathElement::Index` segments. Otherwise descend into the value as an object.
 #[allow(clippy::too_many_arguments)]
 fn descend_into_value(
     selection_set: &[Selection],
@@ -872,7 +1198,7 @@ fn descend_into_value(
     variables: &Object,
     value: &Value,
     current_path: &Path,
-    skipped_paths: &[Path],
+    skip: SkipState<'_>,
     output: &mut Vec<Error>,
 ) {
     if let Some(arr) = value.as_array() {
@@ -886,7 +1212,7 @@ fn descend_into_value(
                 variables,
                 item,
                 &item_path,
-                skipped_paths,
+                skip.descend_index(i),
                 output,
             );
         }
@@ -898,17 +1224,8 @@ fn descend_into_value(
             variables,
             value,
             current_path,
-            skipped_paths,
+            skip,
             output,
         );
     }
-}
-
-/// True iff `path` has some prefix in `skipped`. Equality counts (a skipped
-/// entity path is "under itself"), so leaves of the skipped entity directly
-/// match.
-fn is_under_skipped_path(path: &Path, skipped: &[Path]) -> bool {
-    skipped
-        .iter()
-        .any(|sp| sp.len() <= path.len() && sp.iter().zip(path.iter()).all(|(a, b)| a == b))
 }
