@@ -1168,10 +1168,12 @@ async fn test_subscription_ws_passthrough_dedup_basic() -> Result<(), BoxError> 
 // Reload-propagation portion of the original `_dedup` test. Gated off on
 // macOS while we chase the residual CI flake — see test-split comment above
 // `test_subscription_ws_passthrough_dedup_basic`.
+//
+// Tracking: ROUTER-1793 (https://apollographql.atlassian.net/browse/ROUTER-1793)
 #[cfg_attr(
     target_os = "macos",
     ignore = "known macOS CI flake (~50-70% on m4pro.large) in schema-reload propagation; \
-              dedup invariant is covered by `_dedup_basic`. See flake-fix/split-ws-passthrough-dedup-test."
+              dedup invariant is covered by `_dedup_basic`. See ROUTER-1793."
 )]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_dedup_reload_propagation() -> Result<(), BoxError> {
