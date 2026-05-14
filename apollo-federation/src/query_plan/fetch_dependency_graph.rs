@@ -291,6 +291,11 @@ pub(crate) struct FetchDependencyGraph {
     /// (source.defer_ref != target.defer_ref). These are tracked so that
     /// `extract_children_and_deferred_dependencies` can still register the correct defer
     /// dependencies even after the direct edge has been removed from the graph.
+    ///
+    /// These `NodeIndex` values are live only until subsequent optimization passes
+    /// (`remove_useless_nodes`, `merge_*`) run. Those passes must keep this list in sync:
+    /// a node truly removed has no data, so the entry can be dropped; a node merged
+    /// into another keeps its data under the surviving index, so the entry is remapped.
     #[serde(skip)]
     reduced_defer_edges: Vec<(NodeIndex, NodeIndex)>,
 }
@@ -1123,7 +1128,31 @@ impl FetchDependencyGraph {
 
     fn remove_node(&mut self, node_index: NodeIndex) {
         self.on_modification();
+        // Drop any reduced-defer-edge entries that reference a node we're removing.
+        // A removed node (empty/useless) has no data, so the recovered defer dependency
+        // on/from it is vacuous. For merges the caller must call `remap_reduced_defer_edges`
+        // first so that references are redirected to the surviving node.
+        self.reduced_defer_edges
+            .retain(|&(s, t)| s != node_index && t != node_index);
         self.graph.remove_node(node_index);
+    }
+
+    /// Redirect any `reduced_defer_edges` entries referencing `from` so that they
+    /// reference `to` instead. Called when `from` is being merged into `to`: the
+    /// merged node's data now lives under `to`, so the recovered defer dependency
+    /// must follow.
+    fn remap_reduced_defer_edges(&mut self, from: NodeIndex, to: NodeIndex) {
+        if from == to {
+            return;
+        }
+        for entry in &mut self.reduced_defer_edges {
+            if entry.0 == from {
+                entry.0 = to;
+            }
+            if entry.1 == from {
+                entry.1 = to;
+            }
+        }
     }
 
     /// Retain nodes that satisfy the given predicate and remove the rest.
@@ -1337,6 +1366,10 @@ impl FetchDependencyGraph {
         self.on_modification();
         // Removing the child means attaching all of its children to its parent.
         self.relocate_children_on_merged_in(node_id, child_id, child_path);
+        // A "useless" child is one whose fetched fields are already present in its
+        // inputs (the parent). Redirect any recorded defer edges from the child to
+        // the parent, which actually holds that data.
+        self.remap_reduced_defer_edges(child_id, node_id);
         self.remove_node(child_id);
     }
 
@@ -2425,6 +2458,7 @@ impl FetchDependencyGraph {
             self.relocate_parents_on_merged_in(node_id, merged_id);
         }
 
+        self.remap_reduced_defer_edges(merged_id, node_id);
         self.remove_node(merged_id);
         Ok(())
     }
