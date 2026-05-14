@@ -278,7 +278,61 @@ async fn subscription_task(
                             break;
                         }
                     }
-                    None => break,
+                    None => {
+                        // Race fix (macOS CI ws_passthrough_dedup, second pass):
+                        // `state_machine` (state_machine.rs:457-470) explicitly drops
+                        // the old `RouterServiceFactory` *before* it calls
+                        // `broadcast_schema` / `broadcast_configuration`. Dropping
+                        // the factory cancels the subgraph WS forwarder task
+                        // spawned at `plugins/subscription/subgraph.rs:373`; the
+                        // forwarder's `handle_sink` (a `broadcast::Sender`) is
+                        // dropped, which Closes the per-topic broadcast and
+                        // wakes us here with `receiver.next() == None`. In a
+                        // biased `select!`, `receiver.next() = Ready(None)` is
+                        // checked before `schema_updated_rx.next()`, so even
+                        // when the schema-reload broadcast has *already* been
+                        // sent and is sitting in `schema_updated_rx`'s
+                        // `BroadcastStream` buffer, we break without
+                        // dispatching the schema-reload error to the client.
+                        // The Multipart adapter then emits the terminator with
+                        // no schema-reload payload, and the integration test's
+                        // `verify_subscription_events` sees N-1 events
+                        // ("Received 3 events but expected 4. Stream may have
+                        // terminated early.")
+                        //
+                        // Before breaking, opportunistically check both reload
+                        // channels: if either has a value ready, emit the
+                        // corresponding fatal-error payload so the client
+                        // observes the schema/config reload instead of a bare
+                        // EOF. Uses a 100ms grace window because the broadcast
+                        // send is synchronous immediately after factory drop
+                        // (state_machine.rs:457-470), but the cross-task wake
+                        // can lag by a few ms on macOS under CI scheduling
+                        // jitter. Non-reload terminations pay this 100ms once
+                        // at end-of-stream, which is well below any test
+                        // assertion deadline and dwarfed by the 5s heartbeat
+                        // grace already in the verifier.
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(100),
+                            async {
+                                tokio::select! {
+                                    biased;
+                                    Some(_) = schema_updated_rx.next() => {
+                                        let _ = sender
+                                            .send(subscription_fatal_error("subscription has been closed due to a schema reload", SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE))
+                                            .await;
+                                    }
+                                    Some(_) = configuration_updated_rx.next() => {
+                                        let _ = sender
+                                            .send(subscription_fatal_error("subscription has been closed due to a configuration reload", SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE))
+                                            .await;
+                                    }
+                                }
+                            },
+                        )
+                        .await;
+                        break;
+                    }
                 }
             }
             Some(_new_configuration) = configuration_updated_rx.next() => {
