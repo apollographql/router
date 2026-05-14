@@ -1798,7 +1798,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 for intf in &object.implements_interfaces {
                     if let Some(interface) = self.merged.schema().get_interface(&intf.name) {
                         for (intf_field_name, intf_field) in &interface.fields {
-                            if !object.fields.contains_key(intf_field_name) {
+                            let candidate_field = ObjectFieldDefinitionPosition {
+                                type_name: name.clone(),
+                                field_name: intf_field_name.clone(),
+                            };
+                            if !object.fields.contains_key(intf_field_name)
+                                && !fields_to_insert.contains_key(&candidate_field)
+                            {
                                 // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
                                 // have a specific validation that return a user-friendly error in such incorrect cases, see
                                 // `postMergeValidations`). We must first check that there is some subgraph that implement
@@ -1832,11 +1838,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     missing_obj_node
                                         .directives
                                         .push(JoinFieldBuilder::new().build());
-                                    let merged_field = ObjectFieldDefinitionPosition {
-                                        type_name: name.clone(),
-                                        field_name: intf_field_name.clone(),
-                                    };
-                                    fields_to_insert.insert(merged_field, missing_obj_node);
+                                    fields_to_insert.insert(candidate_field, missing_obj_node);
                                 }
                             }
                         }
