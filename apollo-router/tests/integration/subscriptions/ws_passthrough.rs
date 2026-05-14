@@ -1093,23 +1093,64 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
     let total_duplicated_sub: usize = sum_metric_counts(&duplicated_sub, &metrics);
     assert_eq!(total_duplicated_sub, 1);
 
+    // Race fix (macOS, CircleCI 371466 + sibling builds in flake-bash round
+    // 8, 7/10 failure rate): start consuming both client streams BEFORE
+    // triggering the schema reload, and verify them concurrently with the
+    // reload.
+    //
+    // The prior shape — get streams, wait on metric counters, trigger
+    // schema reload, *then* sequentially consume sub-1 and sub-2 — leaves
+    // both response bodies buffering server-side for the full
+    // metric-poll window plus the schema-reload propagation window. Under
+    // macOS CI scheduling jitter (~ms-scale longer than amd64 Linux for
+    // tokio timer / broadcast / hyper poll interactions), event 2 can
+    // still be in-flight through the subgraph WS forwarder
+    // (`call_websocket` spawn at `plugins/subscription/subgraph.rs:373`)
+    // when the router begins its schema-reload teardown. The forwarder
+    // task is cancelled mid-`forward(handle_sink)`: any event that was
+    // pulled from `gql_stream` but not yet flushed into the broadcast
+    // `Sender` is dropped on the floor. The schema-reload error meanwhile
+    // races against `receiver.next() == None` in `subscription_task`'s
+    // biased select (`plugins/subscription/execution.rs:251-296`); if
+    // `receiver` sees the broadcast Closed signal first, the task breaks
+    // *without* dispatching the schema-reload error, and the Multipart
+    // adapter emits the EOF `{}` + terminator. The client then observes
+    // 3 events (heartbeat-`{}`, event 1, EOF-`{}`) instead of 4, and
+    // `verify_subscription_events` panics at `mod.rs:266` with "Received
+    // 3 events but expected 4. Stream may have terminated early."
+    // (panicked thread on CircleCI 371466; identical shape across the
+    // 7/10 macOS flake-bash failures in round 8.)
+    //
+    // The structural fix: spawn the verifier for each stream as a tokio
+    // task, then trigger the reload. Both bytes_streams are now being
+    // actively drained, so the multipart hyper send pipeline never
+    // backpressures the producer, the broadcast receivers drain
+    // continuously, and the forwarder cancellation cannot strand an
+    // in-flight event between gql_stream and handle_sink.
+    let expected_events: Vec<serde_json::Value> = vec![
+        create_initial_empty_response(),
+        create_expected_user_payload(1),
+        create_expected_user_payload(2),
+        create_expected_schema_reload_payload(),
+    ];
+    let expected_events_clone = expected_events.clone();
+    let stream_handle =
+        tokio::spawn(
+            async move { verify_subscription_events(stream, expected_events, true).await },
+        );
+    let stream_bis_handle = tokio::spawn(async move {
+        verify_subscription_events(stream_bis, expected_events_clone, true).await
+    });
+
     // Trick to close the subscription server side
     router.replace_schema_string("createdAt", "created");
 
-    let expected_events = vec![
-        create_initial_empty_response(),
-        create_expected_user_payload(1),
-        create_expected_user_payload(2),
-        create_expected_schema_reload_payload(),
-    ];
-    verify_subscription_events(stream, expected_events, true).await;
-    let expected_events = vec![
-        create_initial_empty_response(),
-        create_expected_user_payload(1),
-        create_expected_user_payload(2),
-        create_expected_schema_reload_payload(),
-    ];
-    verify_subscription_events(stream_bis, expected_events, true).await;
+    stream_handle
+        .await
+        .expect("verify_subscription_events sub-1 task panicked");
+    stream_bis_handle
+        .await
+        .expect("verify_subscription_events sub-2 task panicked");
 
     router.graceful_shutdown().await;
 
