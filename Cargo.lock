@@ -5963,11 +5963,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
-<<<<<<< HEAD
- "windows-sys 0.60.2",
-=======
  "windows-sys 0.52.0",
->>>>>>> 59998378 (chore(deps): update h2 dependency (#9038))
 ]
 
 [[package]]
