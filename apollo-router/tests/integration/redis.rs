@@ -1846,6 +1846,18 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
         .assert_metrics_contains(expected_metric, Some(std::time::Duration::from_secs(30)))
         .await;
 
+    // Snapshot the redis error counters BEFORE issuing queries. fred can emit transient IO
+    // events to its `error_rx` channel while the pool is still stabilising its initial
+    // connections (every event there is counted by `record_redis_error`), and those counter
+    // increments are independent of whether the router's actual query-time operations
+    // succeed. Asserting "metric not present" is therefore racy. We instead diff the
+    // counters across the query phase so we only fail if a NEW error is recorded while
+    // queries are being served.
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+    let io_error_before = router.read_metric_counter_value(io_error).await;
+    let parse_error_before = router.read_metric_counter_value(parse_error).await;
+
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
     let responses = router.execute_several_default_queries(2).await;
@@ -1854,14 +1866,20 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
         eprintln!("{r:?}");
     }
 
-    // check that there were no I/O errors
-    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
-    router.assert_metrics_does_not_contain(io_error).await;
+    // No NEW I/O errors should be recorded while serving queries.
+    let io_error_after = router.read_metric_counter_value(io_error).await;
+    assert_eq!(
+        io_error_after, io_error_before,
+        "redis IO error counter increased during query execution ({io_error_before} -> {io_error_after}); '{io_error}'"
+    );
 
-    // check that there were no parse errors; these might show up when fred can't read the cluster
-    // state properly
-    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
-    router.assert_metrics_does_not_contain(parse_error).await;
+    // No NEW parse errors either; these might show up when fred can't read the cluster
+    // state properly.
+    let parse_error_after = router.read_metric_counter_value(parse_error).await;
+    assert_eq!(
+        parse_error_after, parse_error_before,
+        "redis parse error counter increased during query execution ({parse_error_before} -> {parse_error_after}); '{parse_error}'"
+    );
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
     assert_eq!(redis_monitor_output.num_nodes(), 1);
