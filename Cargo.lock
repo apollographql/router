@@ -547,9 +547,9 @@ dependencies = [
 
 [[package]]
 name = "astral-tokio-tar"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c23f3af104b40a3430ccb90ed5f7bd877a8dc5c26fc92fde51a22b40890dcf9"
+checksum = "4ce73b17c62717c4b6a9af10b43e87c578b0cac27e00666d48304d3b7d2c0693"
 dependencies = [
  "filetime",
  "futures-core",
@@ -1209,13 +1209,8 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
-<<<<<<< HEAD
- "tokio-tungstenite",
- "tower 0.5.2",
-=======
  "tokio-tungstenite 0.28.0",
- "tower",
->>>>>>> 4f85e2c1 (Fix/router 1485 (#9051))
+ "tower 0.5.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -7332,10 +7327,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
-<<<<<<< HEAD
  "rand 0.9.3",
-=======
- "rand 0.9.2",
  "sha1",
  "thiserror 2.0.17",
  "utf-8",
@@ -7352,8 +7344,7 @@ dependencies = [
  "http 1.4.0",
  "httparse",
  "log",
- "rand 0.9.2",
->>>>>>> 4f85e2c1 (Fix/router 1485 (#9051))
+ "rand 0.9.3",
  "rustls",
  "rustls-pki-types",
  "sha1",
