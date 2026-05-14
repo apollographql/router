@@ -1181,11 +1181,8 @@ mod tests {
     use super::*;
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
-<<<<<<< HEAD
-=======
     use crate::configuration::shared::Client as ClientConfiguration;
     use crate::configuration::subgraph::SubgraphConfiguration;
->>>>>>> e40a95d7 (perf(subgraph_service): avoid unnecessary clones on subgraph requests (#9266))
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
