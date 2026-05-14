@@ -80,7 +80,7 @@ pub(crate) enum ConnectorSelector {
         /// The name of a connector HTTP request header.
         connector_http_request_header: String,
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -88,7 +88,7 @@ pub(crate) enum ConnectorSelector {
         /// The name of a connector HTTP response header.
         connector_http_response_header: String,
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -130,7 +130,7 @@ pub(crate) enum ConnectorSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -140,7 +140,7 @@ pub(crate) enum ConnectorSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -207,9 +207,9 @@ impl Selector for ConnectorSelector {
                     .get(connector_request_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                let value = match (redact.as_deref(), &header_value) {
-                    (Some("allow"), _) => header_value,
-                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                let value = match (redact.as_ref(), &header_value) {
+                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
@@ -309,11 +309,11 @@ impl Selector for ConnectorSelector {
                         .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
                     // Apply redaction logic
-                    let value = match (redact.as_deref(), &header_value) {
+                    let value = match (redact.as_ref(), &header_value) {
                         // If redact is "allow", return the actual value
-                        (Some("allow"), _) => header_value,
+                        (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                         // If redact has any other value, mask it
-                        (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                        (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
                         // If redact is None, check global rules
                         (None, Some(_)) => {
                             let subgraph = response.subgraph_name.as_str();
@@ -830,7 +830,7 @@ mod tests {
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
-            redact: Some("allow".to_string()),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
@@ -917,7 +917,7 @@ mod tests {
 
         let selector = ConnectorSelector::ConnectorResponseHeader {
             connector_http_response_header: TEST_HEADER_NAME.to_string(),
-            redact: Some("allow".to_string()),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {

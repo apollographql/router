@@ -4,8 +4,22 @@ use std::sync::Arc;
 
 use http::HeaderMap;
 use http::HeaderValue;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 use crate::configuration::header_masking_config::HeaderMaskingConfig;
+
+/// Per-selector masking override. `Allow` shows the raw header value; `Mask`
+/// always replaces it with `***MASKED***`. When unset, the selector defers to
+/// the global request/response rules in `MaskingRulesMap`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RedactMode {
+    /// Always show the header value, ignoring any global masking rules.
+    Allow,
+    /// Always mask the header value, regardless of global rules.
+    Mask,
+}
 
 const MASKED_VALUE: &str = "***MASKED***";
 

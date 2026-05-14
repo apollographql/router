@@ -72,7 +72,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -92,7 +92,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -102,7 +102,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -115,7 +115,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -128,7 +128,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -136,7 +136,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of a subgraph request header.
         subgraph_request_header: String,
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -148,7 +148,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of a subgraph response header.
         subgraph_response_header: String,
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -172,7 +172,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -188,7 +188,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -198,7 +198,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -206,7 +206,7 @@ pub(crate) enum SubgraphSelector {
         /// The supergraph request header name.
         supergraph_request_header: String,
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -216,7 +216,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -226,7 +226,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -240,7 +240,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -250,7 +250,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -428,11 +428,11 @@ impl Selector for SubgraphSelector {
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
                 // Apply redaction logic
-                let value = match (redact.as_deref(), &header_value) {
+                let value = match (redact.as_ref(), &header_value) {
                     // If redact is "allow", return the actual value
-                    (Some("allow"), _) => header_value,
+                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
@@ -469,11 +469,11 @@ impl Selector for SubgraphSelector {
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
                 // Apply redaction logic
-                let value = match (redact.as_deref(), &header_value) {
+                let value = match (redact.as_ref(), &header_value) {
                     // If redact is "allow", return the actual value
-                    (Some("allow"), _) => header_value,
+                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
@@ -567,11 +567,11 @@ impl Selector for SubgraphSelector {
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
                 // Apply redaction logic
-                let value = match (redact.as_deref(), &header_value) {
+                let value = match (redact.as_ref(), &header_value) {
                     // If redact is "allow", return the actual value
-                    (Some("allow"), _) => header_value,
+                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(_), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {
@@ -1263,7 +1263,7 @@ mod test {
 
         let selector = SubgraphSelector::SubgraphRequestHeader {
             subgraph_request_header: "authorization".to_string(),
-            redact: Some("allow".to_string()),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
@@ -1358,7 +1358,7 @@ mod test {
 
         let selector = SubgraphSelector::SubgraphResponseHeader {
             subgraph_response_header: "set-cookie".to_string(),
-            redact: Some("allow".to_string()),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {

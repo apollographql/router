@@ -56,9 +56,10 @@ enum Action {
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
-const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request` and per-subgraph \
-     equivalents now require an `operations` key wrapping the list of propagation rules. \
-     Your configuration has been automatically migrated.";
+const HEADERS_OPS_MIGRATION_DESCRIPTION: &str = "`headers.all.request`, per-subgraph \
+     equivalents, and `headers.connector.{all,sources.*}.request` now require an `operations` \
+     key wrapping the list of propagation rules. Your configuration has been automatically \
+     migrated.";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UpgradeMode {
@@ -325,6 +326,18 @@ fn migrate_headers_operations(mut config: Value) -> Value {
     if let Some(Value::Object(subgraphs)) = headers.get_mut("subgraphs") {
         for sg in subgraphs.values_mut() {
             wrap_operations_if_array(sg, "request");
+        }
+    }
+
+    // Connector header config has the same flat→wrapped shape change.
+    if let Some(connector) = headers.get_mut("connector") {
+        if let Some(all) = connector.get_mut("all") {
+            wrap_operations_if_array(all, "request");
+        }
+        if let Some(Value::Object(sources)) = connector.get_mut("sources") {
+            for src in sources.values_mut() {
+                wrap_operations_if_array(src, "request");
+            }
         }
     }
 

@@ -25,3 +25,16 @@ headers:
         operations:
           - propagate:
               named: x-user-id
+  connector:
+    all:
+      request:
+        operations:
+          - propagate:
+              named: x-tenant-id
+    sources:
+      products.api:
+        request:
+          operations:
+            - insert:
+                name: x-source
+                value: api

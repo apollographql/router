@@ -76,9 +76,20 @@ struct ResponseHeadersLocation {
 #[derive(Clone, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersLocation {
-    /// Propagate/Insert/Remove operations for requests
+    /// Request-side propagate/insert/remove operations
     #[serde(default)]
-    request: Vec<Operation>,
+    request: Option<ConnectorRequestHeadersLocation>,
+}
+
+/// Request-side connector header configuration. Mirrors the wrapped
+/// `operations:` shape used by `HeadersLocation`, so connector config doesn't
+/// drift from regular subgraph config.
+#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct ConnectorRequestHeadersLocation {
+    /// Propagate/Insert/Remove operations
+    #[serde(default)]
+    operations: Vec<Operation>,
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -262,12 +273,37 @@ struct Headers {
     masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
 }
 
+/// Per-subgraph masking *extends* (rather than replaces) the global
+/// sensitive-header list, matching the merge semantics of per-subgraph
+/// operations. Users who want a full opt-out for one subgraph set
+/// `masking.enabled: false` at the subgraph level.
+fn merge_subgraph_masking(
+    global: &crate::configuration::header_masking_config::HeaderMaskingConfig,
+    sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
+) -> crate::configuration::header_masking_config::HeaderMaskingConfig {
+    use crate::configuration::header_masking_config::HeaderMaskingConfig;
+    if !sg.enabled {
+        sg.clone()
+    } else if !global.enabled {
+        HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: sg.sensitive_headers.clone(),
+        }
+    } else {
+        let mut sensitive_headers = global.sensitive_headers.clone();
+        sensitive_headers.extend(sg.sensitive_headers.iter().cloned());
+        HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Headers {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        use crate::configuration::header_masking_config::HeaderMaskingConfig;
         use crate::services::header_masking::DirectionRules;
         use crate::services::header_masking::HeaderMaskingRules;
 
@@ -300,7 +336,8 @@ impl PluginPrivate for Headers {
             .connector
             .all
             .as_ref()
-            .map(|a| a.request.clone())
+            .and_then(|a| a.request.as_ref())
+            .map(|r| r.operations.clone())
             .unwrap_or_default();
 
         let connector_source_operations = init
@@ -310,7 +347,9 @@ impl PluginPrivate for Headers {
             .iter()
             .map(|(source_name, connector_config)| {
                 let mut ops = operations.clone();
-                ops.append(&mut connector_config.request.clone());
+                if let Some(request) = &connector_config.request {
+                    ops.append(&mut request.operations.clone());
+                }
                 (source_name.clone(), Arc::new(ops))
             })
             .collect();
@@ -319,43 +358,39 @@ impl PluginPrivate for Headers {
         // fall back to the full HeaderMaskingConfig::default() (the 12-header
         // sensitive list) — *not* HeaderMaskingRules::default(), which would
         // give an empty HashSet and silently mask nothing.
-        let default_rules = Arc::new(HeaderMaskingRules::from_config(
-            &HeaderMaskingConfig::default(),
-        ));
-
-        let global_request_masking = init
+        let effective_global_request_config = init
             .config
             .all
             .as_ref()
             .and_then(|a| a.request.as_ref())
-            .and_then(|r| r.masking.as_ref())
-            .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
-            .unwrap_or_else(|| default_rules.clone());
-
-        let global_response_masking = init
+            .and_then(|r| r.masking.clone())
+            .unwrap_or_default();
+        let effective_global_response_config = init
             .config
             .all
             .as_ref()
             .and_then(|a| a.response.as_ref())
-            .and_then(|r| r.masking.as_ref())
-            .map(|config| Arc::new(HeaderMaskingRules::from_config(config)))
-            .unwrap_or_else(|| default_rules.clone());
+            .and_then(|r| r.masking.clone())
+            .unwrap_or_default();
+
+        let global_request_masking = Arc::new(HeaderMaskingRules::from_config(
+            &effective_global_request_config,
+        ));
+        let global_response_masking = Arc::new(HeaderMaskingRules::from_config(
+            &effective_global_response_config,
+        ));
 
         let per_subgraph_request_masking: HashMap<String, Arc<HeaderMaskingRules>> = init
             .config
             .subgraphs
             .iter()
             .filter_map(|(name, sg_config)| {
-                sg_config
+                let sg_masking = sg_config
                     .request
                     .as_ref()
-                    .and_then(|r| r.masking.as_ref())
-                    .map(|masking_config| {
-                        (
-                            name.clone(),
-                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
-                        )
-                    })
+                    .and_then(|r| r.masking.as_ref())?;
+                let merged = merge_subgraph_masking(&effective_global_request_config, sg_masking);
+                Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
             })
             .collect();
 
@@ -364,16 +399,12 @@ impl PluginPrivate for Headers {
             .subgraphs
             .iter()
             .filter_map(|(name, sg_config)| {
-                sg_config
+                let sg_masking = sg_config
                     .response
                     .as_ref()
-                    .and_then(|r| r.masking.as_ref())
-                    .map(|masking_config| {
-                        (
-                            name.clone(),
-                            Arc::new(HeaderMaskingRules::from_config(masking_config)),
-                        )
-                    })
+                    .and_then(|r| r.masking.as_ref())?;
+                let merged = merge_subgraph_masking(&effective_global_response_config, sg_masking);
+                Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
             })
             .collect();
 
@@ -1010,6 +1041,55 @@ mod test {
             .unwrap();
         assert_eq!(req.sensitive_headers, vec!["authorization".to_string()]);
         assert_eq!(resp.sensitive_headers, vec!["set-cookie".to_string()]);
+    }
+
+    #[test]
+    fn merge_subgraph_masking_extends_global_list() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into(), "cookie".into()],
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-products-secret".into()],
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert!(merged.sensitive_headers.contains(&"authorization".into()));
+        assert!(merged.sensitive_headers.contains(&"cookie".into()));
+        assert!(merged.sensitive_headers.contains(&"x-products-secret".into()));
+    }
+
+    #[test]
+    fn merge_subgraph_masking_disabled_subgraph_is_full_opt_out() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into()],
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: false,
+            sensitive_headers: vec![],
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(!merged.enabled);
+    }
+
+    #[test]
+    fn merge_subgraph_masking_disabled_global_uses_subgraph_only() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        let global = HeaderMaskingConfig {
+            enabled: false,
+            sensitive_headers: vec!["authorization".into()],
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-products-secret".into()],
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert_eq!(merged.sensitive_headers, vec!["x-products-secret".to_string()]);
     }
 
     #[test]

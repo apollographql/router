@@ -695,29 +695,31 @@ async fn test_override_headers_with_config() {
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  // This is additive to the existing forwarding rule
-                  {
-                    "propagate": {
-                      "named": "x-forward-2",
-                      "rename": "x-forward"
+                  "request": {
+                    "operations": [
+                    // This is additive to the existing forwarding rule
+                    {
+                      "propagate": {
+                        "named": "x-forward-2",
+                        "rename": "x-forward"
+                      }
+                    },
+                    // This is an override
+                    {
+                      "insert": {
+                        "name": "x-insert",
+                        "value": "inserted-by-config"
+                      }
+                    },
+                    // This is an override
+                    {
+                      "insert": {
+                        "name": "x-insert-multi-value",
+                        "value": "third,fourth"
+                      }
                     }
-                  },
-                  // This is an override
-                  {
-                    "insert": {
-                      "name": "x-insert",
-                      "value": "inserted-by-config"
-                    }
-                  },
-                  // This is an override
-                  {
-                    "insert": {
-                      "name": "x-insert-multi-value",
-                      "value": "third,fourth"
-                    }
+                    ]
                   }
-                  ]
                 }
               }
             }
@@ -788,13 +790,15 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "propagate": {
-                      "named": "x-forward",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "propagate": {
+                        "named": "x-forward",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }
@@ -869,13 +873,15 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "propagate": {
-                      "matching": ".+?forward",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "propagate": {
+                        "matching": ".+?forward",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }
@@ -955,13 +961,15 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "remove": {
-                      "named": "x-insert",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "remove": {
+                        "named": "x-insert",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }

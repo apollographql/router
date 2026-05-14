@@ -2250,11 +2250,15 @@ expression: "&schema"
       "description": "Configuration for connector headers at a specific location\nConnectors only have request operations - masking is inherited from parent subgraph",
       "properties": {
         "request": {
-          "description": "Propagate/Insert/Remove operations for requests",
-          "items": {
-            "$ref": "#/definitions/Operation"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request-side propagate/insert/remove operations"
         }
       },
       "type": "object"
@@ -2326,6 +2330,20 @@ expression: "&schema"
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorRequestHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Request-side connector header configuration. Mirrors the wrapped\n`operations:` shape used by `HeadersLocation`, so connector config doesn't\ndrift from regular subgraph config.",
+      "properties": {
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
+          "items": {
+            "$ref": "#/definitions/Operation"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -2428,11 +2446,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -2455,11 +2477,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -6105,6 +6131,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -6125,6 +6162,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -8279,6 +8327,21 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "RedactMode": {
+      "description": "Per-selector masking override. `Allow` shows the raw header value; `Mask`\nalways replaces it with `***MASKED***`. When unset, the selector defers to\nthe global request/response rules in `MaskingRulesMap`.",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Always show the header value, ignoring any global masking rules.",
+          "type": "string"
+        },
+        {
+          "const": "mask",
+          "description": "Always mask the header value, regardless of global rules.",
+          "type": "string"
+        }
+      ]
+    },
     "RedisCache": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
@@ -8880,11 +8943,15 @@ expression: "&schema"
               "description": "Optional default value."
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "request_header": {
               "description": "The name of the request header.",
@@ -8979,11 +9046,15 @@ expression: "&schema"
               "description": "Optional default value."
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -10688,11 +10759,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "subgraph_request_header": {
               "description": "The name of a subgraph request header.",
@@ -10728,11 +10803,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "subgraph_response_header": {
               "description": "The name of a subgraph response header.",
@@ -10898,11 +10977,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "supergraph_request_header": {
               "description": "The supergraph request header name.",
@@ -11915,11 +11998,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "request_header": {
               "description": "The name of the request header.",
@@ -11942,11 +12029,15 @@ expression: "&schema"
               ]
             },
             "redact": {
-              "description": "Optional redaction pattern.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
