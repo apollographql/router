@@ -26,6 +26,7 @@ use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::BodyLimitControl;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -218,16 +219,12 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-<<<<<<< HEAD
-        let request_body = router::body::from_result_stream(operations_stream);
-=======
         let operations_bytes = operations_stream
             .bytes()
             .await
             .map_err(FileUploadError::InvalidMultipartRequest)?;
 
         let request_body = router::body::from_bytes(operations_bytes);
->>>>>>> 496dd0ab (fix(file_uploads): enforce http_max_request_bytes on operations field via multer SizeLimit (#9327))
         return Ok(router::Request::from((
             http::Request::from_parts(request_parts, request_body),
             req.context,

@@ -1491,15 +1491,18 @@ mod pool_idle_timeout {
 
     use super::*;
 
-    /// Server that counts how many TCP connections are accepted
+    /// Server that counts how many TCP connections are accepted and how many are currently open.
     async fn serve_counting(
         listener: TcpListener,
         connection_count: Arc<AtomicUsize>,
+        live_connection_count: Arc<AtomicUsize>,
     ) -> std::io::Result<()> {
         loop {
             let (stream, _) = listener.accept().await?;
             connection_count.fetch_add(1, Ordering::SeqCst);
+            live_connection_count.fetch_add(1, Ordering::SeqCst);
             let io = TokioIo::new(stream);
+            let live = live_connection_count.clone();
             tokio::spawn(async move {
                 let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                     Ok::<_, Infallible>(
@@ -1513,6 +1516,7 @@ mod pool_idle_timeout {
                 let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                     .serve_connection_with_upgrades(io, svc)
                     .await;
+                live.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
@@ -1555,7 +1559,11 @@ mod pool_idle_timeout {
         let socket_addr = listener.local_addr().unwrap();
         let connection_count = Arc::new(AtomicUsize::new(0));
 
-        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+        tokio::task::spawn(serve_counting(
+            listener,
+            connection_count.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
 
         let mut service = HttpClientService::test_new(
             "test",
@@ -1586,6 +1594,56 @@ mod pool_idle_timeout {
             connection_count.load(Ordering::SeqCst),
             expected_connections,
             "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
+        );
+    }
+
+    /// Regression test: the router does not proactively close idle connections between requests.
+    /// Before this fix, `pool_timer` was unconditionally set, enabling a background eviction task
+    /// that sent TCP closes between requests and caused latency spikes in some network environments.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_idle_connections_not_proactively_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let live_connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(
+            listener,
+            Arc::new(AtomicUsize::new(0)),
+            live_connection_count.clone(),
+        ));
+
+        let client_config = crate::configuration::shared::Client {
+            pool_idle_timeout: Some(Duration::from_millis(50)),
+            ..Default::default()
+        };
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            client_config,
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection is open after first request"
+        );
+
+        // Sleep well past the 50ms idle timeout. Without pool_timer, no background task fires,
+        // so the connection must still be open in the pool.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection must not be proactively closed between requests"
         );
     }
 }

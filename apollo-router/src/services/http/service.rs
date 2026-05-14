@@ -268,11 +268,13 @@ impl HttpClientService {
 
         let mut client_builder =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        // NOTE: pool_timer is intentionally not set. pool_timer enables a background task that
+        // proactively closes idle connections when they exceed pool_idle_timeout. Without it,
+        // eviction is lazy: connections are checked and dropped at checkout time only. Lazy
+        // eviction avoids a TCP close window that can delay new connections in some network
+        // environments.
         client_builder
             .pool_idle_timeout(pool_idle_timeout)
-            // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-            // unless you're also removing `pool_idle_timeout`
-            .pool_timer(TokioTimer::new())
             .http2_only(http2 == Http2Config::Http2Only);
         if let Some(interval) = http2_keep_alive_interval {
             client_builder
@@ -288,12 +290,10 @@ impl HttpClientService {
 
         #[cfg(unix)]
         let unix_client = {
+            // NOTE: pool_timer is intentionally not set; see comment on client_builder above.
             let unix_client_inner =
                 hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                     .pool_idle_timeout(pool_idle_timeout)
-                    // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-                    // unless you're also removing `pool_idle_timeout`
-                    .pool_timer(TokioTimer::new())
                     .http2_only(http2 == Http2Config::Http2Only)
                     .build(UnixConnector);
 

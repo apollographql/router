@@ -10,6 +10,7 @@ use tower::BoxError;
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
 const FILE_CONFIG_WITH_RHAI: &str = include_str!("../fixtures/file_upload/rhai.router.yaml");
+const FILE_CONFIG_BODY_LIMIT: &str = include_str!("../fixtures/file_upload/body_limit.router.yaml");
 
 /// Create a valid handler for the [helper::FileUploadTestServer].
 macro_rules! make_handler {
@@ -1045,8 +1046,6 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
         .await
 }
 
-<<<<<<< HEAD
-=======
 /// Verifies that a file larger than http_max_request_bytes can still be uploaded when the file
 /// itself is within max_file_size. The body limit should apply only to the operations field.
 #[tokio::test(flavor = "multi_thread")]
@@ -1419,7 +1418,6 @@ mod operation_body_timeout {
     }
 }
 
->>>>>>> 496dd0ab (fix(file_uploads): enforce http_max_request_bytes on operations field via multer SizeLimit (#9327))
 mod helper {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
