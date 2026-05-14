@@ -14,9 +14,11 @@ use apollo_router::graphql;
 use apollo_router::graphql::Error;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
+use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use apollo_router::test_harness::MockedSubgraphs;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use futures::StreamExt;
 use http::HeaderValue;
@@ -103,13 +105,12 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = {
-        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
-        (
-            query_with_router(router, get_request).await,
-            counting_registry,
-        )
-    };
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({}),
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
+    )
+    .await;
+    let actual = query_with_router(router, get_request).await;
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
@@ -208,7 +209,12 @@ async fn queries_should_work_with_compression() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({}),
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
+    )
+    .await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -230,7 +236,18 @@ async fn queries_should_work_over_post() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let (router, registry) = setup_sandboxed_router_and_registry(
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            }
+        }),
+        starstuff_mocks_for_top_products_with_reviews_and_authors(),
+    )
+    .await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -338,7 +355,40 @@ async fn mutation_should_work_over_post() {
         "reviews".to_string()=>2,
     };
 
-    let (actual, registry) = query_rust(request).await;
+    let mocks = {
+        let mut s = MockedSubgraphs::default();
+        s.insert("accounts", MockSubgraph::builder().build());
+        s.insert("inventory", MockSubgraph::builder().build());
+        s.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "mutation { createProduct(name: \"Bob\", upc: \"8\") { __typename upc name } }"}),
+                    serde_json::json!({"data": {"createProduct": {"__typename": "Product", "upc": "8", "name": "Bob"}}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "mutation { createReview(body: \"Bif\", id: \"100\", upc: \"8\") { id body } }"}),
+                    serde_json::json!({"data": {"createReview": {"id": "100", "body": "Bif"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }",
+                        "variables": {"representations": [{"__typename": "Product", "upc": "8"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"reviews": []}]}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) =
+        setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
+    let actual = query_with_router(router, request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -346,7 +396,21 @@ async fn mutation_should_work_over_post() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
-    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query Query__accounts__0 { me { name } }", "operationName": "Query__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"name": "Ada"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) =
+        setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
 
     let persisted = json!({
         "version" : 1u8,
@@ -458,7 +522,26 @@ async fn persisted_queries() {
 
     let mut config: Configuration = serde_json::from_value(config).unwrap();
     config.uplink = Some(uplink_config);
-    let (router, registry) = setup_router_and_registry_with_config(config).await.unwrap();
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query GetMyName__accounts__0 { me { name } }", "operationName": "GetMyName__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"name": "Ada Lovelace"}}}),
+                )
+                .with_json(
+                    serde_json::json!({"query": "query GetYourName__accounts__0 { you: me { name } }", "operationName": "GetYourName__accounts__0"}),
+                    serde_json::json!({"data": {"you": {"name": "Ada Lovelace"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, registry) = setup_sandboxed_router_and_registry_with_config(config, mocks)
+        .await
+        .unwrap();
 
     // Successfully run a persisted query.
     let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID)).await;
@@ -835,8 +918,52 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .expect("expecting valid request");
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "{ me { __typename id } }"}),
+                    serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { reviews { author { reviews { author { __typename id } } } } } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [
+                        {"reviews": [
+                            {"author": {"reviews": [
+                                {"author": {"__typename": "User", "id": "1"}},
+                                {"author": {"__typename": "User", "id": "1"}}
+                            ]}},
+                            {"author": {"reviews": [
+                                {"author": {"__typename": "User", "id": "1"}},
+                                {"author": {"__typename": "User", "id": "1"}}
+                            ]}}
+                        ]}
+                    ]}}),
+                )
+                .build(),
+        );
+        s
+    };
     let (mut response, _registry) = {
-        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        let (router, counting_registry) =
+            setup_sandboxed_router_and_registry(serde_json::json!({}), mocks).await;
         (
             router
                 .oneshot(request.try_into().unwrap())
@@ -876,7 +1003,9 @@ async fn defer_path_with_disabled_config() {
         .build()
         .expect("expecting failure due to disabled config defer support");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // No subgraph traffic: defer is disabled, so the request fails
+    // validation before the plan runs. Empty mocks suffice.
+    let (router, _) = setup_sandboxed_router_and_registry(config, starstuff_mocks_empty()).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -911,7 +1040,8 @@ async fn defer_path() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let mocks = starstuff_mocks_for_me_id_then_deferred_name();
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -952,7 +1082,44 @@ async fn defer_path_in_array() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "{ me { __typename id } }"}),
+                    serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+                )
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+                )
+                .build(),
+        );
+        s.insert(
+            "reviews",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({
+                        "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { reviews { id author { __typename id } } } } }",
+                        "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                    }),
+                    serde_json::json!({"data": {"_entities": [
+                        {"reviews": [
+                            {"id": "1", "author": {"__typename": "User", "id": "1"}},
+                            {"id": "2", "author": {"__typename": "User", "id": "1"}}
+                        ]}
+                    ]}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -993,7 +1160,8 @@ async fn defer_query_without_accept() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // Errors with DEFER_BAD_HEADER before plan execution; no subgraphs hit.
+    let (router, _) = setup_sandboxed_router_and_registry(config, starstuff_mocks_empty()).await;
 
     let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
     let first = stream.next_response().await.unwrap().unwrap();
@@ -1021,7 +1189,9 @@ async fn defer_empty_primary_response() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    let (router, _) =
+        setup_sandboxed_router_and_registry(config, starstuff_mocks_for_me_id_then_deferred_name())
+            .await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1058,7 +1228,11 @@ async fn defer_default_variable() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config.clone()).await;
+    let (router, _) = setup_sandboxed_router_and_registry(
+        config.clone(),
+        starstuff_mocks_for_me_id_then_deferred_name(),
+    )
+    .await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1078,7 +1252,22 @@ async fn defer_default_variable() {
         .build()
         .expect("expecting valid request");
 
-    let (router, _) = setup_router_and_registry(config).await;
+    // Second branch: `if: false` ⇒ no defer, single accounts query for
+    // `me { id name }`.
+    let mocks = {
+        let mut s = starstuff_mocks_empty();
+        s.insert(
+            "accounts",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json!({"query": "query X__accounts__0 { me { id name } }", "operationName": "X__accounts__0"}),
+                    serde_json::json!({"data": {"me": {"id": "1", "name": "Ada Lovelace"}}}),
+                )
+                .build(),
+        );
+        s
+    };
+    let (router, _) = setup_sandboxed_router_and_registry(config, mocks).await;
 
     let mut stream = router
         .oneshot(request.try_into().unwrap())
@@ -1293,6 +1482,161 @@ async fn query_rust_with_config(
         query_with_router(router, request.try_into().unwrap()).await,
         counting_registry,
     )
+}
+
+// Build a MockedSubgraphs with empty entries for each starstuff subgraph.
+// Empty entries cause MockSubgraph to emit a FETCH_ERROR whose message
+// includes the actual query string the planner sent — useful for
+// discovering the queries to mock when migrating a test to the sandboxed
+// path. See `setup_sandboxed_router_and_registry`.
+fn starstuff_mocks_empty() -> MockedSubgraphs {
+    let mut s = MockedSubgraphs::default();
+    s.insert("accounts", MockSubgraph::builder().build());
+    s.insert("inventory", MockSubgraph::builder().build());
+    s.insert("products", MockSubgraph::builder().build());
+    s.insert("reviews", MockSubgraph::builder().build());
+    s
+}
+
+// Mocks for `{ me { id } }` followed by a deferred entity-lookup on
+// `User { name }`. Used by `defer_path` (and any other test whose
+// deferred chunks request these two pieces of accounts data with the
+// `Ada Lovelace` snapshot fixture). Initial chunk asserts
+// `{me: {id: "1"}}`; deferred chunk asserts `{name: "Ada Lovelace"}`
+// via path `["me"]`.
+fn starstuff_mocks_for_me_id_then_deferred_name() -> MockedSubgraphs {
+    let mut s = starstuff_mocks_empty();
+    s.insert(
+        "accounts",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({"query": "{ me { id } }"}),
+                serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+            )
+            .with_json(
+                serde_json::json!({"query": "{ me { __typename id } }"}),
+                serde_json::json!({"data": {"me": {"__typename": "User", "id": "1"}}}),
+            )
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                    "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Ada Lovelace"}]}}),
+            )
+            .build(),
+    );
+    s
+}
+
+// Mocks for the query
+// `{ topProducts { upc name reviews { id product { name } author { id name } } } }`.
+// Shared by `queries_should_work_over_post`, `queries_should_work_over_get`,
+// and `queries_should_work_with_compression` — all three issue the same
+// GraphQL operation, so the planner emits the same four subgraph
+// queries, and the tests assert identical hit totals
+// (`{products: 2, reviews: 1, accounts: 1}`).
+fn starstuff_mocks_for_top_products_with_reviews_and_authors() -> MockedSubgraphs {
+    let mut s = MockedSubgraphs::default();
+    s.insert(
+        "products",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({"query": "{ topProducts { __typename upc name } }"}),
+                serde_json::json!({"data": {
+                    "topProducts": [
+                        {"__typename": "Product", "upc": "1", "name": "Table"},
+                        {"__typename": "Product", "upc": "2", "name": "Couch"},
+                    ]
+                }}),
+            )
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { name } } }",
+                    "variables": {"representations": [{"__typename": "Product", "upc": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Table"}]}}),
+            )
+            .build(),
+    );
+    s.insert("inventory", MockSubgraph::builder().build());
+    s.insert(
+        "reviews",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { id product { __typename upc } author { __typename id } } } } }",
+                    "variables": {"representations": [
+                        {"__typename": "Product", "upc": "1"},
+                        {"__typename": "Product", "upc": "2"},
+                    ]}
+                }),
+                serde_json::json!({"data": {"_entities": [
+                    {"reviews": [
+                        {"id": "r1", "product": {"__typename": "Product", "upc": "1"}, "author": {"__typename": "User", "id": "1"}}
+                    ]},
+                    {"reviews": []}
+                ]}}),
+            )
+            .build(),
+    );
+    s.insert(
+        "accounts",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json!({
+                    "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+                    "variables": {"representations": [{"__typename": "User", "id": "1"}]}
+                }),
+                serde_json::json!({"data": {"_entities": [{"name": "Ada"}]}}),
+            )
+            .build(),
+    );
+    s
+}
+
+// Sandboxed counterpart of `setup_router_and_registry`. Replaces the
+// public starstuff subgraph URLs with in-process MockSubgraph services so
+// the test does not depend on the public demo deployment being reachable.
+async fn setup_sandboxed_router_and_registry_with_config(
+    config: Configuration,
+    mocks: MockedSubgraphs,
+) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
+    let counting_registry = CountingServiceRegistry::new();
+    // See `setup_sandboxed_router_and_registry` for the plugin-order
+    // rationale (counting first / outer, mocks second / inner).
+    let router = apollo_router::TestHarness::builder()
+        .configuration(Arc::new(config))
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(mocks)
+        .build_router()
+        .await?;
+    Ok((router, counting_registry))
+}
+
+async fn setup_sandboxed_router_and_registry(
+    config: serde_json::Value,
+    mocks: MockedSubgraphs,
+) -> (router::BoxCloneService, CountingServiceRegistry) {
+    let counting_registry = CountingServiceRegistry::new();
+    // Plugin order matters here. `SubgraphServiceFactory::new` folds
+    // `plugins.iter().rev()` over the inner service, so the plugin added
+    // EARLIER becomes the OUTER layer of the resulting service. We want
+    // counting to run on every request *before* dispatching to the mock
+    // (so that totals reflect the call), and we want the mock to be the
+    // leaf that produces the response. Hence: counting first, mocks
+    // second.
+    let router = apollo_router::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .extra_plugin(counting_registry.clone())
+        .extra_plugin(mocks)
+        .build_router()
+        .await
+        .unwrap();
+    (router, counting_registry)
 }
 
 async fn fallible_setup_router_and_registry(

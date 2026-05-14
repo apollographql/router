@@ -782,7 +782,7 @@ mod interface_object {
                 ),
                 (
                     "INVALID_FIELD_SHARING",
-                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#,
+                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" (through @interfaceObject field "I.a") and "Subgraph2" and defined as non-shareable in all of them"#,
                 ),
             ],
         );
@@ -839,7 +839,7 @@ mod interface_object {
                 ),
                 (
                     "INVALID_FIELD_SHARING",
-                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1 (through @interfaceObject field "I.a")" and "Subgraph2" and defined as non-shareable in all of them"#,
+                    r#"Non-shareable field "A.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" (through @interfaceObject field "I.a") and "Subgraph2" and defined as non-shareable in all of them"#,
                 ),
             ],
         );
