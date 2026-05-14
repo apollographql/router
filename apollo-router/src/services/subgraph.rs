@@ -470,14 +470,20 @@ impl Request {
             hasher.update(query.as_bytes());
         }
 
-        // this assumes headers are in the same order
-        for (name, value) in http_req
+        // HeaderMap iteration order is not stable across requests, so sort
+        // (name, value) pairs before feeding them to the hasher. Without this,
+        // two logically identical requests can produce different hashes and
+        // miss the dedup cache.
+        let mut headers: Vec<(&str, &str)> = http_req
             .headers()
             .iter()
             .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
-        {
-            hasher.update(name.as_str().as_bytes());
-            hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
+            .map(|(name, value)| (name.as_str(), value.to_str().unwrap_or("ERROR")))
+            .collect();
+        headers.sort_unstable();
+        for (name, value) in headers {
+            hasher.update(name.as_bytes());
+            hasher.update(value.as_bytes());
         }
         if !ignore_auth_context
             && let Some(claim) = self
@@ -637,6 +643,36 @@ mod tests {
                 .get::<ShouldNotSurviveClone>()
                 .is_none(),
             "arbitrary extension types must not be copied when SubgraphRequest is cloned"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_header_order_independence() {
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x-a", "1")
+                    .header("x-b", "2")
+                    .header("x-c", "3")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x-c", "3")
+                    .header("x-a", "1")
+                    .header("x-b", "2")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_eq!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "two requests with the same headers in different insertion orders must hash identically"
         );
     }
 }
