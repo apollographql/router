@@ -152,7 +152,7 @@ pub(crate) fn execute_selection_set<'a>(
 /// <https://spec.graphql.org/October2021/#DoesFragmentTypeApply()>
 /// <https://spec.graphql.org/October2021/#CompleteValue()>
 /// <https://spec.graphql.org/October2021/#ResolveAbstractType()>
-fn type_condition_matches(
+pub(crate) fn type_condition_matches(
     schema: &Schema,
     current_type: Option<&str>,
     type_condition: &str,

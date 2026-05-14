@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
+use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -14,6 +15,7 @@ use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
 use super::log;
+use super::selection::type_condition_matches;
 use super::subscription::SubscriptionHandle;
 use crate::Context;
 use crate::axum_factory::CanceledRequest;
@@ -46,8 +48,11 @@ use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
+use crate::spec::Fragments;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::TYPENAME;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -73,8 +78,9 @@ impl QueryPlan {
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
+        let skipped_entity_paths: Mutex<Vec<Path>> = Mutex::new(Vec::new());
 
-        let (value, errors) = self
+        let (value, mut errors) = self
             .root
             .execute_recursively(
                 &ExecutionParameters {
@@ -88,6 +94,7 @@ impl QueryPlan {
                     subscription_handle: &subscription_handle,
                     subscription_config,
                     subgraph_schemas,
+                    skipped_entity_paths: &skipped_entity_paths,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -99,6 +106,23 @@ impl QueryPlan {
                 "apollo.router.operations.defer",
                 "Number of requests that request deferred data",
                 1
+            );
+        }
+
+        // End-of-execution pass: walk the user's operation against the final
+        // merged data and emit `UNSATISFIED_FETCH_CONDITION` for each missing
+        // leaf that sits under a recorded skipped entity path.
+        let skipped_paths = std::mem::take(&mut *skipped_entity_paths.lock());
+        if !skipped_paths.is_empty() {
+            collect_unsatisfied_fetch_errors(
+                &self.query.operation.selection_set,
+                &self.query.fragments,
+                schema.as_ref(),
+                &supergraph_request.body().variables,
+                &value,
+                &Path::empty(),
+                &skipped_paths,
+                &mut errors,
             );
         }
 
@@ -126,6 +150,11 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
+    /// Entity-level paths whose `_entities` fetch was skipped because a
+    /// required input was unsatisfied. Accumulated across the entire
+    /// execution; consumed at end-of-execution to generate
+    /// `UNSATISFIED_FETCH_CONDITION` errors against the final merged data.
+    pub(crate) skipped_entity_paths: &'a Mutex<Vec<Path>>,
 }
 
 impl PlanNode {
@@ -228,7 +257,9 @@ impl PlanNode {
                                 .build(),
                         ];
                     } else {
-                        match Variables::new(
+                        // Note: subscriptions currently pass empty requires (&[]), so
+                        // _unsatisfied_paths will always be empty.
+                        let (opt_variables, _unsatisfied_paths) = Variables::new(
                             &[],
                             &subscription_node.variable_usages,
                             parent_value,
@@ -237,7 +268,12 @@ impl PlanNode {
                             parameters.schema,
                             &subscription_node.input_rewrites,
                             &None,
-                        ) {
+                        );
+                        debug_assert!(
+                            _unsatisfied_paths.is_empty(),
+                            "subscriptions pass empty `requires` — unsatisfied_paths should always be empty",
+                        );
+                        match opt_variables {
                             Some(variables) => {
                                 let service = parameters.service_factory.create();
                                 let request = fetch::Request::Subscription(
@@ -283,7 +319,7 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        match Variables::new(
+                        let (opt_variables, unsatisfied_paths) = Variables::new(
                             &fetch_node.requires,
                             &fetch_node.variable_usages,
                             parent_value,
@@ -292,7 +328,18 @@ impl PlanNode {
                             parameters.schema.as_ref(),
                             &fetch_node.input_rewrites,
                             &fetch_node.context_rewrites,
-                        ) {
+                        );
+
+                        // Record skipped entity paths; error generation is deferred to
+                        // end-of-execution where the final merged data is available.
+                        if !unsatisfied_paths.is_empty() {
+                            parameters
+                                .skipped_entity_paths
+                                .lock()
+                                .extend(unsatisfied_paths);
+                        }
+
+                        match opt_variables {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
                                 let service = parameters.service_factory.create();
@@ -403,6 +450,7 @@ impl PlanNode {
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
                                         subgraph_schemas: parameters.subgraph_schemas,
+                                        skipped_entity_paths: parameters.skipped_entity_paths,
                                     },
                                     current_dir,
                                     &value,
@@ -575,9 +623,10 @@ impl DeferredNode {
             }
 
             let deferred_fetches = HashMap::new();
+            let deferred_skipped_paths: Mutex<Vec<Path>> = Mutex::new(Vec::new());
 
             if let Some(node) = deferred_inner {
-                let (mut v, err) = node
+                let (mut v, mut err) = node
                     .execute_recursively(
                         &ExecutionParameters {
                             context: &ctx,
@@ -590,6 +639,7 @@ impl DeferredNode {
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
                             subgraph_schemas: &subgraph_schemas,
+                            skipped_entity_paths: &deferred_skipped_paths,
                         },
                         &Path::default(),
                         &value,
@@ -609,6 +659,21 @@ impl DeferredNode {
                         primary_receiver.recv().await.unwrap_or_default();
                     v.type_aware_deep_merge(primary_value, &sc);
                     errors.extend(primary_errors)
+                }
+
+                // End-of-chunk pass for this deferred response.
+                let skipped_paths = std::mem::take(&mut *deferred_skipped_paths.lock());
+                if !skipped_paths.is_empty() {
+                    collect_unsatisfied_fetch_errors(
+                        &query.operation.selection_set,
+                        &query.fragments,
+                        &sc,
+                        &orig.body().variables,
+                        &v,
+                        &Path::empty(),
+                        &skipped_paths,
+                        &mut err,
+                    );
                 }
 
                 if let Err(e) = tx
@@ -656,4 +721,194 @@ impl DeferredNode {
             };
         }
     }
+}
+
+/// End-of-execution walker: traverse the user's selection set against the final
+/// merged response data and emit `UNSATISFIED_FETCH_CONDITION` for each missing
+/// field whose path sits under an entry in `skipped_paths`.
+///
+/// `skipped_paths` is the accumulator filled by `PlanNode::Fetch` execution:
+/// one path per entity whose `_entities` fetch was skipped because a required
+/// input was unsatisfied (paths are entity-root, not per-leaf).
+///
+/// A path is considered "under a skipped path" if some prefix equals an entry
+/// in `skipped_paths`. A field is considered "missing" if either it's absent
+/// from the value object or it's present-but-null. Missing fields that aren't
+/// under any skipped path are left alone — they're either explained by an
+/// existing subgraph error, or fall outside this PR's scope.
+#[allow(clippy::too_many_arguments)]
+fn collect_unsatisfied_fetch_errors(
+    selection_set: &[Selection],
+    fragments: &Fragments,
+    schema: &Schema,
+    variables: &Object,
+    value: &Value,
+    current_path: &Path,
+    skipped_paths: &[Path],
+    output: &mut Vec<Error>,
+) {
+    let current_type = value
+        .as_object()
+        .and_then(|o| o.get(TYPENAME))
+        .and_then(|v| v.as_str());
+
+    for selection in selection_set {
+        match selection {
+            Selection::Field {
+                name,
+                alias,
+                selection_set: sub,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if name.as_str() == TYPENAME {
+                    continue;
+                }
+                let response_key = alias.as_ref().unwrap_or(name).as_str();
+                let field_value = value.as_object().and_then(|o| o.get(response_key));
+
+                // Treat absent OR null as "missing".
+                let missing = match field_value {
+                    None => true,
+                    Some(v) => v.is_null(),
+                };
+
+                let mut field_path = current_path.clone();
+                field_path.push(PathElement::Key(response_key.to_string(), None));
+
+                if missing {
+                    if is_under_skipped_path(&field_path, skipped_paths) {
+                        output.push(
+                            Error::builder()
+                                .message("Could not fetch field")
+                                .path(field_path)
+                                .extension_code("UNSATISFIED_FETCH_CONDITION")
+                                .build(),
+                        );
+                    }
+                    continue;
+                }
+
+                // Composite: recurse into the field's value if it has a sub-selection.
+                if let Some(sub_sel) = sub
+                    && let Some(field_value) = field_value
+                {
+                    descend_into_value(
+                        sub_sel,
+                        fragments,
+                        schema,
+                        variables,
+                        field_value,
+                        &field_path,
+                        skipped_paths,
+                        output,
+                    );
+                }
+            }
+            Selection::InlineFragment {
+                type_condition,
+                selection_set: sub,
+                include_skip,
+                known_type,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                let effective_type = known_type.as_deref().or(current_type);
+                if type_condition_matches(schema, effective_type, type_condition) {
+                    collect_unsatisfied_fetch_errors(
+                        sub,
+                        fragments,
+                        schema,
+                        variables,
+                        value,
+                        current_path,
+                        skipped_paths,
+                        output,
+                    );
+                }
+            }
+            Selection::FragmentSpread {
+                name,
+                known_type,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                let Some(fragment) = fragments.get(name) else {
+                    continue;
+                };
+                let effective_type = known_type.as_deref().or(current_type);
+                if type_condition_matches(schema, effective_type, &fragment.type_condition) {
+                    collect_unsatisfied_fetch_errors(
+                        &fragment.selection_set,
+                        fragments,
+                        schema,
+                        variables,
+                        value,
+                        current_path,
+                        skipped_paths,
+                        output,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Recurse into a field's value; if it's an array, iterate per-index with
+/// `PathElement::Index` segments. Otherwise descend into the value as an object.
+#[allow(clippy::too_many_arguments)]
+fn descend_into_value(
+    selection_set: &[Selection],
+    fragments: &Fragments,
+    schema: &Schema,
+    variables: &Object,
+    value: &Value,
+    current_path: &Path,
+    skipped_paths: &[Path],
+    output: &mut Vec<Error>,
+) {
+    if let Some(arr) = value.as_array() {
+        for (i, item) in arr.iter().enumerate() {
+            let mut item_path = current_path.clone();
+            item_path.push(PathElement::Index(i));
+            descend_into_value(
+                selection_set,
+                fragments,
+                schema,
+                variables,
+                item,
+                &item_path,
+                skipped_paths,
+                output,
+            );
+        }
+    } else {
+        collect_unsatisfied_fetch_errors(
+            selection_set,
+            fragments,
+            schema,
+            variables,
+            value,
+            current_path,
+            skipped_paths,
+            output,
+        );
+    }
+}
+
+/// True iff `path` has some prefix in `skipped`. Equality counts (a skipped
+/// entity path is "under itself"), so leaves of the skipped entity directly
+/// match.
+fn is_under_skipped_path(path: &Path, skipped: &[Path]) -> bool {
+    skipped
+        .iter()
+        .any(|sp| sp.len() <= path.len() && sp.iter().zip(path.iter()).all(|(a, b)| a == b))
 }
