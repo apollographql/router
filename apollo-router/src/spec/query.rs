@@ -155,6 +155,7 @@ impl Query {
                                 nullified: Vec::new(),
                             };
 
+                            let mut fragment_cache = HashMap::new();
                             response.data = Some(
                                 match self.apply_root_selection_set(
                                     &subselection.type_name,
@@ -163,6 +164,7 @@ impl Query {
                                     &mut input,
                                     &mut output,
                                     &mut Vec::new(),
+                                    &mut fragment_cache,
                                 ) {
                                     Ok(()) => output.into(),
                                     Err(InvalidValue) => Value::Null,
@@ -213,6 +215,7 @@ impl Query {
                         nullified: Vec::new(),
                     };
 
+                    let mut fragment_cache = HashMap::new();
                     response.data = Some(
                         match self.apply_root_selection_set(
                             operation_type_name,
@@ -221,6 +224,7 @@ impl Query {
                             &mut input,
                             &mut output,
                             &mut Vec::new(),
+                            &mut fragment_cache,
                         ) {
                             Ok(()) => output.into(),
                             Err(InvalidValue) => Value::Null,
@@ -910,6 +914,7 @@ impl Query {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set<'a: 'b, 'b>(
         &'a self,
         root_type_name: &str,
@@ -918,6 +923,7 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
+        fragment_cache: &mut HashMap<&'a str, Option<&'a [Selection]>>,
     ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
@@ -1008,6 +1014,7 @@ impl Query {
                             input,
                             output,
                             path,
+                            fragment_cache,
                         )?;
                     }
                 }
@@ -1022,29 +1029,43 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(Fragment {
-                        type_condition,
-                        selection_set,
-                    }) = self.fragments.get(name)
-                    {
-                        // check if the fragment matches the input type directly, and if not, check if the
-                        // input type is a subtype of the fragment's type condition (interface, union)
-                        let is_apply = (root_type_name == type_condition.as_str())
-                            || parameters.schema.is_subtype(type_condition, root_type_name);
-
-                        if is_apply {
-                            self.apply_root_selection_set(
-                                root_type_name,
+                    let applicable_set = match fragment_cache.get(name.as_str()) {
+                        Some(cached) => *cached,
+                        None => {
+                            let result = if let Some(Fragment {
+                                type_condition,
                                 selection_set,
-                                parameters,
-                                input,
-                                output,
-                                path,
-                            )?;
+                            }) = self.fragments.get(name)
+                            {
+                                // check if the fragment matches the input type directly, and if not, check if the
+                                // input type is a subtype of the fragment's type condition (interface, union)
+                                let is_apply = (root_type_name == type_condition.as_str())
+                                    || parameters.schema.is_subtype(type_condition, root_type_name);
+                                if is_apply {
+                                    Some(selection_set.as_slice())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                // the fragment should have been already checked with the schema
+                                failfast_debug!("missing fragment named: {}", name);
+                                None
+                            };
+                            fragment_cache.insert(name.as_str(), result);
+                            result
                         }
-                    } else {
-                        // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                    };
+
+                    if let Some(selection_set) = applicable_set {
+                        self.apply_root_selection_set(
+                            root_type_name,
+                            selection_set,
+                            parameters,
+                            input,
+                            output,
+                            path,
+                            fragment_cache,
+                        )?;
                     }
                 }
             }
