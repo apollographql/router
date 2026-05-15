@@ -3162,11 +3162,11 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let socket_addr = listener.local_addr().unwrap();
             let connection_count = Arc::new(AtomicU32::new(0));
-            // reconnect_delay = 1ms ⇒ grace ≈ 5ms. Hold each connection 50ms so
-            // every drop is well past the grace window.
+            // The grace floor is 500ms (see `stability_grace` in subgraph.rs);
+            // hold each connection 600ms so every drop is past it.
             let spawned_task = tokio::task::spawn(emulate_websocket_server_stable_then_drops(
                 listener,
-                std::time::Duration::from_millis(50),
+                std::time::Duration::from_millis(600),
                 connection_count.clone(),
             ));
 

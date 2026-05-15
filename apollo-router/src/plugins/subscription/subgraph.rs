@@ -259,7 +259,13 @@ async fn call_websocket(
     // stable, and the per-disconnect retry budget refreshes. A subgraph that
     // flaps (accepts the handshake then drops faster than this) keeps burning
     // through the current budget and eventually terminates the subscription.
-    let stability_grace = reconnect_delay.saturating_mul(5);
+    // The minimum floor guards against `reconnect_delay: 0s` collapsing the
+    // grace window to zero (every elapsed >= 0 → every drop resets the budget
+    // → unbounded reconnect loop, which is exactly the failure mode the grace
+    // window is designed to prevent).
+    let stability_grace = reconnect_delay
+        .saturating_mul(5)
+        .max(Duration::from_millis(500));
     let retry_subgraph_cfg = subgraph_cfg.clone();
 
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
@@ -343,12 +349,6 @@ async fn call_websocket(
                 'reconnect: loop {
                     if attempt < max_reconnect_attempts {
                         attempt += 1;
-                        u64_counter!(
-                            "apollo.router.operations.subscriptions.reconnect",
-                            "Number of subscription WebSocket reconnect attempts",
-                            1,
-                            subgraph.name = service_name_for_task.clone()
-                        );
                         tracing::debug!(
                             attempt,
                             max_reconnect_attempts,
@@ -364,6 +364,15 @@ async fn call_websocket(
                             },
                             _ = tokio::time::sleep(reconnect_delay) => {},
                         }
+                        // Count only attempts that actually issue a handshake — a closing
+                        // signal during the delay short-circuits without ever calling
+                        // `open_ws_gql_stream`, so it shouldn't be charged to this counter.
+                        u64_counter!(
+                            "apollo.router.operations.subscriptions.reconnect",
+                            "Number of subscription WebSocket reconnect attempts",
+                            1,
+                            subgraph.name = service_name_for_task.clone()
+                        );
                         let (retry_parts, retry_body) =
                             retry_subgraph_request.clone().into_parts();
                         match open_ws_gql_stream(
