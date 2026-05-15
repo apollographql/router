@@ -260,7 +260,12 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = super::scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_request(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -434,7 +439,12 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = super::scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_response(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -500,6 +510,7 @@ where
                 .condition
                 .evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
             async move {
                 if !should_be_executed {
                     return Ok(deferred_response);
@@ -521,7 +532,14 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = super::scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 let co_processor_result = payload
                     .call(
                         generator_client,

@@ -838,6 +838,7 @@ mod test {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
@@ -867,6 +868,7 @@ mod test {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
@@ -931,6 +933,7 @@ mod test {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();
@@ -961,6 +964,7 @@ mod test {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = crate::context::Context::new();

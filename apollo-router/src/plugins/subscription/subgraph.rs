@@ -232,9 +232,17 @@ async fn call_websocket(
 
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
+        let headers_str = context.extensions().with_lock(|lock| {
+            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
+                .map(|m| {
+                    m.get_request(Some(service_name))
+                        .mask_headers_debug(request.headers())
+                })
+                .unwrap_or_else(|| format!("{:?}", request.headers()))
+        });
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
+            opentelemetry::Value::String(headers_str.into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.method"),

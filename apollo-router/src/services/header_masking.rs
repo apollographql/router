@@ -32,22 +32,38 @@ pub(crate) struct HeaderMaskingRules {
 
 impl HeaderMaskingRules {
     /// Create masking rules from configuration. Returns empty rules when `enabled: false`.
+    ///
+    /// The effective sensitive-header list is the merge of the built-in
+    /// defaults and the user-provided `sensitive_headers`, unless
+    /// `replace_defaults: true` is set (see
+    /// [`HeaderMaskingConfig::effective_sensitive_headers`]).
     pub(crate) fn from_config(config: &HeaderMaskingConfig) -> Self {
         if !config.enabled {
             return Self::default();
         }
         let sensitive_headers = config
-            .sensitive_headers
-            .iter()
+            .effective_sensitive_headers()
+            .into_iter()
             .map(|h| h.to_lowercase())
             .collect();
 
         Self { sensitive_headers }
     }
 
-    /// Check if a header should be masked (case-insensitive)
+    /// Check if a header should be masked (case-insensitive).
+    ///
+    /// The set entries are stored lowercase. `http::HeaderName::as_str()` is
+    /// already canonical lowercase, which is the common caller — handle that
+    /// without a `String` allocation. Header names are ASCII (RFC 9110 §5.1),
+    /// so the only-uppercase case falls back to the explicit lowercased
+    /// lookup; all other cases reuse the input borrow.
     pub(crate) fn should_mask(&self, header_name: &str) -> bool {
-        self.sensitive_headers.contains(&header_name.to_lowercase())
+        if header_name.bytes().all(|b| !b.is_ascii_uppercase()) {
+            self.sensitive_headers.contains(header_name)
+        } else {
+            self.sensitive_headers
+                .contains(&header_name.to_ascii_lowercase())
+        }
     }
 
     /// Mask a HeaderMap and convert to HashMap for coprocessor
@@ -85,6 +101,26 @@ impl HeaderMaskingRules {
         }
 
         output
+    }
+
+    /// Mask already-externalized headers (the `HashMap<String, Vec<String>>`
+    /// shape used in coprocessor payloads) for safe debug logging. Sensitive
+    /// header values are replaced with `***MASKED***`; non-sensitive headers
+    /// pass through unchanged.
+    pub(crate) fn mask_externalized_headers(
+        &self,
+        input: &HashMap<String, Vec<String>>,
+    ) -> HashMap<String, Vec<String>> {
+        input
+            .iter()
+            .map(|(k, v)| {
+                if self.should_mask(k) {
+                    (k.clone(), vec![MASKED_VALUE.to_string()])
+                } else {
+                    (k.clone(), v.clone())
+                }
+            })
+            .collect()
     }
 
     /// Mask headers in Debug format string for telemetry events
@@ -191,6 +227,7 @@ mod tests {
                 "cookie".to_string(),
                 "x-api-key".to_string(),
             ],
+            replace_defaults: false,
         };
         HeaderMaskingRules::from_config(&config)
     }
@@ -324,33 +361,51 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_config() {
+    fn test_empty_config_with_replace_defaults_masks_nothing() {
         let config = HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![],
+            // Explicitly opt out of built-in defaults to make the empty list
+            // authoritative.
+            replace_defaults: true,
         };
         let rules = HeaderMaskingRules::from_config(&config);
 
-        // No headers should be masked with empty config
         assert!(!rules.should_mask("authorization"));
         assert!(!rules.should_mask("cookie"));
     }
 
     #[test]
+    fn empty_user_list_with_default_replace_defaults_still_masks_built_in_headers() {
+        let config = HeaderMaskingConfig::default();
+        let rules = HeaderMaskingRules::from_config(&config);
+
+        // The fail-secure default: even without user config, the built-in
+        // sensitive-header list is in effect.
+        assert!(rules.should_mask("authorization"));
+        assert!(rules.should_mask("cookie"));
+    }
+
+    #[test]
     fn test_masking_rules_map_separates_request_and_response() {
+        // Use replace_defaults: true so each rule set contains exactly the
+        // listed headers, isolating the request/response separation under test.
         let request_rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: true,
         }));
         let response_rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: true,
         }));
         let per_subgraph_response: HashMap<String, Arc<HeaderMaskingRules>> = [(
             "products".to_string(),
             Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
                 enabled: true,
                 sensitive_headers: vec!["x-products-secret".to_string()],
+                replace_defaults: true,
             })),
         )]
         .into_iter()

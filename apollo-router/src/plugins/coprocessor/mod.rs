@@ -67,6 +67,29 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
+/// Produce a copy of `payload` with sensitive headers masked, for use in debug
+/// logs. Without this scrub, the `tracing::debug!(?payload, ...)` lines in each
+/// coprocessor stage would print the full Debug of `Externalizable`, including
+/// the raw `headers` field — defeating the masking the surrounding "(masked)"
+/// log just performed.
+pub(super) fn scrub_payload_for_log<T, F>(
+    payload: &Externalizable<T>,
+    masking_rules: Option<&MaskingRulesMap>,
+    rule_for_direction: F,
+) -> Externalizable<T>
+where
+    T: Clone,
+    F: FnOnce(
+        &MaskingRulesMap,
+    ) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    let mut clone = payload.clone();
+    if let (Some(rules), Some(headers)) = (masking_rules, clone.headers.as_mut()) {
+        *headers = rule_for_direction(rules).mask_externalized_headers(headers);
+    }
+    clone
+}
+
 // Type alias for coprocessor HTTP client - uses HttpClientService with timeout
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
@@ -1021,7 +1044,12 @@ where
         .method(parts.method.to_string())
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_request(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1221,7 +1249,12 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_response(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1287,6 +1320,7 @@ where
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
             let context_conf = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             async move {
                 let bytes = deferred_response.to_vec();
@@ -1309,7 +1343,14 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 // Use a fresh context for the coprocessor HTTP call. The pipeline's request
                 // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
                 // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1438,7 +1479,12 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_request(Some(subgraph_name.as_str())),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1603,6 +1649,7 @@ where
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
     let context_to_send = response_config.context.get_context(&response.context);
+    let subgraph_name = service_name.clone();
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1619,7 +1666,12 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_response(Some(subgraph_name.as_str())),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor

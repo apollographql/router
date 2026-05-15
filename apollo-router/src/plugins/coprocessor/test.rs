@@ -7426,6 +7426,7 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+            replace_defaults: false,
                     },
                 ),
             );
@@ -7559,6 +7560,7 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["x-api-key".to_string()],
+            replace_defaults: false,
                     },
                 ),
             );
@@ -7753,6 +7755,7 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+            replace_defaults: false,
                     },
                 ),
             );
@@ -7884,6 +7887,7 @@ mod tests {
                             "x-internal-token".to_string(),
                             "x-secret-key".to_string(),
                         ],
+            replace_defaults: false,
                     },
                 ),
             );
@@ -7948,186 +7952,12 @@ mod tests {
             );
         }
 
-        #[test]
-        fn coprocessor_reads_masking_config_from_headers_path() {
-            // Verify the coprocessor reads masking rules from headers.all.request.masking
-            // (not the old "header_masking" top-level key that no longer exists).
-            let full_config = serde_json::json!({
-                "headers": {
-                    "all": {
-                        "request": {
-                            "masking": {
-                                "enabled": true,
-                                "sensitive_headers": ["authorization", "x-secret"]
-                            }
-                        }
-                    }
-                }
-            });
-
-            let rules = full_config
-                .get("headers")
-                .and_then(|h| h.get("all"))
-                .and_then(|a| a.get("request"))
-                .and_then(|r| r.get("masking"))
-                .and_then(|hm_config| {
-                    serde_json::from_value::<
-                        crate::configuration::header_masking_config::HeaderMaskingConfig,
-                    >(hm_config.clone())
-                    .ok()
-                    .map(|config| {
-                        Arc::new(
-                            crate::services::header_masking::HeaderMaskingRules::from_config(
-                                &config,
-                            ),
-                        )
-                    })
-                });
-
-            assert!(
-                rules.is_some(),
-                "masking rules should be loaded from headers.all.request.masking"
-            );
-            let rules = rules.unwrap();
-            assert!(
-                rules.should_mask("authorization"),
-                "authorization should be masked"
-            );
-            assert!(rules.should_mask("x-secret"), "x-secret should be masked");
-            assert!(
-                !rules.should_mask("content-type"),
-                "content-type should not be masked"
-            );
-
-            // Old path must not work (the bug that was fixed)
-            let old_path_rules = full_config.get("header_masking");
-            assert!(
-                old_path_rules.is_none(),
-                "header_masking key should not exist at top level"
-            );
-        }
-
-        #[test]
-        fn coprocessor_masking_disabled_produces_empty_rules() {
-            // When enabled: false, from_config returns empty rules (no headers masked).
-            use crate::configuration::header_masking_config::HeaderMaskingConfig;
-            use crate::services::header_masking::HeaderMaskingRules;
-
-            let config = HeaderMaskingConfig {
-                enabled: false,
-                sensitive_headers: vec!["authorization".to_string()],
-            };
-            let rules = HeaderMaskingRules::from_config(&config);
-            assert!(
-                !rules.should_mask("authorization"),
-                "enabled: false should produce empty rules that mask nothing"
-            );
-        }
-
-        #[test]
-        fn coprocessor_builds_per_subgraph_and_response_rules_from_config() {
-            // The coprocessor's masking-config reader must honor:
-            //   - per-subgraph request overrides
-            //   - per-subgraph response overrides
-            //   - response-only top-level configs (no headers.all.request.masking)
-            use crate::configuration::header_masking_config::HeaderMaskingConfig;
-            use crate::services::header_masking::DirectionRules;
-            use crate::services::header_masking::HeaderMaskingRules;
-            use crate::services::header_masking::MaskingRulesMap;
-
-            let full_config = serde_json::json!({
-                "headers": {
-                    "all": {
-                        "response": {
-                            "masking": {
-                                "enabled": true,
-                                "sensitive_headers": ["set-cookie"]
-                            }
-                        }
-                    },
-                    "subgraphs": {
-                        "products": {
-                            "request": {
-                                "masking": {
-                                    "enabled": true,
-                                    "sensitive_headers": ["x-products-key"]
-                                }
-                            },
-                            "response": {
-                                "masking": {
-                                    "enabled": true,
-                                    "sensitive_headers": ["x-products-secret"]
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Re-derive the rules the same way coprocessor/mod.rs does so the
-            // test pins the contract.
-            let headers = full_config.get("headers").unwrap();
-            let all = headers.get("all");
-            let default_rules = Arc::new(HeaderMaskingRules::from_config(
-                &HeaderMaskingConfig::default(),
-            ));
-            let parse_masking = |v: &serde_json::Value| -> Option<Arc<HeaderMaskingRules>> {
-                v.get("masking")
-                    .and_then(|hm| serde_json::from_value::<HeaderMaskingConfig>(hm.clone()).ok())
-                    .map(|c| Arc::new(HeaderMaskingRules::from_config(&c)))
-            };
-            let global_request = all
-                .and_then(|a| a.get("request"))
-                .and_then(parse_masking)
-                .unwrap_or_else(|| default_rules.clone());
-            let global_response = all
-                .and_then(|a| a.get("response"))
-                .and_then(parse_masking)
-                .unwrap_or_else(|| default_rules.clone());
-
-            let mut per_sg_request = std::collections::HashMap::new();
-            let mut per_sg_response = std::collections::HashMap::new();
-            if let Some(serde_json::Value::Object(subgraphs)) = headers.get("subgraphs") {
-                for (name, sg) in subgraphs {
-                    if let Some(rules) = sg.get("request").and_then(&parse_masking) {
-                        per_sg_request.insert(name.clone(), rules);
-                    }
-                    if let Some(rules) = sg.get("response").and_then(&parse_masking) {
-                        per_sg_response.insert(name.clone(), rules);
-                    }
-                }
-            }
-            let map = MaskingRulesMap::new(
-                DirectionRules::new(global_request, per_sg_request),
-                DirectionRules::new(global_response, per_sg_response),
-            );
-
-            // Global response rule applied.
-            assert!(map.get_response(None).should_mask("set-cookie"));
-            // Per-subgraph request rule applied for products.
-            assert!(
-                map.get_request(Some("products"))
-                    .should_mask("x-products-key")
-            );
-            // Per-subgraph response rule applied for products.
-            assert!(
-                map.get_response(Some("products"))
-                    .should_mask("x-products-secret"),
-                "per-subgraph response override should mask x-products-secret"
-            );
-            // Per-subgraph request rule does NOT bleed into response side.
-            assert!(
-                !map.get_response(Some("products"))
-                    .should_mask("x-products-key")
-            );
-            // Unknown subgraph falls back to the global response rules.
-            assert!(map.get_response(Some("other")).should_mask("set-cookie"));
-            // Unknown subgraph request falls back to fail-secure defaults
-            // (authorization is in the built-in sensitive list).
-            assert!(
-                map.get_request(Some("other")).should_mask("authorization"),
-                "fail-secure default should mask authorization when request rules are unset"
-            );
-        }
+        // Real end-to-end coverage for the coprocessor + masking flow lives in
+        // the sibling integration tests above (e.g.
+        // `router_request_headers_sent_unmasked_to_coprocessor`,
+        // `multiple_headers_selective_masking`), which drive
+        // `RouterStage::as_service` with a mocked HTTP client and assert on
+        // what the coprocessor actually receives. Config-shape contracts are
+        // pinned by `HeaderMaskingConfig::tests` and the schema snapshot.
     }
 }

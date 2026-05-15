@@ -814,6 +814,7 @@ mod tests {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = Context::new();
@@ -836,6 +837,7 @@ mod tests {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let context = Context::new();
@@ -861,6 +863,7 @@ mod tests {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let response = connector_response_with_header();
@@ -889,11 +892,13 @@ mod tests {
         let global = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![],
+            replace_defaults: false,
         }));
         // Per-subgraph response rules for "products": do mask TEST_HEADER_NAME.
         let products = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
         }));
         let mut per_sg: HashMap<String, Arc<HeaderMaskingRules>> = HashMap::new();
         per_sg.insert("products".to_string(), products);
@@ -923,6 +928,7 @@ mod tests {
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
         }));
         let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
         let response = connector_response_with_header();

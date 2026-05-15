@@ -14,7 +14,7 @@ Adds header masking configuration to automatically mask sensitive header values 
 
 **Configuration:**
 
-Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections:
+Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections. Both global and per-subgraph `sensitive_headers` lists are **additive**: any entries you provide are added to the built-in fail-secure list (authorization, cookie, set-cookie, x-api-key, …). Set `replace_defaults: true` on a global block to opt out of the built-ins and treat your list as authoritative.
 
 ```yaml
 headers:
@@ -23,32 +23,31 @@ headers:
     request:
       masking:
         enabled: true  # default
+        # Additional headers to mask on top of the built-in fail-secure list.
         sensitive_headers:
-          - authorization
-          - cookie
-          - x-api-key
-          - x-custom-secret  # add custom headers
+          - x-custom-secret
     response:
       masking:
         enabled: true
         sensitive_headers:
-          - set-cookie
-          - www-authenticate
+          - x-internal-trace-id
 
-  # Per-subgraph overrides
+  # Per-subgraph extensions (added to global + built-ins).
   subgraphs:
     products:
       request:
         masking:
           enabled: true
           sensitive_headers:
-            - authorization
             - x-products-api-key
-      response:
-        masking:
-          enabled: true
-          sensitive_headers:
-            - set-cookie
+
+  # Example: replace the built-in list entirely (advanced).
+  # all:
+  #   request:
+  #     masking:
+  #       replace_defaults: true
+  #       sensitive_headers:
+  #         - x-only-this
 ```
 
 When enabled, sensitive header values are replaced with `***MASKED***` in debug logs and telemetry output while preserving header names for debugging purposes.

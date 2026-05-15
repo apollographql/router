@@ -258,7 +258,12 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = super::scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_request(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -429,7 +434,12 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = super::scrub_payload_for_log(
+        &payload,
+        header_masking_rules.as_deref(),
+        |r| r.get_response(None),
+    );
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
@@ -491,6 +501,7 @@ where
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
             let response_config_context = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             async move {
                 let body_to_send =
@@ -510,7 +521,14 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = super::scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 let co_processor_result = payload
                     .call(
                         generator_client,

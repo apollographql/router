@@ -5919,22 +5919,14 @@ expression: "&schema"
           "description": "Enable header masking globally (default: true for fail-secure behavior)",
           "type": "boolean"
         },
+        "replace_defaults": {
+          "default": false,
+          "description": "When true, `sensitive_headers` replaces the built-in default list\ninstead of extending it. Default: false (additive, fail-secure).",
+          "type": "boolean"
+        },
         "sensitive_headers": {
-          "default": [
-            "authorization",
-            "proxy-authorization",
-            "proxy-authenticate",
-            "cookie",
-            "set-cookie",
-            "x-api-key",
-            "api-key",
-            "x-auth-token",
-            "x-session-id",
-            "x-session-token",
-            "x-csrf-token",
-            "x-xsrf-token"
-          ],
-          "description": "List of header names to mask (case-insensitive)\nDefault includes common sensitive headers",
+          "default": [],
+          "description": "Additional header names to mask (case-insensitive). By default these are\nmerged with the built-in sensitive-header list (see\n`default_sensitive_headers`). Set `replace_defaults: true` to opt out of\nthe built-ins and treat this list as authoritative.",
           "items": {
             "type": "string"
           },

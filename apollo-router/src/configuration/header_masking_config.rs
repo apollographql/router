@@ -8,16 +8,38 @@ pub(crate) struct HeaderMaskingConfig {
     /// Enable header masking globally (default: true for fail-secure behavior)
     pub(crate) enabled: bool,
 
-    /// List of header names to mask (case-insensitive)
-    /// Default includes common sensitive headers
+    /// Additional header names to mask (case-insensitive). By default these are
+    /// merged with the built-in sensitive-header list (see
+    /// `default_sensitive_headers`). Set `replace_defaults: true` to opt out of
+    /// the built-ins and treat this list as authoritative.
     pub(crate) sensitive_headers: Vec<String>,
+
+    /// When true, `sensitive_headers` replaces the built-in default list
+    /// instead of extending it. Default: false (additive, fail-secure).
+    pub(crate) replace_defaults: bool,
 }
 
 impl Default for HeaderMaskingConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled(),
-            sensitive_headers: default_sensitive_headers(),
+            sensitive_headers: Vec::new(),
+            replace_defaults: false,
+        }
+    }
+}
+
+impl HeaderMaskingConfig {
+    /// Returns the effective sensitive-header list this config produces,
+    /// merging `sensitive_headers` with the built-in defaults unless
+    /// `replace_defaults` is set.
+    pub(crate) fn effective_sensitive_headers(&self) -> Vec<String> {
+        if self.replace_defaults {
+            self.sensitive_headers.clone()
+        } else {
+            let mut headers = default_sensitive_headers();
+            headers.extend(self.sensitive_headers.iter().cloned());
+            headers
         }
     }
 }
@@ -26,7 +48,7 @@ fn default_enabled() -> bool {
     true
 }
 
-fn default_sensitive_headers() -> Vec<String> {
+pub(crate) fn default_sensitive_headers() -> Vec<String> {
     vec![
         // Authentication and authorization
         "authorization".to_string(),
@@ -57,16 +79,42 @@ mod tests {
         let config = HeaderMaskingConfig::default();
 
         assert!(config.enabled);
-        assert!(!config.sensitive_headers.is_empty());
+        // sensitive_headers is empty in the struct (defaults are applied at
+        // use time via effective_sensitive_headers, so user-provided lists are
+        // additive rather than replacing).
+        assert!(config.sensitive_headers.is_empty());
+        assert!(!config.replace_defaults);
 
-        // Verify common sensitive headers are included
-        assert!(
-            config
-                .sensitive_headers
-                .contains(&"authorization".to_string())
-        );
-        assert!(config.sensitive_headers.contains(&"cookie".to_string()));
-        assert!(config.sensitive_headers.contains(&"x-api-key".to_string()));
+        // The effective list (what callers actually see) includes the
+        // built-in fail-secure list.
+        let effective = config.effective_sensitive_headers();
+        assert!(effective.contains(&"authorization".to_string()));
+        assert!(effective.contains(&"cookie".to_string()));
+        assert!(effective.contains(&"x-api-key".to_string()));
+    }
+
+    #[test]
+    fn effective_sensitive_headers_merges_user_list_with_defaults() {
+        let config = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-my-secret".to_string()],
+            replace_defaults: false,
+        };
+        let effective = config.effective_sensitive_headers();
+        assert!(effective.contains(&"authorization".to_string()));
+        assert!(effective.contains(&"cookie".to_string()));
+        assert!(effective.contains(&"x-my-secret".to_string()));
+    }
+
+    #[test]
+    fn effective_sensitive_headers_honors_replace_defaults() {
+        let config = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-only-this".to_string()],
+            replace_defaults: true,
+        };
+        let effective = config.effective_sensitive_headers();
+        assert_eq!(effective, vec!["x-only-this".to_string()]);
     }
 
     #[test]
@@ -96,7 +144,7 @@ sensitive_headers:
 
     #[test]
     fn test_partial_config() {
-        // Test that defaults are applied when fields are omitted
+        // Test that omitted fields take their struct defaults.
         let yaml = r#"
 enabled: false
 "#;
@@ -104,7 +152,8 @@ enabled: false
         let config: HeaderMaskingConfig = serde_yaml::from_str(yaml).unwrap();
 
         assert!(!config.enabled);
-        // Should still have default sensitive headers
-        assert!(!config.sensitive_headers.is_empty());
+        // sensitive_headers defaults to empty; replace_defaults to false.
+        assert!(config.sensitive_headers.is_empty());
+        assert!(!config.replace_defaults);
     }
 }

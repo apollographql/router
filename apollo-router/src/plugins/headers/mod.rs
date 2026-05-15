@@ -277,25 +277,31 @@ struct Headers {
 /// sensitive-header list, matching the merge semantics of per-subgraph
 /// operations. Users who want a full opt-out for one subgraph set
 /// `masking.enabled: false` at the subgraph level.
+///
+/// Default-vs-replace is a *global* concern (controlled by
+/// `headers.all.{request,response}.masking.replace_defaults`); the per-subgraph
+/// block contributes only its raw `sensitive_headers` list on top of whatever
+/// the global side already resolved to.
 fn merge_subgraph_masking(
     global: &crate::configuration::header_masking_config::HeaderMaskingConfig,
     sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
 ) -> crate::configuration::header_masking_config::HeaderMaskingConfig {
     use crate::configuration::header_masking_config::HeaderMaskingConfig;
     if !sg.enabled {
-        sg.clone()
-    } else if !global.enabled {
-        HeaderMaskingConfig {
-            enabled: true,
-            sensitive_headers: sg.sensitive_headers.clone(),
-        }
+        return sg.clone();
+    }
+    let mut sensitive_headers = if global.enabled {
+        global.effective_sensitive_headers()
     } else {
-        let mut sensitive_headers = global.sensitive_headers.clone();
-        sensitive_headers.extend(sg.sensitive_headers.iter().cloned());
-        HeaderMaskingConfig {
-            enabled: true,
-            sensitive_headers,
-        }
+        Vec::new()
+    };
+    sensitive_headers.extend(sg.sensitive_headers.iter().cloned());
+    HeaderMaskingConfig {
+        enabled: true,
+        sensitive_headers,
+        // Already a fully-resolved list; don't have `from_config` merge
+        // defaults a second time.
+        replace_defaults: true,
     }
 }
 
@@ -430,7 +436,10 @@ impl PluginPrivate for Headers {
             .cloned()
             .unwrap_or_else(|| self.all_operations.clone());
 
-        // Get request masking rules for this subgraph (fallback to global)
+        // Note: masking rules aren't installed here — they're inserted into
+        // request context once in `router_service` below, and consumers
+        // resolve per-subgraph rules at read time via
+        // `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
         ServiceBuilder::new()
             .layer(HeadersLayer::new(operations))
             .service(service)
@@ -1049,10 +1058,12 @@ mod test {
         let global = HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".into(), "cookie".into()],
+            replace_defaults: false,
         };
         let sg = HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["x-products-secret".into()],
+            replace_defaults: false,
         };
         let merged = merge_subgraph_masking(&global, &sg);
         assert!(merged.enabled);
@@ -1067,10 +1078,12 @@ mod test {
         let global = HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["authorization".into()],
+            replace_defaults: false,
         };
         let sg = HeaderMaskingConfig {
             enabled: false,
             sensitive_headers: vec![],
+            replace_defaults: false,
         };
         let merged = merge_subgraph_masking(&global, &sg);
         assert!(!merged.enabled);
@@ -1082,10 +1095,12 @@ mod test {
         let global = HeaderMaskingConfig {
             enabled: false,
             sensitive_headers: vec!["authorization".into()],
+            replace_defaults: false,
         };
         let sg = HeaderMaskingConfig {
             enabled: true,
             sensitive_headers: vec!["x-products-secret".into()],
+            replace_defaults: false,
         };
         let merged = merge_subgraph_masking(&global, &sg);
         assert!(merged.enabled);
