@@ -105,11 +105,6 @@ impl RouterOverheadTracker {
             active_subgraph_requests: active_count,
         }
     }
-
-    /// Returns the total elapsed time since the request started.
-    pub(crate) fn total_duration(&self) -> Duration {
-        self.request_start.elapsed()
-    }
 }
 
 #[cfg(test)]
