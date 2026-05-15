@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2278,9 +2277,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -2334,9 +2336,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -2944,16 +2949,36 @@ expression: "&schema"
       "type": "object"
     },
     "ContextConf": {
-      "anyOf": [
+      "description": "Configures the context",
+      "oneOf": [
         {
-          "description": "Deprecated configuration using a boolean",
-          "type": "boolean"
+          "const": "all",
+          "description": "Send all context keys to coprocessor",
+          "type": "string"
         },
         {
-          "$ref": "#/definitions/NewContextConf"
+          "const": "deprecated",
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
         }
-      ],
-      "description": "Configures the context"
+      ]
     },
     "CooperativeCancellation": {
       "additionalProperties": false,
@@ -3872,9 +3897,12 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -3923,9 +3951,12 @@ expression: "&schema"
           "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -7279,38 +7310,6 @@ expression: "&schema"
       "description": "Config for the test plugin",
       "type": "object"
     },
-    "NewContextConf": {
-      "description": "Configures the context",
-      "oneOf": [
-        {
-          "const": "all",
-          "description": "Send all context keys to coprocessor",
-          "type": "string"
-        },
-        {
-          "const": "deprecated",
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Only send the list of context keys to coprocessor",
-          "properties": {
-            "selective": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array",
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "selective"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "OTLPConfig": {
       "additionalProperties": false,
       "properties": {
@@ -8557,9 +8556,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -8613,9 +8615,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -10290,9 +10295,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -10354,9 +10362,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -11572,9 +11583,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -11626,9 +11640,12 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/ContextConf"
+            },
+            {
+              "type": "null"
             }
           ],
           "description": "Send the context"

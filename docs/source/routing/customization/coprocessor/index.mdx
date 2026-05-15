@@ -179,18 +179,11 @@ coprocessor:
 ### Context configuration
 
 The router request context is used to share data across stages of the request pipeline. The coprocessor can also use this context.
-By default, the context is not sent to the coprocessor (`context: false`).
+By default, the context is not sent to the coprocessor (omit the `context` field).
 You can send _all_ context keys to your coprocessor using `context: all`.
 You can also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
 
 If you're upgrading from router 1.x, the [context key names changed](/docs/graphos/routing/upgrade/from-router-v1#renamed-context-keys) in router v2.0. You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
-
-<Note>
-
-`context: true` from router 1.x is still supported by the configuration, and is an alias for `context: deprecated`.
-We strongly recommend using `context: deprecated` or `context: all` instead.
-
-</Note>
 
 Example:
 
@@ -198,8 +191,7 @@ Example:
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   router:
-    request:
-      context: false # Do not send any context entries
+    request: {} # Omit `context` to skip sending any context entries
   supergraph:
     request:
       headers: true

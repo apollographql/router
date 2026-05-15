@@ -76,87 +76,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        if matches!(
-            init.config.router.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.router.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
         if let Some(ref url) = init.config.router.request.url {
@@ -354,7 +273,7 @@ pub(super) struct RouterRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: ContextConf,
+    pub(super) context: Option<ContextConf>,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -376,7 +295,7 @@ pub(super) struct RouterResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: ContextConf,
+    pub(super) context: Option<ContextConf>,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -395,7 +314,7 @@ pub(super) struct SubgraphRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: ContextConf,
+    pub(super) context: Option<ContextConf>,
     /// Send the body
     pub(super) body: bool,
     /// Send the subgraph URI
@@ -419,7 +338,7 @@ pub(super) struct SubgraphResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: ContextConf,
+    pub(super) context: Option<ContextConf>,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
     /// Send the service name
@@ -506,32 +425,8 @@ pub(super) struct BodyFieldsConf {
 
 /// Configures the context
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
-pub(super) enum ContextConf {
-    /// Deprecated configuration using a boolean
-    Deprecated(bool),
-    NewContextConf(NewContextConf),
-}
-
-impl ContextConf {
-    fn is_deprecated(&self) -> bool {
-        match self {
-            Self::Deprecated(v) => *v,
-            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
-        }
-    }
-}
-
-impl Default for ContextConf {
-    fn default() -> Self {
-        Self::Deprecated(false)
-    }
-}
-
-/// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(super) enum NewContextConf {
+pub(super) enum ContextConf {
     /// Send all context keys to coprocessor
     All,
     /// Send all context keys using deprecated names (from router 1.x) to coprocessor
@@ -541,10 +436,10 @@ pub(super) enum NewContextConf {
 }
 
 impl ContextConf {
-    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Context {
         match self {
-            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::All => ctx.clone(),
+            Self::Deprecated => {
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     (
                         context_key_to_deprecated(elt.key().clone()),
@@ -552,10 +447,9 @@ impl ContextConf {
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                new_ctx
             }
-            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            Self::Selective(context_keys) => {
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
                         Some((elt.key().clone(), elt.value().clone()))
@@ -564,10 +458,8 @@ impl ContextConf {
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                new_ctx
             }
-            Self::Deprecated(false) => None,
         }
     }
 }
@@ -621,14 +513,16 @@ pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(
 pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
-    context_config: &ContextConf,
+    context_config: Option<&ContextConf>,
 ) -> Result<(), BoxError> {
     // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
+    let is_deprecated = matches!(context_config, Some(ContextConf::Deprecated));
+
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
-        if context_config.is_deprecated() {
+        if is_deprecated {
             key = context_key_from_deprecated(key);
         }
 
@@ -639,7 +533,7 @@ pub(crate) fn update_context_from_coprocessor(
     // Delete keys that were sent but are missing from the returned context
     // If the context config is selective, only delete keys that are in the selective list
     match context_config {
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
+        Some(ContextConf::Selective(context_keys)) => {
             target_context.retain(|key, _v| {
                 if keys_returned.contains(key) {
                     return true;
@@ -977,7 +871,10 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .as_ref()
+        .map(|c| c.get_context(&request.context));
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1064,9 +961,7 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
+                if let Some(ContextConf::Deprecated) = &request_config.context {
                     key = context_key_from_deprecated(key);
                 }
                 res.context.upsert_json_value(key, move |_current| value);
@@ -1089,8 +984,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if let Some(ContextConf::Deprecated) = &request_config.context {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1165,7 +1059,10 @@ where
         .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
+    let context_to_send = response_config
+        .context
+        .as_ref()
+        .map(|c| c.get_context(&response.context));
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1221,7 +1118,11 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            response_config.context.as_ref(),
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -1253,7 +1154,9 @@ where
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
                 let generator_map_context = generator_map_context.clone();
-                let context_to_send = context_conf.get_context(&generator_map_context);
+                let context_to_send = context_conf
+                    .as_ref()
+                    .map(|c| c.get_context(&generator_map_context));
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1296,7 +1199,7 @@ where
                     update_context_from_coprocessor(
                         &generator_map_context,
                         context,
-                        &context_conf,
+                        context_conf.as_ref(),
                     )?;
                 }
 
@@ -1362,7 +1265,10 @@ where
         .body
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .as_ref()
+        .map(|c| c.get_context(&request.context));
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1445,9 +1351,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if let Some(ContextConf::Deprecated) = &request_config.context {
                         key = context_key_from_deprecated(key);
                     }
                     subgraph_response
@@ -1473,8 +1377,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if let Some(ContextConf::Deprecated) = &request_config.context {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1534,7 +1437,10 @@ where
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
-    let context_to_send = response_config.context.get_context(&response.context);
+    let context_to_send = response_config
+        .context
+        .as_ref()
+        .map(|c| c.get_context(&response.context));
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1599,7 +1505,11 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            response_config.context.as_ref(),
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {

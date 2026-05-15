@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+coprocessor:
+  url: "http://example.com"
+  router:
+    request:
+      context: deprecated
+    response:
+      context: ~
+  supergraph:
+    request:
+      context: deprecated
+  subgraph:
+    all:
+      request:
+        context: ~
+  connector:
+    all:
+      request:
+        context: deprecated
