@@ -269,6 +269,12 @@ fn create_error_payload() -> serde_json::Value {
 }
 
 #[rstest::rstest]
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough(
     #[values(
@@ -346,6 +352,12 @@ async fn test_subscription_ws_passthrough(
     Ok(())
 }
 
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -428,6 +440,12 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
 }
 
 #[rstest::rstest]
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_error_payload(
     #[values(
@@ -527,6 +545,12 @@ async fn test_subscription_ws_passthrough_error_payload(
 }
 
 #[rstest::rstest]
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload(
     #[values(
@@ -620,6 +644,12 @@ async fn test_subscription_ws_passthrough_pure_error_payload(
     Ok(())
 }
 
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
 -> Result<(), BoxError> {
@@ -723,6 +753,12 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
     Ok(())
 }
 
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1078,6 +1114,12 @@ async fn dedup_dispatch_and_verify(
 //     (4 expected events including the schema-reload error) and is
 //     `cfg_attr`-gated to be ignored on macOS until the upstream race is
 //     resolved.
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_dedup_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1315,6 +1357,12 @@ async fn test_subscription_ws_passthrough_dedup_reload_propagation() -> Result<(
     Ok(())
 }
 
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1517,6 +1565,12 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
 /// This is an end-to-end integration test that verifies the fix works holistically through
 /// the router, since axum may be using a different version of tokio-tungstenite.
 #[rstest::rstest]
+// ROUTER-1793: ws_passthrough integration family has a CI-only race
+// that flakes ~5-10% on each test. Disabled until the race is
+// root-caused. See top-level comment above
+// `test_subscription_ws_passthrough_dedup_reload_propagation` for the
+// full investigation history.
+#[ignore = "ROUTER-1793: ws_passthrough family CI race"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_with_non_ascii_headers(
     #[values(
