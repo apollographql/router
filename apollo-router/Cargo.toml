@@ -66,6 +66,7 @@ async-compression = { version = "0.4.6", features = [
     "brotli",
     "gzip",
     "deflate",
+    "zstd",
 ] }
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }

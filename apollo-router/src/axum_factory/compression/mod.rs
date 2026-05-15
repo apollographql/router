@@ -213,14 +213,83 @@ impl Encode for Compressor {
 
 #[cfg(test)]
 mod tests {
+    use async_compression::tokio::write::BrotliDecoder;
+    use async_compression::tokio::write::DeflateDecoder;
     use async_compression::tokio::write::GzipDecoder;
+    use async_compression::tokio::write::ZstdDecoder;
+    use futures::StreamExt as _;
     use futures::stream;
     use rand::RngExt as _;
+    use rstest::rstest;
+    use tokio::io::AsyncWrite;
     use tokio::io::AsyncWriteExt;
 
     use super::*;
     use crate::services::router;
     use crate::services::router::body::{self};
+
+    // `get_ref()` and `get_mut()` on the async-compression decoders are inherent
+    // methods, not part of any trait. This thin trait lets us write a single
+    // generic helper for the flush tests rather than repeating the body four times.
+    trait DecoderTestExt: AsyncWrite + Unpin {
+        fn decoded(&self) -> &[u8];
+        fn decoded_mut(&mut self) -> &mut Vec<u8>;
+    }
+
+    macro_rules! impl_decoder_test_ext {
+        ($ty:ident) => {
+            impl DecoderTestExt for $ty<Vec<u8>> {
+                fn decoded(&self) -> &[u8] {
+                    self.get_ref()
+                }
+                fn decoded_mut(&mut self) -> &mut Vec<u8> {
+                    self.get_mut()
+                }
+            }
+        };
+    }
+    impl_decoder_test_ext!(GzipDecoder);
+    impl_decoder_test_ext!(DeflateDecoder);
+    impl_decoder_test_ext!(BrotliDecoder);
+    impl_decoder_test_ext!(ZstdDecoder);
+
+    /// Feeds `stream` to `decoder` one chunk at a time, asserting after each chunk that the
+    /// decoded output so far matches the expected text. A failure here means the compressor is
+    /// buffering across chunk boundaries instead of flushing a sync point after each one.
+    async fn assert_per_chunk_flush(
+        mut stream: impl futures::Stream<Item = Result<Bytes, BoxError>> + Unpin,
+        mut decoder: Box<dyn DecoderTestExt>,
+        primary: &str,
+        deferred: &str,
+    ) {
+        let first = stream
+            .next()
+            .await
+            .expect("stream ended before first chunk")
+            .expect("first chunk error");
+        decoder.write_all(&first).await.unwrap();
+        decoder.flush().await.unwrap();
+        decoder.decoded_mut().flush().await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(decoder.decoded()).expect("decoded output is not valid UTF-8"),
+            primary
+        );
+
+        let second = stream
+            .next()
+            .await
+            .expect("stream ended before second chunk")
+            .expect("second chunk error");
+        decoder.write_all(&second).await.unwrap();
+        decoder.flush().await.unwrap();
+        decoder.decoded_mut().flush().await.unwrap();
+
+        let expected = format!("{primary}{deferred}");
+        assert_eq!(
+            std::str::from_utf8(decoder.decoded()).expect("decoded output is not valid UTF-8"),
+            expected
+        );
+    }
 
     #[tokio::test]
     async fn finish() {
@@ -279,9 +348,17 @@ mod tests {
         let _ = stream.next().await.unwrap().unwrap();
     }
 
+    /// Verifies that each input chunk produces an independently decompressable output chunk.
+    /// This is the critical property for `@defer` streaming: the first part of the response
+    /// must reach the client before the second part is compressed.
+    #[rstest]
+    #[case::gzip("gzip")]
+    #[case::deflate("deflate")]
+    #[case::brotli("br")]
+    #[case::zstd("zstd")]
     #[tokio::test]
-    async fn flush() {
-        let primary_response = r#"
+    async fn flush(#[case] encoding: &str) {
+        const PRIMARY_RESPONSE: &str = r#"
 --graphql
 content-type: application/json
 
@@ -289,42 +366,25 @@ content-type: application/json
 --graphql
 "#;
 
-        let deferred_response = r#"content-type: application/json
+        const DEFERRED_RESPONSE: &str = r#"content-type: application/json
 
 {"hasNext":false,"incremental":[{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"platform"}},"path":["allProducts",0]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"platform","name":"platform-name"}},"path":["allProducts",1]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"client"}},"path":["allProducts",2]}]}
 --graphql--
 "#;
-        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
+        let compressor = Compressor::new([encoding].into_iter()).unwrap();
         let body: RouterBody = router::body::from_result_stream(stream::iter(vec![
-            Ok::<_, BoxError>(Bytes::from(primary_response)),
-            Ok(Bytes::from(deferred_response)),
+            Ok::<_, BoxError>(Bytes::from(PRIMARY_RESPONSE)),
+            Ok(Bytes::from(DEFERRED_RESPONSE)),
         ]));
-
-        let mut stream = compressor.process(body);
-        let mut decoder = GzipDecoder::new(Vec::new());
-
-        let first = stream.next().await.unwrap().unwrap();
-        decoder.write_all(&first).await.unwrap();
-
-        decoder.flush().await.unwrap();
-        decoder.get_mut().flush().await.unwrap();
-        assert_eq!(
-            std::str::from_utf8(decoder.get_ref()).unwrap(),
-            primary_response
-        );
-
-        let second = stream.next().await.unwrap().unwrap();
-        decoder.write_all(&second).await.unwrap();
-
-        decoder.flush().await.unwrap();
-        decoder.get_mut().flush().await.unwrap();
-
-        let mut full_response = String::from(primary_response);
-        full_response += deferred_response;
-        assert_eq!(
-            std::str::from_utf8(decoder.get_ref()).unwrap(),
-            full_response
-        );
+        let stream = compressor.process(body);
+        let decoder: Box<dyn DecoderTestExt> = match encoding {
+            "gzip" => Box::new(GzipDecoder::new(Vec::new())),
+            "deflate" => Box::new(DeflateDecoder::new(Vec::new())),
+            "br" => Box::new(BrotliDecoder::new(Vec::new())),
+            "zstd" => Box::new(ZstdDecoder::new(Vec::new())),
+            _ => unreachable!(),
+        };
+        assert_per_chunk_flush(stream, decoder, PRIMARY_RESPONSE, DEFERRED_RESPONSE).await
     }
 }
