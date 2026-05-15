@@ -2,6 +2,7 @@ use std::error::Error as _;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 
 use ::serde::Deserialize;
 use futures::future::BoxFuture;
@@ -60,6 +61,8 @@ type UnixHTTPClient = Decompression<hyper_util::client::legacy::Client<UnixConne
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
 type MixedClient = HTTPClient;
+
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -137,7 +140,6 @@ impl HttpClientService {
             .with_tls_config(tls_config)
             .https_or_http();
 
-        let pool_idle_timeout = client_config.pool_idle_timeout;
         let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
         let http2_keep_alive_timeout = client_config
             .experimental_http2_keep_alive_timeout
@@ -156,10 +158,7 @@ impl HttpClientService {
         let mut client_builder =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
         client_builder
-            .pool_idle_timeout(pool_idle_timeout)
-            // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-            // unless you're also removing `pool_idle_timeout`
-            .pool_timer(TokioTimer::new())
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
             .http2_only(http2 == Http2Config::Http2Only);
         if let Some(interval) = http2_keep_alive_interval {
             client_builder
@@ -184,10 +183,7 @@ impl HttpClientService {
                     hyper_util::client::legacy::Client::builder(
                         hyper_util::rt::TokioExecutor::new(),
                     )
-                    .pool_idle_timeout(pool_idle_timeout)
-                    // WARN: for `pool_idle_timeout` to work, it needs a pool timer; don't remove this
-                    // unless you're also removing `pool_idle_timeout`
-                    .pool_timer(TokioTimer::new())
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                     .http2_only(http2 == Http2Config::Http2Only)
                     .build(UnixConnector),
                 ),
