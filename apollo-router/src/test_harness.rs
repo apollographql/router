@@ -254,7 +254,7 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::router_service`]
     pub fn router_hook(
         self,
-        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+        callback: impl Fn(router::BoxCloneService) -> router::BoxCloneService + Send + Sync + 'static,
     ) -> Self {
         self.extra_plugin(RouterServicePlugin(callback))
     }
@@ -262,7 +262,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
     pub fn supergraph_hook(
         self,
-        callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SupergraphServicePlugin(callback))
     }
@@ -270,7 +273,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::execution_service`]
     pub fn execution_hook(
         self,
-        callback: impl Fn(execution::BoxService) -> execution::BoxService + Send + Sync + 'static,
+        callback: impl Fn(execution::BoxCloneService) -> execution::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(ExecutionServicePlugin(callback))
     }
@@ -278,7 +284,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::subgraph_service`]
     pub fn subgraph_hook(
         self,
-        callback: impl Fn(&str, subgraph::BoxService) -> subgraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SubgraphServicePlugin(callback))
     }
@@ -442,7 +451,7 @@ struct SubgraphServicePlugin<F>(F);
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+    F: 'static + Send + Sync + Fn(router::BoxCloneService) -> router::BoxCloneService,
 {
     type Config = ();
 
@@ -450,7 +459,7 @@ where
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -458,7 +467,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
+    F: 'static + Send + Sync + Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService,
 {
     type Config = ();
 
@@ -466,7 +475,10 @@ where
         unreachable!()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -474,7 +486,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for ExecutionServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(execution::BoxService) -> execution::BoxService,
+    F: 'static + Send + Sync + Fn(execution::BoxCloneService) -> execution::BoxCloneService,
 {
     type Config = ();
 
@@ -482,7 +494,7 @@ where
         unreachable!()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -490,7 +502,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SubgraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(&str, subgraph::BoxService) -> subgraph::BoxService,
+    F: 'static + Send + Sync + Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService,
 {
     type Config = ();
 
@@ -501,8 +513,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         (self.0)(subgraph_name, service)
     }
 }
@@ -529,11 +541,11 @@ impl Plugin for MockedSubgraphs {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        default: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.0
             .get(subgraph_name)
-            .map(|service| service.clone().boxed())
+            .map(|service| service.clone().boxed_clone())
             .unwrap_or(default)
     }
 }

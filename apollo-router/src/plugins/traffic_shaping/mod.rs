@@ -326,10 +326,11 @@ impl PluginPrivate for TrafficShaping {
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         // NB: consider each triplet (map_future_with_request_data, load_shed, layer) as a unit of
         //  behavior
         ServiceBuilder::new()
+            .buffered()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -401,10 +402,14 @@ impl PluginPrivate for TrafficShaping {
                     .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
             }))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -429,6 +434,7 @@ impl PluginPrivate for TrafficShaping {
                 });
 
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
                     move |(ctx, subgraph_name), future| {
@@ -479,7 +485,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -487,9 +493,9 @@ impl PluginPrivate for TrafficShaping {
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         let all_config = self.config.connector.all.as_ref();
         let source_config = self.config.connector.sources.get(&source_name).cloned();
         let final_config = Self::merge_config(all_config, source_config.as_ref());
@@ -509,6 +515,7 @@ impl PluginPrivate for TrafficShaping {
             });
 
             ServiceBuilder::new()
+                .buffered()
                 .map_future_with_request_data(
                     |req: &Request| (req.context.clone(), req.key.clone()),
                     move |(context, response_key), future| {
@@ -545,8 +552,9 @@ impl PluginPrivate for TrafficShaping {
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression {
-                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
@@ -554,7 +562,7 @@ impl PluginPrivate for TrafficShaping {
                 })
                 .buffered()
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -656,6 +664,7 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Configuration;
@@ -688,7 +697,7 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Bytes,
-        mut router_service: router::BoxService,
+        mut router_service: router::BoxCloneService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
@@ -715,7 +724,7 @@ mod test {
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> router::BoxService {
+    ) -> router::BoxCloneService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -810,7 +819,7 @@ mod test {
         .await
         .unwrap()
         .make()
-        .boxed()
+        .boxed_clone()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
@@ -839,11 +848,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -928,7 +937,7 @@ mod test {
         });
 
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .subgraph_service("test", test_service.boxed_clone())
             .oneshot(request)
             .await
             .unwrap();
@@ -951,7 +960,9 @@ mod test {
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request;
+                let TransportRequest::Http(ref http_request) = req.transport_request else {
+                    panic!("expected Http transport request");
+                };
 
                 assert_eq!(
                     http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
@@ -963,7 +974,7 @@ mod test {
 
         let _response = plugin
             .connector_request_service(
-                test_service.boxed(),
+                test_service.boxed_clone(),
                 "test_subgraph.test_sourcename".to_string(),
             )
             .oneshot(request)
@@ -1117,7 +1128,7 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        let mut svc = plugin.subgraph_service("test", test_service.boxed());
+        let mut svc = plugin.subgraph_service("test", test_service.boxed_clone());
 
         assert!(
             svc.ready()
@@ -1180,7 +1191,7 @@ mod test {
         });
 
         let mut svc = plugin.connector_request_service(
-            test_service.boxed(),
+            test_service.boxed_clone(),
             "test_subgraph.test_sourcename".to_string(),
         );
 
@@ -1252,7 +1263,7 @@ mod test {
             .returning(MockRouterService::new);
 
         // let mut svc = plugin.router_service(mock_service.clone().boxed());
-        let mut svc = plugin.router_service(mock_service.boxed());
+        let mut svc = plugin.router_service(mock_service.boxed_clone());
 
         let response: RouterResponse = svc
             .ready()
@@ -1313,7 +1324,7 @@ mod test {
                     .data(json!({ "test": 1234_u32 }))
                     .build()
             })
-            .boxed();
+            .boxed_clone();
 
         let mut rs = plugin.router_service(svc);
 
@@ -1650,7 +1661,7 @@ mod test {
                 sleep(Duration::from_millis(500)).await;
                 RouterResponse::fake_builder().build()
             })
-            .boxed();
+            .boxed_clone();
 
         let mut router_service = plugin.router_service(svc);
 

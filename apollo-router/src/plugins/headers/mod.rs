@@ -263,7 +263,11 @@ impl PluginPrivate for Headers {
         })
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.subgraph_operations
@@ -272,14 +276,14 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         ServiceBuilder::new()
             .layer(HeadersLayer::new(
                 self.connector_source_operations
@@ -288,7 +292,7 @@ impl PluginPrivate for Headers {
                     .unwrap_or_else(|| self.all_connector_operations.clone()),
             ))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -312,6 +316,7 @@ impl<S> Layer<S> for HeadersLayer {
         }
     }
 }
+#[derive(Clone)]
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
@@ -399,7 +404,9 @@ impl<S> HeadersService<S> {
     fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
-        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+        let TransportRequest::Http(ref mut http_request) = req.transport_request else {
+            return;
+        };
         let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
@@ -623,6 +630,7 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
@@ -1654,11 +1662,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -1748,7 +1756,9 @@ mod test {
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
-            let TransportRequest::Http(ref http_request) = self.transport_request;
+            let TransportRequest::Http(ref http_request) = self.transport_request else {
+                panic!("expected Http transport request");
+            };
             let actual_headers = http_request
                 .inner
                 .headers()

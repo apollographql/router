@@ -15,8 +15,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
 use tower::BoxError;
-use tower::ServiceExt as _;
-use tower::util::BoxService;
+use tower::ServiceExt;
+use tower::util::BoxCloneService;
 use tracing::debug;
 
 use crate::metrics::meter_provider;
@@ -259,7 +259,7 @@ impl PluginPrivate for FleetDetector {
         }
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -328,14 +328,14 @@ impl PluginPrivate for FleetDetector {
                     .build()
                     .unwrap()
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn http_client_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<HttpRequest, HttpResponse, BoxError>,
-    ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
+        service: BoxCloneService<HttpRequest, HttpResponse, BoxError>,
+    ) -> BoxCloneService<HttpRequest, HttpResponse, BoxError> {
         let sn_req = Arc::new(subgraph_name.to_string());
         let sn_res = sn_req.clone();
         service
@@ -426,7 +426,7 @@ impl PluginPrivate for FleetDetector {
                     }
                 }
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -618,7 +618,7 @@ mod tests {
                         .build()
                 });
             let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
+                plugin.router_service(mock_bad_request_service.boxed_clone());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("request"))
                 .build()
@@ -670,7 +670,7 @@ mod tests {
                         http_response: res,
                         context: Default::default(),
                     })
-                    .boxed(),
+                    .boxed_clone(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
@@ -747,7 +747,7 @@ mod tests {
                         http_response: res.map(Body::from),
                         context: Default::default(),
                     })
-                    .boxed(),
+                    .boxed_clone(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
@@ -917,7 +917,7 @@ nodev   cgroup
                         .build()
                 });
 
-            let mut router_service = plugin.router_service(mock_service.boxed());
+            let mut router_service = plugin.router_service(mock_service.boxed_clone());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("test request"))
                 .build()
@@ -974,7 +974,7 @@ nodev   cgroup
                         .build()
                 });
 
-            let mut router_service = plugin.router_service(mock_service.boxed());
+            let mut router_service = plugin.router_service(mock_service.boxed_clone());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_result_stream(futures::stream::once(
                     async { Ok::<_, Infallible>(bytes::Bytes::from("streaming request")) },

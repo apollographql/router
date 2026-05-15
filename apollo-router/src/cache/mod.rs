@@ -15,6 +15,7 @@ use crate::configuration::RedisCache;
 
 mod metrics;
 pub(crate) mod redis;
+mod replica_filter;
 mod size_estimation;
 pub(crate) mod storage;
 use std::convert::Infallible;
@@ -63,13 +64,43 @@ where
         Self::with_capacity(config.in_memory.limit, config.redis.clone(), caller).await
     }
 
-    /// `init_from_redis` is called with values newly deserialized from Redis cache
-    /// if an error is returned, the value is ignored and considered a cache miss.
+    /// Look up `key` in the cache, returning an [`Entry`] that describes how to proceed:
+    ///
+    /// - **In-memory hit (fast path)**: the value is returned immediately without acquiring
+    ///   the `wait_map` mutex.
+    /// - **First waiter** ([`Entry::is_first`] returns `true`): this task missed in all cache
+    ///   layers and is responsible for computing the value. Call [`Entry::insert`] when done to
+    ///   store the result and unblock any concurrent waiters for the same key.
+    /// - **Subsequent waiter**: another task is already computing the value for this key. Call
+    ///   [`Entry::get`] to wait for the result.
+    ///
+    /// `init_from_redis` is called on values freshly deserialized from Redis. Return `Err` to
+    /// reject the entry and treat the lookup as a miss (e.g. the cached plan is no longer valid
+    /// for the current schema).
     pub(crate) async fn get(
         &self,
         key: &K,
         init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
     ) -> Entry<K, V, UncachedError> {
+        // Fast path: if the value is already in the in-memory cache, return it without
+        // acquiring the wait_map mutex. This is the common case for a warm cache and
+        // removes all wait_map contention on cache hits — the mutex is only needed for
+        // miss deduplication (preventing thundering herd when multiple tasks race to
+        // compute the same value). Redis-only entries still fall through to the slow path.
+        if let Some(value) = self.storage.peek_in_memory(key).await {
+            return Entry {
+                inner: EntryInner::Value(value),
+            };
+        }
+
+        // Slow path: acquire wait_map mutex for miss deduplication.
+        //
+        // Note: storage.get() below will re-check the in-memory cache, so on a miss this path
+        // locks `inner` twice. The redundant check is intentional — it closes the
+        // time-of-check/time-of-use race between the fast-path miss above and the wait_map
+        // lock below. The overhead is nanoseconds on a path already dominated by plan
+        // computation or a Redis round-trip.
+        //
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
         // go through a wait map to register interest in data associated with a key.
@@ -119,7 +150,7 @@ where
                     inner: EntryInner::First {
                         sender,
                         key: key.clone(),
-                        cache: self.clone(),
+                        cache: Box::new(self.clone()),
                         _drop_signal,
                     },
                 }
@@ -169,7 +200,7 @@ enum EntryInner<K: KeyType, V: ValueType, UncachedError> {
     First {
         key: K,
         sender: broadcast::Sender<Result<V, UncachedError>>,
-        cache: DeduplicatingCache<K, V, UncachedError>,
+        cache: Box<DeduplicatingCache<K, V, UncachedError>>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
@@ -316,5 +347,35 @@ mod tests {
 
         // To be really sure, check there is only one value in the cache
         assert_eq!(cache.storage.len().await, 1);
+    }
+
+    #[test(tokio::test)]
+    async fn warm_cache_hit_never_returns_first() {
+        let cache: DeduplicatingCache<String, String> =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test")
+                .await
+                .unwrap();
+
+        // Populate the cache
+        let entry = cache.get(&"key".to_string(), |_| Ok(())).await;
+        assert!(entry.is_first());
+        entry.insert("value".to_string()).await;
+
+        // A warm-cache lookup should never return First — the value is found by the in-memory
+        // fast path or by storage.get()'s re-check inside the wait_map path.
+        let mut tasks: FuturesUnordered<_> = (0..100)
+            .map(|_| {
+                let cache = cache.clone();
+                async move {
+                    let entry = cache.get(&"key".to_string(), |_| Ok(())).await;
+                    assert!(!entry.is_first(), "warm-cache hit should not be First");
+                    entry.get().await.unwrap()
+                }
+            })
+            .collect();
+
+        while let Some(result) = tasks.next().await {
+            assert_eq!(result, "value");
+        }
     }
 }

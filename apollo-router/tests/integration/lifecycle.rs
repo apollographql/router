@@ -385,6 +385,8 @@ async fn test_plugin_ordering() {
 macro_rules! make_plugin {
     ($mod_name: ident, $str_name: expr) => {
         mod $mod_name {
+            use tower::ServiceExt;
+
             use super::*;
 
             #[derive(Deserialize, JsonSchema)]
@@ -406,7 +408,10 @@ macro_rules! make_plugin {
                     Ok(Self)
                 }
 
-                fn router_service(&self, service: router::BoxService) -> router::BoxService {
+                fn router_service(
+                    &self,
+                    service: router::BoxCloneService,
+                ) -> router::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: router::Request| {
                             test_plugin_ordering_push_trace(
@@ -423,13 +428,13 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed()
+                        .boxed_clone()
                 }
 
                 fn supergraph_service(
                     &self,
-                    service: supergraph::BoxService,
-                ) -> supergraph::BoxService {
+                    service: supergraph::BoxCloneService,
+                ) -> supergraph::BoxCloneService {
                     ServiceBuilder::new()
                         .map_request(|request: supergraph::Request| {
                             test_plugin_ordering_push_trace(
@@ -446,7 +451,7 @@ macro_rules! make_plugin {
                             response
                         })
                         .service(service)
-                        .boxed()
+                        .boxed_clone()
                 }
             }
         }

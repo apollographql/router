@@ -8,4 +8,5 @@ subscription:
   queue_capacity: 100000
   max_opened_subscriptions: 100
   deduplication:
-    enabled: true
+    all:
+      enabled: true

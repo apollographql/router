@@ -125,7 +125,7 @@ impl<'a> Builder<'a> {
                     PrometheusService {
                         registry: prometheus_registry.clone(),
                     }
-                    .boxed(),
+                    .boxed_clone(),
                 ),
             );
         }

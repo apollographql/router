@@ -141,7 +141,7 @@ impl Plugin for ProgressiveOverridePlugin {
 
     // Add all arbitrary labels (non-percentage-based labels) from the schema to
     // the context so coprocessors can resolve their values
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             service
         } else {
@@ -154,7 +154,7 @@ impl Plugin for ProgressiveOverridePlugin {
                     request
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
@@ -166,7 +166,10 @@ impl Plugin for ProgressiveOverridePlugin {
     //    operation
     // 4. Add the filtered, sorted set of labels to the context for use by the
     //    query planner
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             service
         } else {
@@ -255,7 +258,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 request
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
         }
     }
 }

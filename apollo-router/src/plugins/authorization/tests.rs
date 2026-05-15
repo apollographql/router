@@ -1128,7 +1128,7 @@ async fn cache_key_metadata() {
                         .build())
                 },
             );
-            mock_subgraph_service.boxed()
+            mock_subgraph_service.boxed_clone()
         })
         .build_router()
         .await

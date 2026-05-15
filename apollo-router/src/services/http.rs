@@ -9,6 +9,7 @@ use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
 
+pub(crate) mod connection_timing;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -64,19 +65,19 @@ impl HttpClientServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> BoxService {
+    pub(crate) fn create(&self, name: &str) -> BoxCloneService {
         let service = self.service.clone();
         self.plugins
             .iter()
             .rev()
-            .fold(service.boxed(), |acc, (_, e)| {
+            .fold(service.boxed_clone(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
             })
     }
 }
 
 pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxService;
+    fn make(&self) -> BoxCloneService;
 }
 
 impl<S> MakeHttpService for S
@@ -88,7 +89,22 @@ where
         + 'static,
     <S as Service<HttpRequest>>::Future: Send,
 {
-    fn make(&self) -> BoxService {
-        self.clone().boxed()
+    fn make(&self) -> BoxCloneService {
+        self.clone().boxed_clone()
     }
+}
+
+/// The kind of remote service an [`HttpClientService`] is configured to talk to.
+///
+/// Used by [`service::HttpClientService`] to derive the service name and by
+/// [`connection_timing::ConnectionTimingConnector`] to select the OTel attributes emitted on the
+/// `apollo.router.connection.acquire.duration` histogram.
+#[derive(Clone)]
+enum ServiceTarget {
+    /// A coprocessor: emits `coprocessor = true`.
+    Coprocessor,
+    /// A subgraph: emits `subgraph.name = name`.
+    Subgraph { name: Arc<str> },
+    /// A connector source: emits `connector.source.name = name`.
+    Connector { name: Arc<str> },
 }

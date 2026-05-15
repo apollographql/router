@@ -19,7 +19,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
 
-use super::connect::BoxService;
+use super::connect::BoxCloneService;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
@@ -159,19 +159,23 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             // TODO: apollo.connector.field.alias
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
-            let transport = &connector.transport;
-            if let Ok(detail) = serde_json::to_string(
-                &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
-            ) {
-                span.record("apollo.connector.detail", detail);
-            }
-            if let Some(source_name) = connector.id.source_name.as_ref() {
-                span.record("apollo.connector.source.name", source_name.as_str());
+            if let Some(transport) = &connector.transport {
                 if let Ok(detail) = serde_json::to_string(
-                    &serde_json::json!({ "baseURL": transport.source_template.as_ref().map(|uri| uri.to_string()) }),
+                    &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
                 ) {
+                    span.record("apollo.connector.detail", detail);
+                }
+                if connector.id.source_name.is_some()
+                    && let Ok(detail) = serde_json::to_string(
+                        &serde_json::json!({ "baseURL": transport.source_template.as_ref().map(|uri| uri.to_string()) }),
+                    )
+                {
                     span.record("apollo.connector.source.detail", detail);
                 }
+            }
+            // Record source name regardless of transport (it comes from the connector ID, not transport)
+            if let Some(source_name) = connector.id.source_name.as_ref() {
+                span.record("apollo.connector.source.name", source_name.as_str());
             }
 
             execute(&connector_request_service_factory, request, connector)
@@ -275,7 +279,7 @@ impl ConnectorServiceFactory {
 }
 
 impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
-    type Service = BoxService;
+    type Service = BoxCloneService;
 
     fn create(&self) -> Self::Service {
         ConnectorService {
@@ -285,6 +289,6 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
             connectors_by_service_name: self.connectors_by_service_name.clone(),
             connector_request_service_factory: self.connector_request_service_factory.clone(),
         }
-        .boxed()
+        .boxed_clone()
     }
 }

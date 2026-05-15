@@ -157,6 +157,10 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) raw_yaml: Option<Arc<str>>,
 
+    /// Reload configuration
+    #[serde(default)]
+    pub(crate) reload: Reload,
+
     /// Health check configuration
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
@@ -251,6 +255,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         #[derive(Deserialize, Default)]
         #[serde(default)]
         struct AdHocConfiguration {
+            reload: Reload,
             health_check: HealthCheck,
             sandbox: Sandbox,
             homepage: Homepage,
@@ -287,6 +292,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
+            reload: ad_hoc.reload,
             health_check: ad_hoc.health_check,
             sandbox: ad_hoc.sandbox,
             homepage: ad_hoc.homepage,
@@ -349,6 +355,7 @@ impl Configuration {
         let conf = Self {
             validated_yaml: Default::default(),
             raw_yaml: None,
+            reload: Default::default(),
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -494,6 +501,7 @@ impl Configuration {
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
+            reload: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
@@ -1378,6 +1386,43 @@ pub(crate) struct TlsClientAuth {
     pub(crate) key: PrivateKeyDer<'static>,
 }
 
+/// Configuration for router reload behavior.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Reload {
+    /// Maximum number of automatic retry attempts when a reload fails.
+    /// `0` disables automatic retries entirely.
+    /// `null` allows unlimited retries.
+    /// Defaults to 5 — an arbitrary but conservative limit to prevent a
+    /// bad publish from causing endless reload attempts.
+    #[schemars(default = "default_reload_max_retries")]
+    pub(crate) max_retries: Option<u32>,
+
+    /// Base delay between retry attempts. A random jitter of up to 25% is
+    /// added automatically to spread retries across router instances.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_reload_retry_delay")]
+    pub(crate) retry_delay: Duration,
+}
+
+fn default_reload_max_retries() -> Option<u32> {
+    Some(5)
+}
+
+fn default_reload_retry_delay() -> Duration {
+    Duration::from_secs(10)
+}
+
+impl Default for Reload {
+    fn default() -> Self {
+        Self {
+            max_retries: default_reload_max_retries(),
+            retry_delay: default_reload_retry_delay(),
+        }
+    }
+}
+
 /// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1563,10 +1608,9 @@ pub(crate) enum BatchingMode {
 
 /// Configuration for Batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
-    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Batching mode
@@ -1576,12 +1620,12 @@ pub(crate) struct Batching {
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
 
     /// Maximum size for a batch
-    #[serde(default)]
     pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct CommonBatchingConfig {
     /// Whether this batching config should be enabled
     pub(crate) enabled: bool,

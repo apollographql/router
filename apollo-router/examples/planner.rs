@@ -27,7 +27,10 @@ impl Plugin for DoNotExecute {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_request(|mut req: supergraph::Request| {
                 let body = req.supergraph_request.body_mut();
@@ -38,10 +41,10 @@ impl Plugin for DoNotExecute {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 Ok(ControlFlow::Break(
@@ -52,7 +55,7 @@ impl Plugin for DoNotExecute {
                 ))
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

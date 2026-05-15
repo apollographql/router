@@ -22,7 +22,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as _;
+use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
@@ -631,7 +631,7 @@ pub(crate) struct ExecutionServiceFactory {
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
-    type Service = execution::BoxService;
+    type Service = execution::BoxCloneService;
 
     fn create(&self) -> Self::Service {
         let subscription_plugin_conf = self
@@ -658,11 +658,11 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                         apollo_telemetry_config: apollo_telemetry_conf,
                         configuration: Arc::clone(&self.configuration),
                     }
-                    .boxed(),
+                    .boxed_clone(),
                     |acc, (_, e)| e.execution_service(acc),
                 ),
             )
-            .boxed()
+            .boxed_clone()
     }
 }
 

@@ -348,6 +348,13 @@ async fn service_call(
                 let ctx = context.clone();
                 let response_stream = response_stream.inspect(move |_| {
                     if first_event {
+                        // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
+                        // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
+                        // response chunk from deferred/subscription chunks.
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(true),
+                        );
                         first_event = false;
                     } else if !inserted {
                         ctx.insert_json_value(
@@ -611,11 +618,11 @@ impl PluggableSupergraphServiceBuilder {
                     self.plugins
                         .iter()
                         .rev()
-                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        .fold(supergraph_service.boxed_clone(), |acc, (_, e)| {
                             e.supergraph_service(acc)
                         }),
                 )
-                .boxed(),
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
 
@@ -658,24 +665,15 @@ impl HasSchema for SupergraphCreator {
 }
 
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
-    type Service = supergraph::BoxService;
+    type Service = supergraph::BoxCloneService;
     fn create(&self) -> Self::Service {
-        self.make().boxed()
+        self.make()
     }
 }
 
 impl SupergraphCreator {
-    pub(crate) fn make(
-        &self,
-    ) -> impl Service<
-        supergraph::Request,
-        Response = supergraph::Response,
-        Error = BoxError,
-        Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send
-    + use<> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.sb.clone().boxed()
+    pub(crate) fn make(&self) -> supergraph::BoxCloneService {
+        self.sb.clone().boxed_clone()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

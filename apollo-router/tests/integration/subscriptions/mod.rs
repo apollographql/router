@@ -20,6 +20,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 use tokio::time::Duration;
+use tokio::time::Instant;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -30,6 +31,27 @@ use wiremock::matchers::method;
 pub mod callback;
 pub mod trace_propagation;
 pub mod ws_passthrough;
+
+/// Poll an HTTP URL until a 200 response is received or the deadline
+/// expires. Used to wait for axum servers spawned in tests to actually
+/// be serving (not just bound) before the test exercises them.
+///
+/// The fixture historically slept 500 ms here, which races with axum's
+/// task scheduling under load — see `flaky-test-fixes.md` Section 9.
+pub async fn wait_for_http_ok(url: &str, deadline: Duration) {
+    let start = Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .expect("build reqwest client");
+    while start.elapsed() < deadline {
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => return,
+            _ => tokio::time::sleep(Duration::from_millis(20)).await,
+        }
+    }
+    panic!("server at {url} did not become ready within {deadline:?}");
+}
 
 #[derive(Clone)]
 struct SubscriptionServerConfig {
@@ -121,8 +143,13 @@ pub async fn start_subscription_server_with_payloads(
         axum::serve(listener, app).await.unwrap();
     });
 
-    // Wait a moment for the server to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for the server to actually serve. TCP connect alone is not
+    // sufficient since the kernel queues connections on the listen
+    // backlog before `axum::serve` has scheduled — the test fixture
+    // historically slept 500 ms here, which raced with axum's task
+    // scheduling under load. Poll the GET `/` route (which returns
+    // "WebSocket server running") instead.
+    wait_for_http_ok(&format!("http://{}/", ws_addr), Duration::from_secs(5)).await;
 
     info!("Axum server running on {}", ws_addr);
 
@@ -692,7 +719,10 @@ pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
         axum::serve(listener, app).await.unwrap();
     });
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // See `start_subscription_server_with_payloads` for why TCP
+    // connect alone is not sufficient. Poll the GET `/` route
+    // (which returns "Callback server running") until it 200s.
+    wait_for_http_ok(&format!("http://{}/", addr), Duration::from_secs(5)).await;
     info!("Callback server running on {}", addr);
 
     (addr, state)

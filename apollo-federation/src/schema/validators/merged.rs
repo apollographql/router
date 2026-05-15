@@ -14,6 +14,7 @@ use crate::ensure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::HasLocations;
+use crate::error::Locations;
 use crate::error::SingleFederationError;
 use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -59,14 +60,18 @@ pub(crate) fn validate_merged_schema(
                 if field_pos.get(supergraph_schema.schema()).is_err() {
                     // This means that the type was defined (or at least implemented the interface)
                     // only in subgraphs where the interface didn't have that field.
-                    let subgraphs_with_interface_field = subgraphs
+                    let mut locations: Locations = Vec::new();
+                    let subgraphs_with_interface_field: Vec<_> = subgraphs
                         .iter()
                         .filter(|subgraph| {
                             interface_field_pos.get(subgraph.schema().schema()).is_ok()
                         })
+                        .inspect(|subgraph| {
+                            locations.extend(interface_field_pos.locations(subgraph));
+                        })
                         .map(|subgraph| subgraph.name.clone())
-                        .collect::<Vec<_>>();
-                    let subgraphs_with_type_implementing_interface = subgraphs
+                        .collect();
+                    let subgraphs_with_type_implementing_interface: Vec<_> = subgraphs
                         .iter()
                         .filter(|subgraph| {
                             let Some(subgraph_type) =
@@ -84,8 +89,11 @@ pub(crate) fn validate_merged_schema(
                                 _ => false,
                             }
                         })
+                        .inspect(|subgraph| {
+                            locations.extend(type_pos.locations(subgraph));
+                        })
                         .map(|subgraph| subgraph.name.clone())
-                        .collect::<Vec<_>>();
+                        .collect();
                     errors.push(CompositionError::InterfaceFieldNoImplem {
                         message: format!(
                             "Interface field \"{}\" is declared in {} but type \"{}\", which implements \"{}\" only in {} does not have field \"{}\".",
@@ -95,7 +103,8 @@ pub(crate) fn validate_merged_schema(
                             interface_name,
                             human_readable_subgraph_names(subgraphs_with_type_implementing_interface.iter()),
                             interface_field_pos.field_name,
-                        )
+                        ),
+                        locations,
                     });
                 }
 
@@ -131,6 +140,7 @@ pub(crate) fn validate_merged_schema(
             else {
                 bail!("@requires unexpectedly missing from field that references it");
             };
+            let requires_directive_locations = requires_directive.locations(subgraph);
             let requires_arguments = &subgraph
                 .metadata()
                 .federation_spec_definition()
@@ -220,6 +230,7 @@ pub(crate) fn validate_merged_schema(
                     add_requires_error(
                         parent_field_pos,
                         requires_directive,
+                        &requires_directive_locations,
                         &subgraph.name,
                         type_name,
                         field_name,
@@ -251,6 +262,7 @@ pub(crate) fn validate_merged_schema(
                     add_requires_error(
                         parent_field_pos,
                         requires_directive,
+                        &requires_directive_locations,
                         &subgraph.name,
                         type_name,
                         field_name,
@@ -302,6 +314,7 @@ static APOLLO_COMPILER_REQUIRED_ARGUMENT_PATTERN: LazyLock<Regex> = LazyLock::ne
 fn add_requires_error(
     requires_parent_field_pos: &ObjectFieldDefinitionPosition,
     requires_application: &Directive,
+    requires_directive_locations: &Locations,
     subgraph_name: &str,
     type_name: &str,
     field_name: &str,
@@ -314,7 +327,8 @@ fn add_requires_error(
     let type_name = Name::new(type_name)?;
     let field_name = Name::new(field_name)?;
     let argument_name = Name::new(argument_name)?;
-    let mut locations = Vec::with_capacity(subgraphs.len());
+    let mut locations = Vec::with_capacity(subgraphs.len() + requires_directive_locations.len());
+    locations.extend_from_slice(requires_directive_locations);
     let incompatible_subgraph_names = subgraphs
         .iter()
         .map(|other_subgraph| {

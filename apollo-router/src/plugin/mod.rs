@@ -379,20 +379,23 @@ pub trait Plugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define `router_service` if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -402,8 +405,8 @@ pub trait Plugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         service
     }
 
@@ -453,20 +456,23 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -476,8 +482,8 @@ pub trait PluginUnstable: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         service
     }
 
@@ -514,23 +520,26 @@ where
         Plugin::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         Plugin::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         Plugin::supergraph_service(self, service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         Plugin::execution_service(self, service)
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         Plugin::subgraph_service(self, subgraph_name, service)
     }
 
@@ -584,20 +593,23 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -607,8 +619,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         service
     }
 
@@ -616,17 +628,17 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         service
     }
 
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         _source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         service
     }
 
@@ -663,23 +675,26 @@ where
         PluginUnstable::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         PluginUnstable::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         PluginUnstable::supergraph_service(self, service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         PluginUnstable::execution_service(self, service)
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         PluginUnstable::subgraph_service(self, subgraph_name, service)
     }
 
@@ -713,16 +728,19 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService;
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -730,22 +748,22 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService;
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService;
 
     /// This service handles HTTP communication
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService;
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService;
 
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService;
+    ) -> crate::services::connector::request_service::BoxCloneService;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -771,19 +789,26 @@ where
     T: PluginPrivate,
     for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.router_service(service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         self.supergraph_service(service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.subgraph_service(name, service)
     }
 
@@ -791,16 +816,16 @@ where
     fn http_client_service(
         &self,
         name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         self.http_client_service(name, service)
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.connector_request_service(service, source_name)
     }
 
@@ -912,12 +937,12 @@ macro_rules! register_private_plugin {
 pub(crate) struct Handler {
     service: UnconstrainedBuffer<
         router::Request,
-        <router::BoxService as Service<router::Request>>::Future,
+        <router::BoxCloneService as Service<router::Request>>::Future,
     >,
 }
 
 impl Handler {
-    pub(crate) fn new(service: router::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxCloneService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
@@ -938,8 +963,8 @@ impl Service<router::Request> for Handler {
     }
 }
 
-impl From<router::BoxService> for Handler {
-    fn from(original: router::BoxService) -> Self {
+impl From<router::BoxCloneService> for Handler {
+    fn from(original: router::BoxCloneService) -> Self {
         Self::new(original)
     }
 }

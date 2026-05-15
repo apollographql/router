@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
@@ -9,6 +11,17 @@ const CONFIG: &str = r#"
 include_subgraph_errors:
   all: true
 "#;
+
+/// Build a `reqwest::Client` that disables HTTP keep-alive so each request
+/// closes its TCP connection on completion. Neutralises the hyper-client
+/// pool drain race that flakes `assert_shutdown` in the harness (see
+/// `IntegrationTest::assert_shutdown_with_deadline` for the full story).
+fn no_keepalive_reqwest_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build")
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_returning_data_null() -> Result<(), BoxError> {
@@ -88,8 +101,17 @@ async fn test_subgraph_returning_different_typename_on_query_root() -> Result<()
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_valid_extensions_service_for_subgraph_error() -> Result<(), BoxError> {
+    // This test shares a flake fingerprint with
+    // `coprocessor::test_coprocessor_response_handling`: a shutdown-drain
+    // race that trips the harness's default 10 s `assert_shutdown`
+    // budget. Disable client-side keep-alive so the router's
+    // per-connection task isn't holding an idle inbound TCP socket when
+    // SIGTERM fires, and widen the shutdown budget to give OpenTelemetry
+    // SDK 0.31.0's `MeterProvider.Drop` ordering enough headroom on
+    // slow runners.
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
+        .reqwest_client(no_keepalive_reqwest_client())
         .responder(ResponseTemplate::new(200).set_body_json(json!({
             "data": { "topProducts": null },
             "errors": [{
@@ -125,7 +147,9 @@ async fn test_valid_extensions_service_for_subgraph_error() -> Result<(), BoxErr
         })
     );
 
-    router.graceful_shutdown().await;
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(30))
+        .await;
     Ok(())
 }
 

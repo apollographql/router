@@ -66,7 +66,7 @@ The supergraph service is executed after query parsing but before query executio
 | `query_variable`   | Yes         |                                                       | The name of a GraphQL query variable                                              |
 | `request_header`   | Yes         |                                                       | The name of a request header                                                      |
 | `response_header`  | Yes         |                                                       | The name of a response header                                                     |
-| `is_primary_response` | No       | `true` \| `false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
+| `is_primary_response` | No       | `true`                                                  | Boolean indicating whether the current response chunk is the primary one (instead of a deferred or subscription event). At per-chunk scope (for example, on an event-level instrument), returns `true` for the primary chunk and `false` for subsequent chunks. For details, see [splitting metrics between primary and deferred chunks](#splitting-metrics-between-primary-and-deferred-chunks). |
 | `response_data`    | Yes         |                                                       | JSON Path into the supergraph response body data (it might impact performance)   |
 | `response_errors`  | Yes         |                                                       | JSON Path into the supergraph response body errors (it might impact performance) |
 | `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
@@ -253,6 +253,56 @@ telemetry:
               # response_errors: "$.[0].locations"
               # response_errors: "$.[0].extensions"
 ```
+
+### Splitting metrics between primary and deferred chunks
+
+For `@defer` queries (and subscriptions), a single supergraph response is delivered as a stream of chunks: one primary chunk followed by one or more deferred (or subscription) chunks. The `is_primary_response` selector lets you split per-chunk telemetry into primary-vs-deferred series.
+
+Use it as an attribute on an event-level instrument (`value: event_unit`, `value: event_duration`, or similar) so it evaluates once per chunk:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        my.defer.chunks:
+          type: counter
+          value: event_unit
+          unit: chunk
+          description: "Count of response chunks, split by primary vs deferred"
+          attributes:
+            is_primary:
+              is_primary_response: true
+```
+
+This produces two series:
+
+- `my_defer_chunks_total{is_primary="true"}` — increments on each primary chunk (typically once per request).
+- `my_defer_chunks_total{is_primary="false"}` — increments on each deferred chunk.
+
+The same pattern works with `condition` if you want an instrument that fires only on primary chunks (or only on deferred chunks):
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        my.deferred.chunks.only:
+          type: counter
+          value: event_unit
+          unit: chunk
+          description: "Count of deferred response chunks"
+          condition:
+            eq:
+              - is_primary_response: true
+              - false
+```
+
+<Note>
+
+At span/response scope — for example, as a supergraph span attribute — `is_primary_response: true` evaluates to `true` once per response. The primary-vs-deferred split is only meaningful at per-chunk scope (event-level instruments or events).
+
+</Note>
 
 ### Router overhead and duration selectors
 

@@ -5,17 +5,23 @@
 //!  - There are timings (sleeps) which work as things are implemented right now, but
 //!    may be sources of problems in the future.
 //!
-//!  - There is a global TEST lock which forces these tests to execute serially to stop router
-//!    global tracing effect from breaking the tests. DO NOT BE TEMPTED to remove this TEST lock to
-//!    try and speed things up (unless you have time and patience to re-work a lot of test code).
+//!  - These tests must execute serially across this binary AND across the
+//!    sibling `apollo_reports` / `apollo_otel_http_proxy` binaries, because
+//!    they each install process-wide OpenTelemetry tracer/meter providers and
+//!    Apollo Studio mock collectors that would otherwise stomp each other.
+//!    Serialization is enforced by the `serial-apollo-telemetry-integration`
+//!    nextest test-group in `.config/nextest.toml` (an in-source mutex cannot
+//!    do this because each `tests/*.rs` is a separate binary).
+//!    DO NOT run these tests with bare `cargo test` -- only `cargo nextest`
+//!    honours the group; bare `cargo test` will race the global state.
 //!
 //! Summary: The dragons here are ancient and very evil. Do not attempt to take their treasure.
 //!
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
-use anyhow::anyhow;
 use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
@@ -35,13 +41,18 @@ use tokio::task::JoinHandle;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::RequestDecompressionLayer;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+use wiremock::matchers::path_regex;
 
 mod tracing_common;
 
 static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(|| {
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
-static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
 async fn config(
     use_legacy_request_span: bool,
@@ -136,12 +147,119 @@ async fn get_router_service(
     )
 }
 
+/// Spin up a localhost wiremock server that mimics the subset of the
+/// `https://jsonplaceholder.typicode.com/` REST surface that
+/// `tests/fixtures/supergraph_connect.graphql` exercises:
+///
+/// - `GET /posts` — list endpoint used by `query{posts{id body title}}`.
+///   Returns a small deterministic payload (2 posts) so the resulting OTel
+///   trace has a fixed, hermetic shape regardless of network reachability.
+/// - `GET /posts/{id}` — entity fetch for the `post(id:)` field.
+/// - `GET /missing*` — the `forceError` connector source path; always 404
+///   so the `connector_error` test exercises the error path deterministically.
+/// - `GET /health*` — the `routerHealth` connector source path; always 200
+///   so any incidental health probe doesn't introduce non-determinism.
+///
+/// The server is leaked (`Box::leak`) so it lives for the duration of the
+/// process — same pattern Apollo's test harness uses for the OTLP/Apollo
+/// collector mocks above. Tests in this file are serialised by the
+/// `serial-apollo-telemetry-integration` nextest group, so leaking is safe.
+///
+/// Used by `get_connector_router_service` to replace the live-network
+/// egress these tests previously relied on. Without this mock the tests
+/// flaked whenever CI couldn't reach `jsonplaceholder.typicode.com` (and
+/// the snapshot encoded a non-deterministic `connect_request` count
+/// matching whatever the live API happened to return).
+async fn start_connector_mock_server() -> MockServer {
+    let server = wiremock::MockServer::builder().start().await;
+
+    // `GET /posts` — return a 2-element list. Deterministic.
+    Mock::given(method("GET"))
+        .and(path("/posts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "title": "first", "body": "first body"},
+            {"id": 2, "title": "second", "body": "second body"},
+        ])))
+        .mount(&server)
+        .await;
+
+    // `GET /posts/{id}` — single-post entity fetch.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/posts/\d+$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "title": "first", "body": "first body"
+        })))
+        .mount(&server)
+        .await;
+
+    // `GET /missing*` — `forceError` source path. Always 404 so the
+    // `connector_error` test exercises the error path deterministically.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    // `GET /health*` — `routerHealth` source. Not exercised by the current
+    // test queries but mocked for completeness so any incidental request
+    // doesn't reach off-host.
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    server
+}
+
 async fn get_connector_router_service(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     use_legacy_request_span: bool,
     mocked: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
+    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+
+    // Stand up a localhost wiremock to replace the real
+    // `https://jsonplaceholder.typicode.com/` egress the connector schema
+    // hardcodes. The server is leaked so its lifetime matches the test
+    // process (these tests are serialised at the binary level).
+    let connector_mock = start_connector_mock_server().await;
+    let mock_url = connector_mock.uri();
+    // Leak so the server stays alive for the duration of the test (and
+    // any other test in this binary) without us threading a guard through
+    // the BoxCloneService return type.
+    let _ = Box::leak(Box::new(connector_mock));
+
+    // Inject `connectors.sources.<subgraph>.<sourceName>.override_url`
+    // entries so the runtime rewrites the connector source baseURL to the
+    // mock. The runtime override propagates into the `connect` span's
+    // `apollo.connector.source.detail` attribute, so that attribute is
+    // redacted by `assert_report!` (see the `redacted_attributes` list)
+    // to keep the snapshot hermetic across the random port wiremock
+    // chooses.
+    if let Some(obj) = config.as_object_mut() {
+        let connectors = obj
+            .entry("connectors".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let sources = connectors
+            .as_object_mut()
+            .expect("connectors must be an object")
+            .entry("sources".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let sources_obj = sources
+            .as_object_mut()
+            .expect("connectors.sources must be an object");
+        // Subgraph name is `posts` (see `enum join__Graph` in
+        // tests/fixtures/supergraph_connect.graphql).
+        sources_obj.insert(
+            "posts.jsonPlaceholder".to_string(),
+            serde_json::json!({"override_url": format!("{mock_url}/")}),
+        );
+        sources_obj.insert(
+            "posts.routerHealth".to_string(),
+            serde_json::json!({"override_url": format!("{mock_url}/")}),
+        );
+    }
 
     let builder = TestHarness::builder()
         .try_log_level("INFO")
@@ -209,6 +327,15 @@ macro_rules! assert_report {
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
                                 "graphql.error.path",
+                                // The `connector` and `connector_error` tests stand
+                                // up an ephemeral wiremock server (see
+                                // `start_connector_mock_server`) and inject its URL
+                                // via `connectors.sources.*.override_url`, so the
+                                // `connect` span's `apollo.connector.source.detail`
+                                // attribute renders as the random localhost port
+                                // the OS gave us. Redact so the snapshot stays
+                                // hermetic across runs.
+                                "apollo.connector.source.detail",
                             ];
                             if $batch {
                                 redacted_attributes.append(&mut vec![
@@ -368,9 +495,9 @@ async fn get_traces<
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
+    let started_at = Instant::now();
     let response = service
         .ready()
         .await
@@ -379,40 +506,105 @@ where
         .await
         .expect("router service call failed");
 
-    // Drain the response
-    let mut found_report = match response
+    // Drain the response. We capture the body verbatim (or its decode error) so the
+    // post-deadline panic below can report whether the request succeeded, returned
+    // GATEWAY_TIMEOUT, etc. — the matcher's "no matching report" message is
+    // ambiguous between (a) router never produced a trace and (b) router produced
+    // a trace whose shape didn't match the filter, and the request body
+    // disambiguates the two.
+    let response_body: Result<String, String> = match response
         .response
         .into_body()
         .collect()
         .await
         .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
-        Ok(Ok(response)) => {
-            if response.contains("errors") {
-                eprintln!("response had errors {response}");
+        Ok(Ok(body)) => {
+            if body.contains("errors") {
+                eprintln!("response had errors {body}");
             }
-            Ok(None)
+            Ok(body)
         }
-        _ => Err(anyhow!("error retrieving response")),
+        Ok(Err(utf8_err)) => Err(format!("response body was not valid UTF-8: {utf8_err}")),
+        Err(collect_err) => Err(format!("failed to drain response body: {collect_err}")),
     };
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
+    // Poll until a report passes `filter`. The 10 s deadline was set when Phase 1
+    // of the de-flaking effort widened the window from `10 × 100 ms` (≈1 s) to
+    // give CI plenty of slack for normal export latency. If we hit it anyway, the
+    // problem is almost always upstream of the OTLP exporter (the request itself
+    // didn't complete, the matcher doesn't fit the trace shape the router
+    // produced, etc.) — see the diagnostic panic below.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let found_report;
+    loop {
         let my_reports = reports.lock().await;
-        let report = my_reports.iter().find(filter);
-        if report.is_some() && matches!(found_report, Ok(None)) {
-            found_report = Ok(report.cloned());
+        if let Some(report) = my_reports.iter().find(filter) {
+            found_report = report.clone();
             break;
         }
+        if Instant::now() >= deadline {
+            // Build a diagnostic that turns "timed out" into something actionable.
+            // Per-report shape: resource_spans / scope_spans / total spans, plus the
+            // distinct span names we saw — enough to tell at a glance whether the
+            // problem is "no spans at all" (request timed out / never traced) vs.
+            // "wrong spans" (filter mismatch) vs. "right spans but on a later
+            // batch we never waited long enough for" (rare; deadline too short).
+            let summary: Vec<String> = my_reports
+                .iter()
+                .enumerate()
+                .map(|(idx, r)| {
+                    let resource_count = r.resource_spans.len();
+                    let scope_count: usize =
+                        r.resource_spans.iter().map(|rs| rs.scope_spans.len()).sum();
+                    let total_spans: usize = r
+                        .resource_spans
+                        .iter()
+                        .flat_map(|rs| &rs.scope_spans)
+                        .map(|ss| ss.spans.len())
+                        .sum();
+                    let mut names: Vec<&str> = r
+                        .resource_spans
+                        .iter()
+                        .flat_map(|rs| &rs.scope_spans)
+                        .flat_map(|ss| &ss.spans)
+                        .map(|s| s.name.as_str())
+                        .collect();
+                    names.sort();
+                    names.dedup();
+                    format!(
+                        "[{idx}] resource_spans={resource_count} scope_spans={scope_count} \
+                         total_spans={total_spans} span_names={names:?}"
+                    )
+                })
+                .collect();
+            let report_count = my_reports.len();
+            drop(my_reports);
+            let elapsed = started_at.elapsed();
+            let body_summary = match &response_body {
+                Ok(body) if body.contains("errors") => {
+                    let snippet: String = body.chars().take(400).collect();
+                    format!("response had errors (first 400 chars): {snippet}")
+                }
+                Ok(body) => {
+                    let snippet: String = body.chars().take(200).collect();
+                    format!("response ok (first 200 chars): {snippet}")
+                }
+                Err(e) => format!("response unavailable: {e}"),
+            };
+            panic!(
+                "timed out waiting for matching trace report after {elapsed:?} \
+                 (deadline 10s); reports collected: {report_count}; \
+                 {body_summary}; report shapes: {summary:?}"
+            );
+        }
         drop(my_reports);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
 
     found_report
-        .expect("failed to get report")
-        .expect("failed to find report")
 }
 
 #[tokio::test(flavor = "multi_thread")]

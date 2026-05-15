@@ -72,11 +72,11 @@ impl SupergraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: supergraph::BoxService,
+        service: supergraph::BoxCloneService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> supergraph::BoxService
+    ) -> supergraph::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -177,7 +177,7 @@ impl SupergraphStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -238,18 +238,21 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SupergraphRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -396,18 +399,21 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
+        payload
+            .call(http_client.clone(), &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -752,7 +758,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -831,7 +837,7 @@ mod tests {
 
         let service = supergraph_stage.clone().as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -909,7 +915,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1025,7 +1031,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1141,7 +1147,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1259,7 +1265,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1475,7 +1481,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_disabled_invalid() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1494,7 +1500,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_disabled_empty() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1516,7 +1522,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_enabled_valid() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1535,7 +1541,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_enabled_empty() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1559,7 +1565,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_enabled_invalid() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1583,7 +1589,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_disabled_valid() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1602,7 +1608,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_disabled_empty() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1623,7 +1629,7 @@ mod tests {
     async fn external_plugin_supergraph_request_validation_disabled_invalid() {
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1645,7 +1651,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_enabled_valid() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1663,7 +1669,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_enabled_empty() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1680,7 +1686,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_enabled_invalid() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1697,7 +1703,7 @@ mod tests {
     async fn external_plugin_supergraph_response_validation_disabled_valid() {
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            create_mock_supergraph_service().boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled

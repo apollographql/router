@@ -640,3 +640,353 @@ fn interface_object_chains_are_not_supported() {
         )],
     );
 }
+
+// =============================================================================
+// @interfaceObject JOIN FIELD EMISSION TESTS
+//
+// Verifies that @join__field directives are only emitted when necessary on
+// interface fields involving @interfaceObject. Fields shared by ALL subgraphs
+// that declare the type should omit @join__field (implicit semantics suffice).
+// =============================================================================
+
+#[test]
+fn interface_object_shared_key_fields_omit_join_field() {
+    // Mirrors the real-world pattern (e.g. ShoppableProduct) where an
+    // interface spans two subgraphs — one as a real interface, the other as
+    // an @interfaceObject — while additional unrelated subgraphs participate
+    // in the composition. Key fields shared by both interface-declaring
+    // subgraphs should NOT get @join__field; subgraph-specific fields should.
+    //
+    // The bystander subgraph is critical: without it, the post-merge
+    // remove_redundant_join_fields cleanup would strip the extra directives
+    // (since they'd cover all graphs globally), masking the bug.
+    let subgraph_a = ServiceDefinition {
+        name: "SubgraphA",
+        type_defs: r#"
+        type Query {
+          items: [I]
+        }
+
+        interface I @key(fields: "id code") {
+          id: ID!
+          code: String!
+          onlyInA: Int
+        }
+
+        type A implements I @key(fields: "id code") {
+          id: ID!
+          code: String!
+          onlyInA: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "SubgraphB",
+        type_defs: r#"
+        type I @interfaceObject @key(fields: "id code") {
+          id: ID!
+          code: String!
+          onlyInB: Boolean
+        }
+        "#,
+    };
+
+    let bystander = ServiceDefinition {
+        name: "Bystander",
+        type_defs: r#"
+        type Unrelated @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, bystander]);
+    let supergraph = result.expect("composition should succeed");
+    let schema = supergraph.schema().schema();
+
+    let iface = schema
+        .types
+        .get("I")
+        .expect("type I should exist")
+        .as_interface()
+        .expect("I should be an interface");
+
+    // Key fields present in BOTH subgraphs should NOT have @join__field
+    for field_name in ["id", "code"] {
+        let field = iface
+            .fields
+            .get(field_name)
+            .expect("field should exist on interface I");
+        let join_fields: Vec<_> = field
+            .directives
+            .iter()
+            .filter(|d| d.name == "join__field")
+            .collect();
+        assert!(
+            join_fields.is_empty(),
+            "Interface field I.{field_name} is shared by all declaring subgraphs \
+             and should NOT have @join__field, but has: {join_fields:?}"
+        );
+    }
+
+    // Fields present in only ONE subgraph should have @join__field
+    for field_name in ["onlyInA", "onlyInB"] {
+        let field = iface
+            .fields
+            .get(field_name)
+            .expect("field should exist on interface I");
+        let has_join_field = field.directives.iter().any(|d| d.name == "join__field");
+        assert!(
+            has_join_field,
+            "Interface field I.{field_name} exists in only one subgraph \
+             and should have @join__field"
+        );
+    }
+}
+
+#[test]
+fn interface_object_shared_key_fields_with_three_subgraphs() {
+    // Interface declared in SubgraphA with all implementations,
+    // @interfaceObject in SubgraphB and SubgraphC, plus a bystander.
+    // Key fields shared by all three interface-declaring subgraphs should
+    // omit @join__field; subgraph-specific fields should not.
+    let subgraph_a = ServiceDefinition {
+        name: "SubgraphA",
+        type_defs: r#"
+        type Query {
+          items: [I]
+        }
+
+        interface I @key(fields: "id") {
+          id: ID!
+          aOnly: Int
+        }
+
+        type Impl implements I @key(fields: "id") {
+          id: ID!
+          aOnly: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "SubgraphB",
+        type_defs: r#"
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+          bOnly: Float
+        }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "SubgraphC",
+        type_defs: r#"
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+          cOnly: Boolean
+        }
+        "#,
+    };
+
+    let bystander = ServiceDefinition {
+        name: "Bystander",
+        type_defs: r#"
+        type Unrelated @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c, bystander]);
+    let supergraph = result.expect("composition should succeed");
+    let schema = supergraph.schema().schema();
+
+    let iface = schema
+        .types
+        .get("I")
+        .expect("type I should exist")
+        .as_interface()
+        .expect("I should be an interface");
+
+    // `id` is in ALL three subgraphs → should NOT have @join__field
+    let id_field = iface.fields.get("id").expect("id field should exist");
+    let id_join_fields: Vec<_> = id_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "join__field")
+        .collect();
+    assert!(
+        id_join_fields.is_empty(),
+        "Interface field I.id is shared by all declaring subgraphs \
+         and should NOT have @join__field, but has: {id_join_fields:?}"
+    );
+
+    // Fields in only one subgraph should have exactly 1 @join__field
+    for field_name in ["aOnly", "bOnly", "cOnly"] {
+        let field = iface
+            .fields
+            .get(field_name)
+            .expect("field should exist on interface I");
+        let join_count = field
+            .directives
+            .iter()
+            .filter(|d| d.name == "join__field")
+            .count();
+        assert_eq!(
+            join_count, 1,
+            "Interface field I.{field_name} exists in only one subgraph \
+             and should have exactly 1 @join__field, but has {join_count}"
+        );
+    }
+}
+
+#[test]
+fn interface_object_partial_overlap_needs_join_field() {
+    // When a non-key field is present in some-but-not-all subgraphs that
+    // declare the interface, @join__field is required even with @interfaceObject.
+    // SubgraphA: interface with id + partial, SubgraphB: @interfaceObject with
+    // id + partial, SubgraphC: @interfaceObject with id only, plus a bystander.
+    let subgraph_a = ServiceDefinition {
+        name: "SubgraphA",
+        type_defs: r#"
+        type Query {
+          items: [I]
+        }
+
+        interface I @key(fields: "id") {
+          id: ID!
+          partial: String
+        }
+
+        type X implements I @key(fields: "id") {
+          id: ID!
+          partial: String @shareable
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "SubgraphB",
+        type_defs: r#"
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+          partial: String @shareable
+        }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "SubgraphC",
+        type_defs: r#"
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    };
+
+    let bystander = ServiceDefinition {
+        name: "Bystander",
+        type_defs: r#"
+        type Unrelated @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c, bystander]);
+    let supergraph = result.expect("composition should succeed");
+    let schema = supergraph.schema().schema();
+
+    let iface = schema
+        .types
+        .get("I")
+        .expect("type I should exist")
+        .as_interface()
+        .expect("I should be an interface");
+
+    // `id` is in all three → no @join__field
+    let id_field = iface.fields.get("id").expect("id field should exist");
+    let id_join_count = id_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "join__field")
+        .count();
+    assert_eq!(
+        id_join_count, 0,
+        "I.id is shared by all subgraphs and should NOT have @join__field"
+    );
+
+    // `partial` is in A and B but NOT C → needs @join__field
+    let partial_field = iface
+        .fields
+        .get("partial")
+        .expect("partial field should exist");
+    let partial_join_count = partial_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "join__field")
+        .count();
+    assert_eq!(
+        partial_join_count, 2,
+        "I.partial is in 2 of 3 subgraphs and should have exactly 2 @join__field directives, \
+         but has {partial_join_count}"
+    );
+}
+
+#[test]
+fn interface_object_type_kind_mismatch_labels_correctly_when_object_processed_first() {
+    // Regression test for a bug where `mismatched_types` and `subgraphs_with_interface_obj`
+    // used TypeDefinitionPosition (kind-carrying enum) as keys. When a plain object subgraph
+    // was processed before an @interfaceObject subgraph, the merged schema stored Object("I")
+    // but the @interfaceObject map was keyed by Interface("I"), causing lookup failures.
+    // This produced: (1) wrong labels in TYPE_KIND_MISMATCH (both subgraphs shown as
+    // "Object Type"), and (2) a spurious INTERFACE_OBJECT_USAGE_ERROR because the
+    // mismatch-suppression check also failed.
+
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          iFromA: I
+        }
+
+        type I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          iFromB: I
+        }
+
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+          y: Int
+        }
+        "#,
+    };
+
+    // Compose with the plain object subgraph processed first (alphabetical ordering).
+    // Before the fix, this produced:
+    // 1. TYPE_KIND_MISMATCH with wrong label (both shown as "Object Type")
+    // 2. Spurious INTERFACE_OBJECT_USAGE_ERROR
+    // After the fix, only TYPE_KIND_MISMATCH with correct labeling is produced.
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "TYPE_KIND_MISMATCH",
+            r#"Type "I" has mismatched kind: it is defined as Object Type in subgraph "subgraphA" but Interface Object Type (Object Type with @interfaceObject) in subgraph "subgraphB""#,
+        )],
+    );
+}

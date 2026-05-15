@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -733,6 +734,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +746,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +997,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {
@@ -3248,6 +3247,11 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.\n(default: true)",
+          "type": "boolean"
+        },
+        "ignore_auth_context": {
+          "default": false,
+          "description": "When true, JWT claims from the authorization context are excluded from the deduplication key.\nUse this when your subgraph data does not vary by user identity and you want authenticated\nusers to share a single subgraph WebSocket connection.\n\nSecurity note: with this enabled, a user may receive events from a connection originally\nopened by a different user.  Only enable this when subgraph subscription data is truly\nnon-personalized.\n(default: false)",
           "type": "boolean"
         },
         "ignored_headers": {
@@ -8273,6 +8277,31 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Reload": {
+      "additionalProperties": false,
+      "description": "Configuration for router reload behavior.",
+      "properties": {
+        "max_retries": {
+          "default": 5,
+          "description": "Maximum number of automatic retry attempts when a reload fails.\n`0` disables automatic retries entirely.\n`null` allows unlimited retries.\nDefaults to 5 — an arbitrary but conservative limit to prevent a\nbad publish from causing endless reload attempts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Base delay between retry attempts. A random jitter of up to 25% is\nadded automatically to spread retries across router instances.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Remove": {
       "description": "Remove header",
       "oneOf": [
@@ -10088,6 +10117,33 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphDeduplicationConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeduplicationConfig"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "ignore_auth_context": false,
+            "ignored_headers": []
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DeduplicationConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphErrorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -11310,12 +11366,16 @@ expression: "&schema"
         "deduplication": {
           "allOf": [
             {
-              "$ref": "#/definitions/DeduplicationConfig"
+              "$ref": "#/definitions/SubgraphDeduplicationConfigConfiguration"
             }
           ],
           "default": {
-            "enabled": true,
-            "ignored_headers": []
+            "all": {
+              "enabled": true,
+              "ignore_auth_context": false,
+              "ignored_headers": []
+            },
+            "subgraphs": {}
           },
           "description": "Configure subgraph subscription deduplication"
         },
@@ -11323,6 +11383,14 @@ expression: "&schema"
           "default": true,
           "description": "Enable subscription",
           "type": "boolean"
+        },
+        "max_lifetime": {
+          "default": null,
+          "description": "Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "max_opened_subscriptions": {
           "default": null,
@@ -12999,6 +13067,21 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/definitions/Config7"
+    },
+    "reload": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Reload"
+        }
+      ],
+      "default": {
+        "max_retries": 5,
+        "retry_delay": {
+          "nanos": 0,
+          "secs": 10
+        }
+      },
+      "description": "Reload configuration"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

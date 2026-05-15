@@ -22,7 +22,7 @@ use crate::query_planner::subscription::SubscriptionNode;
 /// its existence.
 const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 
 // XXX(@goto-bus-stop): The `SubscriptionRequest` should not be an enum branch here in the future.
 // The information it represents must be isolated to the subscription plugin.
@@ -173,6 +173,7 @@ impl<T> AddSubgraphNameExt for Result<T, Error> {
 }
 
 /// Extension trait for getting the subgraph name associated with an error, if any.
+/// This removes the subgraph name from the error's extensions.
 pub(crate) trait SubgraphNameExt {
     /// Get the subgraph name associated with an error, if any
     fn subgraph_name(&mut self) -> Option<String>;

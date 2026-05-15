@@ -6,7 +6,6 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -199,33 +198,37 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.router_service(service)
     }
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.supergraph_service(service)
     }
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.subgraph_service(name, service)
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.connector_request_service(&source_name, service)
     }
 }
@@ -279,7 +282,7 @@ where
         })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.configuration.router.as_service(
             self.http_client.clone(),
             service,
@@ -291,8 +294,8 @@ where
 
     fn supergraph_service(
         &self,
-        service: services::supergraph::BoxService,
-    ) -> services::supergraph::BoxService {
+        service: services::supergraph::BoxCloneService,
+    ) -> services::supergraph::BoxCloneService {
         self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,
@@ -304,8 +307,8 @@ where
 
     fn execution_service(
         &self,
-        service: services::execution::BoxService,
-    ) -> services::execution::BoxService {
+        service: services::execution::BoxCloneService,
+    ) -> services::execution::BoxCloneService {
         self.configuration.execution.as_service(
             self.http_client.clone(),
             service,
@@ -315,7 +318,11 @@ where
         )
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
@@ -328,8 +335,8 @@ where
     fn connector_request_service(
         &self,
         source_name: &str,
-        service: crate::services::connector::request_service::BoxService,
-    ) -> crate::services::connector::request_service::BoxService {
+        service: crate::services::connector::request_service::BoxCloneService,
+    ) -> crate::services::connector::request_service::BoxCloneService {
         self.configuration.connector.all.as_service(
             self.http_client.clone(),
             service,
@@ -648,13 +655,12 @@ pub(crate) fn update_context_from_coprocessor(
     Ok(())
 }
 
-fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
-    f64_histogram!(
+fn get_coprocessor_timer(stage: PipelineStep) -> crate::metrics::HistogramTimerGuard {
+    f64_histogram_timer!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
-        duration.as_secs_f64(),
         coprocessor.stage = stage.to_string()
-    );
+    )
 }
 
 fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
@@ -680,11 +686,11 @@ impl RouterStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: router::BoxService,
+        service: router::BoxCloneService,
         default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
-    ) -> router::BoxService
+    ) -> router::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -783,7 +789,7 @@ impl RouterStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -811,11 +817,11 @@ impl SubgraphStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: subgraph::BoxService,
+        service: subgraph::BoxCloneService,
         default_url: String,
         service_name: String,
         response_validation: bool,
-    ) -> subgraph::BoxService
+    ) -> subgraph::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -915,7 +921,7 @@ impl SubgraphStage {
             .option_layer(response_layer)
             .buffered() // XXX: Added during backpressure fixing
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -987,7 +993,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -995,13 +1000,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::RouterRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -1171,7 +1180,6 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1179,13 +1187,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::RouterResponse);
+        payload
+            .call(http_client.clone(), &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1372,7 +1384,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1380,13 +1391,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SubgraphRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1537,7 +1552,6 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
     // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1545,13 +1559,17 @@ where
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::SubgraphResponse);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
