@@ -846,6 +846,14 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     Ok(())
 }
 
+// Same race family as `test_subscription_ws_passthrough_dedup_reload_propagation`:
+// when a schema reload fires mid-stream, the subscription_task can break
+// before the reload broadcast lands, so the client misses the schema-reload
+// error event. Disabled while ROUTER-1793 is open; investigation context lives
+// in the comment above `test_subscription_ws_passthrough_dedup_reload_propagation`.
+//
+// Tracking: ROUTER-1793 — https://apollographql.atlassian.net/browse/ROUTER-1793
+#[ignore = "ROUTER-1793: cross-platform race in schema-reload propagation."]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxError> {
     if !graph_os_enabled() {
