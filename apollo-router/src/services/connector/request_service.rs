@@ -179,7 +179,7 @@ impl ConnectorRequestServiceFactory {
             let service = UnconstrainedBuffer::new(
                 plugins.iter().rev().fold(
                     ConnectorRequestService {
-                        http_clients: http_clients.clone(),
+                        http_client: http_clients.get(source).cloned(),
                     }
                     .boxed_clone(),
                     |acc, (_, e)| e.connector_request_service(acc, source.clone()),
@@ -206,10 +206,11 @@ impl ConnectorRequestServiceFactory {
 /// A service for executing individual requests to Apollo Connectors
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestService {
-    /// Pre-built HTTP client services keyed by source config key, with all
-    /// plugin layers already folded in. Owned (not `Arc`-wrapped) because
-    /// `BoxCloneService` is `Clone + Send` but not `Sync`.
-    pub(crate) http_clients: IndexMap<String, crate::services::http::BoxCloneService>,
+    /// Pre-built HTTP client service for this service's source, with all
+    /// plugin layers already folded in. Each `ConnectorRequestService`
+    /// instance only handles requests for a single source, so we store
+    /// just the one client it needs.
+    pub(crate) http_client: Option<crate::services::http::BoxCloneService>,
 }
 
 impl tower::Service<Request> for ConnectorRequestService {
@@ -223,8 +224,7 @@ impl tower::Service<Request> for ConnectorRequestService {
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        let source_name = request.connector.source_config_key();
-        let http_client = self.http_clients.get(&source_name).cloned();
+        let http_client = self.http_client.clone();
 
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
