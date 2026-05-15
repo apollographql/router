@@ -103,72 +103,6 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    pub(crate) fn new(
-        service: impl Into<String>,
-        tls_config: ClientConfig,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http();
-
-        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
-        let http2_keep_alive_timeout = client_config
-            .experimental_http2_keep_alive_timeout
-            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
-
-        let http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = match http2 {
-            Http2Config::Enable => builder
-                .enable_http1()
-                .enable_http2()
-                .wrap_connector(http_connector),
-            Http2Config::Disable => builder.enable_http1().wrap_connector(http_connector),
-            Http2Config::Http2Only => builder.enable_http2().wrap_connector(http_connector),
-        };
-
-        let mut client_builder =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
-        client_builder
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only);
-        if let Some(interval) = http2_keep_alive_interval {
-            client_builder
-                // WARN: http2 keep-alive requires a timer; don't remove this
-                .timer(TokioTimer::new())
-                .http2_keep_alive_interval(Some(interval))
-                .http2_keep_alive_timeout(http2_keep_alive_timeout)
-                // Send pings even when the connection is idle in the pool, so stale
-                // connections are detected before a request is made on them
-                .http2_keep_alive_while_idle(true);
-        }
-        let http_client = client_builder.build(connector);
-
-        Ok(Self {
-            http_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(http_client),
-            #[cfg(unix)]
-            unix_client: ServiceBuilder::new()
-                .layer(DecompressionLayer::new())
-                .service(
-                    hyper_util::client::legacy::Client::builder(
-                        hyper_util::rt::TokioExecutor::new(),
-                    )
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .http2_only(http2 == Http2Config::Http2Only)
-                    .build(UnixConnector),
-                ),
-            service: Arc::new(service.into()),
-        })
-    }
-
     /// Creates a client for talking to subgraphs
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
@@ -244,6 +178,68 @@ impl HttpClientService {
             generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
         HttpClientService::new(name, tls_client_config, client_config)
+    }
+
+    pub(crate) fn new(
+        service: impl Into<String>,
+        tls_config: ClientConfig,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let mut http_connector =
+            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1();
+
+        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
+        let http2_keep_alive_timeout = client_config
+            .experimental_http2_keep_alive_timeout
+            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
+
+        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let connector = if http2 != Http2Config::Disable {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
+
+        let mut client_builder =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        client_builder
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+            .http2_only(http2 == Http2Config::Http2Only);
+        if let Some(interval) = http2_keep_alive_interval {
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
+        }
+        let http_client = client_builder.build(connector);
+
+        Ok(Self {
+            http_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(http_client),
+            #[cfg(unix)]
+            unix_client: ServiceBuilder::new()
+                .layer(DecompressionLayer::new())
+                .service(
+                    hyper_util::client::legacy::Client::builder(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .build(UnixConnector),
+                ),
+            service: Arc::new(service.into()),
+        })
     }
 
     /// Creates a client using only a `Client` config, with an empty TLS root store.
