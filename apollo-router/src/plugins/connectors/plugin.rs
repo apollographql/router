@@ -59,6 +59,15 @@ impl Plugin for Connectors {
             );
         }
 
+        #[allow(deprecated)]
+        if !init.config.subgraphs.is_empty() {
+            tracing::warn!(
+                "The `connectors.subgraphs` configuration field is deprecated and will be \
+                 removed in a future release. Rename it to `connectors.sources`. See \
+                 https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors"
+            );
+        }
+
         let max_requests = init
             .config
             .max_requests_per_operation_per_source
