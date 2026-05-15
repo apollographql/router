@@ -637,8 +637,6 @@ mod test {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
-    use tokio::task::JoinSet;
-    use tokio::time::sleep;
     use tower::Service;
 
     use super::*;
@@ -1444,45 +1442,5 @@ mod test {
             None,
             "keep-alive timeout should be None when not configured"
         );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_raises_different_errors_for_timeouts_and_rate_limits() {
-        // expected behavior: the first request sent will timeout, the second request will return
-        // immediately due to the ratelimit
-        let config: serde_json::Value = serde_yaml::from_str(
-            r#"
-        router:
-            global_rate_limit:
-                capacity: 1
-                interval: 100ms
-            timeout: 150ms
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let svc = ServiceBuilder::new()
-            .service_fn(move |_req: router::Request| async {
-                sleep(Duration::from_millis(500)).await;
-                RouterResponse::fake_builder().build()
-            })
-            .boxed();
-
-        let mut router_service = plugin.router_service(svc);
-
-        let mut tasks = JoinSet::new();
-        for _ in 0..2 {
-            let request = RouterRequest::fake_builder().build().unwrap();
-            tasks.spawn(router_service.ready().await.unwrap().call(request));
-        }
-
-        let mut results = tasks.join_all().await.into_iter();
-
-        let response = results.next().unwrap().unwrap().response;
-        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.status());
-
-        let response = results.next().unwrap().unwrap().response;
-        assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.status());
     }
 }

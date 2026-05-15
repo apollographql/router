@@ -62,11 +62,10 @@ type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
 type MixedClient = HTTPClient;
 
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
-
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -104,28 +103,7 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    /// Test-wrapper for HttpClientService::new()
-    ///
-    /// NOTE: this separation is primarily to keep us from exposing `new()`
-    /// when we don't need to
-    #[cfg_attr(test, allow(unreachable_pub))]
-    pub(crate) fn test_new(
-        service: impl Into<String>,
-        tls_config: ClientConfig,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
-        Self::new(service, tls_config, client_config)
-    }
-
-    /// Create a new HttpClientService using:
-    ///
-    /// - the service's name (eg, connector name, hardcoded "coprocessor", or the subgraph's name) for
-    ///   use in errors and potentially signing requests
-    /// - the tls config to be used in setting tls; though, this is actually rustls's and hyper
-    ///   figuring out which parts of a broader config to use for tls
-    /// - the client's config, which is _our_ set of options from the router config for use in
-    ///   enabling/disabling features like http/2
-    fn new(
+    pub(crate) fn new(
         service: impl Into<String>,
         tls_config: ClientConfig,
         client_config: crate::configuration::shared::Client,

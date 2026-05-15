@@ -503,7 +503,7 @@ impl SnapshotServer {
             }
         };
 
-        let http_service = HttpClientService::test_new(
+        let http_service = HttpClientService::new(
             "test",
             rustls::ClientConfig::builder()
                 .with_native_roots()
