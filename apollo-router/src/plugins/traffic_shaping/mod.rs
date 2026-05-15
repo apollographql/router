@@ -31,6 +31,7 @@ use tower::timeout::error::Elapsed;
 
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
+use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -70,8 +71,6 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-<<<<<<< HEAD
-=======
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -89,7 +88,6 @@ struct Shaping {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     experimental_http2_keep_alive_timeout: Option<Duration>,
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
@@ -127,8 +125,6 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: self
                     .pool_idle_timeout
                     .as_ref()
@@ -144,7 +140,6 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
                     .cloned(),
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         }
     }
@@ -193,8 +188,6 @@ struct ConnectorShaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-<<<<<<< HEAD
-=======
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -212,7 +205,6 @@ struct ConnectorShaping {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     experimental_http2_keep_alive_timeout: Option<Duration>,
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
 
 impl Merge for ConnectorShaping {
@@ -237,8 +229,6 @@ impl Merge for ConnectorShaping {
                     .as_ref()
                     .or(fallback.dns_resolution_strategy.as_ref())
                     .cloned(),
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: self
                     .pool_idle_timeout
                     .as_ref()
@@ -254,7 +244,6 @@ impl Merge for ConnectorShaping {
                     .as_ref()
                     .or(fallback.experimental_http2_keep_alive_timeout.as_ref())
                     .cloned(),
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         }
     }
@@ -624,8 +613,6 @@ impl TrafficShaping {
         .map(|config| crate::configuration::shared::Client {
             experimental_http2: config.shaping.experimental_http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
-<<<<<<< HEAD
-=======
             pool_idle_timeout: config.shaping.pool_idle_timeout,
             experimental_http2_keep_alive_interval: config
                 .shaping
@@ -633,7 +620,6 @@ impl TrafficShaping {
             experimental_http2_keep_alive_timeout: config
                 .shaping
                 .experimental_http2_keep_alive_timeout,
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
         })
         .unwrap_or_default()
     }
@@ -647,13 +633,10 @@ impl TrafficShaping {
             .map(|config| crate::configuration::shared::Client {
                 experimental_http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: config.pool_idle_timeout,
                 experimental_http2_keep_alive_interval: config
                     .experimental_http2_keep_alive_interval,
                 experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             })
             .unwrap_or_default()
     }
@@ -681,6 +664,8 @@ mod test {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
+    use tokio::task::JoinSet;
+    use tokio::time::sleep;
     use tower::Service;
 
     use super::*;
@@ -1099,11 +1084,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Enable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6ThenIpv4),
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
         assert_eq!(
@@ -1111,11 +1093,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv4Only),
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
         assert_eq!(
@@ -1123,11 +1102,8 @@ mod test {
             crate::configuration::shared::Client {
                 experimental_http2: Some(Http2Config::Disable),
                 dns_resolution_strategy: Some(DnsResolutionStrategy::Ipv6Only),
-<<<<<<< HEAD
-=======
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
             },
         );
     }
@@ -1368,8 +1344,6 @@ mod test {
         .expect("our body is valid json");
         assert_eq!("Your request has been timed out", j["errors"][0]["message"]);
     }
-<<<<<<< HEAD
-=======
 
     #[tokio::test]
     async fn test_subgraph_pool_idle_timeout_override_and_fallback() {
@@ -1659,5 +1633,4 @@ mod test {
         let response = results.next().unwrap().unwrap().response;
         assert_eq!(StatusCode::GATEWAY_TIMEOUT, response.status());
     }
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }

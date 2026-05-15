@@ -1,11 +1,10 @@
+use std::time::Duration;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::plugins::traffic_shaping::Http2Config;
 
-<<<<<<< HEAD
-/// HTTP client configuration for coprocessors.
-=======
 /// Default for idle keep-alive sockets in a connection pool for HttpClientService
 ///
 /// NOTE: the default in hyper is 90s but historically has been set much lower (5s). I couldn't
@@ -19,7 +18,6 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// HTTP client configuration
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 #[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
@@ -28,8 +26,6 @@ pub(crate) struct Client {
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
-<<<<<<< HEAD
-=======
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -58,7 +54,6 @@ pub(crate) struct Client {
 /// pool. Useful as a default for serde deserializers or other areas where this default is needed
 pub(crate) fn default_pool_idle_timeout() -> Option<Duration> {
     Some(DEFAULT_POOL_IDLE_TIMEOUT)
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
 }
 
 #[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -76,8 +71,6 @@ pub(crate) enum DnsResolutionStrategy {
     /// Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records
     Ipv4ThenIpv6,
 }
-<<<<<<< HEAD
-=======
 
 #[cfg(test)]
 mod tests {
@@ -165,4 +158,3 @@ mod tests {
         assert_eq!(client.experimental_http2_keep_alive_timeout, expected);
     }
 }
->>>>>>> 1f06b0f7 (feat: support HTTP/2 keep-alive (#9056))
