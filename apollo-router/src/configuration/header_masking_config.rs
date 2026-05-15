@@ -54,6 +54,7 @@ pub(crate) fn default_sensitive_headers() -> Vec<String> {
         "authorization".to_string(),
         "proxy-authorization".to_string(),
         "proxy-authenticate".to_string(),
+        "www-authenticate".to_string(),
         // Session management
         "cookie".to_string(),
         "set-cookie".to_string(),

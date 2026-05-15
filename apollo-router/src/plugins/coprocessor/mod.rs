@@ -90,6 +90,27 @@ where
     clone
 }
 
+/// Scrub the `Ok` arm of a coprocessor reply for logging. The symmetric
+/// `tracing::debug!(?co_processor_result, "co-processor returned")` line at
+/// each stage would otherwise print the raw `headers` field of the returned
+/// `Externalizable`, leaking values that the outbound `scrub_payload_for_log`
+/// just masked.
+pub(super) fn scrub_result_for_log<'a, T, F>(
+    result: &'a Result<Externalizable<T>, BoxError>,
+    masking_rules: Option<&MaskingRulesMap>,
+    rule_for_direction: F,
+) -> Result<Externalizable<T>, &'a BoxError>
+where
+    T: Clone,
+    F: FnOnce(
+        &MaskingRulesMap,
+    ) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    result
+        .as_ref()
+        .map(|p| scrub_payload_for_log(p, masking_rules, rule_for_direction))
+}
+
 // Type alias for coprocessor HTTP client - uses HttpClientService with timeout
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
@@ -1069,7 +1090,17 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    // Scoped so the cloned `Externalizable` (which Arc-shares the reply's
+    // Context) drops before `co_processor_result?` hands the reply to
+    // downstream code that needs to `Arc::try_unwrap` the Context.
+    {
+        let co_processor_result_for_log = scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
@@ -1274,7 +1305,16 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    // Scoped so the cloned `Externalizable` drops before `?` (see notes at
+    // the RouterRequest site).
+    {
+        let co_processor_result_for_log = scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
@@ -1361,7 +1401,14 @@ where
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url, Context::new())
                     .await;
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                {
+                    let co_processor_result_for_log = scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
+                    );
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+                }
                 let co_processor_output = co_processor_result?;
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
@@ -1504,7 +1551,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(Some(subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -1691,7 +1745,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(Some(subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;

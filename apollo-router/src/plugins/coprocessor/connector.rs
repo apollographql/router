@@ -323,7 +323,14 @@ where
     };
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(Some(request.connector.id.subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::ConnectorRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -527,7 +534,14 @@ where
     };
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(Some(response.subgraph_name.as_str())),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ConnectorResponse)?;

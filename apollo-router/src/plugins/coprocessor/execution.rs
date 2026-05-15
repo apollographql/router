@@ -280,7 +280,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -455,7 +462,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
@@ -536,7 +550,14 @@ where
                         generator_map_context.clone(),
                     )
                     .await;
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                {
+                    let co_processor_result_for_log = super::scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
+                    );
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+                }
                 let co_processor_output = co_processor_result?;
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;

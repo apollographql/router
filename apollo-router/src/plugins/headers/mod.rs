@@ -282,6 +282,24 @@ struct Headers {
 /// `headers.all.{request,response}.masking.replace_defaults`); the per-subgraph
 /// block contributes only its raw `sensitive_headers` list on top of whatever
 /// the global side already resolved to.
+/// `replace_defaults` is a global-only concern, but the per-subgraph
+/// `HeaderMaskingConfig` reuses the same struct, so serde accepts the field
+/// silently. Warn so operators don't quietly get the additive merge when they
+/// asked for a replacement list.
+fn warn_if_subgraph_replace_defaults(
+    subgraph: &str,
+    direction: &str,
+    sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
+) {
+    if sg.replace_defaults {
+        tracing::warn!(
+            subgraph = %subgraph,
+            direction = %direction,
+            "headers.subgraphs.{subgraph}.{direction}.masking.replace_defaults is ignored at the per-subgraph level; set it on headers.all.{direction}.masking instead"
+        );
+    }
+}
+
 fn merge_subgraph_masking(
     global: &crate::configuration::header_masking_config::HeaderMaskingConfig,
     sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
@@ -395,6 +413,7 @@ impl PluginPrivate for Headers {
                     .request
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())?;
+                warn_if_subgraph_replace_defaults(name, "request", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_request_config, sg_masking);
                 Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
             })
@@ -409,6 +428,7 @@ impl PluginPrivate for Headers {
                     .response
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())?;
+                warn_if_subgraph_replace_defaults(name, "response", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_response_config, sg_masking);
                 Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
             })
