@@ -73,11 +73,16 @@ impl MultipartRequest {
         request_body: RouterBody,
         boundary: String,
         limits: MultipartRequestLimits,
+        operations_size_limit: u64,
     ) -> Self {
         let multer = Multipart::with_constraints(
             request_body.into_data_stream(),
             boundary,
-            Constraints::new().size_limit(SizeLimit::new().for_field("map", MAP_SIZE_LIMIT)),
+            Constraints::new().size_limit(
+                SizeLimit::new()
+                    .for_field("map", MAP_SIZE_LIMIT)
+                    .for_field("operations", operations_size_limit),
+            ),
         );
         Self {
             state: Arc::new(Mutex::new(MultipartRequestState {

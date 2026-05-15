@@ -348,6 +348,13 @@ async fn service_call(
                 let ctx = context.clone();
                 let response_stream = response_stream.inspect(move |_| {
                     if first_event {
+                        // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
+                        // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
+                        // response chunk from deferred/subscription chunks.
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(true),
+                        );
                         first_event = false;
                     } else if !inserted {
                         ctx.insert_json_value(

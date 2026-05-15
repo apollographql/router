@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use apollo_router::graphql;
 use apollo_router::services::router;
@@ -12,6 +13,9 @@ use fred::clients::Client;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::types::Builder;
+use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
+use futures::StreamExt as _;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -393,7 +397,8 @@ async fn basic_cache_skips_subgraph_request() {
         return;
     }
 
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let config = base_config();
+    let (mut router, subgraph_request_counters) = harness(config.clone(), base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -413,8 +418,13 @@ async fn basic_cache_skips_subgraph_request() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned, so the second request can race the writes. The first request
+    // produces a `products` root cache entry plus one cache entry per reviews
+    // entity (2 entities) → 3 keys minimum. Polling for >= 3 keys proves all
+    // three writes have landed before we issue the cache-hit request below.
+    // Replaces a fixed 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -440,8 +450,9 @@ async fn private_id_set_at_subgraph_request() {
         return;
     }
 
+    let config = base_config();
     let (mut router, subgraph_request_counters) =
-        harness(base_config(), private_base_subgraphs()).await;
+        harness(config.clone(), private_base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -482,8 +493,13 @@ async fn private_id_set_at_subgraph_request() {
     products: 2
     reviews: 2
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned. The first (no-id) request does not cache; the second
+    // (private_id=123) request produces the first set of cache entries (one
+    // products root + two reviews entities = 3 keys). Poll until those have
+    // landed before issuing the cache-hit request below. Replaces a fixed
+    // 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = makegraphql_request_with_headers(&mut router, headers.clone()).await;
     assert!(headers["cache-control"].contains("private"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -541,7 +557,7 @@ async fn check_cache_tags_from_debugger_data() {
         .and_then(|c| c.as_object_mut())
         .and_then(|c| c.insert("debug".to_string(), true.into()));
 
-    let (mut router, subgraph_request_counters) = harness(config, base_subgraphs()).await;
+    let (mut router, subgraph_request_counters) = harness(config.clone(), base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -569,8 +585,12 @@ async fn check_cache_tags_from_debugger_data() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned. The first request produces a `products` root cache entry plus
+    // one cache entry per reviews entity (2 entities) → 3 keys minimum. Poll
+    // until those have landed before issuing the cache-hit request below.
+    // Replaces a fixed 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = make_debug_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
@@ -680,8 +700,10 @@ async fn not_cached_without_cache_control_header() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No sleep needed: cache-control is no-store, so neither request writes to
+    // the cache and the second request always re-hits the subgraph regardless
+    // of timing. The previous fixed 100 ms sleep was a copy-pasted defensive
+    // pause with no race to defend against.
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert_eq!(headers["cache-control"], "no-store");
@@ -1132,6 +1154,52 @@ async fn cache_key_exists(
     let key = format!("{namespace}:{cache_key}");
     let count: u32 = client.exists(key).await?;
     Ok(count == 1)
+}
+
+/// Polls Redis until at least `expected_min_keys` cache entries exist under the
+/// `response_cache.subgraph.all.redis.namespace` embedded in `config`, with a
+/// generous deadline. This replaces the previous
+/// `tokio::time::sleep(Duration::from_millis(100))` "Needed because insert in
+/// the cache is async" pattern, which was a fixed timing buffer that raced
+/// under CI load — the cache write happens in a background tokio task after
+/// the response is returned, and 100 ms was simply too tight when the host was
+/// busy. Polling the actual redis state until the writes have landed makes
+/// the test deterministic regardless of system load.
+async fn wait_for_cache_writes(config: &Value, expected_min_keys: usize) {
+    let namespace = config
+        .pointer("/response_cache/subgraph/all/redis/namespace")
+        .and_then(|v| v.as_str())
+        .expect(
+            "wait_for_cache_writes() requires a redis namespace at \
+             config.response_cache.subgraph.all.redis.namespace",
+        )
+        .to_owned();
+    let pattern = format!("{namespace}:*");
+    let client = redis_client()
+        .await
+        .expect("connect to redis at 127.0.0.1:6379");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut scanner = client.scan(&pattern, Some(100), Some(ScanType::String));
+        let mut count: usize = 0;
+        while let Some(result) = scanner.next().await {
+            if let Ok(scan_result) = result
+                && let Some(keys) = scan_result.results()
+            {
+                count += keys.len();
+            }
+        }
+        if count >= expected_min_keys {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out after 10s waiting for >= {expected_min_keys} cache key(s) \
+                 under namespace {namespace}; observed {count}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

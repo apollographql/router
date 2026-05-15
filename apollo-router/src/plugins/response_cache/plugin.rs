@@ -114,6 +114,7 @@ pub(crate) struct ResponseCache {
     entity_type: Option<String>,
     enabled: bool,
     debug: bool,
+    include_cache_control_header_on_router_response: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -196,6 +197,13 @@ pub(crate) struct Config {
     /// Enable debug mode for the debugger
     debug: bool,
 
+    /// Whether to include a Cache-Control header in the supergraph response sent to clients.
+    /// When set to false, the router will not set a Cache-Control header on the client response,
+    /// while all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.
+    /// Defaults to true for backward compatibility.
+    #[serde(default = "default_include_cache_control_header_on_router_response")]
+    include_cache_control_header_on_router_response: bool,
+
     /// Configure invalidation per subgraph
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
@@ -209,6 +217,10 @@ pub(crate) struct Config {
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {
     DEFAULT_LRU_PRIVATE_QUERIES_SIZE
+}
+
+const fn default_include_cache_control_header_on_router_response() -> bool {
+    true
 }
 
 /// Per subgraph configuration for response caching
@@ -361,6 +373,9 @@ impl PluginPrivate for ResponseCache {
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
+            include_cache_control_header_on_router_response: init
+                .config
+                .include_cache_control_header_on_router_response,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -383,12 +398,15 @@ impl PluginPrivate for ResponseCache {
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
         let debug = self.debug;
+        let include_cache_control_header_on_router_response =
+            self.include_cache_control_header_on_router_response;
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
-                if let Some(mut cache_control) = response
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<CacheControl>().cloned())
+                if include_cache_control_header_on_router_response
+                    && let Some(mut cache_control) = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
                     // If the response contains GraphQL errors, force Cache-Control: no-store to prevent
                     // intermediate caches (CDNs, reverse proxies) from caching partial or error responses.
@@ -558,6 +576,7 @@ impl ResponseCache {
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
         drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -579,6 +598,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
+            include_cache_control_header_on_router_response,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -623,6 +643,7 @@ impl ResponseCache {
             entity_type: None,
             enabled: true,
             debug: true,
+            include_cache_control_header_on_router_response: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -1492,6 +1513,8 @@ async fn cache_lookup_entities(
     debug: bool,
     cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
+    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
+
     let cache_metadata = extract_cache_keys(
         &name,
         supergraph_schema,
@@ -1507,41 +1530,39 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
             cache_keys
-                .into_iter()
+                .iter()
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
     );
 
-    if cache_control.is_some_and(|c| c.is_no_cache()) {
-        // skip cache lookup if no-cache is set - we have no means of revalidating entries without
-        // just performing the query, so there's no benefit to hitting the cache
-        return Ok(ControlFlow::Continue((
-            request,
-            ResponseCacheResults::default(),
-        )));
-    }
+    // When no-cache is set, skip using any cached values: treat every entity as a cache miss
+    // so that all representations are fetched fresh from the subgraph. We still build the
+    // IntermediateResult list (all with cache_entry = None) so that insert_entities_in_result
+    // can properly assemble the response in the correct order.
+    let cache_result: Vec<Option<CacheEntry>> = if is_no_cache {
+        vec![None; keys_len]
+    } else {
+        match cache.fetch_multiple(&cache_keys, &name).await {
+            Ok(res) => res
+                .into_iter()
+                .map(|v| match v {
+                    Some(v) if v.control.can_use() => Some(v),
+                    _ => None,
+                })
+                .collect(),
+            Err(err) => {
+                if !err.is_row_not_found() {
+                    let span = Span::current();
+                    span.mark_as_error(format!("cannot get cache entry: {err}"));
+                }
 
-    let cache_result: Vec<Option<CacheEntry>> = match cache_result {
-        Ok(res) => res
-            .into_iter()
-            .map(|v| match v {
-                Some(v) if v.control.can_use() => Some(v),
-                _ => None,
-            })
-            .collect(),
-        Err(err) => {
-            if !err.is_row_not_found() {
-                let span = Span::current();
-                span.mark_as_error(format!("cannot get cache entry: {err}"));
+                vec![None; keys_len]
             }
-
-            std::iter::repeat_n(None, keys_len).collect()
         }
     };
     let body = request.subgraph_request.body_mut();
@@ -1551,6 +1572,9 @@ async fn cache_lookup_entities(
         .get_mut(REPRESENTATIONS)
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
+    // When no-cache is set, skip recording cache metrics: the cache was not consulted so
+    // registering every entity as a miss would produce misleading telemetry data.
+
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
         &name,
@@ -1559,6 +1583,7 @@ async fn cache_lookup_entities(
         cache_metadata,
         cache_result,
         &request.context,
+        !is_no_cache,
     )?;
 
     if !new_representations.is_empty() {
@@ -2334,6 +2359,7 @@ fn filter_representations(
     keys: Vec<CacheMetadata>,
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
+    record_metrics: bool,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -2406,10 +2432,12 @@ fn filter_representations(
         save_original_cache_control(subgraph_req_id.clone(), context, non_updated_cache_control);
     }
 
-    let _ = context.insert(
-        CacheMetricContextKey::new(subgraph_name.to_string()),
-        CacheSubgraph(cache_hit),
-    );
+    if record_metrics {
+        let _ = context.insert(
+            CacheMetricContextKey::new(subgraph_name.to_string()),
+            CacheSubgraph(cache_hit),
+        );
+    }
 
     Ok((new_representations, result, cache_control))
 }
@@ -2731,6 +2759,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
@@ -2786,6 +2815,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap()
@@ -3193,6 +3223,7 @@ mod tests {
             valid_schema.clone(),
             true,
             drop_tx,
+            true,
         )
         .await
         .unwrap();
@@ -4124,5 +4155,36 @@ mod tests {
             result.is_ok(),
             "should handle concrete type (isInterfaceObject: false)"
         );
+    }
+
+    #[test]
+    fn config_include_cache_control_header_on_router_response_defaults_to_true() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "24h"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.include_cache_control_header_on_router_response);
+    }
+
+    #[test]
+    fn config_include_cache_control_header_on_router_response_false() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "include_cache_control_header_on_router_response": false,
+            "subgraph": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "24h"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!config.include_cache_control_header_on_router_response);
     }
 }

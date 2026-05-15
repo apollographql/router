@@ -579,14 +579,20 @@ async fn test_cache_error_metrics() {
         assert_eq!(response.status(), 200);
     }
 
-    // Wait for metrics to be collected
-    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-
-    // Assert that Redis error metrics are emitted when Redis operations fail
-    // We expect an IO error when connecting to an invalid Redis port
+    // Assert that Redis error metrics are emitted when Redis operations fail.
+    // We expect at least one IO error when connecting to an invalid Redis port.
+    //
+    // Use `assert_metric_non_zero` (which already polls up to 15s) instead of an
+    // exact-count assertion: the underlying `apollo.router.cache.redis.errors`
+    // counter is incremented per failed Redis operation (connect, query, client
+    // event, heartbeat). The exact number that lands depends on how many connect
+    // retries `fred` has performed, the 100ms metrics interval, and how many
+    // subgraph requests fanned out — none of which are deterministic in this
+    // test. The semantic we actually care about is "Redis IO errors are
+    // recorded when Redis is unreachable", which `non_zero` captures correctly.
     router
-        .assert_metrics_contains(
-            r#"apollo_router_cache_redis_errors_total{error_type="io",kind="entity",otel_scope_name="apollo/router"} 1"#,
+        .assert_metric_non_zero(
+            r#"apollo_router_cache_redis_errors_total{error_type="io",kind="entity",otel_scope_name="apollo/router"}"#,
             None,
         )
         .await;

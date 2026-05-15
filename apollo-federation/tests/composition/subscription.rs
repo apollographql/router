@@ -76,7 +76,9 @@ fn directives_incompatible_with_subscriptions_wont_compose() {
             "#,
     };
 
-    let errors = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).unwrap_err();
+    let errors = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b])
+        .unwrap_err()
+        .errors;
     assert_eq!(errors.len(), 1);
     let msg = errors.first().unwrap().to_string();
     assert_eq!(
@@ -119,7 +121,9 @@ fn subscription_name_collisions_across_subgraphs_should_not_compose() {
             "#,
     };
 
-    let errors = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).unwrap_err();
+    let errors = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b])
+        .unwrap_err()
+        .errors;
     assert_eq!(errors.len(), 1);
     let msg = errors.first().unwrap().to_string();
     assert_eq!(

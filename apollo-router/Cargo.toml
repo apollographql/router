@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.13.1"
+version = "2.14.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.13.1" }
+apollo-federation = { path = "../apollo-federation", version = "=2.14.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -141,7 +141,7 @@ jsonschema = { version = "0.46.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
-lru = "0.16.0"
+lru = "0.18.0"
 mediatype = "0.21.0"
 mockall = "0.14.0"
 mime = "0.3.17"
@@ -232,9 +232,8 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
 sys-info = "0.9.1"
-sysinfo = { version = "0.38.0", features = [
+sysinfo = { version = "0.39.1", features = [
     "system",
-    "windows",
 ], default-features = false }
 thiserror = "2.0.0"
 tokio.workspace = true
@@ -263,7 +262,7 @@ tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.25.0"
+hickory-resolver = "0.26.0"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
@@ -295,7 +294,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.0" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.1" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -309,7 +308,7 @@ tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
-ctor = "0.10.0"
+ctor = "1.0.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [

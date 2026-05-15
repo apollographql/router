@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.2:subgraph:products:type:Query:hash:6cef120d3c4db191469a8d6910bd8446b7100e96138c35ea6e7450f654022b54:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:products:type:Query:hash:18371ae250f46ed39f19887a7f8467ad5ce156505ed6ce3f88ae3196cd9c086e:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "allProducts"
     ],
@@ -44,7 +44,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.2:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:dbe2bf116d39f492d11e260a6362594c1a1ef3be5548a46aac38aecc5489b79f:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:7a4c3d64ce911b1d0fedda806fe765e17b142ee246dd35d96cc3596860d0e534:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "user-email:test@test.com-country-a:France"
     ],

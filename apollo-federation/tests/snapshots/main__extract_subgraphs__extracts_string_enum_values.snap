@@ -69,7 +69,7 @@ scalar federation__Policy
 
 scalar federation__ContextFieldValue
 
-type Entity @key(fields: "id", resolvable: true) {
+type Entity @key(fields: "id") {
   id: ID! @shareable
   localField: String! @requires(fields: "requiredField(arg: ENUM_VALUE)")
   requiredField(arg: Enum): String! @external
@@ -160,7 +160,7 @@ scalar federation__Policy
 
 scalar federation__ContextFieldValue
 
-type Entity @key(fields: "id", resolvable: true) {
+type Entity @key(fields: "id") {
   id: ID! @shareable
   requiredField(arg: Enum): String!
 }

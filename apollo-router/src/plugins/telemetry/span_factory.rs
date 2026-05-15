@@ -218,6 +218,7 @@ impl SpanMode {
                     "apollo.source.name" = source_name,
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
+                    "apollo.connector.response.aborted" = ::tracing::field::Empty,
                 )
             }
             SpanMode::SpecCompliant => {
@@ -225,6 +226,7 @@ impl SpanMode {
                     CONNECT_REQUEST_SPAN_NAME,
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
+                    "apollo.connector.response.aborted" = ::tracing::field::Empty,
                 )
             }
         }

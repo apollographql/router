@@ -6419,11 +6419,11 @@ mod tests {
                     None,
                     0,
                 ),
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -6456,10 +6456,10 @@ mod tests {
                 .body(r#"{"query":"test"}"#.to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             request_service::Request {
                 context: crate::Context::default(),
@@ -6625,10 +6625,10 @@ mod tests {
                 .body("plain text body".to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             let request = request_service::Request {
                 context: crate::Context::default(),
@@ -6708,7 +6708,9 @@ mod tests {
                 let captured_uri = captured_uri_clone.clone();
                 let captured_headers = captured_headers_clone.clone();
                 async move {
-                    let TransportRequest::Http(ref http_req) = req.transport_request;
+                    let TransportRequest::Http(ref http_req) = req.transport_request else {
+                        panic!("expected Http transport request");
+                    };
                     *captured_uri.lock().unwrap() = http_req.inner.uri().to_string();
                     *captured_headers.lock().unwrap() = http_req
                         .inner

@@ -254,7 +254,8 @@ impl Supergraph {
         schema: Valid<Schema>,
         supported_specs: Option<&[Url]>,
     ) -> Result<Self, FederationError> {
-        let schema: Schema = schema.into_inner();
+        let mut schema: Schema = schema.into_inner();
+        compat::coerce_schema_default_values(&mut schema);
         let schema = FederationSchema::new(schema)?;
 
         let _ = validate_supergraph_for_query_planning(&schema)?;

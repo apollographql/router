@@ -1,0 +1,17 @@
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 1kb
+        max_files: 5
+# 500 bytes: large enough for the operations field JSON (~150 bytes), but far smaller
+# than a typical file. This is used to test that http_max_request_bytes is enforced
+# at the content level (operations field only), not at the HTTP frame level.
+limits:
+  router:
+    http_max_request_bytes: 500
+include_subgraph_errors:
+  all: true

@@ -75,13 +75,13 @@ type Query {
   _service: _Service!
 }
 
-type T @key(fields: "id", resolvable: true) @federation__context(name: "context") {
+type T @key(fields: "id") @federation__context(name: "context") {
   id: ID!
   u: U!
   prop: String!
 }
 
-type U @key(fields: "id", resolvable: true) {
+type U @key(fields: "id") {
   id: ID! @shareable
   field(
     a: String @federation__fromContext(field: "$context { prop }"),
@@ -169,7 +169,7 @@ type Query {
   _service: _Service!
 }
 
-type U @key(fields: "id", resolvable: true) {
+type U @key(fields: "id") {
   id: ID! @shareable
 }
 

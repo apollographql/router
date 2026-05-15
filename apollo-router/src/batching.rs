@@ -22,7 +22,6 @@ use tracing::Span;
 use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
-use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -95,7 +94,6 @@ impl BatchQuery {
         &self,
         client_factory: HttpClientServiceFactory,
         request: SubgraphRequest,
-        gql_request: graphql::Request,
     ) -> Result<oneshot::Receiver<Result<SubgraphResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
         let (tx, rx) = oneshot::channel();
@@ -115,7 +113,6 @@ impl BatchQuery {
                     index: self.index,
                     client_factory,
                     request,
-                    gql_request,
                     response_sender: tx,
                     span_context: Span::current().context(),
                 },
@@ -185,7 +182,6 @@ struct BatchHandlerMessageProgress {
     index: usize,
     client_factory: HttpClientServiceFactory,
     request: SubgraphRequest,
-    gql_request: graphql::Request,
     response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
     span_context: otelContext,
 }
@@ -194,9 +190,6 @@ struct BatchHandlerMessageProgress {
 pub(crate) struct BatchQueryInfo {
     /// The owning subgraph request
     request: SubgraphRequest,
-
-    /// The GraphQL request tied to this subgraph request
-    gql_request: graphql::Request,
 
     /// Notifier for the subgraph service handler
     ///
@@ -319,7 +312,6 @@ impl Batch {
                             index,
                             client_factory,
                             request,
-                            gql_request,
                             response_sender,
                             span_context,
                         } = *progress;
@@ -336,7 +328,6 @@ impl Batch {
                         Span::current().add_link(span_context.span().span_context().clone());
                         requests[index].push(BatchQueryInfo {
                             request,
-                            gql_request,
                             sender: response_sender,
                         })
                     }
@@ -361,7 +352,6 @@ impl Batch {
             let mut svc_map: HashMap<String, Vec<BatchQueryInfo>> = HashMap::new();
             for BatchQueryInfo {
                 request: sg_request,
-                gql_request,
                 sender: tx,
             } in all_in_one
             {
@@ -373,7 +363,6 @@ impl Batch {
                     .or_default();
                 value.push(BatchQueryInfo {
                     request: sg_request,
-                    gql_request,
                     sender: tx,
                 });
             }
@@ -441,24 +430,19 @@ pub(crate) async fn assemble_batch(
     ),
     BoxError,
 > {
-    // Extract the collection of parts from the requests
-    let (txs, request_pairs): (Vec<_>, Vec<_>) = requests
-        .into_iter()
-        .map(|r| (r.sender, (r.request, r.gql_request)))
-        .unzip();
-    let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
-
-    // Construct the actual byte body of the batched request
-    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let (txs, requests): (Vec<_>, Vec<_>) =
+        requests.into_iter().map(|r| (r.sender, r.request)).unzip();
 
     // Retain the various contexts for later use
     let contexts = requests
         .iter()
         .map(|request| (request.context.clone(), request.id.clone()))
         .collect::<Vec<(Context, SubgraphRequestId)>>();
-    // Grab the common info from the first request
-    let first_request = requests
-        .into_iter()
+
+    // Extract the GraphQL body from each request. The first request also provides the HTTP
+    // parts (URI, headers, etc.) used as the transport envelope for the whole batch.
+    let mut requests_iter = requests.into_iter();
+    let first_request = requests_iter
         .next()
         .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
         .subgraph_request;
@@ -467,7 +451,17 @@ pub(crate) async fn assemble_batch(
         .operation_name
         .clone()
         .unwrap_or_default();
-    let (parts, _) = first_request.into_parts();
+    let (parts, first_body) = first_request.into_parts();
+
+    let mut gql_requests = Vec::with_capacity(txs.len());
+    gql_requests.push(first_body);
+    for r in requests_iter {
+        let (_, body) = r.subgraph_request.into_parts();
+        gql_requests.push(body);
+    }
+
+    // Construct the actual byte body of the batched request
+    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
@@ -520,12 +514,9 @@ mod tests {
                     rx,
                     BatchQueryInfo {
                         request: SubgraphRequest::fake_builder()
-                            .subgraph_request(
-                                http::Request::builder().body(gql_request.clone()).unwrap(),
-                            )
+                            .subgraph_request(http::Request::builder().body(gql_request).unwrap())
                             .subgraph_name(format!("slot{index}"))
                             .build(),
-                        gql_request,
                         sender: tx,
                     },
                 )
@@ -662,20 +653,12 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress(
-                factory.clone(),
-                request.clone(),
-                graphql::Request::default()
-            )
-            .await
-            .is_ok()
+            bq.signal_progress(factory.clone(), request.clone())
+                .await
+                .is_ok()
         );
         assert!(bq.finished());
-        assert!(
-            bq.signal_progress(factory, request, graphql::Request::default())
-                .await
-                .is_err()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -703,11 +686,7 @@ mod tests {
                 .is_ok()
         );
         assert!(!bq.finished());
-        assert!(
-            bq.signal_progress(factory, request, graphql::Request::default())
-                .await
-                .is_ok()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_ok());
         assert!(bq.finished());
         assert!(
             bq.signal_cancelled("only once though".to_string())
@@ -738,11 +717,7 @@ mod tests {
         let qh = Arc::new(QueryHash::default());
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
-        assert!(
-            bq.signal_progress(factory, request, graphql::Request::default())
-                .await
-                .is_ok()
-        );
+        assert!(bq.signal_progress(factory, request).await.is_ok());
         assert!(!bq.finished());
         assert!(
             bq.signal_cancelled("only twice though".to_string())

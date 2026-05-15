@@ -119,7 +119,6 @@ impl std::fmt::Display for MergeDirectiveItem {
 
 type DirectiveImportSpecNamesByAlias<'a> = Cow<'a, IndexMap<Name, Name>>;
 
-#[allow(dead_code)]
 impl ComposeDirectiveManager {
     pub(crate) fn new() -> Self {
         Self {
@@ -247,21 +246,11 @@ impl ComposeDirectiveManager {
 
         let tag_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.tag_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.tag_directive_name().zip(Some(s.name.clone())))
             .collect();
         let inaccessible_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.inaccessible_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.inaccessible_directive_name().zip(Some(s.name.clone())))
             .collect();
 
         for subgraph in subgraphs {
@@ -737,7 +726,7 @@ impl ErrorReporter {
         );
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\". {}",
+                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\".{}",
                 subgraph.name,
                 did_you_mean(words),
             ),

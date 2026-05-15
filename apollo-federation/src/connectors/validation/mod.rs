@@ -284,6 +284,8 @@ pub enum Code {
     InvalidUrlProperty,
     /// Any named type not found in a GraphQL schema where expected
     MissingSchemaType,
+    /// Omitting `http:` from `@connect` requires connect spec v0.4 or later
+    HttpOmittedRequiresV0_4,
 }
 
 impl Code {

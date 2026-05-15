@@ -15,6 +15,7 @@ use tracing::Span;
 use crate::graphql;
 use crate::plugins::subscription::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
+use crate::plugins::subscription::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
 use crate::plugins::subscription::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedCounter;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -129,8 +130,8 @@ impl Multipart {
         self
     }
 
-    /// Checks if the errors indicate a reload-related termination and returns the appropriate end reason
-    fn detect_reload_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
+    /// Checks if the errors indicate a router-initiated termination and returns the appropriate end reason
+    fn detect_subscription_end_reason(errors: &[graphql::Error]) -> Option<SubscriptionEndReason> {
         for error in errors {
             match error.extensions.get("code").and_then(|v| v.as_str()) {
                 Some(code) if code == SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE => {
@@ -138,6 +139,9 @@ impl Multipart {
                 }
                 Some(code) if code == SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE => {
                     return Some(SubscriptionEndReason::ConfigReload);
+                }
+                Some(code) if code == SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE => {
+                    return Some(SubscriptionEndReason::MaxLifetime);
                 }
                 _ => {}
             }
@@ -196,6 +200,8 @@ pub(crate) enum SubscriptionEndReason {
     SchemaReload,
     /// Subscription terminated due to router configuration reload
     ConfigReload,
+    /// Subscription terminated because the configured max lifetime was reached
+    MaxLifetime,
 }
 
 impl SubscriptionEndReason {
@@ -207,6 +213,7 @@ impl SubscriptionEndReason {
             Self::ClientDisconnect => "client_disconnect",
             Self::SchemaReload => "schema_reload",
             Self::ConfigReload => "config_reload",
+            Self::MaxLifetime => "max_lifetime",
         }
     }
 
@@ -314,7 +321,7 @@ impl Stream for Multipart {
                         response.has_next.unwrap_or(false) || response.subscribed.unwrap_or(false);
 
                     // Check for reload-related termination before errors are moved
-                    let maybe_end_reason = Self::detect_reload_end_reason(&response.errors);
+                    let maybe_end_reason = Self::detect_subscription_end_reason(&response.errors);
 
                     let mut buf = if self.is_first_chunk {
                         self.is_first_chunk = false;
@@ -866,6 +873,60 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated.client",
                 1,
                 "reason" = "config_reload",
+                "subgraph.name" = "",
+                "client.name" = ""
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_subscription_end_reason_max_lifetime() {
+        async {
+            let (_guard, layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                    .subscribed(true)
+                    .build(),
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(
+                                "subscription closed because the maximum lifetime has been reached",
+                            )
+                            .extension_code("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")
+                            .build(),
+                    )
+                    .subscribed(false)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_terminated_counter(Some(test_terminated_counter()));
+
+            // Consume all messages
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            let reason = layer.captured_reason.lock().unwrap().clone();
+            assert_eq!(
+                reason,
+                Some(KeyValue::new(
+                    SUBSCRIPTION_END_REASON_KEY,
+                    SubscriptionEndReason::MaxLifetime.as_value()
+                ))
+            );
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.client",
+                1,
+                "reason" = "max_lifetime",
                 "subgraph.name" = "",
                 "client.name" = ""
             );

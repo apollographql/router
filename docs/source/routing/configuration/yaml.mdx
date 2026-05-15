@@ -32,6 +32,7 @@ import Plugins from '../../../shared/config/plugins.mdx';
 import PreviewEntityCache from '../../../shared/config/preview_entity_cache.mdx';
 import ResponseCache from '../../../shared/config/response_cache.mdx';
 import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
+import Reload from '../../../shared/config/reload.mdx';
 import Rhai from '../../../shared/config/rhai.mdx';
 import Sandbox from '../../../shared/config/sandbox.mdx';
 import Server from '../../../shared/config/server.mdx';
@@ -345,6 +346,12 @@ Learn more in [File Uploads](/graphos/routing/operations/file-upload).
 
 ---
 
+<Reload />
+
+Learn more about [configuring reload retries](/graphos/routing/configuration/hot-reload-schema#configuring-reload-retries).
+
+---
+
 <Rhai /> 
 
 Learn more in [Rhai customization for router](/graphos/routing/customization/rhai).
@@ -502,7 +509,8 @@ In case the router rejects legitimate queries, you can disable the limit by sett
 supergraph:
   introspection: true
 limits:
-  introspection_max_depth: false
+  router:
+    introspection_max_depth: false
 ```
 
 #### Redacting query validation errors

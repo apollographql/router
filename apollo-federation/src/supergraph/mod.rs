@@ -100,7 +100,9 @@ impl Supergraph<Merged> {
     }
 
     pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        let mut schema = Schema::parse_and_validate(schema_str, "schema.graphql")?.into_inner();
+        crate::compat::coerce_schema_default_values(&mut schema);
+        let schema = schema.validate()?;
         Ok(Self {
             state: Merged {
                 schema: ValidFederationSchema::new(schema)?,
@@ -357,6 +359,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
     for (_, mut subgraph) in subgraphs {
+        crate::compat::coerce_schema_default_values(subgraph.schema.schema_mut());
         let valid_subgraph_schema = if validate_extracted_subgraphs {
             match subgraph.schema.validate_or_return_self() {
                 Ok(schema) => schema,

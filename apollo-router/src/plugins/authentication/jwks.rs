@@ -200,7 +200,15 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!(%e, "could not get url");
+                let url = e.url().map(Url::as_str).unwrap_or("<unknown>");
+                let msg = if e.is_timeout() {
+                    "JWKS request timed out"
+                } else if e.is_connect() {
+                    "JWKS request connection failed"
+                } else {
+                    "JWKS request failed"
+                };
+                tracing::error!(url, %e, "{msg}");
                 e
             })
             .ok()?
@@ -940,5 +948,21 @@ mod test {
 
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::from_secs(3600));
+    }
+
+    /// Verifies that a connection failure to a JWKS URL produces an actionable error log
+    /// that includes both the URL and the failure category (timeout, connection error, etc.)
+    /// rather than a generic "could not get url" message.
+    #[tokio::test]
+    async fn test_get_jwks_unreachable_url_logs_helpful_error() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let url = "http://127.0.0.1:1/jwks.json".parse().expect("valid URL");
+
+        let result = super::get_jwks(url, vec![]).await;
+        assert!(result.is_none());
+
+        assert!(tracing_test::logs_contain("JWKS request connection failed"));
+        assert!(tracing_test::logs_contain("127.0.0.1:1"));
     }
 }

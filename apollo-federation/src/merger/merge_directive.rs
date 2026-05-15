@@ -546,6 +546,7 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
+                    dest.remove(&mut self.merged)?;
                     self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
@@ -560,6 +561,7 @@ impl Merger {
                         false,
                         false,
                     );
+                    return Ok(());
                 }
             }
         }
@@ -657,10 +659,7 @@ impl Merger {
                     &POLICY_DIRECTIVE_NAME_IN_SPEC,
                 ] {
                     let directive = federation_spec
-                        .directive_name_in_schema(subgraph.schema(), access_control_directive)?
-                        .and_then(|name| {
-                            subgraph.schema().schema().directive_definitions.get(&name)
-                        });
+                        .try_directive_definition(subgraph.schema(), access_control_directive);
                     if let Some(directive) = directive {
                         let referencers = subgraph_referencers.get_directive(&directive.name);
                         for type_position in &referencers.object_types {
