@@ -1,33 +1,24 @@
-use brotli::enc::BrotliEncoderParams;
+use async_compression::Level;
+use async_compression::tokio::write::BrotliEncoder;
+use async_compression::tokio::write::DeflateEncoder;
+use async_compression::tokio::write::GzipEncoder;
+use async_compression::tokio::write::ZstdEncoder;
 use bytes::Bytes;
-use bytes::BytesMut;
-use flate2::Compression;
 use futures::Stream;
 use futures::StreamExt;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tracing::Instrument;
 
-use self::codec::BrotliEncoder;
-use self::codec::DeflateEncoder;
-use self::codec::Encode;
-use self::codec::GzipEncoder;
-use self::codec::ZstdEncoder;
-use self::util::PartialBuffer;
 use crate::services::router::body::RouterBody;
 
-pub(crate) mod codec;
-pub(crate) mod unshared;
-pub(crate) mod util;
-
-const GZIP_HEADER_LEN: usize = 10;
-
 pub(crate) enum Compressor {
-    Deflate(DeflateEncoder),
-    Gzip(GzipEncoder),
-    Brotli(Box<BrotliEncoder>),
-    Zstd(ZstdEncoder),
+    Deflate(DeflateEncoder<Vec<u8>>),
+    Gzip(GzipEncoder<Vec<u8>>),
+    Brotli(BrotliEncoder<Vec<u8>>),
+    Zstd(ZstdEncoder<Vec<u8>>),
 }
 
 impl Compressor {
@@ -38,24 +29,29 @@ impl Compressor {
     {
         for s in it {
             match s {
-                "gzip" => return Some(Compressor::Gzip(GzipEncoder::new(Compression::fast()))),
+                "gzip" => {
+                    return Some(Compressor::Gzip(GzipEncoder::with_quality(
+                        Vec::new(),
+                        Level::Fastest,
+                    )));
+                }
                 "deflate" => {
-                    return Some(Compressor::Deflate(
-                        DeflateEncoder::new(Compression::fast()),
-                    ));
+                    return Some(Compressor::Deflate(DeflateEncoder::with_quality(
+                        Vec::new(),
+                        Level::Fastest,
+                    )));
                 }
                 "br" => {
-                    return Some(Compressor::Brotli(Box::new(BrotliEncoder::new(
-                        BrotliEncoderParams {
-                            // '4' is a reasonable setting for 'fast'
-                            // https://github.com/dropbox/rust-brotli/issues/93
-                            quality: 4,
-                            ..BrotliEncoderParams::default()
-                        },
-                    ))));
+                    return Some(Compressor::Brotli(BrotliEncoder::with_quality(
+                        Vec::new(),
+                        Level::Precise(4), // https://github.com/dropbox/rust-brotli/issues/93
+                    )));
                 }
                 "zstd" => {
-                    return Some(Compressor::Zstd(ZstdEncoder::new(zstd_safe::min_c_level())));
+                    return Some(Compressor::Zstd(ZstdEncoder::with_quality(
+                        Vec::new(),
+                        Level::Precise(1), // matches zstd_safe::min_c_level()
+                    )));
                 }
                 _ => {}
             }
@@ -72,96 +68,138 @@ impl Compressor {
         }
     }
 
-    pub(crate) fn process(
-        mut self,
-        body: RouterBody,
-    ) -> impl Stream<Item = Result<Bytes, BoxError>>
-where {
+    pub(crate) fn process(self, body: RouterBody) -> impl Stream<Item = Result<Bytes, BoxError>> {
         let (tx, rx) = mpsc::channel(10);
-
         let mut stream = http_body_util::BodyDataStream::new(body);
         tokio::task::spawn(
             async move {
-                while let Some(data) = stream.next().await {
-                    match data {
-                        Err(e) => {
-                            if (tx.send(Err(e.into())).await).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(data) => {
-                            // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
-                            // room to store the data itself
-                            let mut buf = BytesMut::zeroed(GZIP_HEADER_LEN + data.len());
-
-                            let mut partial_input = PartialBuffer::new(&*data);
-                            let mut partial_output = PartialBuffer::new(&mut buf);
-                            loop {
-                                if let Err(e) = self.encode(&mut partial_input, &mut partial_output)
-                                {
+                match self {
+                    Compressor::Gzip(mut encoder) => {
+                        while let Some(data) = stream.next().await {
+                            match data {
+                                Err(e) => {
                                     let _ = tx.send(Err(e.into())).await;
                                     return;
                                 }
-
-                                if !partial_input.unwritten().is_empty() {
-                                    // there was not enough space in the output buffer to compress everything,
-                                    // so we resize and add more data
-                                    if partial_output.unwritten().is_empty() {
-                                        partial_output.extend(partial_input.unwritten().len() / 10);
-                                    }
-                                } else {
-                                    loop {
-                                        match self.flush(&mut partial_output) {
-                                            Err(e) => {
-                                                let _ = tx.send(Err(e.into())).await;
-                                                return;
-                                            }
-                                            Ok(flushed) => {
-                                                if flushed {
-                                                    break;
-                                                }
-                                                if partial_output.unwritten().is_empty() {
-                                                    partial_output
-                                                        .extend(partial_output.written().len());
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    let len = partial_output.written().len();
-                                    let _ = partial_output.into_inner();
-                                    buf.resize(len, 0);
-
-                                    if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                Ok(data) => {
+                                    if let Err(e) = encoder.write_all(&data).await {
+                                        let _ = tx.send(Err(e.into())).await;
                                         return;
                                     }
-                                    break;
+                                    if let Err(e) = encoder.flush().await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
+                                    if tx.send(Ok(chunk)).await.is_err() {
+                                        return;
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-
-                loop {
-                    let buf = BytesMut::zeroed(1024);
-                    let mut partial_output = PartialBuffer::new(buf);
-
-                    match self.finish(&mut partial_output) {
-                        Err(e) => {
+                        if let Err(e) = encoder.shutdown().await {
                             let _ = tx.send(Err(e.into())).await;
-                            break;
+                            return;
                         }
-                        Ok(is_flushed) => {
-                            let len = partial_output.written().len();
-
-                            let mut buf = partial_output.into_inner();
-                            buf.resize(len, 0);
-                            if (tx.send(Ok(buf.freeze())).await).is_err() {
-                                return;
+                        let remaining = Bytes::from(encoder.into_inner());
+                        if !remaining.is_empty() {
+                            let _ = tx.send(Ok(remaining)).await;
+                        }
+                    }
+                    Compressor::Deflate(mut encoder) => {
+                        while let Some(data) = stream.next().await {
+                            match data {
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.into())).await;
+                                    return;
+                                }
+                                Ok(data) => {
+                                    if let Err(e) = encoder.write_all(&data).await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    if let Err(e) = encoder.flush().await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
+                                    if tx.send(Ok(chunk)).await.is_err() {
+                                        return;
+                                    }
+                                }
                             }
-                            if is_flushed {
-                                break;
+                        }
+                        if let Err(e) = encoder.shutdown().await {
+                            let _ = tx.send(Err(e.into())).await;
+                            return;
+                        }
+                        let remaining = Bytes::from(encoder.into_inner());
+                        if !remaining.is_empty() {
+                            let _ = tx.send(Ok(remaining)).await;
+                        }
+                    }
+                    Compressor::Brotli(mut encoder) => {
+                        while let Some(data) = stream.next().await {
+                            match data {
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.into())).await;
+                                    return;
+                                }
+                                Ok(data) => {
+                                    if let Err(e) = encoder.write_all(&data).await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    if let Err(e) = encoder.flush().await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
+                                    if tx.send(Ok(chunk)).await.is_err() {
+                                        return;
+                                    }
+                                }
                             }
+                        }
+                        if let Err(e) = encoder.shutdown().await {
+                            let _ = tx.send(Err(e.into())).await;
+                            return;
+                        }
+                        let remaining = Bytes::from(encoder.into_inner());
+                        if !remaining.is_empty() {
+                            let _ = tx.send(Ok(remaining)).await;
+                        }
+                    }
+                    Compressor::Zstd(mut encoder) => {
+                        while let Some(data) = stream.next().await {
+                            match data {
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.into())).await;
+                                    return;
+                                }
+                                Ok(data) => {
+                                    if let Err(e) = encoder.write_all(&data).await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    if let Err(e) = encoder.flush().await {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
+                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
+                                    if tx.send(Ok(chunk)).await.is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        if let Err(e) = encoder.shutdown().await {
+                            let _ = tx.send(Err(e.into())).await;
+                            return;
+                        }
+                        let remaining = Bytes::from(encoder.into_inner());
+                        if !remaining.is_empty() {
+                            let _ = tx.send(Ok(remaining)).await;
                         }
                     }
                 }
@@ -169,45 +207,6 @@ where {
             .instrument(tracing::debug_span!("body_compression")),
         );
         ReceiverStream::new(rx)
-    }
-}
-
-impl Encode for Compressor {
-    fn encode(
-        &mut self,
-        input: &mut PartialBuffer<impl AsRef<[u8]>>,
-        output: &mut PartialBuffer<impl AsRef<[u8]> + AsMut<[u8]>>,
-    ) -> std::io::Result<()> {
-        match self {
-            Compressor::Deflate(e) => e.encode(input, output),
-            Compressor::Gzip(e) => e.encode(input, output),
-            Compressor::Brotli(e) => e.encode(input, output),
-            Compressor::Zstd(e) => e.encode(input, output),
-        }
-    }
-
-    fn flush(
-        &mut self,
-        output: &mut PartialBuffer<impl AsRef<[u8]> + AsMut<[u8]>>,
-    ) -> std::io::Result<bool> {
-        match self {
-            Compressor::Deflate(e) => e.flush(output),
-            Compressor::Gzip(e) => e.flush(output),
-            Compressor::Brotli(e) => e.flush(output),
-            Compressor::Zstd(e) => e.flush(output),
-        }
-    }
-
-    fn finish(
-        &mut self,
-        output: &mut PartialBuffer<impl AsRef<[u8]> + AsMut<[u8]>>,
-    ) -> std::io::Result<bool> {
-        match self {
-            Compressor::Deflate(e) => e.finish(output),
-            Compressor::Gzip(e) => e.finish(output),
-            Compressor::Brotli(e) => e.finish(output),
-            Compressor::Zstd(e) => e.finish(output),
-        }
     }
 }
 
