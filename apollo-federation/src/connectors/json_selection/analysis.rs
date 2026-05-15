@@ -19,7 +19,7 @@
 //!     "id name: $args.name",
 //!     ConnectSpec::V0_4,
 //! ).unwrap());
-//! let analysis = SelectionAnalysis::of(selection);
+//! let analysis = SelectionAnalysis::new(selection);
 //!
 //! // What inputs does this selection consume?
 //! let args_trie = analysis.consumption().get("$args");
@@ -41,7 +41,7 @@ use super::apply_to::ShapeContext;
 /// Static analysis of a [`JSONSelection`]. Holds a shared handle to the
 /// original selection plus cached views derived from it.
 ///
-/// The canonical entry point is [`SelectionAnalysis::of`], which eagerly
+/// The canonical entry point is [`SelectionAnalysis::new`], which eagerly
 /// computes every cached view. Re-running the analysis against a different
 /// input shape is cheap via [`SelectionAnalysis::with_input_shape`] because
 /// the underlying selection is [`Arc`]-shared.
@@ -67,7 +67,12 @@ impl SelectionAnalysis {
     /// Analyze the given selection. Performs the shape and consumption-trie
     /// computations eagerly so the results are ready for later queries
     /// without further work.
-    pub(crate) fn of(selection: Arc<JSONSelection>) -> Self {
+    ///
+    /// Accepts anything convertible into `Arc<JSONSelection>`, so both an
+    /// owned `JSONSelection` (via std's blanket `From<T> for Arc<T>`) and an
+    /// existing `Arc<JSONSelection>` work without ceremony at the call site.
+    pub(crate) fn new(selection: impl Into<Arc<JSONSelection>>) -> Self {
+        let selection: Arc<JSONSelection> = selection.into();
         let context =
             ShapeContext::new(SourceId::Other("JSONSelection".into())).with_spec(selection.spec());
         let output_shape =
@@ -137,9 +142,8 @@ mod tests {
     }
 
     fn analyze_with_spec(input: &str, spec: ConnectSpec) -> SelectionAnalysis {
-        let selection =
-            Arc::new(JSONSelection::parse_with_spec(input, spec).expect("valid selection"));
-        SelectionAnalysis::of(selection)
+        let selection = JSONSelection::parse_with_spec(input, spec).expect("valid selection");
+        SelectionAnalysis::new(selection)
     }
 
     #[test]
@@ -205,7 +209,7 @@ mod tests {
 
     // ---- RH-1345 / CNN-1093 regression coverage at the SelectionAnalysis
     // level. These tests assert directly on the consumption trie produced
-    // by `SelectionAnalysis::of` rather than going through the validator,
+    // by `SelectionAnalysis::new` rather than going through the validator,
     // so a regression in the fused-trie machinery surfaces here even if
     // the validator path is unchanged. ----
 
@@ -281,7 +285,7 @@ mod tests {
         let selection =
             Arc::new(JSONSelection::parse_with_spec("id", ConnectSpec::V0_4).expect("valid"));
         let before = Arc::strong_count(&selection);
-        let analysis = SelectionAnalysis::of(Arc::clone(&selection));
+        let analysis = SelectionAnalysis::new(Arc::clone(&selection));
         assert_eq!(Arc::strong_count(&selection), before + 1);
         // Cloning the analysis must not clone the underlying selection.
         #[allow(clippy::redundant_clone)] // Hold the clone alive across the

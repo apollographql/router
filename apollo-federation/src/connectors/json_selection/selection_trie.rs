@@ -9,11 +9,8 @@ use apollo_compiler::collections::IndexSet;
 use shape::name::Name;
 use shape::name::NameCase;
 
-use super::Key;
-use super::Ranged;
 use super::Ref;
 use super::helpers::quote_if_necessary;
-use super::location::WithRange;
 
 #[derive(Debug, Eq, Clone)]
 pub(crate) struct SelectionTrie {
@@ -257,11 +254,6 @@ impl SelectionTrie {
         self.add_str(key)
     }
 
-    #[allow(dead_code)] // Legacy walker, retained for cross-checks in tests.
-    fn add_key(&mut self, key: &WithRange<Key>) -> &mut Self {
-        self.add_str_with_ranges(key.as_str(), key.range())
-    }
-
     pub(crate) fn set_leaf(&mut self) -> &mut Self {
         self.is_leaf = true;
         self
@@ -275,6 +267,16 @@ impl SelectionTrie {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connectors::json_selection::Key;
+    use crate::connectors::json_selection::Ranged;
+    use crate::connectors::json_selection::location::WithRange;
+
+    // Legacy walker, retained for cross-checks in tests.
+    impl SelectionTrie {
+        fn add_key(&mut self, key: &WithRange<Key>) -> &mut Self {
+            self.add_str_with_ranges(key.as_str(), key.range())
+        }
+    }
 
     #[test]
     fn test_empty() {

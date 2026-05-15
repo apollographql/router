@@ -3,7 +3,6 @@
 use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
-use std::sync::Arc;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
@@ -273,7 +272,7 @@ impl<'schema> Selection<'schema> {
         // Cloning is acceptable here: this runs once per `@connect` directive
         // during validation, not on any hot path, and the analysis machinery
         // is designed to be cheap after a one-shot wrap.
-        let analysis = SelectionAnalysis::of(Arc::new(self.parsed.clone()));
+        let analysis = SelectionAnalysis::new(self.parsed.clone());
         let consumption = analysis.consumption();
 
         // Each entry is (namespace, human-readable description of the
