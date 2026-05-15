@@ -492,20 +492,26 @@ impl RedisCacheStorage {
             // router can refuse to start (the contract documented on
             // `required_to_start`).
             for mut rx in connect_rxs {
-                match rx.recv().await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => return Err(Box::new(e)),
-                    Err(RecvError::Lagged(_)) => {
-                        // A lag means the broadcast queue overflowed between the
-                        // subscribe and recv; this only happens under extreme load
-                        // and is not a connect failure, so wait for the next event.
-                        continue;
-                    }
-                    Err(RecvError::Closed) => {
-                        return Err(Box::new(RedisError::new(
-                            RedisErrorKind::Canceled,
-                            "redis connect notification channel closed before any connect attempt completed",
-                        )));
+                loop {
+                    match rx.recv().await {
+                        Ok(Ok(())) => break,
+                        Ok(Err(e)) => return Err(Box::new(e)),
+                        Err(RecvError::Lagged(_)) => {
+                            // A lag means the broadcast queue overflowed between
+                            // the subscribe and recv; this only happens under
+                            // extreme load and is not a connect failure, so
+                            // re-recv on the SAME rx to wait for the next event.
+                            // Without the inner loop, `continue` would advance
+                            // the outer `for` and drop this client's receiver
+                            // without ever observing its connect.
+                            continue;
+                        }
+                        Err(RecvError::Closed) => {
+                            return Err(Box::new(RedisError::new(
+                                RedisErrorKind::Canceled,
+                                "redis connect notification channel closed before any connect attempt completed",
+                            )));
+                        }
                     }
                 }
             }
