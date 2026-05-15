@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use futures::SinkExt;
 use futures::StreamExt;
@@ -254,6 +255,11 @@ async fn call_websocket(
     let reconnect_delay = subscription_config
         .reconnect_delay
         .unwrap_or(Duration::from_secs(1));
+    // A reconnected connection that stays open at least this long is treated as
+    // stable, and the per-disconnect retry budget refreshes. A subgraph that
+    // flaps (accepts the handshake then drops faster than this) keeps burning
+    // through the current budget and eventually terminates the subscription.
+    let stability_grace = reconnect_delay.saturating_mul(5);
     let retry_subgraph_cfg = subgraph_cfg.clone();
 
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
@@ -266,6 +272,7 @@ async fn call_websocket(
             let mut attempt = 0u32;
 
             'retry: loop {
+                let connection_started_at = Instant::now();
                 // Read events from the current stream and forward them to clients.
                 loop {
                     select! {
@@ -278,6 +285,19 @@ async fn call_websocket(
                         item = gql_stream.next() => {
                             match item {
                                 Some(val) => {
+                                    // When reconnect is configured, swallow transient transport
+                                    // errors (abnormal close / read error) from the inner stream.
+                                    // Forwarding them would set `subscribed=false` on the client
+                                    // response and cause HTTP-multipart subscribers to terminate
+                                    // their stream before reconnect can restore service. If
+                                    // attempts are exhausted, the client will see the
+                                    // subscription end via handle_sink.close() below.
+                                    if max_reconnect_attempts > 0 && is_transient_transport_error(&val) {
+                                        tracing::debug!(
+                                            "suppressing transient subgraph transport error during reconnect window"
+                                        );
+                                        continue;
+                                    }
                                     if handle_sink.send_sync(val).is_err() {
                                         // All router clients have disconnected; no need to keep
                                         // the subgraph connection open. We don't increment the
@@ -294,7 +314,14 @@ async fn call_websocket(
                                         increment_subgraph_ended_counter(&service_name_for_task);
                                         break 'retry;
                                     }
-                                    // Unexpected connection drop — break inner loop to attempt reconnect.
+                                    // If the just-ended connection stayed open past the grace
+                                    // window, treat it as stable and refresh the retry budget so
+                                    // each disconnect of a long-lived subscription gets its own
+                                    // `max_reconnect_attempts`. Quick-flapping connections fall
+                                    // through and keep accumulating against the existing budget.
+                                    if connection_started_at.elapsed() >= stability_grace {
+                                        attempt = 0;
+                                    }
                                     tracing::debug!("gql_stream empty");
                                     break;
                                 }
@@ -354,8 +381,6 @@ async fn call_websocket(
                             Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
                                 stream_completed_normally = new_completed_normally;
-                                // Reset so a future disconnect gets a fresh attempt budget.
-                                attempt = 0;
                                 break 'reconnect;
                             }
                             Err(err) => {
@@ -802,4 +827,19 @@ fn increment_subgraph_ended_counter(service_name: &str) {
         1,
         subgraph.name = service_name.to_string()
     );
+}
+
+/// True if the response is one of the synthetic error items emitted by
+/// `convert_websocket_stream` for an abnormal subgraph close or a read failure.
+/// These are transport-level events the reconnect machinery will recover from;
+/// forwarding them to clients with `subscribed=false` would prematurely
+/// terminate HTTP-multipart subscriptions.
+fn is_transient_transport_error(resp: &graphql::Response) -> bool {
+    resp.subscribed == Some(false)
+        && resp.errors.iter().any(|e| {
+            matches!(
+                e.extension_code().as_deref(),
+                Some("WEBSOCKET_CLOSE_ERROR") | Some("WEBSOCKET_MESSAGE_ERROR")
+            )
+        })
 }

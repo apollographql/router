@@ -2780,6 +2780,80 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// Like `emulate_websocket_server_that_drops` but holds each connection open for
+    /// `hold` after sending its single event, then drops with an abnormal close. The
+    /// connection count is reported back so the test can stop the server once it has
+    /// observed enough reconnect cycles.
+    async fn emulate_websocket_server_stable_then_drops(
+        listener: TcpListener,
+        hold: std::time::Duration,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        async fn ws_handler(
+            ws: WebSocketUpgrade,
+            ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+            State((hold, connection_count)): State<(std::time::Duration, Arc<AtomicU32>)>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            let res = ws
+                .protocols(["graphql-transport-ws"])
+                .on_upgrade(move |mut socket| async move {
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    assert!(matches!(
+                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                        ClientMessage::ConnectionInit { .. }
+                    ));
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let client_id =
+                        if let ClientMessage::Subscribe { id, .. } =
+                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                        {
+                            id
+                        } else {
+                            panic!("expected Subscribe message");
+                        };
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::Next {
+                                id: client_id,
+                                payload: graphql::Response::builder()
+                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                    .build(),
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    // Keep the connection open long enough for the router to treat it
+                    // as stable (past the grace window).
+                    tokio::time::sleep(hold).await;
+                    connection_count.fetch_add(1, Ordering::SeqCst);
+                    socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: 1011,
+                            reason: "unexpected termination".into(),
+                        })))
+                        .await
+                        .unwrap();
+                });
+            Ok(res)
+        }
+
+        let app = Router::new()
+            .route("/ws", get(ws_handler))
+            .with_state((hold, connection_count));
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     fn subscription_config_with_reconnect(max_reconnect_attempts: u32) -> SubscriptionConfig {
         SubscriptionConfig {
             max_reconnect_attempts: Some(max_reconnect_attempts),
@@ -2862,9 +2936,10 @@ mod tests {
                 .build()
         );
 
-        // The abnormal close produces one or more error items before the reconnect fires.
-        // Windows may produce an additional WEBSOCKET_MESSAGE_ERROR after the close frame;
-        // drain all error items to reach the reconnected stream's first event.
+        // Transient transport errors from the abnormal close are suppressed during the
+        // reconnect window (so HTTP-multipart clients don't tear down). The next item the
+        // client sees is data from the reconnected stream. Loop defensively in case any
+        // unexpected error item slips through.
         let second = loop {
             let item = gql_stream.next().await.unwrap();
             if item.errors.is_empty() {
@@ -2941,8 +3016,8 @@ mod tests {
                     .build()
             );
 
-            // Drain error items from the first abnormal close, then read the reconnected event.
-            // Windows may produce multiple error items per close; drain until data arrives.
+            // Errors from the first abnormal close are suppressed during the reconnect
+            // window; the next item should be data from the reconnected stream.
             let second = loop {
                 let item = gql_stream.next().await.unwrap();
                 if item.errors.is_empty() {
@@ -3067,6 +3142,98 @@ mod tests {
             assert_counter_not_exists!(
                 "apollo.router.operations.subscriptions.reconnect",
                 u64,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// A connection that stays open past the grace window before dropping should
+    /// refresh the per-disconnect retry budget. With `max_reconnect_attempts=1`,
+    /// a server that drops after every "stable" connection should produce *more
+    /// than one* reconnect — the budget resets on each drop. A hard lifetime
+    /// ceiling would terminate after exactly one reconnect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_budget_resets_after_stable_connection() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let connection_count = Arc::new(AtomicU32::new(0));
+            // reconnect_delay = 1ms ⇒ grace ≈ 5ms. Hold each connection 50ms so
+            // every drop is well past the grace window.
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_stable_then_drops(
+                listener,
+                std::time::Duration::from_millis(50),
+                connection_count.clone(),
+            ));
+
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                1,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Pull data events through several reconnect cycles. After observing
+            // 3 successful "stable" connections (one initial + 2 reconnects), we
+            // know the budget was refreshed at least once — a hard ceiling would
+            // have terminated after the first reconnect with max_reconnect_attempts=1.
+            let mut data_events = 0u32;
+            while data_events < 3 {
+                let item = gql_stream.next().await.unwrap();
+                if !item.errors.is_empty() {
+                    continue;
+                }
+                assert_eq!(item.subscribed, Some(true));
+                data_events += 1;
+            }
+
+            // Allow the metrics to flush.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            // At least 2 reconnects must have happened to reach 3 data events.
+            // With a hard ceiling on attempts (`max_reconnect_attempts=1`), the
+            // counter would be capped at 1 and the subscription would have
+            // terminated before the third event.
+            assert_counter!(
+                "apollo.router.operations.subscriptions.reconnect",
+                2,
                 "subgraph.name" = "test"
             );
 
