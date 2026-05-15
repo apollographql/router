@@ -247,6 +247,72 @@ mod entity_consistency {
             r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraph "Subgraph1"."#,
         );
     }
+
+    #[test]
+    fn inconsistent_entity_hint_includes_locations_for_extension_types() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @key(fields: "k") {
+                    k: Int
+                    v1: String
+                }
+            "#,
+        };
+
+        // Subgraph2 uses `extend type` without a base definition — the compiler
+        // creates a synthetic Node with no source location. The hint must still
+        // include a location for this subgraph.
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                extend type T @shareable {
+                    k: Int
+                    v2: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                extend type T @key(fields: "k") {
+                    k: Int
+                    v3: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENTITY",
+            r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraphs "Subgraph1" and "Subgraph3"."#,
+        );
+
+        let hint = result
+            .hints()
+            .iter()
+            .find(|h| h.code() == "INCONSISTENT_ENTITY")
+            .expect("should have INCONSISTENT_ENTITY hint");
+
+        let mut subgraph_names: Vec<&str> = hint
+            .locations
+            .iter()
+            .map(|loc| loc.subgraph.as_str())
+            .collect();
+        subgraph_names.sort();
+
+        assert_eq!(
+            subgraph_names,
+            vec!["Subgraph1", "Subgraph2", "Subgraph3"],
+            "Hint locations must include all subgraphs, including those using extend type"
+        );
+    }
 }
 
 mod value_type_fields {
