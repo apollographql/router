@@ -14,6 +14,72 @@ use tracing::Instrument;
 
 use crate::services::router::body::RouterBody;
 
+/// Abstracts the `get_mut()`/`into_inner()` inherent methods that each
+/// `async-compression` encoder exposes on its `Vec<u8>` inner writer, allowing
+/// `run_encoder` to be written once generically.
+trait EncoderExt: tokio::io::AsyncWrite + Unpin + Send {
+    fn take_output(&mut self) -> Vec<u8>;
+    fn finish(self) -> Vec<u8>;
+}
+
+macro_rules! impl_encoder_ext {
+    ($ty:ident) => {
+        impl EncoderExt for $ty<Vec<u8>> {
+            fn take_output(&mut self) -> Vec<u8> {
+                std::mem::take(self.get_mut())
+            }
+            fn finish(self) -> Vec<u8> {
+                self.into_inner()
+            }
+        }
+    };
+}
+impl_encoder_ext!(GzipEncoder);
+impl_encoder_ext!(DeflateEncoder);
+impl_encoder_ext!(BrotliEncoder);
+impl_encoder_ext!(ZstdEncoder);
+
+async fn run_encoder<E, S, SE>(
+    mut encoder: E,
+    mut stream: S,
+    tx: mpsc::Sender<Result<Bytes, BoxError>>,
+) where
+    E: EncoderExt,
+    S: Stream<Item = Result<Bytes, SE>> + Unpin,
+    SE: Into<BoxError>,
+{
+    while let Some(data) = stream.next().await {
+        match data {
+            Err(e) => {
+                let _ = tx.send(Err(e.into())).await;
+                return;
+            }
+            Ok(data) => {
+                if let Err(e) = encoder.write_all(&data).await {
+                    let _ = tx.send(Err(e.into())).await;
+                    return;
+                }
+                if let Err(e) = encoder.flush().await {
+                    let _ = tx.send(Err(e.into())).await;
+                    return;
+                }
+                let chunk = Bytes::from(encoder.take_output());
+                if tx.send(Ok(chunk)).await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+    if let Err(e) = encoder.shutdown().await {
+        let _ = tx.send(Err(e.into())).await;
+        return;
+    }
+    let remaining = Bytes::from(encoder.finish());
+    if !remaining.is_empty() {
+        let _ = tx.send(Ok(remaining)).await;
+    }
+}
+
 pub(crate) enum Compressor {
     Deflate(DeflateEncoder<Vec<u8>>),
     Gzip(GzipEncoder<Vec<u8>>),
@@ -70,138 +136,14 @@ impl Compressor {
 
     pub(crate) fn process(self, body: RouterBody) -> impl Stream<Item = Result<Bytes, BoxError>> {
         let (tx, rx) = mpsc::channel(10);
-        let mut stream = http_body_util::BodyDataStream::new(body);
+        let stream = http_body_util::BodyDataStream::new(body);
         tokio::task::spawn(
             async move {
                 match self {
-                    Compressor::Gzip(mut encoder) => {
-                        while let Some(data) = stream.next().await {
-                            match data {
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.into())).await;
-                                    return;
-                                }
-                                Ok(data) => {
-                                    if let Err(e) = encoder.write_all(&data).await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    if let Err(e) = encoder.flush().await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
-                                    if tx.send(Ok(chunk)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        if let Err(e) = encoder.shutdown().await {
-                            let _ = tx.send(Err(e.into())).await;
-                            return;
-                        }
-                        let remaining = Bytes::from(encoder.into_inner());
-                        if !remaining.is_empty() {
-                            let _ = tx.send(Ok(remaining)).await;
-                        }
-                    }
-                    Compressor::Deflate(mut encoder) => {
-                        while let Some(data) = stream.next().await {
-                            match data {
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.into())).await;
-                                    return;
-                                }
-                                Ok(data) => {
-                                    if let Err(e) = encoder.write_all(&data).await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    if let Err(e) = encoder.flush().await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
-                                    if tx.send(Ok(chunk)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        if let Err(e) = encoder.shutdown().await {
-                            let _ = tx.send(Err(e.into())).await;
-                            return;
-                        }
-                        let remaining = Bytes::from(encoder.into_inner());
-                        if !remaining.is_empty() {
-                            let _ = tx.send(Ok(remaining)).await;
-                        }
-                    }
-                    Compressor::Brotli(mut encoder) => {
-                        while let Some(data) = stream.next().await {
-                            match data {
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.into())).await;
-                                    return;
-                                }
-                                Ok(data) => {
-                                    if let Err(e) = encoder.write_all(&data).await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    if let Err(e) = encoder.flush().await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
-                                    if tx.send(Ok(chunk)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        if let Err(e) = encoder.shutdown().await {
-                            let _ = tx.send(Err(e.into())).await;
-                            return;
-                        }
-                        let remaining = Bytes::from(encoder.into_inner());
-                        if !remaining.is_empty() {
-                            let _ = tx.send(Ok(remaining)).await;
-                        }
-                    }
-                    Compressor::Zstd(mut encoder) => {
-                        while let Some(data) = stream.next().await {
-                            match data {
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.into())).await;
-                                    return;
-                                }
-                                Ok(data) => {
-                                    if let Err(e) = encoder.write_all(&data).await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    if let Err(e) = encoder.flush().await {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    let chunk = Bytes::from(std::mem::take(encoder.get_mut()));
-                                    if tx.send(Ok(chunk)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        if let Err(e) = encoder.shutdown().await {
-                            let _ = tx.send(Err(e.into())).await;
-                            return;
-                        }
-                        let remaining = Bytes::from(encoder.into_inner());
-                        if !remaining.is_empty() {
-                            let _ = tx.send(Ok(remaining)).await;
-                        }
-                    }
+                    Compressor::Gzip(encoder) => run_encoder(encoder, stream, tx).await,
+                    Compressor::Deflate(encoder) => run_encoder(encoder, stream, tx).await,
+                    Compressor::Brotli(encoder) => run_encoder(encoder, stream, tx).await,
+                    Compressor::Zstd(encoder) => run_encoder(encoder, stream, tx).await,
                 }
             }
             .instrument(tracing::debug_span!("body_compression")),
