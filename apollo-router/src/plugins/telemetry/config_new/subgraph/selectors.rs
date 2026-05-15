@@ -432,7 +432,9 @@ impl Selector for SubgraphSelector {
                     // If redact is "allow", return the actual value
                     (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
+                        Some("***MASKED***".to_string())
+                    }
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
@@ -473,7 +475,9 @@ impl Selector for SubgraphSelector {
                     // If redact is "allow", return the actual value
                     (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
+                        Some("***MASKED***".to_string())
+                    }
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = request.context.extensions().with_lock(|lock| {
@@ -571,7 +575,9 @@ impl Selector for SubgraphSelector {
                     // If redact is "allow", return the actual value
                     (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
                     // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
+                        Some("***MASKED***".to_string())
+                    }
                     // If redact is None, check global rules
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {

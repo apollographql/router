@@ -415,7 +415,10 @@ impl PluginPrivate for Headers {
                     .and_then(|r| r.masking.as_ref())?;
                 warn_if_subgraph_replace_defaults(name, "request", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_request_config, sg_masking);
-                Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
+                Some((
+                    name.clone(),
+                    Arc::new(HeaderMaskingRules::from_config(&merged)),
+                ))
             })
             .collect();
 
@@ -430,7 +433,10 @@ impl PluginPrivate for Headers {
                     .and_then(|r| r.masking.as_ref())?;
                 warn_if_subgraph_replace_defaults(name, "response", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_response_config, sg_masking);
-                Some((name.clone(), Arc::new(HeaderMaskingRules::from_config(&merged))))
+                Some((
+                    name.clone(),
+                    Arc::new(HeaderMaskingRules::from_config(&merged)),
+                ))
             })
             .collect();
 
@@ -1089,7 +1095,11 @@ mod test {
         assert!(merged.enabled);
         assert!(merged.sensitive_headers.contains(&"authorization".into()));
         assert!(merged.sensitive_headers.contains(&"cookie".into()));
-        assert!(merged.sensitive_headers.contains(&"x-products-secret".into()));
+        assert!(
+            merged
+                .sensitive_headers
+                .contains(&"x-products-secret".into())
+        );
     }
 
     #[test]
@@ -1124,7 +1134,10 @@ mod test {
         };
         let merged = merge_subgraph_masking(&global, &sg);
         assert!(merged.enabled);
-        assert_eq!(merged.sensitive_headers, vec!["x-products-secret".to_string()]);
+        assert_eq!(
+            merged.sensitive_headers,
+            vec!["x-products-secret".to_string()]
+        );
     }
 
     #[test]

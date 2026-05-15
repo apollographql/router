@@ -7426,16 +7426,15 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
-            replace_defaults: false,
+                        replace_defaults: false,
                     },
                 ),
             );
-            let masking_rules = Arc::new(
-                crate::services::header_masking::MaskingRulesMap::new_test(
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
-                ),
-            );
+                ));
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7560,16 +7559,15 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["x-api-key".to_string()],
-            replace_defaults: false,
+                        replace_defaults: false,
                     },
                 ),
             );
-            let masking_rules = Arc::new(
-                crate::services::header_masking::MaskingRulesMap::new_test(
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
-                ),
-            );
+                ));
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
@@ -7755,16 +7753,15 @@ mod tests {
                     &crate::configuration::header_masking_config::HeaderMaskingConfig {
                         enabled: true,
                         sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
-            replace_defaults: false,
+                        replace_defaults: false,
                     },
                 ),
             );
-            let masking_rules = Arc::new(
-                crate::services::header_masking::MaskingRulesMap::new_test(
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
-                ),
-            );
+                ));
 
             let service = router_stage.as_service(
                 mock_http_client,
@@ -7887,16 +7884,15 @@ mod tests {
                             "x-internal-token".to_string(),
                             "x-secret-key".to_string(),
                         ],
-            replace_defaults: false,
+                        replace_defaults: false,
                     },
                 ),
             );
-            let masking_rules = Arc::new(
-                crate::services::header_masking::MaskingRulesMap::new_test(
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
                     inner,
                     Default::default(),
-                ),
-            );
+                ));
 
             let service = router_stage.as_service(
                 mock_http_client,

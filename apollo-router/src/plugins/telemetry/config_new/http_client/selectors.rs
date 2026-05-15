@@ -72,7 +72,9 @@ impl Selector for HttpClientSelector {
                     .map(|h| h.to_string());
                 let value = match (redact.as_ref(), &header_value) {
                     (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
+                        Some("***MASKED***".to_string())
+                    }
                     (None, Some(_)) => {
                         // HTTP-client layer has no subgraph identity on the
                         // request, so fall back to the global request rules.
@@ -117,7 +119,9 @@ impl Selector for HttpClientSelector {
                     .map(|h| h.to_string());
                 let value = match (redact.as_ref(), &header_value) {
                     (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => Some("***MASKED***".to_string()),
+                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
+                        Some("***MASKED***".to_string())
+                    }
                     (None, Some(_)) => {
                         let should_mask = response.context.extensions().with_lock(|lock| {
                             lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
@@ -216,9 +220,7 @@ mod test {
             DirectionRules::new(rules.clone(), HashMap::new()),
             DirectionRules::new(rules, HashMap::new()),
         ));
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(map));
+        context.extensions().with_lock(|lock| lock.insert(map));
 
         let http_request = ::http::Request::builder()
             .method(::http::Method::GET)
@@ -261,9 +263,7 @@ mod test {
             DirectionRules::new(rules.clone(), HashMap::new()),
             DirectionRules::new(rules, HashMap::new()),
         ));
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(map));
+        context.extensions().with_lock(|lock| lock.insert(map));
 
         let http_request = ::http::Request::builder()
             .method(::http::Method::GET)

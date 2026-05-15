@@ -302,11 +302,10 @@ where
         .and_uri(uri)
         .build();
 
-    let payload_for_log = super::scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_request(Some(request.connector.id.subgraph_name.as_str())),
-    );
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(Some(request.connector.id.subgraph_name.as_str()))
+        });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
@@ -513,11 +512,10 @@ where
         .and_service_name(service_name_to_send)
         .build();
 
-    let payload_for_log = super::scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_response(Some(response.subgraph_name.as_str())),
-    );
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_response(Some(response.subgraph_name.as_str()))
+        });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that

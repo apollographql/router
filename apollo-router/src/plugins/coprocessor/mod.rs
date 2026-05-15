@@ -1065,11 +1065,9 @@ where
         .method(parts.method.to_string())
         .build();
 
-    let payload_for_log = scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_request(None),
-    );
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_request(None)
+    });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
@@ -1094,11 +1092,10 @@ where
     // Context) drops before `co_processor_result?` hands the reply to
     // downstream code that needs to `Arc::try_unwrap` the Context.
     {
-        let co_processor_result_for_log = scrub_result_for_log(
-            &co_processor_result,
-            header_masking_rules.as_deref(),
-            |r| r.get_request(None),
-        );
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_request(None)
+            });
         tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
     }
     let mut co_processor_output = co_processor_result?;
@@ -1280,11 +1277,9 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    let payload_for_log = scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_response(None),
-    );
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_response(None)
+    });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
@@ -1308,11 +1303,10 @@ where
     // Scoped so the cloned `Externalizable` drops before `?` (see notes at
     // the RouterRequest site).
     {
-        let co_processor_result_for_log = scrub_result_for_log(
-            &co_processor_result,
-            header_masking_rules.as_deref(),
-            |r| r.get_response(None),
-        );
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_response(None)
+            });
         tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
     }
     let co_processor_output = co_processor_result?;
@@ -1526,11 +1520,9 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    let payload_for_log = scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_request(Some(subgraph_name.as_str())),
-    );
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_request(Some(subgraph_name.as_str()))
+    });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
@@ -1552,11 +1544,10 @@ where
     *executed = true;
 
     {
-        let co_processor_result_for_log = scrub_result_for_log(
-            &co_processor_result,
-            header_masking_rules.as_deref(),
-            |r| r.get_request(Some(subgraph_name.as_str())),
-        );
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_request(Some(subgraph_name.as_str()))
+            });
         tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
     }
     let co_processor_output = co_processor_result?;
@@ -1720,11 +1711,9 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    let payload_for_log = scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_response(Some(subgraph_name.as_str())),
-    );
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_response(Some(subgraph_name.as_str()))
+    });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
@@ -1746,11 +1735,10 @@ where
     *executed = true;
 
     {
-        let co_processor_result_for_log = scrub_result_for_log(
-            &co_processor_result,
-            header_masking_rules.as_deref(),
-            |r| r.get_response(Some(subgraph_name.as_str())),
-        );
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_response(Some(subgraph_name.as_str()))
+            });
         tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
     }
     let co_processor_output = co_processor_result?;

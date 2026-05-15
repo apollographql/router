@@ -258,11 +258,10 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    let payload_for_log = super::scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_request(None),
-    );
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(None)
+        });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
@@ -441,11 +440,10 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    let payload_for_log = super::scrub_payload_for_log(
-        &payload,
-        header_masking_rules.as_deref(),
-        |r| r.get_response(None),
-    );
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_response(None)
+        });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
