@@ -40,7 +40,15 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 
 <Note>
 
-The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them, setting them to `true`. You must explicitly configure an instrument for different behavior. 
+The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them. 
+
+| Value of `default_requirement_level` | Value of standard instruments |
+|-------------------------------------|--------------------------------|
+| `none`                              | `false`                        |
+| `required`                          | `true`                         |
+| `recommended`                       | `true`                         |
+
+You must explicitly configure an individual instrument for different behavior.
 
 </Note>
 
@@ -50,19 +58,20 @@ These instruments are configurable in `router.yaml`:
 telemetry:
   instrumentation:
     instruments:
+      default_requirement_level: required # (default is required)
       router:
-        http.server.active_requests: false # (default true)
-        http.server.request.body.size: false # (default true)
-        http.server.request.duration: false # (default true)
-        http.server.response.body.size: false # (default true)
+        http.server.active_requests: false # (default is true)
+        http.server.request.body.size: false # (default is true)
+        http.server.request.duration: false # (default is true)
+        http.server.response.body.size: false # (default is true)
       subgraph:
-        http.client.request.body.size: false # (default true)
-        http.client.request.duration: false # (default true)
-        http.client.response.body.size: false # (default true)
+        http.client.request.body.size: false # (default is true)
+        http.client.request.duration: false # (default is true)
+        http.client.response.body.size: false # (default is true)
       connector:
-        http.client.request.body.size: false # (default true)
-        http.client.request.duration: false # (default true)
-        http.client.response.body.size: false # (default true)
+        http.client.request.body.size: false # (default is true)
+        http.client.request.duration: false # (default is true)
+        http.client.response.body.size: false # (default is true)
 ```
 
 They can be customized by attaching or removing attributes. See [attributes](#attributes) to learn more about configuring attributes.
