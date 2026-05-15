@@ -163,9 +163,9 @@ query GetTopProducts {
 
 #### `max_recursive_selections`
 
-Limits the total number of selections encountered when recursively expanding fragment spreads in an operation. This protects against extremely large or deeply nested operations that could consume excessive resources during query planning.
+Limits the total number of selections encountered when recursively expanding fragment spreads in an operation. This protects against extremely large or deeply nested operations that consume excessive resources during query planning.
 
-The default value is `10000000` (10 million). Unlike the other operation limits, this limit is available on all plans and does not require a license. Set to `null` to disable.
+The default value is `10000000` (10 million). This limit is available on all plans and does not require a license. Set to `null` to disable.
 
 ### `warn_only` mode
 
