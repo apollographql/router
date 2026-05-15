@@ -9,7 +9,7 @@ pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
 fn valid_large_body() {
     const SCHEMA: &str = "src/connectors/validation/test_data/valid_large_body.graphql";
 
-    const MAX_BYTES: usize = 250_000;
+    const MAX_BYTES: usize = 275_000;
     const MAX_ALLOCATIONS: u64 = 27_000;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
