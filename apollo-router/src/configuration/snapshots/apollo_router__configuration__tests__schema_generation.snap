@@ -6845,6 +6845,7 @@ expression: "&schema"
             "max_aliases": null,
             "max_depth": null,
             "max_height": null,
+            "max_recursive_selections": 10000000,
             "max_root_fields": null,
             "parser_max_recursion": 500,
             "parser_max_tokens": 15000,
@@ -8497,6 +8498,16 @@ expression: "&schema"
         "max_height": {
           "default": null,
           "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_recursive_selections": {
+          "default": 10000000,
+          "description": "Limit the total number of selections encountered when recursively expanding\nfragment spreads in an operation. This protects against extremely large or\ndeeply nested operations that could consume excessive resources during\nquery planning. Default: 10000000 (10 million).",
           "format": "uint32",
           "minimum": 0,
           "type": [

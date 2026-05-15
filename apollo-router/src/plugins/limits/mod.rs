@@ -108,6 +108,12 @@ pub(crate) struct RouterLimitsConfig {
     /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
     pub(crate) max_aliases: Option<u32>,
 
+    /// Limit the total number of selections encountered when recursively expanding
+    /// fragment spreads in an operation. This protects against extremely large or
+    /// deeply nested operations that could consume excessive resources during
+    /// query planning. Default: 10000000 (10 million).
+    pub(crate) max_recursive_selections: Option<u32>,
+
     /// If set to true (which is the default is dev mode),
     /// requests that exceed a `max_*` limit are *not* rejected.
     /// Instead they are executed normally, and a warning is logged.
@@ -159,6 +165,8 @@ impl Default for RouterLimitsConfig {
             max_height: None,
             max_root_fields: None,
             max_aliases: None,
+
+            max_recursive_selections: Some(10_000_000),
             warn_only: false,
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,

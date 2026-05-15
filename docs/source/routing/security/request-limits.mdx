@@ -30,6 +30,9 @@ limits:
     max_aliases: 30
     max_root_fields: 20
 
+    # Available on all plans (no license required)
+    max_recursive_selections: 10000000 # Default value
+
   # Subgraph response size limits
   subgraph:
     all:
@@ -71,7 +74,7 @@ limits:
     max_height: 200
     max_aliases: 30
     max_root_fields: 20
-
+    max_recursive_selections: 10000000 # Default value
     # Uncomment to enable warn_only mode
     # warn_only: true
 ```
@@ -157,6 +160,12 @@ query GetTopProducts {
   }
 }
 ```
+
+#### `max_recursive_selections`
+
+Limits the total number of selections encountered when recursively expanding fragment spreads in an operation. This protects against extremely large or deeply nested operations that could consume excessive resources during query planning.
+
+The default value is `10000000` (10 million). Unlike the other operation limits, this limit is available on all plans and does not require a license. Set to `null` to disable.
 
 ### `warn_only` mode
 
