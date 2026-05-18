@@ -7,6 +7,8 @@ traffic_shaping:
     deduplicate_query: false
     dns_resolution_strategy: ipv4_only
     experimental_http2: enable
+    experimental_http2_keep_alive_interval: null
+    experimental_http2_keep_alive_timeout: null
     global_rate_limit:
       capacity: 1
       interval: 30s
@@ -16,6 +18,8 @@ traffic_shaping:
       compression: gzip
       dns_resolution_strategy: ipv4_only
       experimental_http2: enable
+      experimental_http2_keep_alive_interval: null
+      experimental_http2_keep_alive_timeout: null
       global_rate_limit:
         capacity: 1
         interval: 30s
