@@ -39,6 +39,12 @@ impl_encoder_ext!(DeflateEncoder);
 impl_encoder_ext!(BrotliEncoder);
 impl_encoder_ext!(ZstdEncoder);
 
+async fn encode_chunk<E: EncoderExt>(encoder: &mut E, data: &[u8]) -> Result<Bytes, BoxError> {
+    encoder.write_all(data).await?;
+    encoder.flush().await?;
+    Ok(Bytes::from(encoder.take_output()))
+}
+
 async fn run_encoder<E, S, SE>(
     mut encoder: E,
     mut stream: S,
@@ -49,29 +55,23 @@ async fn run_encoder<E, S, SE>(
     SE: Into<BoxError>,
 {
     while let Some(data) = stream.next().await {
-        match data {
-            Err(e) => {
-                let _ = tx.send(Err(e.into())).await;
-                return;
-            }
-            Ok(data) => {
-                if let Err(e) = encoder.write_all(&data).await {
-                    let _ = tx.send(Err(e.into())).await;
-                    return;
-                }
-                if let Err(e) = encoder.flush().await {
-                    let _ = tx.send(Err(e.into())).await;
-                    return;
-                }
-                let chunk = Bytes::from(encoder.take_output());
-                if tx.send(Ok(chunk)).await.is_err() {
-                    return;
-                }
-            }
+        let result = match data {
+            Ok(data) => encode_chunk(&mut encoder, &data).await,
+            Err(e) => Err(e.into()),
+        };
+        let failed_to_encode = result.is_err();
+        if tx.send(result).await.is_err() {
+            return;
+        }
+        if failed_to_encode {
+            return;
         }
     }
     if let Err(e) = encoder.shutdown().await {
-        let _ = tx.send(Err(e.into())).await;
+        // Don't attempt to send `remaining` after a shutdown failure: the encoder
+        // didn't write a valid finalizer, so any buffered bytes are incomplete and
+        // would corrupt the decompressor. Send the error and stop.
+        let _ = tx.send(Err(e.into())).await; // best-effort; we return regardless
         return;
     }
     let remaining = Bytes::from(encoder.finish());
