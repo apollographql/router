@@ -299,7 +299,7 @@ impl Query {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "benchmarking"))]
     pub(crate) fn parse(
         query_text: impl Into<String>,
         operation_name: Option<&str>,
