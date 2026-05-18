@@ -5125,12 +5125,8 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            Some(&ContextConf::All),
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, Some(&ContextConf::All))
+            .unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5163,12 +5159,8 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            Some(&ContextConf::All),
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, Some(&ContextConf::All))
+            .unwrap();
 
         // k1 should be updated
         assert_eq!(
