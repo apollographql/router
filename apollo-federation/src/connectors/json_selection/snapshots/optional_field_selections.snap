@@ -8,102 +8,123 @@ JSONSelection {
             selections: [
                 NamedSelection {
                     prefix: None,
-                    path: PathSelection {
-                        path: WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "author",
-                                    ),
-                                    range: Some(
-                                        0..6,
-                                    ),
-                                },
-                                WithRange {
-                                    node: Question(
+                    path: WithRange {
+                        node: Path(
+                            PathSelection {
+                                path: WithRange {
+                                    node: Key(
                                         WithRange {
-                                            node: Selection(
-                                                SubSelection {
-                                                    selections: [
-                                                        NamedSelection {
-                                                            prefix: None,
-                                                            path: PathSelection {
-                                                                path: WithRange {
-                                                                    node: Key(
-                                                                        WithRange {
-                                                                            node: Field(
-                                                                                "age",
-                                                                            ),
-                                                                            range: Some(
-                                                                                10..13,
-                                                                            ),
-                                                                        },
-                                                                        WithRange {
-                                                                            node: Empty,
-                                                                            range: Some(
-                                                                                13..13,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                    range: Some(
-                                                                        10..13,
-                                                                    ),
-                                                                },
-                                                            },
-                                                        },
-                                                        NamedSelection {
-                                                            prefix: None,
-                                                            path: PathSelection {
-                                                                path: WithRange {
-                                                                    node: Key(
-                                                                        WithRange {
-                                                                            node: Field(
-                                                                                "middleName",
-                                                                            ),
-                                                                            range: Some(
-                                                                                14..24,
-                                                                            ),
-                                                                        },
-                                                                        WithRange {
-                                                                            node: Question(
-                                                                                WithRange {
-                                                                                    node: Empty,
+                                            node: Field(
+                                                "author",
+                                            ),
+                                            range: Some(
+                                                0..6,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Question(
+                                                WithRange {
+                                                    node: Selection(
+                                                        SubSelection {
+                                                            selections: [
+                                                                NamedSelection {
+                                                                    prefix: None,
+                                                                    path: WithRange {
+                                                                        node: Path(
+                                                                            PathSelection {
+                                                                                path: WithRange {
+                                                                                    node: Key(
+                                                                                        WithRange {
+                                                                                            node: Field(
+                                                                                                "age",
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                10..13,
+                                                                                            ),
+                                                                                        },
+                                                                                        WithRange {
+                                                                                            node: Empty,
+                                                                                            range: Some(
+                                                                                                13..13,
+                                                                                            ),
+                                                                                        },
+                                                                                    ),
                                                                                     range: Some(
-                                                                                        25..25,
+                                                                                        10..13,
                                                                                     ),
                                                                                 },
-                                                                            ),
-                                                                            range: Some(
-                                                                                24..25,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                    range: Some(
-                                                                        14..25,
-                                                                    ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            10..13,
+                                                                        ),
+                                                                    },
                                                                 },
-                                                            },
+                                                                NamedSelection {
+                                                                    prefix: None,
+                                                                    path: WithRange {
+                                                                        node: Path(
+                                                                            PathSelection {
+                                                                                path: WithRange {
+                                                                                    node: Key(
+                                                                                        WithRange {
+                                                                                            node: Field(
+                                                                                                "middleName",
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                14..24,
+                                                                                            ),
+                                                                                        },
+                                                                                        WithRange {
+                                                                                            node: Question(
+                                                                                                WithRange {
+                                                                                                    node: Empty,
+                                                                                                    range: Some(
+                                                                                                        25..25,
+                                                                                                    ),
+                                                                                                },
+                                                                                            ),
+                                                                                            range: Some(
+                                                                                                24..25,
+                                                                                            ),
+                                                                                        },
+                                                                                    ),
+                                                                                    range: Some(
+                                                                                        14..25,
+                                                                                    ),
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            14..25,
+                                                                        ),
+                                                                    },
+                                                                },
+                                                            ],
+                                                            range: Some(
+                                                                8..27,
+                                                            ),
                                                         },
-                                                    ],
+                                                    ),
                                                     range: Some(
                                                         8..27,
                                                     ),
                                                 },
                                             ),
                                             range: Some(
-                                                8..27,
+                                                6..27,
                                             ),
                                         },
                                     ),
                                     range: Some(
-                                        6..27,
+                                        0..27,
                                     ),
                                 },
-                            ),
-                            range: Some(
-                                0..27,
-                            ),
-                        },
+                            },
+                        ),
+                        range: Some(
+                            0..27,
+                        ),
                     },
                 },
             ],

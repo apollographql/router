@@ -8,6 +8,7 @@ use apollo_compiler::collections::IndexSet;
 
 use super::JSONSelection;
 use super::Key;
+use super::LitExpr;
 use super::PathList;
 use super::PathSelection;
 use super::Ranged;
@@ -42,12 +43,12 @@ impl JSONSelection {
         }
 
         let mut root_trie = SelectionTrie::new();
-        match &self.inner {
-            TopLevelSelection::Path(path) => {
-                root_trie.add_path_list(&path.path);
-            }
+        match self.top_level() {
             TopLevelSelection::Named(selection) => {
                 root_trie.add_subselection(selection);
+            }
+            TopLevelSelection::Value(lit) => {
+                root_trie.add_lit_expr(lit.as_ref());
             }
         };
         trie.add_str("$root").extend(&root_trie);
@@ -198,9 +199,48 @@ impl SelectionTrie {
         }
     }
 
+    /// Add any trie-worthy structure carried by `lit` — paths, object-literal
+    /// subselections, `LitPath` tails (which may end in a `SubSelection`), and
+    /// the inner expressions of `Array` / `OpChain` / legacy-object literals.
+    /// Primitive variants (`String`, `Number`, `Bool`, `Null`) refine nothing,
+    /// so they act as leaves and leave the trie unchanged.
+    pub(crate) fn add_lit_expr(&mut self, lit: &LitExpr) -> &mut Self {
+        match lit {
+            LitExpr::Path(path) => self.add_path_selection(path),
+            LitExpr::Object(sub) => self.add_subselection(sub),
+            LitExpr::LitPath(literal, tail) => {
+                self.add_lit_expr(literal.as_ref());
+                self.add_path_list(tail)
+            }
+            LitExpr::Array(elems) => {
+                for elem in elems {
+                    self.add_lit_expr(elem.as_ref());
+                }
+                self
+            }
+            LitExpr::OpChain(_, operands) => {
+                for operand in operands {
+                    self.add_lit_expr(operand.as_ref());
+                }
+                self
+            }
+            LitExpr::LegacyObject(map) => {
+                for value in map.values() {
+                    self.add_lit_expr(value.as_ref());
+                }
+                self
+            }
+            LitExpr::String(_) | LitExpr::Number(_) | LitExpr::Bool(_) | LitExpr::Null => self,
+        }
+    }
+
     pub(crate) fn add_subselection(&mut self, sub: &SubSelection) -> &mut Self {
         for selection in sub.selections_iter() {
-            self.add_path_selection(&selection.path);
+            // A `NamedSelection`'s value is any `LitExpr`; traverse the full
+            // shape so non-path values like object literals, `LitPath` chains,
+            // and operand expressions also contribute the paths and
+            // subselections they carry.
+            self.add_lit_expr(selection.path.as_ref());
         }
         self
     }

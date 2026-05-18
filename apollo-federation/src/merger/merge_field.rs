@@ -52,7 +52,9 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
-use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::HumanReadableListOptions;
+use crate::utils::human_readable::HumanReadableListPrefix;
+use crate::utils::human_readable::human_readable_list;
 use crate::utils::human_readable::human_readable_types;
 
 #[derive(Debug, Clone)]
@@ -235,7 +237,7 @@ impl Merger {
                     match source {
                         Some(_source_field) => {
                             // Direct field definition in this subgraph
-                            Some(self.names[*i].clone())
+                            Some(format!("\"{}\"", self.names[*i]))
                         }
                         None => {
                             // Check for interface object fields
@@ -248,7 +250,7 @@ impl Merger {
 
                             // Build description for interface object abstraction
                             Some(format!(
-                                "{} (through @interfaceObject {})",
+                                "\"{}\" (through @interfaceObject {})",
                                 self.names[*i],
                                 human_readable_types(
                                     itf_object_fields.iter().map(|f| f.type_name.clone())
@@ -264,7 +266,16 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    human_readable_subgraph_names(defining_subgraphs.iter())
+                    human_readable_list(
+                        defining_subgraphs.iter().map(|s| s.as_str()),
+                        HumanReadableListOptions {
+                            prefix: Some(HumanReadableListPrefix {
+                                singular: "subgraph",
+                                plural: "subgraphs",
+                            }),
+                            ..Default::default()
+                        },
+                    )
                 ),
             };
 
@@ -701,7 +712,7 @@ impl Merger {
                     // field.
                     for field in itf_object_fields {
                         let subgraph_str = format!(
-                            "{} (through @interfaceObject field \"{}.{}\")",
+                            "\"{}\" (through @interfaceObject field \"{}.{}\")",
                             self.names[*idx], field.type_name, field.field_name
                         );
                         categorize_field(*idx, subgraph_str, &field.into());
@@ -711,7 +722,7 @@ impl Merger {
                     if !merge_context.is_used_overridden(*idx)
                         && !merge_context.is_unused_overridden(*idx)
                     {
-                        let subgraph = self.names[*idx].clone();
+                        let subgraph = format!("\"{}\"", self.names[*idx]);
                         categorize_field(*idx, subgraph, source);
                     }
                 }
@@ -719,7 +730,17 @@ impl Merger {
         }
 
         fn print_subgraphs<T: HasSubgraph>(arr: &[T]) -> String {
-            human_readable_subgraph_names(arr.iter().map(|s| s.subgraph()))
+            human_readable_list(
+                arr.iter().map(|s| s.subgraph().to_string()),
+                HumanReadableListOptions {
+                    prefix: Some(HumanReadableListPrefix {
+                        singular: "subgraph",
+                        plural: "subgraphs",
+                    }),
+                    output_length_limit: 500,
+                    ..Default::default()
+                },
+            )
         }
 
         if !non_shareable_sources.is_empty()
@@ -747,7 +768,7 @@ impl Merger {
 
             let extra_hint = if let Some(s) = subgraph_with_targetless_override {
                 format!(
-                    " (please note that \"{}.{}\" has an @override directive in \"{}\" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
+                    " (please note that \"{}.{}\" has an @override directive in {} that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
                     dest.type_name(),
                     dest.field_name(),
                     s.subgraph,
