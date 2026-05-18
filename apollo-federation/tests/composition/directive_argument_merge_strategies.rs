@@ -400,7 +400,7 @@ mod tests {
             .expect("@listSize directive should be present on T");
         assert_eq!(
             t_requires_scopes_directive.to_string(),
-            r#"@listSize(assumedSize: 20)"#
+            r#"@listSize(assumedSize: 20, requireOneSlicingArgument: true)"#
         );
 
         let k = coord!(T.k)
@@ -413,7 +413,7 @@ mod tests {
             .expect("@listSize directive should be present on T.k");
         assert_eq!(
             k_requires_scopes_directive.to_string(),
-            r#"@listSize(assumedSize: 3)"#
+            r#"@listSize(assumedSize: 3, requireOneSlicingArgument: true)"#
         );
 
         let b = coord!(T.b)
@@ -536,7 +536,7 @@ mod tests {
             .expect("@listSize directive should be present on T.k");
         assert_eq!(
             k_requires_scopes_directive.to_string(),
-            r#"@listSize(slicingArguments: ["first", "last"])"#
+            r#"@listSize(slicingArguments: ["first", "last"], requireOneSlicingArgument: true)"#
         );
 
         let b = coord!(T.b)
@@ -549,7 +549,7 @@ mod tests {
             .expect("@listSize directive should be present on T.b");
         assert_eq!(
             b_requires_scopes_directive.to_string(),
-            r#"@listSize(sizedFields: ["page", "nextPageToken"])"#
+            r#"@listSize(sizedFields: ["page", "nextPageToken"], requireOneSlicingArgument: true)"#
         );
 
         let c = coord!(T.c)
@@ -563,6 +563,70 @@ mod tests {
         assert_eq!(
             c_requires_scopes_directive.to_string(),
             r#"@listSize(sizedFields: ["nextPageToken"])"#
+        );
+    }
+
+    #[test]
+    fn argument_merger_includes_default_values() {
+        // Verifies that when the argument merger is invoked, default argument values
+        // are included in the merge (matching JS behavior). Both subgraphs apply
+        // @listSize with different assumedSize but neither specifies
+        // requireOneSlicingArgument (which defaults to true). The merger should
+        // expand the default and include it in the merged result.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    items: [T!] @shareable @listSize(assumedSize: 10)
+                }
+
+                type T @key(fields: "id") {
+                    id: ID
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    items: [T!] @shareable @listSize(assumedSize: 20)
+                }
+
+                type T @key(fields: "id") {
+                    id: ID
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let result_sg = result.expect("Composition should succeed");
+
+        let expected_hints = vec![CompositionHint {
+            definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
+            message: String::from(
+                r#"Directive @listSize is applied to "Query.items" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+            ),
+            locations: Vec::new(),
+        }];
+        assert_hints_equal(result_sg.hints(), &expected_hints);
+
+        let schema = result_sg.schema().schema();
+        let items = coord!(Query.items)
+            .lookup_field(schema)
+            .expect("Query.items should be defined on the supergraph");
+        let list_size_directive = items
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on Query.items");
+
+        // assumedSize: NULLABLE_MAX(10, 20) = 20
+        // requireOneSlicingArgument: NULLABLE_AND(true, true) = true (from defaults)
+        assert_eq!(
+            list_size_directive.to_string(),
+            r#"@listSize(assumedSize: 20, requireOneSlicingArgument: true)"#
         );
     }
 }
