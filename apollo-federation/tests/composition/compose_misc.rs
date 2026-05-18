@@ -92,6 +92,79 @@ fn misc_drops_empty_object_default_when_only_some_subgraphs_declare_it() {
     );
 }
 
+/// Partial input object defaults must be preserved as written — composition should not expand
+/// them by injecting type-level field defaults for absent fields.
+#[test]
+fn misc_preserves_partial_input_object_defaults_without_expansion() {
+    let subgraph = ServiceDefinition {
+        name: "subgraph",
+        type_defs: r#"
+        type Query {
+          products(filter: SearchFilter = {paging: {limit: 10}, sorting: []}): [Product!]!
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String!
+        }
+
+        input SearchFilter {
+          paging: PagingInput = {limit: 10}
+          sorting: [SortInput!] = []
+          inStock: Boolean = true
+        }
+
+        input PagingInput {
+          limit: Int = 10
+        }
+
+        input SortInput {
+          field: String = "created_at"
+          direction: String = "DESC"
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
+    let query = supergraph
+        .schema()
+        .schema()
+        .get_object("Query")
+        .expect("Query type should exist in the supergraph");
+    assert_snapshot!(query);
+}
+
+/// Defaults inside list elements should also be preserved without expansion.
+#[test]
+fn misc_preserves_defaults_inside_list_elements() {
+    let subgraph = ServiceDefinition {
+        name: "subgraph",
+        type_defs: r#"
+        type Query {
+          products(sort: [SortInput!] = [{}]): [Product!]!
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String!
+        }
+
+        input SortInput {
+          field: String = "created_at"
+          direction: String = "DESC"
+        }
+        "#,
+    };
+
+    let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
+    let query = supergraph
+        .schema()
+        .schema()
+        .get_object("Query")
+        .expect("Query type should exist in the schema");
+    assert_snapshot!(query);
+}
+
 #[test]
 fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
     let subgraph_a = ServiceDefinition {
