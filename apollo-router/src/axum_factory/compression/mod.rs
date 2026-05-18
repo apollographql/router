@@ -232,9 +232,16 @@ mod tests {
         );
     }
 
+    /// Verifies that a full body compresses and decompresses correctly end-to-end for each
+    /// encoding, and that the output stream is properly closed after all data is sent.
+    #[rstest]
+    #[case::gzip("gzip")]
+    #[case::deflate("deflate")]
+    #[case::brotli("br")]
+    #[case::zstd("zstd")]
     #[tokio::test]
-    async fn finish() {
-        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+    async fn finish(#[case] encoding: &str) {
+        let compressor = Compressor::new([encoding].into_iter()).unwrap();
 
         let mut rng = rand::rng();
         let body: RouterBody = body::from_bytes(
@@ -245,16 +252,36 @@ mod tests {
         );
 
         let mut stream = compressor.process(body);
-        let mut decoder = GzipDecoder::new(Vec::new());
+        let mut decoder: Box<dyn DecoderTestExt> = match encoding {
+            "gzip" => Box::new(GzipDecoder::new(Vec::new())),
+            "deflate" => Box::new(DeflateDecoder::new(Vec::new())),
+            "br" => Box::new(BrotliDecoder::new(Vec::new())),
+            "zstd" => Box::new(ZstdDecoder::new(Vec::new())),
+            _ => unreachable!(),
+        };
 
         while let Some(buf) = stream.next().await {
             decoder.write_all(&buf.unwrap()).await.unwrap();
         }
 
         decoder.shutdown().await.unwrap();
-        let response = decoder.into_inner();
-        assert_eq!(response.len(), 5000);
+        assert_eq!(decoder.decoded().len(), 5000);
+        assert!(stream.next().await.is_none());
+    }
 
+    /// Verifies that an error from the input body stream is forwarded to the output stream
+    /// and that the output stream is closed immediately after.
+    #[tokio::test]
+    async fn stream_error_is_propagated() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+        let body: RouterBody = router::body::from_result_stream(stream::iter(vec![
+            Ok::<_, BoxError>(Bytes::from("hello")),
+            Err(BoxError::from("input error")),
+        ]));
+
+        let mut stream = compressor.process(body);
+        assert!(stream.next().await.unwrap().is_ok());
+        assert!(stream.next().await.unwrap().is_err());
         assert!(stream.next().await.is_none());
     }
 
@@ -277,6 +304,37 @@ mod tests {
         assert_eq!(response, [0u8, 1, 2, 3]);
 
         assert!(stream.next().await.is_none());
+    }
+
+    #[rstest]
+    #[case::unknown(&["unknown"])]
+    #[case::identity(&["identity"])]
+    #[case::empty(&[])]
+    fn new_returns_none(#[case] encodings: &[&str]) {
+        assert!(Compressor::new(encodings.iter().copied()).is_none());
+    }
+
+    #[rstest]
+    #[case::zstd_beats_gzip(&["zstd", "gzip"], "zstd")]
+    #[case::skips_unknown(&["unknown", "br"], "br")]
+    fn new_returns_first_supported_encoding(#[case] encodings: &[&str], #[case] expected: &str) {
+        let c = Compressor::new(encodings.iter().copied()).unwrap();
+        assert_eq!(c.content_encoding(), expected);
+    }
+
+    /// Verifies that `encode_chunk` compresses bytes and flushes a sync point that allows
+    /// partial decompression without closing the stream.
+    #[tokio::test]
+    async fn encode_chunk_roundtrip() {
+        let mut encoder = GzipEncoder::with_quality(Vec::new(), Level::Fastest);
+        let input = b"hello, world";
+        let compressed = encode_chunk(&mut encoder, input).await.unwrap();
+
+        let mut decoder = GzipDecoder::new(Vec::new());
+        decoder.write_all(&compressed).await.unwrap();
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+        assert_eq!(decoder.get_ref(), input);
     }
 
     #[tokio::test]
