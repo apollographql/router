@@ -1993,6 +1993,33 @@ impl IntegrationTest {
         panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
 
+    /// Read the current value of a Prometheus counter or gauge identified by the exact metric
+    /// name + label-set prefix `text` (e.g. `my_counter{label="value"}`). Returns `0` if the
+    /// metric line is not yet present in the scrape output.
+    ///
+    /// This is intentionally a snapshot (no waiting). It's useful for taking a "before" sample
+    /// of a cumulative counter, executing some work, and then taking an "after" sample to
+    /// assert the delta — which is robust against unrelated increments that happen during
+    /// router startup (e.g. transient Redis IO errors emitted by fred's event listener while
+    /// connections are still stabilising).
+    #[allow(dead_code)]
+    pub async fn read_metric_counter_value(&self, text: &str) -> u64 {
+        let metrics = match self.get_metrics_response().await {
+            Ok(resp) => match resp.text().await {
+                Ok(body) => body,
+                Err(_) => return 0,
+            },
+            Err(_) => return 0,
+        };
+
+        let pattern = regex::escape(text);
+        let re = Regex::new(&format!(r"(?m)^{pattern}\s+(\d+)(?:\s|$)")).expect("Invalid regex");
+        re.captures(&metrics)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         // Budget must cover:
