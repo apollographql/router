@@ -615,18 +615,7 @@ fn authenticate(
         if token_data.claims.get("exp").is_none() {
             tracing::debug!("accepted JWT without `exp` claim");
         }
-        // This is a metric and will not appear in the logs
-        //
-        // Apparently intended to be `apollo.router.operations.authentication.jwt` like above,
-        // but has existed for two years with a buggy name. Keep it for now.
-        u64_counter!(
-            "apollo.router.operations.jwt",
-            "Number of requests with JWT successful authentication (deprecated, \
-                use `apollo.router.operations.authentication.jwt` \
-                with `authentication.jwt.failed = false` instead)",
-            1
-        );
-        // Use the fixed name too:
+
         let failed = false;
         increment_jwt_counter_metric(failed);
 
