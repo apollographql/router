@@ -83,7 +83,7 @@ async fn run_encoder<E, S, SE>(
 pub(crate) enum Compressor {
     Deflate(DeflateEncoder<Vec<u8>>),
     Gzip(GzipEncoder<Vec<u8>>),
-    Brotli(BrotliEncoder<Vec<u8>>),
+    Brotli(Box<BrotliEncoder<Vec<u8>>>),
     Zstd(ZstdEncoder<Vec<u8>>),
 }
 
@@ -108,10 +108,10 @@ impl Compressor {
                     )));
                 }
                 "br" => {
-                    return Some(Compressor::Brotli(BrotliEncoder::with_quality(
+                    return Some(Compressor::Brotli(Box::new(BrotliEncoder::with_quality(
                         Vec::new(),
                         Level::Precise(4), // https://github.com/dropbox/rust-brotli/issues/93
-                    )));
+                    ))));
                 }
                 "zstd" => {
                     return Some(Compressor::Zstd(ZstdEncoder::with_quality(
@@ -142,7 +142,7 @@ impl Compressor {
                 match self {
                     Compressor::Gzip(encoder) => run_encoder(encoder, stream, tx).await,
                     Compressor::Deflate(encoder) => run_encoder(encoder, stream, tx).await,
-                    Compressor::Brotli(encoder) => run_encoder(encoder, stream, tx).await,
+                    Compressor::Brotli(encoder) => run_encoder(*encoder, stream, tx).await,
                     Compressor::Zstd(encoder) => run_encoder(encoder, stream, tx).await,
                 }
             }
