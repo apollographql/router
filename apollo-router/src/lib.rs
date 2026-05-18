@@ -81,9 +81,6 @@ pub mod tracer;
 mod uplink;
 
 pub(crate) mod allocator;
-#[cfg(feature = "benchmarking")]
-#[doc(hidden)]
-pub mod benchmarking;
 #[doc(hidden)]
 pub mod otel_compat;
 mod registry;

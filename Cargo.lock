@@ -473,7 +473,6 @@ dependencies = [
  "once_cell",
  "rhai",
  "serde_json",
- "serde_json_bytes",
  "tokio",
  "tower",
 ]
