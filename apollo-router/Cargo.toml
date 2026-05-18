@@ -55,6 +55,9 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = []
 
+# Exposes internal helpers for out-of-crate benchmarks (not part of the public API)
+benchmarking = []
+
 [dependencies]
 addr2line = "0.26.0"
 anyhow = "1.0.86"
