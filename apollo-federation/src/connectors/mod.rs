@@ -29,6 +29,7 @@ pub mod expand;
 pub mod header;
 mod id;
 mod json_selection;
+pub mod migration;
 mod models;
 mod schema_type_ref;
 pub use models::ProblemLocation;

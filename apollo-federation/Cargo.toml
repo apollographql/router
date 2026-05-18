@@ -17,9 +17,13 @@ autotests = false                                      # Integration tests are m
 snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
+# Builds the `connect-migrate` binary in `connectors/migration/`.
+# Pulls in `clap` only when the binary is being built.
+connect-migrate = ["dep:clap"]
 
 [dependencies]
 apollo-compiler.workspace = true
+clap = { version = "4", features = ["derive"], optional = true }
 time = { version = "0.3.34", default-features = false, features = [
   "local-offset",
 ] }
@@ -88,3 +92,8 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+[[bin]]
+name = "connect-migrate"
+path = "src/connectors/migration/main.rs"
+required-features = ["connect-migrate"]

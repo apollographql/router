@@ -212,6 +212,7 @@ version = "2.14.0"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
+ "clap",
  "derive_more",
  "dhat",
  "diff",
