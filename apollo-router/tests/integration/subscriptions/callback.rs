@@ -147,8 +147,8 @@ async fn wait_for_callbacks(
 /// RST-on-overflow path, producing
 /// `reqwest::Error: error sending request for url (...)` —
 /// the surface that crashed
-/// `test_subscription_callback_error_payload` on CircleCI build
-/// 370163 (flake-bash branch-5, `test-amd_linux_test`).
+/// `test_subscription_callback_error_payload` on
+/// `test-amd_linux_test`.
 ///
 /// A HEAD against `/` won't return a useful status (the
 /// supergraph rejects non-POST GraphQL), but it WILL complete
@@ -419,8 +419,8 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     // actually answers an HTTP request before sending the
     // subscription POST, so the test's initial `execute_query`
     // can't race the kernel's RST-on-overflow path under heavy CI
-    // scheduling pressure (the failure surface on flake-bash
-    // branch-5 / CircleCI 370163).
+    // scheduling pressure (the failure surface previously observed
+    // on `test-amd_linux_test`).
     let router_url = format!("http://{}/", router.bind_address());
     wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(30)).await;
 

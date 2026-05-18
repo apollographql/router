@@ -190,10 +190,9 @@ async fn test_http2_max_header_list_size_exceeded() -> Result<(), BoxError> {
     // GOAWAY + the harness's 5 s `connection_shutdown_timeout` before the
     // process can exit. On macOS arm64 CI the 21 MiB header upload leaves the
     // kernel TCP/TLS path with enough residual work that the 10 s default
-    // assert_shutdown budget trips ~10% of the time
-    // (CircleCI 373412). Pair the 20 s deadline with the upstream timeout to
-    // keep the test honest about real hangs while absorbing macOS scheduling
-    // jitter.
+    // assert_shutdown budget trips ~10% of the time. Pair the 20 s deadline
+    // with the upstream timeout to keep the test honest about real hangs while
+    // absorbing macOS scheduling jitter.
     router
         .graceful_shutdown_with_deadline(Duration::from_secs(20))
         .await;
@@ -537,9 +536,9 @@ mod unix_tests {
         // out the harness's 5 s `connection_shutdown_timeout` before the
         // process can exit — and on macOS arm64 CI the
         // `case_2_header_bigger_than_config` variant (21 MiB header) trips the
-        // default 10 s `assert_shutdown` budget ~10% of the time
-        // (CircleCI 373473). Use a 20 s deadline to absorb macOS scheduling
-        // jitter while keeping the upstream timeout honest.
+        // default 10 s `assert_shutdown` budget ~10% of the time. Use a 20 s
+        // deadline to absorb macOS scheduling jitter while keeping the
+        // upstream timeout honest.
         drop(response);
         drop(sender);
         router

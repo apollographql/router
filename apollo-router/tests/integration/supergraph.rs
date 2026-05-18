@@ -95,8 +95,8 @@ async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
     // connection while the client is still streaming the body. Depending on TCP scheduling
     // the client either reads the 431 response or sees the connection reset before the
     // response surfaces. Both outcomes prove the server rejected the oversized header, so
-    // we accept either rather than panicking on the connection error (CircleCI 373669
-    // surfaced the connection-reset path on amd_linux). Going through reqwest directly
+    // we accept either rather than panicking on the connection error (the
+    // connection-reset path has been observed on amd_linux). Going through reqwest directly
     // (instead of `execute_query`) also keeps the harness's panic-on-send-error from
     // racing with the legitimate server-side rejection.
     let url = format!("http://{}", router.bind_address());

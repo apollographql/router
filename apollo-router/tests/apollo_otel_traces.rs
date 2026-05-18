@@ -326,7 +326,7 @@ async fn get_batch_router_service(
 /// `parse_query` / `compute_job` / `compute_job.execution`), siblings of one
 /// trace family can drift between the two `supergraph` subtrees depending on
 /// which worker happened to win the start-time race. This was the root cause
-/// of the CircleCI build-369985 flake on `test_batch_trace_id-2` (the
+/// of the observed flake on `test_batch_trace_id-2` (the
 /// `test_batch_send_header` snapshot has the same shape and was a latent
 /// sibling).
 ///

@@ -515,7 +515,7 @@ async fn test_subscription_ws_passthrough_error_payload(
     );
 
     let stream = response.1.bytes_stream();
-    // Race fix (round-3 flake-bash branch 3-2, CircleCI 370401): the router's
+    // Race fix: the router's
     // multipart subscription transport emits `{}` heartbeats every 10ms in
     // test builds (see `HEARTBEAT_INTERVAL` in
     // `apollo-router/src/protocols/multipart.rs`). The mock subscription
@@ -1031,7 +1031,7 @@ async fn dedup_dispatch_and_verify(
     // `create_or_subscribe` to return `created=true`. Then BOTH are counted
     // as `deduplicated="false"` (count=2, deduplicated="true" count=0), the
     // predicate `true==1 && false==1` never converges, and the 10s deadline
-    // panics (CircleCI 370144 amd, 11.784s; flake-bash branches 6+1).
+    // panics (observed on amd Linux at ~12 s).
     //
     // The structural fix is to dispatch the two subscriptions serially:
     // fire the first, deadline-poll until it is observable in metrics
