@@ -455,8 +455,6 @@ dependencies = [
  "wiremock",
  "wsl",
  "yaml-rust",
- "zstd",
- "zstd-safe",
 ]
 
 [[package]]
