@@ -1,9 +1,14 @@
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
