@@ -13,7 +13,7 @@ rust = { version = "1.95.0", profile = "default" }
 "cargo:typos-cli" = "1.31.1"
 protoc = "34.1"
 gh = "2.92.0"
-helm = "3.20.2"
+helm = "3.21.0"
 helm-docs = "1.14.2"
 yq = "4.53.2"
 jq = "1.8.1"
