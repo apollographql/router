@@ -1,9 +1,14 @@
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use regex::Regex;
 use serde_json::json;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -263,6 +268,85 @@ async fn test_subgraph_auth_metrics() {
     );
 
     router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
+}
+
+// Regression test: SigV4 signing params must not leak from a configured subgraph
+// to an unconfigured one when both are resolved in the same operation.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sigv4_does_not_leak_to_unconfigured_subgraph() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Set up a single mock server that both subgraphs route to.
+    let mock_server = MockServer::start().await;
+    let subgraph_url = mock_server.uri();
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "topProducts": [{"name": "Table"}], "me": {"name": "Alice"} }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            telemetry:
+              exporters:
+                metrics:
+                  prometheus:
+                    listen: 127.0.0.1:4000
+                    enabled: true
+                    path: /metrics
+            include_subgraph_errors:
+              all: true
+            authentication:
+              subgraph:
+                subgraphs:
+                  products:
+                    aws_sig_v4:
+                      hardcoded:
+                        access_key_id: "test"
+                        secret_access_key: "test"
+                        region: "us-east-1"
+                        service_name: "test_service"
+            "#,
+        )
+        .subgraph_overrides(HashMap::from([
+            ("products".to_string(), subgraph_url.clone()),
+            ("accounts".to_string(), subgraph_url.clone()),
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query resolves topProducts (products subgraph, SigV4 configured) and me
+    // (accounts subgraph, not configured) in the same operation.
+    router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query": "{ topProducts { name } me { name } }"}))
+                .build(),
+        )
+        .await;
+
+    // Wait for the products signing metric to appear, proving metrics have been
+    // flushed, then immediately assert accounts was not signed.
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router
+        .assert_metrics_does_not_contain(
+            r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="accounts""#,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

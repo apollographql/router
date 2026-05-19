@@ -39,9 +39,9 @@ pub(crate) async fn count_subgraph_errors(
 
     let response_body = response.response.body();
     if !response_body.errors.is_empty() {
-        count_operation_errors(&response_body.errors, &context, &errors_config);
+        count_operation_errors(response_body.errors.iter(), &context, &errors_config);
         // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+        let _ = context.insert(COUNTED_ERRORS, to_set(response_body.errors.iter()));
     }
     SubgraphResponse {
         context: response.context,
@@ -61,8 +61,8 @@ pub(crate) async fn count_supergraph_errors(
     let (parts, stream) = response.response.into_parts();
 
     let stream = stream.inspect(move |response_body| {
-        if !response_body.errors.is_empty() {
-            count_operation_errors(&response_body.errors, &context, &errors_config);
+        if response_body.contains_errors() {
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
         }
         if let Some(value_completion) = response_body
             .extensions
@@ -74,11 +74,11 @@ pub(crate) async fn count_supergraph_errors(
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            count_operation_errors(&errors, &context, &errors_config);
+            count_operation_errors(errors.iter(), &context, &errors_config);
         }
 
         // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+        let _ = context.insert(COUNTED_ERRORS, to_set(response_body.all_errors()));
     });
 
     let (first_response, rest) = StreamExt::into_future(stream).await;
@@ -105,10 +105,10 @@ pub(crate) async fn count_execution_errors(
     let (parts, stream) = response.response.into_parts();
 
     let stream = stream.inspect(move |response_body| {
-        if !response_body.errors.is_empty() {
-            count_operation_errors(&response_body.errors, &context, &errors_config);
+        if response_body.contains_errors() {
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
             // Refresh context with the most up-to-date list of errors
-            let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+            let _ = context.insert(COUNTED_ERRORS, to_set(response_body.all_errors()));
         }
     });
 
@@ -141,7 +141,7 @@ pub(crate) async fn count_router_errors(
         .map(|(id, error)| error.with_apollo_id(*id))
         .collect();
     if !errors.is_empty() {
-        count_operation_errors(&errors, &context, &errors_config);
+        count_operation_errors(errors.iter(), &context, &errors_config);
         // Router layer handling is unique in that the list of new errors from context may not
         // include errors we previously counted. Thus, we must combine the set of previously counted
         // errors with the set of new errors here before adding to context.
@@ -156,12 +156,12 @@ pub(crate) async fn count_router_errors(
     }
 }
 
-fn to_set(errors: &[Error]) -> HashSet<Uuid> {
-    errors.iter().map(Error::apollo_id).collect()
+fn to_set<'a>(errors: impl Iterator<Item = &'a Error>) -> HashSet<Uuid> {
+    errors.map(Error::apollo_id).collect()
 }
 
-fn count_operation_errors(
-    errors: &[Error],
+fn count_operation_errors<'a>(
+    errors: impl Iterator<Item = &'a Error>,
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
