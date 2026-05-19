@@ -348,20 +348,7 @@ impl Selector for RouterSelector {
                             let data: serde_json_bytes::Value =
                                 serde_json_bytes::to_value(errors).ok()?;
 
-                            let result = response_errors_count.find(&data);
-                            // JSONPath find returns:
-                            // - Array if multiple matches
-                            // - Single value (unwrapped) if one match
-                            // - Null if no matches
-                            let count = if let Some(arr) = result.as_array() {
-                                arr.len()
-                            } else if result.is_null() {
-                                0
-                            } else {
-                                // Single matched element (returned unwrapped)
-                                1
-                            };
-
+                            let count = response_errors_count.select(&data).count();
                             Some(opentelemetry::Value::I64(count as i64))
                         })
                 }),
