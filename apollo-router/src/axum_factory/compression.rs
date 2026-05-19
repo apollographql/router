@@ -7,16 +7,13 @@ use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
-use tracing::Instrument;
 
 use crate::services::router::body::RouterBody;
 
 /// Abstracts the `get_mut()`/`into_inner()` inherent methods that each
 /// `async-compression` encoder exposes on its `Vec<u8>` inner writer, allowing
-/// `run_encoder` to be written once generically.
+/// `encode_stream` to be written once generically.
 trait EncoderExt: tokio::io::AsyncWrite + Unpin + Send {
     fn take_output(&mut self) -> Vec<u8>;
     fn finish(self) -> Vec<u8>;
@@ -45,39 +42,59 @@ async fn encode_chunk<E: EncoderExt>(encoder: &mut E, data: &[u8]) -> Result<Byt
     Ok(Bytes::from(encoder.take_output()))
 }
 
-async fn run_encoder<E, S, SE>(
-    mut encoder: E,
-    mut stream: S,
-    tx: mpsc::Sender<Result<Bytes, BoxError>>,
-) where
-    E: EncoderExt,
-    S: Stream<Item = Result<Bytes, SE>> + Unpin,
-    SE: Into<BoxError>,
+/// Returns a lazy `Stream` that compresses `stream` one chunk at a time.
+///
+/// Each output chunk is produced only when the consumer polls for it, which
+/// preserves backpressure: the next input chunk is not fetched until the
+/// previous compressed chunk has been consumed. This is critical for `@defer`
+/// streaming — it ensures the first response part reaches the client before the
+/// deferred subgraph call that produces the second part is even issued.
+fn encode_stream<E, S, SE>(
+    encoder: E,
+    stream: S,
+) -> impl Stream<Item = Result<Bytes, BoxError>> + Send + 'static
+where
+    E: EncoderExt + Send + 'static,
+    S: Stream<Item = Result<Bytes, SE>> + Unpin + Send + 'static,
+    SE: Into<BoxError> + Send + 'static,
 {
-    while let Some(data) = stream.next().await {
-        let result = match data {
-            Ok(data) => encode_chunk(&mut encoder, &data).await,
-            Err(e) => Err(e.into()),
-        };
-        let failed_to_encode = result.is_err();
-        if tx.send(result).await.is_err() {
-            return;
+    enum State<E, S> {
+        Processing(E, S),
+        Done,
+    }
+
+    futures::stream::unfold(State::Processing(encoder, stream), |state| async move {
+        match state {
+            State::Done => None,
+            State::Processing(mut encoder, mut stream) => match stream.next().await {
+                Some(Ok(data)) => {
+                    let result = encode_chunk(&mut encoder, &data).await;
+                    let next = if result.is_err() {
+                        State::Done
+                    } else {
+                        State::Processing(encoder, stream)
+                    };
+                    Some((result, next))
+                }
+                Some(Err(e)) => Some((Err(e.into()), State::Done)),
+                None => {
+                    if let Err(e) = encoder.shutdown().await {
+                        // Don't yield `remaining` after a shutdown failure: the encoder
+                        // didn't write a valid finalizer, so any buffered bytes are
+                        // incomplete and would corrupt the decompressor.
+                        Some((Err(e.into()), State::Done))
+                    } else {
+                        let remaining = Bytes::from(encoder.finish());
+                        if remaining.is_empty() {
+                            None
+                        } else {
+                            Some((Ok(remaining), State::Done))
+                        }
+                    }
+                }
+            },
         }
-        if failed_to_encode {
-            return;
-        }
-    }
-    if let Err(e) = encoder.shutdown().await {
-        // Don't attempt to send `remaining` after a shutdown failure: the encoder
-        // didn't write a valid finalizer, so any buffered bytes are incomplete and
-        // would corrupt the decompressor. Send the error and stop.
-        let _ = tx.send(Err(e.into())).await; // best-effort; we return regardless
-        return;
-    }
-    let remaining = Bytes::from(encoder.finish());
-    if !remaining.is_empty() {
-        let _ = tx.send(Ok(remaining)).await;
-    }
+    })
 }
 
 pub(crate) enum Compressor {
@@ -135,20 +152,13 @@ impl Compressor {
     }
 
     pub(crate) fn process(self, body: RouterBody) -> impl Stream<Item = Result<Bytes, BoxError>> {
-        let (tx, rx) = mpsc::channel(10);
         let stream = http_body_util::BodyDataStream::new(body);
-        tokio::task::spawn(
-            async move {
-                match self {
-                    Compressor::Gzip(encoder) => run_encoder(encoder, stream, tx).await,
-                    Compressor::Deflate(encoder) => run_encoder(encoder, stream, tx).await,
-                    Compressor::Brotli(encoder) => run_encoder(*encoder, stream, tx).await,
-                    Compressor::Zstd(encoder) => run_encoder(encoder, stream, tx).await,
-                }
-            }
-            .instrument(tracing::debug_span!("body_compression")),
-        );
-        ReceiverStream::new(rx)
+        match self {
+            Compressor::Gzip(encoder) => encode_stream(encoder, stream).fuse().boxed(),
+            Compressor::Deflate(encoder) => encode_stream(encoder, stream).fuse().boxed(),
+            Compressor::Brotli(encoder) => encode_stream(*encoder, stream).fuse().boxed(),
+            Compressor::Zstd(encoder) => encode_stream(encoder, stream).fuse().boxed(),
+        }
     }
 }
 
