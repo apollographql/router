@@ -785,6 +785,61 @@ mod test {
             Ok(())
         }
 
+        // Arc<SigningParamsConfig> must survive SubgraphRequest::clone so APQ probe
+        // requests (which clone the request for a potential retry) can be signed.
+        #[tokio::test]
+        async fn test_signing_params_preserved_across_subgraph_request_clone()
+        -> Result<(), BoxError> {
+            let signing_params = Arc::new(
+                make_signing_params(
+                    &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
+                        access_key_id: "id".to_string(),
+                        secret_access_key: "secret".to_string(),
+                        region: "us-east-1".to_string(),
+                        service_name: "execute-api".to_string(),
+                        assume_role: None,
+                    })),
+                    "products",
+                )
+                .await
+                .unwrap(),
+            );
+
+            let mut req = SubgraphRequest::builder()
+                .supergraph_request(Arc::new(
+                    http::Request::builder()
+                        .header(http::header::HOST, "host")
+                        .body(crate::graphql::Request::builder().query("query").build())
+                        .expect("valid request"),
+                ))
+                .subgraph_request(
+                    http::Request::builder()
+                        .header(http::header::HOST, "rhost")
+                        .uri("https://products-endpoint.com")
+                        .body(crate::graphql::Request::builder().query("query").build())
+                        .expect("valid request"),
+                )
+                .operation_kind(OperationKind::Query)
+                .context(Context::new())
+                .subgraph_name("products".to_string())
+                .build();
+            req.subgraph_request
+                .extensions_mut()
+                .insert(signing_params.clone());
+
+            let cloned = req.clone();
+            assert!(
+                cloned
+                    .subgraph_request
+                    .extensions()
+                    .get::<Arc<SigningParamsConfig>>()
+                    .is_some(),
+                "Arc<SigningParamsConfig> must be preserved when SubgraphRequest is cloned for APQ"
+            );
+
+            Ok(())
+        }
+
         // SigV4 params stored in per-request extensions must not leak to other subgraphs
         // that share the same operation context.
         #[tokio::test]

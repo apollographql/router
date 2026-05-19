@@ -34,6 +34,7 @@ use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
@@ -191,9 +192,21 @@ impl Clone for Request {
             );
         }
         let mut subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
-        // Copy extensions so per-request data (e.g. SigV4 signing params) is preserved
-        // across clones made for APQ retries.
-        *subgraph_request.extensions_mut() = self.subgraph_request.extensions().clone();
+        // Copy only Arc<SigningParamsConfig> so APQ probe requests can be signed.
+        //
+        // We deliberately avoid copying all extensions: some types (e.g. MultipartFormData
+        // in the file-uploads plugin) hold shared stream state that must not be shared with
+        // the APQ probe clone — draining the probe would exhaust the original on retry.
+        //
+        // If a new extension type needs to survive SubgraphRequest clones, add it here.
+        if let Some(signing_params) = self
+            .subgraph_request
+            .extensions()
+            .get::<Arc<SigningParamsConfig>>()
+            .cloned()
+        {
+            subgraph_request.extensions_mut().insert(signing_params);
+        }
 
         Self {
             supergraph_request: self.supergraph_request.clone(),
@@ -596,13 +609,14 @@ mod tests {
     }
 
     #[test]
-    fn test_clone_preserves_subgraph_request_extensions() {
-        // APQ retries clone the SubgraphRequest to keep it around for a potential
-        // retry. Extensions on the inner subgraph HTTP request (e.g. SigV4 signing
-        // params inserted by the authentication plugin) must survive that clone,
-        // otherwise the retried request will be sent unsigned.
+    fn test_clone_does_not_copy_arbitrary_subgraph_request_extensions() {
+        // The Clone impl copies only specific extension types needed for APQ retries
+        // (Arc<SigningParamsConfig> for SigV4 — see authentication/subgraph.rs for the
+        // positive test). Arbitrary types must NOT be copied: some extensions
+        // (e.g. MultipartFormData in file uploads) hold shared stream state, and copying
+        // them would cause the APQ probe clone to exhaust the stream before the retry.
         #[derive(Clone, PartialEq, Debug)]
-        struct TestExtension(u32);
+        struct ShouldNotSurviveClone(u32);
 
         let mut req = Request::fake_builder()
             .subgraph_request(
@@ -613,13 +627,16 @@ mod tests {
             .build();
         req.subgraph_request
             .extensions_mut()
-            .insert(TestExtension(42));
+            .insert(ShouldNotSurviveClone(42));
 
         let cloned = req.clone();
-        assert_eq!(
-            cloned.subgraph_request.extensions().get::<TestExtension>(),
-            Some(&TestExtension(42)),
-            "subgraph_request extensions must be preserved when SubgraphRequest is cloned"
+        assert!(
+            cloned
+                .subgraph_request
+                .extensions()
+                .get::<ShouldNotSurviveClone>()
+                .is_none(),
+            "arbitrary extension types must not be copied when SubgraphRequest is cloned"
         );
     }
 }
