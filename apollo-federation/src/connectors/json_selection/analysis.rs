@@ -85,9 +85,11 @@ impl SelectionAnalysis {
         }
     }
 
-    /// The selection this analysis was computed from.
-    pub(crate) fn selection(&self) -> &Arc<JSONSelection> {
-        &self.selection
+    /// The selection this analysis was computed from. The returned `Arc`
+    /// is cheap to clone, so callers can take ownership without scoping
+    /// the borrow against the analysis.
+    pub(crate) fn selection(&self) -> Arc<JSONSelection> {
+        Arc::clone(&self.selection)
     }
 
     /// The static output shape of the selection.
@@ -97,8 +99,8 @@ impl SelectionAnalysis {
     /// show up in the output shape as subpaths of `$root` (e.g.
     /// `$root.books.4.isbn`). Use [`Self::with_input_shape`] to re-run the
     /// analysis against a concrete input shape.
-    pub(crate) fn output_shape(&self) -> &Shape {
-        &self.output_shape
+    pub(crate) fn output_shape(&self) -> Shape {
+        self.output_shape.clone()
     }
 
     /// Per-variable consumption trie. Top-level keys are variable names
