@@ -133,7 +133,7 @@ impl Compressor {
                 "zstd" => {
                     return Some(Compressor::Zstd(ZstdEncoder::with_quality(
                         Vec::new(),
-                        Level::Precise(1), // matches zstd_safe::min_c_level()
+                        Level::Fastest, // level 1; async-compression avoids negatives that expand output
                     )));
                 }
                 _ => {}
