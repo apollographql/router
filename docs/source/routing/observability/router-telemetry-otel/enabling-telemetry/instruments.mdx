@@ -41,7 +41,7 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 <Note>
 
 The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them.  
-<br/>
+
 
 | Value of `default_requirement_level` | Value of standard instruments |
 |--------------------------------------|-------------------------------|
@@ -202,7 +202,7 @@ Valid values:
 
 * `required` (default, Apollo recommended) - required attributes will be attached to standard instruments by default.
 * `recommended` - experimental attributes from OpenTelemetry's development-status conventions will be attached to standard instruments by default.
-* `none` - standard instruments will be disabled by default and no attributes will be set unless configured individually.
+* `none` - standard instruments will be disabled by default, thus no attributes will be set unless configured individually.
 
 <Note>
 
