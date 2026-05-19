@@ -5,8 +5,8 @@ The boolean form of the `context` field on each coprocessor stage (`context: tru
 - `context: all` — send every context entry with the current key names
 - `context: deprecated` — send every context entry using the pre-2.x deprecated key names
 - `context: selective: [key1, key2, ...]` — only send the listed context keys
-- omit the field — do not send context (the default)
+- `context: none` — do not send context (the default; equivalent to omitting the field)
 
-To preserve existing behavior, an automatic configuration migration rewrites `context: true` to `context: deprecated` and drops `context: false` on router startup. See [https://go.apollo.dev/o/coprocessor-context](https://go.apollo.dev/o/coprocessor-context) for details.
+To preserve existing behavior, an automatic configuration migration rewrites `context: true` to `context: deprecated` and `context: false` to `context: none` on router startup. See [https://go.apollo.dev/o/coprocessor-context](https://go.apollo.dev/o/coprocessor-context) for details.
 
 By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9453

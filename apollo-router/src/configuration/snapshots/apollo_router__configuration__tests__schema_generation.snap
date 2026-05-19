@@ -2277,12 +2277,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -2336,12 +2333,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -2951,6 +2945,11 @@ expression: "&schema"
     "ContextConf": {
       "description": "Configures the context",
       "oneOf": [
+        {
+          "const": "none",
+          "description": "Do not send context to the coprocessor (the default)",
+          "type": "string"
+        },
         {
           "const": "all",
           "description": "Send all context keys to coprocessor",
@@ -3897,12 +3896,9 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -3951,12 +3947,9 @@ expression: "&schema"
           "description": "Send the body (can be true/false or selective with data/errors/extensions)"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -8556,12 +8549,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -8615,12 +8605,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -10295,12 +10282,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -10362,12 +10346,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -11583,12 +11564,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"
@@ -11640,12 +11618,9 @@ expression: "&schema"
           "description": "Condition to trigger this stage"
         },
         "context": {
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ContextConf"
-            },
-            {
-              "type": "null"
             }
           ],
           "description": "Send the context"

@@ -25,7 +25,7 @@ pub(super) struct ExecutionRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: Option<ContextConf>,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -45,7 +45,7 @@ pub(super) struct ExecutionResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: Option<ContextConf>,
+    pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
     /// Send the SDL
@@ -216,10 +216,7 @@ where
         .body
         .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config
-        .context
-        .as_ref()
-        .map(|c| c.get_context(&request.context));
+    let context_to_send = request_config.context.get_context(&request.context);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
     let query_plan = request_config
@@ -288,7 +285,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let Some(ContextConf::Deprecated) = &request_config.context {
+                    if let ContextConf::Deprecated = &request_config.context {
                         key = context_key_from_deprecated(key);
                     }
                     execution_response
@@ -314,7 +311,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let Some(ContextConf::Deprecated) = &request_config.context {
+            if let ContextConf::Deprecated = &request_config.context {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -378,10 +375,7 @@ where
         .then(|| externalize_header_map(&parts.headers));
     let body_to_send = filter_graphql_response_body(&first, &response_config.body);
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config
-        .context
-        .as_ref()
-        .map(|c| c.get_context(&response.context));
+    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::execution_builder()
@@ -438,11 +432,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            context,
-            response_config.context.as_ref(),
-        )?;
+        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -466,9 +456,7 @@ where
             async move {
                 let body_to_send =
                     filter_graphql_response_body(&deferred_response, &response_config.body);
-                let context_to_send = response_config_context
-                    .as_ref()
-                    .map(|c| c.get_context(&generator_map_context));
+                let context_to_send = response_config_context.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -519,7 +507,7 @@ where
                     update_context_from_coprocessor(
                         &generator_map_context,
                         context,
-                        response_config_context.as_ref(),
+                        &response_config_context,
                     )?;
                 }
 
@@ -646,7 +634,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: None,
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -782,7 +770,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: None,
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -856,7 +844,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: Some(ContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -993,7 +981,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: Some(ContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1105,7 +1093,7 @@ mod tests {
             request: Default::default(),
             response: ExecutionResponseConf {
                 headers: true,
-                context: Some(ContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1136,7 +1124,7 @@ mod tests {
         ExecutionStage {
             request: ExecutionRequestConf {
                 headers: true,
-                context: Some(ContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,

@@ -49,7 +49,7 @@ pub(super) struct ConnectorRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: Option<ContextConf>,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the connector URI
@@ -71,7 +71,7 @@ pub(super) struct ConnectorResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: Option<ContextConf>,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the service name
@@ -261,10 +261,7 @@ where
         serde_json::from_str::<Value>(&body).unwrap_or_else(|_| Value::String(body.clone().into()))
     });
 
-    let context_to_send = request_config
-        .context
-        .as_ref()
-        .map(|c| c.get_context(&request.context));
+    let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let service_name_to_send = request_config.service_name.then_some(service_name);
 
@@ -343,7 +340,7 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let Some(ContextConf::Deprecated) = &request_config.context {
+                if let ContextConf::Deprecated = &request_config.context {
                     key = context_key_from_deprecated(key);
                 }
                 request
@@ -374,7 +371,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let Some(ContextConf::Deprecated) = &request_config.context {
+            if let ContextConf::Deprecated = &request_config.context {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -446,10 +443,7 @@ where
         None
     };
 
-    let context_to_send = response_config
-        .context
-        .as_ref()
-        .map(|c| c.get_context(&context));
+    let context_to_send = response_config.context.get_context(&context);
     let service_name_to_send = response_config.service_name.then_some(service_name);
 
     let payload = Externalizable::connector_builder()
@@ -499,11 +493,7 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &context,
-            returned_context,
-            response_config.context.as_ref(),
-        )?;
+        update_context_from_coprocessor(&context, returned_context, &response_config.context)?;
     }
 
     if let Some(body) = co_processor_output.body {

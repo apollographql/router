@@ -9,14 +9,14 @@ coprocessor:
     request:
       context: deprecated
     response:
-      context: ~
+      context: none
   supergraph:
     request:
       context: deprecated
   subgraph:
     all:
       request:
-        context: ~
+        context: none
   connector:
     all:
       request:
