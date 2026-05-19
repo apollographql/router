@@ -609,7 +609,8 @@ impl MappedResponse {
                         ResponseKey::RootField { name, .. } => {
                             for field in op.selection_set.selections.iter() {
                                 if let Selection::Field(field) = field
-                                    && field.name.as_str() == name.as_str()
+                                    && field.alias.as_ref().unwrap_or(&field.name).as_str()
+                                        == name.as_str()
                                 {
                                     // Use the field's selection set type so that
                                     // __typename resolves to the return type (e.g.
