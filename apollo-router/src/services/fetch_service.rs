@@ -15,7 +15,7 @@ use super::FetchRequest;
 use super::SubgraphRequest;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::AddSubgraphNameExt;
-use super::fetch::BoxService;
+use super::fetch::BoxCloneService;
 use super::new_service::ServiceFactory;
 use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
@@ -312,7 +312,7 @@ impl FetchServiceFactory {
 }
 
 impl ServiceFactory<Request> for FetchServiceFactory {
-    type Service = BoxService;
+    type Service = BoxCloneService;
 
     fn create(&self) -> Self::Service {
         FetchService {
@@ -323,6 +323,6 @@ impl ServiceFactory<Request> for FetchServiceFactory {
             connector_service_factory: self.connector_service_factory.clone(),
             hoist_orphan_errors: self.hoist_orphan_errors.clone(),
         }
-        .boxed()
+        .boxed_clone()
     }
 }

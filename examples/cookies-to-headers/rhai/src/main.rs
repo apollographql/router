@@ -37,7 +37,7 @@ mod tests {
     use apollo_router::services::subgraph;
     use apollo_router::services::supergraph;
     use http::StatusCode;
-    use tower::util::ServiceExt;
+    use tower::util::ServiceExt as _;
 
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
@@ -87,7 +87,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .subgraph_hook(move |_, _| mock_service.clone().boxed())
+            .subgraph_hook(move |_, _| mock_service.clone().boxed_clone())
             .supergraph_hook(|service| {
                 service
                     .map_response(|response| {
@@ -97,7 +97,7 @@ mod tests {
                             stream_item
                         })
                     })
-                    .boxed()
+                    .boxed_clone()
             })
             .build_router()
             .await

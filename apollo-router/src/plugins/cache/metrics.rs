@@ -27,11 +27,11 @@ pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
 impl CacheMetricsService {
     pub(crate) fn create(
         name: String,
-        service: subgraph::BoxService,
+        service: subgraph::BoxCloneService,
         ttl: Option<&Ttl>,
         separate_per_type: bool,
-    ) -> subgraph::BoxService {
-        tower::util::BoxService::new(CacheMetricsService {
+    ) -> subgraph::BoxCloneService {
+        tower::util::BoxCloneService::new(CacheMetricsService {
             service: ServiceBuilder::new()
                 .buffered()
                 .service(service)
@@ -55,7 +55,7 @@ pub(crate) struct CacheMetricsService {
 impl Service<subgraph::Request> for CacheMetricsService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

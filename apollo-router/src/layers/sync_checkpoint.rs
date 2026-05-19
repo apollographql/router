@@ -108,13 +108,12 @@ where
 
 impl<S, Request> Clone for CheckpointService<S, Request>
 where
-    S: Clone,
-    // bounds to match the service struct...
+    S: Service<Request>,
+    S: Send + Clone + 'static,
+    S::Future: Send,
+    S::Response: Send + 'static,
+    S::Error: Into<BoxError> + Send + 'static,
     Request: Send + 'static,
-    S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
-    <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Future: Send + 'static,
 {
     fn clone(&self) -> Self {
         Self {

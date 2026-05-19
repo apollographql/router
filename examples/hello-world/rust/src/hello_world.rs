@@ -33,7 +33,10 @@ impl Plugin for HelloWorld {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -49,17 +52,21 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
     }
 
     // Called for each subgraph
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         ServiceBuilder::new()
@@ -69,7 +76,7 @@ impl Plugin for HelloWorld {
             // .checkpoint()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

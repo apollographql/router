@@ -381,7 +381,10 @@ impl PluginPrivate for EntityCache {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
                 if let Some(cache_control) = response
@@ -395,14 +398,14 @@ impl PluginPrivate for EntityCache {
                 response
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         name: &str,
-        mut service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        mut service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let storage = match self.storage.get(name) {
             Some(storage) => storage.clone(),
             None => {
@@ -418,7 +421,7 @@ impl PluginPrivate for EntityCache {
                         response
                     })
                     .service(service)
-                    .boxed();
+                    .boxed_clone();
             }
         };
 
@@ -466,7 +469,7 @@ impl PluginPrivate for EntityCache {
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
                 });
-            tower::util::BoxService::new(inner)
+            tower::util::BoxCloneService::new(inner)
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
@@ -480,7 +483,7 @@ impl PluginPrivate for EntityCache {
                     response
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         }
     }
 
@@ -500,7 +503,7 @@ impl PluginPrivate for EntityCache {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
                         InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed(),
+                            .boxed_clone(),
                     );
                     tracing::info!(
                         "Entity caching invalidation endpoint listening on: {}{}",
@@ -647,7 +650,7 @@ struct CacheService {
 impl Service<subgraph::Request> for CacheService {
     type Response = subgraph::Response;
     type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+    type Future = <subgraph::BoxCloneService as Service<subgraph::Request>>::Future;
 
     fn poll_ready(
         &mut self,

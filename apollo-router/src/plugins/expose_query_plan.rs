@@ -10,12 +10,12 @@ use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
+use tower::ServiceExt;
 
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt;
+use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
@@ -59,7 +59,7 @@ impl Plugin for ExposeQueryPlan {
         })
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let setting = req
@@ -94,10 +94,13 @@ impl Plugin for ExposeQueryPlan {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         let conf_enabled = self.enabled;
         service
             .map_future_with_request_data(move |req: &supergraph::Request| {
@@ -149,7 +152,7 @@ impl Plugin for ExposeQueryPlan {
 
                 res
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -160,6 +163,7 @@ mod tests {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
+    use tower::ServiceExt as _;
 
     use super::*;
     use crate::MockedSubgraphs;

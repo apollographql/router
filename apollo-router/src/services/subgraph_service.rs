@@ -753,7 +753,7 @@ async fn call_http(
 /// call_single_http makes http calls with modified graphql::Request (body)
 pub(crate) async fn call_single_http(
     request: SubgraphRequest,
-    client: crate::services::http::BoxService,
+    client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = request
@@ -1008,7 +1008,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: crate::services::http::BoxService,
+    mut client: crate::services::http::BoxCloneService,
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
@@ -1144,7 +1144,7 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .service(maker.make())
-                .boxed();
+                .boxed_clone();
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1161,9 +1161,9 @@ impl SubgraphServiceFactory {
         }
     }
 
-    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.services.get(name).map(|svc| svc.clone().boxed())
+        self.services.get(name).map(|svc| svc.clone().boxed_clone())
     }
 }
 
@@ -2145,7 +2145,7 @@ mod tests {
         assert!(!response.response.body().errors.is_empty());
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': HTTP fetch failed from 'test': connection closed before message completed"
+            "HTTP fetch failed: HTTP fetch failed: connection closed before message completed"
         );
     }
 
@@ -2180,7 +2180,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "service 'test' response was malformed: expected value at line 1 column 1"
+            "response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -2307,11 +2307,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "service 'test' response was malformed: invalid"
+            "response was malformed: invalid"
         );
     }
 
@@ -2348,11 +2348,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "service 'test' response was malformed: expected value at line 1 column 1"
+            "response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -2450,7 +2450,7 @@ mod tests {
                 .unwrap_err();
 
             let err_str = err.to_string();
-            assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
+            assert!(err_str.starts_with("Websocket fetch failed: cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
 
             assert_counter!(
                 "apollo.router.operations.subscriptions.rejected",
@@ -2566,7 +2566,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 400: Bad Request"
+            "HTTP fetch failed: 400: Bad Request"
         );
         assert_eq!(
             response.response.body().errors[1].message,
@@ -2606,7 +2606,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2642,7 +2642,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2678,7 +2678,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response contains unsupported content-type: text/html; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response contains unsupported content-type: text/html; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2713,7 +2713,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
     }
 

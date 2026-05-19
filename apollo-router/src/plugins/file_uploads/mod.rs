@@ -62,7 +62,7 @@ impl PluginPrivate for FileUploadsPlugin {
         Ok(Self { enabled, limits })
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -100,10 +100,13 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -125,10 +128,10 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -146,14 +149,14 @@ impl PluginPrivate for FileUploadsPlugin {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -166,7 +169,7 @@ impl PluginPrivate for FileUploadsPlugin {
             })
             .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

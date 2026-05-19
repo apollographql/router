@@ -18,8 +18,8 @@ pub(super) struct ConnectorAuth {
 impl ConnectorAuth {
     pub(super) fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
-    ) -> connector::request_service::BoxService {
+        service: connector::request_service::BoxCloneService,
+    ) -> connector::request_service::BoxCloneService {
         let signing_params = self.signing_params.clone();
         ServiceBuilder::new()
             .map_request(move |req: connector::request_service::Request| {
@@ -38,7 +38,7 @@ impl ConnectorAuth {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

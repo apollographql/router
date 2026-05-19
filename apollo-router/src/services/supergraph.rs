@@ -415,7 +415,7 @@ impl Response {
     ///     #     Ok(Self)
     ///     # }
     ///     // …
-    ///     fn supergraph_service(&self, inner: supergraph::BoxService) -> supergraph::BoxService {
+    ///     fn supergraph_service(&self, inner: supergraph::BoxCloneService) -> supergraph::BoxCloneService {
     ///         inner
     ///             .map_response(|supergraph_response| {
     ///                 supergraph_response.map_stream(|graphql_response| {
