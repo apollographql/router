@@ -351,14 +351,19 @@ async fn test_otlp_http_traces_through_proxy() {
     // Drain the response body so the router can proceed with span export.
     let _ = response.response.into_body().collect().await;
 
-    // Wait up to ~1 s for the OTLP batch to flush.
+    // Poll until the OTLP batch has been flushed through the proxy to the
+    // backend. The OTLP integration tests use a 10 s deadline-bounded poll
+    // (see `verifier.rs::validate_metrics`); apply the same window here
+    // because the proxy adds an extra hop and the OTLP batch flush itself
+    // can be delayed under load.
     let mut trace_received = false;
-    for _ in 0..10 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if !reports.lock().await.is_empty() {
             trace_received = true;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     // Clean up env and background tasks before asserting, so any failure message

@@ -10,8 +10,10 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::connectors::ConnectSpec;
+use crate::connectors::LitExpr;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
+use crate::connectors::TopLevelSelection;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -176,39 +178,47 @@ fn validate_args_on_field(
             return Ok(());
         }
     };
-    for err in format.expressions().filter_map(|expr| {
-        expr.expression.if_named_else_path(
-            |_named| {
-                Some(
+    for err in format
+        .expressions()
+        .filter_map(|expr| match expr.expression.top_level() {
+            TopLevelSelection::Value(lit) => match lit.as_ref() {
+                LitExpr::Path(path) => match path.variable_reference::<String>() {
+                    Some(var_ref) => {
+                        // Check the namespace
+                        if var_ref.namespace.namespace != "$args" {
+                            return Some(
+                                SingleFederationError::CacheTagInvalidFormatArgumentOnRootField
+                                    .into(),
+                            );
+                        }
+
+                        // Check the selection
+                        let fields = field_def
+                            .arguments
+                            .iter()
+                            .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
+                            .collect::<IndexMap<Name, &Type>>();
+                        validate_args_selection(schema, &fields, &var_ref.selection)
+                            .err()
+                            .map(Into::into)
+                    }
+                    None => None,
+                },
+                _ => Some(
                     SingleFederationError::CacheTagInvalidFormat {
                         message: format!("\"{}\"", expr.expression),
                     }
                     .into(),
-                )
+                ),
             },
-            |path| match path.variable_reference::<String>() {
-                Some(var_ref) => {
-                    // Check the namespace
-                    if var_ref.namespace.namespace != "$args" {
-                        return Some(
-                            SingleFederationError::CacheTagInvalidFormatArgumentOnRootField.into(),
-                        );
-                    }
-
-                    // Check the selection
-                    let fields = field_def
-                        .arguments
-                        .iter()
-                        .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
-                        .collect::<IndexMap<Name, &Type>>();
-                    validate_args_selection(schema, &fields, &var_ref.selection)
-                        .err()
-                        .map(Into::into)
+            TopLevelSelection::Named(_) => Some(
+                SingleFederationError::CacheTagInvalidFormat {
+                    message: format!("\"{}\"", expr.expression),
                 }
-                None => None,
-            },
-        )
-    }) {
+                .into(),
+            ),
+        })
+    {
         errors.push(err);
     }
     Ok(())
@@ -320,39 +330,46 @@ fn validate_args_on_object_type(
     };
     let mut format_selections = Vec::new();
     let mut has_error = false;
-    for item in format.expressions().filter_map(|expr| {
-        expr.expression.if_named_else_path(
-            |_named| {
+    for item in format
+        .expressions()
+        .filter_map(|expr| match expr.expression.top_level() {
+            TopLevelSelection::Value(lit) => match lit.as_ref() {
+                LitExpr::Path(path) => match path.variable_reference::<String>() {
+                    Some(var_ref) => {
+                        // Check the namespace
+                        if var_ref.namespace.namespace != "$key" {
+                            return Some(Err(
+                                SingleFederationError::CacheTagInvalidFormatArgumentOnEntity {
+                                    type_name: type_pos.type_name.clone(),
+                                    format: format.to_string(),
+                                }
+                                .into(),
+                            ));
+                        }
+
+                        // Build the selection set based on what's in the variable, so if it's
+                        // $key.a.b it will generate { a { b } }
+                        let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
+                        match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
+                            Ok(_) => Some(Ok(selection_set)),
+                            Err(err) => Some(Err(err.into())),
+                        }
+                    }
+                    None => None,
+                },
+                _ => Some(Err(SingleFederationError::CacheTagInvalidFormat {
+                    message: format!("\"{}\"", expr.expression),
+                }
+                .into())),
+            },
+            TopLevelSelection::Named(_) => {
                 Some(Err(SingleFederationError::CacheTagInvalidFormat {
                     message: format!("\"{}\"", expr.expression),
                 }
                 .into()))
-            },
-            |path| match path.variable_reference::<String>() {
-                Some(var_ref) => {
-                    // Check the namespace
-                    if var_ref.namespace.namespace != "$key" {
-                        return Some(Err(
-                            SingleFederationError::CacheTagInvalidFormatArgumentOnEntity {
-                                type_name: type_pos.type_name.clone(),
-                                format: format.to_string(),
-                            }
-                            .into(),
-                        ));
-                    }
-
-                    // Build the selection set based on what's in the variable, so if it's
-                    // $key.a.b it will generate { a { b } }
-                    let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
-                    match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
-                        Ok(_) => Some(Ok(selection_set)),
-                        Err(err) => Some(Err(err.into())),
-                    }
-                }
-                None => None,
-            },
-        )
-    }) {
+            }
+        })
+    {
         match item {
             Ok(sel) => format_selections.push(executable::FieldSet {
                 selection_set: sel,

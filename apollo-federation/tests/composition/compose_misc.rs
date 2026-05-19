@@ -10,27 +10,27 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
-/// Invalid `{}` on inputs with required fields (e.g. `AuditsFilterV2`) must not appear on the
-/// composed supergraph, matching `FED-1001.graphql` / graphql-js `printSchema`. Valid `{}` on
-/// all-optional inputs is kept when all subgraphs agree.
+/// `{}` on inputs with required fields must not appear on the composed supergraph (matches
+/// graphql-js `printSchema` behavior). Valid `{}` on all-optional inputs is kept when all
+/// subgraphs agree; see `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it`.
 #[test]
 fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
     let subgraph = ServiceDefinition {
         name: "subgraph",
         type_defs: r#"
         type Query {
-          audits(filter: AuditsFilterV2 = {}): String
-          carriers(filter: CarriersFilterV2 = {}): String
+          fieldA(filter: InputWithRequired = {}): String
+          fieldB(filter: InputAllOptional = {}): String
         }
 
-        input AuditsFilterV2 {
-          startDate: String!
-          endDate: String!
-          carrierId: String!
+        input InputWithRequired {
+          requiredA: String!
+          requiredB: String!
+          requiredC: String!
         }
 
-        input CarriersFilterV2 {
-          code: String
+        input InputAllOptional {
+          optionalField: String
         }
         "#,
     };
@@ -39,11 +39,11 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
     let sdl = print_sdl(supergraph.schema().schema());
 
     assert!(
-        !sdl.contains("filter: AuditsFilterV2 = {}"),
-        "supergraph should omit invalid empty-object default for AuditsFilterV2 (FED-1001), got:\n{sdl}"
+        !sdl.contains("filter: InputWithRequired = {}"),
+        "supergraph should omit invalid empty-object default when input has required fields, got:\n{sdl}"
     );
     assert!(
-        sdl.contains("filter: CarriersFilterV2 = {}"),
+        sdl.contains("filter: InputAllOptional = {}"),
         "supergraph should keep valid empty-object default when all input fields are optional, got:\n{sdl}"
     );
 }
@@ -58,11 +58,11 @@ fn misc_drops_empty_object_default_when_only_some_subgraphs_declare_it() {
         }
 
         type Thing @shareable {
-          f(filter: CarriersFilterV2 = {}): String
+          f(filter: InputAllOptional = {}): String
         }
 
-        input CarriersFilterV2 {
-          code: String
+        input InputAllOptional {
+          optionalField: String
         }
         "#,
     };
@@ -74,11 +74,11 @@ fn misc_drops_empty_object_default_when_only_some_subgraphs_declare_it() {
         }
 
         type Thing @shareable {
-          f(filter: CarriersFilterV2): String
+          f(filter: InputAllOptional): String
         }
 
-        input CarriersFilterV2 {
-          code: String
+        input InputAllOptional {
+          optionalField: String
         }
         "#,
     };
@@ -87,7 +87,7 @@ fn misc_drops_empty_object_default_when_only_some_subgraphs_declare_it() {
         .expect("composition should succeed");
     let sdl = print_sdl(supergraph.schema().schema());
     assert!(
-        !sdl.contains("filter: CarriersFilterV2 = {}"),
+        !sdl.contains("filter: InputAllOptional = {}"),
         "supergraph should drop `= {{}}` when default presence is inconsistent across subgraphs, got:\n{sdl}"
     );
 }

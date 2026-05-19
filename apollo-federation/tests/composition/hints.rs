@@ -247,6 +247,72 @@ mod entity_consistency {
             r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraph "Subgraph1"."#,
         );
     }
+
+    #[test]
+    fn inconsistent_entity_hint_includes_locations_for_extension_types() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @key(fields: "k") {
+                    k: Int
+                    v1: String
+                }
+            "#,
+        };
+
+        // Subgraph2 uses `extend type` without a base definition — the compiler
+        // creates a synthetic Node with no source location. The hint must still
+        // include a location for this subgraph.
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                extend type T @shareable {
+                    k: Int
+                    v2: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                extend type T @key(fields: "k") {
+                    k: Int
+                    v3: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENTITY",
+            r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraphs "Subgraph1" and "Subgraph3"."#,
+        );
+
+        let hint = result
+            .hints()
+            .iter()
+            .find(|h| h.code() == "INCONSISTENT_ENTITY")
+            .expect("should have INCONSISTENT_ENTITY hint");
+
+        let mut subgraph_names: Vec<&str> = hint
+            .locations
+            .iter()
+            .map(|loc| loc.subgraph.as_str())
+            .collect();
+        subgraph_names.sort();
+
+        assert_eq!(
+            subgraph_names,
+            vec!["Subgraph1", "Subgraph2", "Subgraph3"],
+            "Hint locations must include all subgraphs, including those using extend type"
+        );
+    }
 }
 
 mod value_type_fields {
@@ -286,6 +352,54 @@ mod value_type_fields {
             "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
             r#"Field "T.b" of non-entity object type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
+    }
+
+    #[test]
+    fn hints_on_value_type_field_emits_single_hint_when_multiple_subgraphs_missing_field() {
+        // Regression test: before the fix, hint_on_inconsistent_value_type_field was missing
+        // a break after emitting the hint. Since report_mismatch_hint already examines all
+        // sources internally, the loop would emit duplicate identical hints — one per subgraph
+        // missing the field.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @shareable {
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
+            r#"Field "T.b" of non-entity object type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraphs "Subgraph2" and "Subgraph3"."#,
+        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
     }
 
     #[test]
@@ -594,6 +708,54 @@ mod enum_hints {
             "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
             "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraph \"Subgraph2\".",
         );
+    }
+
+    #[test]
+    fn hints_on_output_enum_value_emits_single_hint_when_multiple_subgraphs_missing_value() {
+        // Regression test: before the fix, hint_on_inconsistent_output_enum_value was missing
+        // an early return after emitting the hint. Since report_mismatch_hint already examines
+        // all sources internally, the loop would emit duplicate identical hints — one per
+        // subgraph missing the value.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: T
+                }
+
+                enum T {
+                    V1
+                    V2
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
+            "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraphs \"Subgraph2\" and \"Subgraph3\".",
+        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
     }
 }
 

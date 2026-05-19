@@ -543,6 +543,8 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
     use apollo_federation::connectors::ConnectBatchArguments;
@@ -553,7 +555,9 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use insta::assert_debug_snapshot;
+    use serde_json_bytes::Value;
 
     use crate::Context;
     use crate::graphql;
@@ -727,8 +731,8 @@ mod tests {
         ).unwrap());
 
         let operation = ExecutableDocument::parse_and_validate(
-                    &schema,
-                r#"
+            &schema,
+            r#"
                 query(
                     $var1: Int, $var2: Boolean, $var3: Float, $var4: ID, $var5: JSON, $var6: [String], $var7: String
                 ) {
@@ -744,9 +748,9 @@ mod tests {
                     )
                 }
                 "#.to_string(),
-                    "./",
-                )
-                .unwrap();
+            "./",
+        )
+            .unwrap();
         let variables = Variables {
             variables: serde_json_bytes::json!({
                 "var1": 1, "var2": true, "var3": 0.9,
@@ -2068,6 +2072,164 @@ mod tests {
             ),
         ]
         "#);
+    }
+
+    /// Helper function for full pipeline: parse query → `root_fields()` → apply connector
+    /// selection → `apply_operation()`. Returns the final response data.
+    fn run_pipeline(query: &str) -> Value {
+        const CONNECTOR_SELECTION: &str = r#"
+            results: $.response.docs {
+                id
+                title: doc_title
+                viewUri: view_uri
+            }
+            metadata: $.response {
+                total: numFound
+            }
+        "#;
+
+        let schema = Arc::new(
+            Schema::parse_and_validate(
+                r#"
+                type Query { search_items(query: String): SearchResponse }
+                type SearchResponse { results: [Item!]! metadata: Metadata! }
+                type Item { id: ID! title: String! viewUri: String! }
+                type Metadata { total: Int! }
+                "#,
+                "schema.graphql",
+            )
+            .unwrap(),
+        );
+
+        let operation =
+            Arc::new(ExecutableDocument::parse_and_validate(&schema, query, "op.graphql").unwrap());
+        let variables = create_test_variables(serde_json_bytes::json!({}));
+        let conn = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new(
+                "subgraph".into(),
+                None,
+                name!(Query),
+                name!(search_items),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/search".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse(CONNECTOR_SELECTION).unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        };
+
+        let keys = super::root_fields(Arc::new(conn), &operation, &variables).unwrap();
+        assert_eq!(keys.len(), 1);
+        let key = keys.into_iter().next().unwrap();
+
+        // Apply the connector selection to the raw REST JSON — this is
+        // what map_response() does.
+        let inputs: IndexMap<String, Value> = Default::default();
+        let rest_response = serde_json_bytes::json!({
+            "response": {
+                "docs": [
+                    { "id": "1", "doc_title": "First",  "view_uri": "https://example.com/1" },
+                    { "id": "2", "doc_title": "Second", "view_uri": "https://example.com/2" },
+                ],
+                "numFound": 2
+            }
+        });
+        let (mapped_data, _) = key.selection().apply_with_vars(&rest_response, &inputs);
+        let mapped = MappedResponse::Data {
+            data: mapped_data.unwrap_or(Value::Null),
+            key,
+            problems: vec![],
+        };
+
+        // Apply GraphQL operation aliases.
+        let result = mapped.apply_operation(
+            Some(operation.as_ref().as_ref()),
+            &IndexMap::<String, IndexSet<String>>::default(),
+        );
+        match result {
+            MappedResponse::Data { data, .. } => data,
+            other => panic!("expected Data, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_aliases() {
+        let data = run_pipeline(
+            r#"{ search_items(query: "t") { results { id title viewUri } metadata { total } } }"#,
+        );
+        let item = &data["results"][0];
+        assert_eq!(item["id"].as_str(), Some("1"));
+        assert_eq!(item["title"].as_str(), Some("First"));
+        assert_eq!(item["viewUri"].as_str(), Some("https://example.com/1"));
+        assert_eq!(data["metadata"]["total"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn field_alias_only() {
+        let data = run_pipeline(
+            r#"{ search_items(query: "t") { results { id title link: viewUri } metadata { total } } }"#,
+        );
+        assert_eq!(
+            data["results"][0]["link"].as_str(),
+            Some("https://example.com/1")
+        );
+        assert!(data["results"][0].get("viewUri").is_none());
+    }
+
+    #[test]
+    fn root_alias_only() {
+        let data = run_pipeline(
+            r#"{ items: search_items(query: "t") { results { id title viewUri } metadata { total } } }"#,
+        );
+        assert_eq!(
+            data["results"][0]["viewUri"].as_str(),
+            Some("https://example.com/1")
+        );
+        assert_eq!(data["metadata"]["total"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn root_alias_with_field_alias() {
+        let data = run_pipeline(
+            r#"{ items: search_items(query: "t") { results { id title link: viewUri } metadata { total } } }"#,
+        );
+        let items = data["results"].as_array().expect("results should be array");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["link"].as_str(), Some("https://example.com/1"));
+        assert_eq!(items[1]["link"].as_str(), Some("https://example.com/2"));
+        assert!(
+            items[0].get("viewUri").is_none(),
+            "original name should not appear when aliased"
+        );
+    }
+
+    #[test]
+    fn root_alias_with_multiple_field_aliases() {
+        let data = run_pipeline(
+            r#"{ items: search_items(query: "t") { results { id name: title link: viewUri } metadata { count: total } } }"#,
+        );
+        let item = &data["results"][0];
+        assert_eq!(item["name"].as_str(), Some("First"));
+        assert_eq!(item["link"].as_str(), Some("https://example.com/1"));
+        assert!(item.get("title").is_none());
+        assert!(item.get("viewUri").is_none());
+        assert_eq!(data["metadata"]["count"].as_i64(), Some(2));
+        assert!(data["metadata"].get("total").is_none());
     }
 }
 
