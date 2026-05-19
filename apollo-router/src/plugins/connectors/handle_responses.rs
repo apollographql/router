@@ -51,12 +51,17 @@ impl From<RuntimeError> for graphql::Error {
     fn from(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
-        let err = graphql::Error::builder()
+        let mut err = graphql::Error::builder()
             .message(&error.message)
             .extensions(error.extensions())
             .extension_code(error.code())
             .path(path)
             .build();
+
+        // `process_response` emits a span event for every `MappedResponse::Error` it builds.
+        // Mark the resulting `graphql::Error` so the catch-all in `count_operation_errors`
+        // doesn't fire a duplicate.
+        err.set_span_event_emitted(true);
 
         if let Some(subgraph_name) = &error.subgraph_name {
             err.with_subgraph_name(subgraph_name)
@@ -240,6 +245,9 @@ where
     };
 
     if let MappedResponse::Error { ref error, .. } = mapped_response {
+        // Emit here so the event picks up the connector request-service span's attributes
+        // (coordinate, source, etc.). `From<RuntimeError>` marks the resulting error so the
+        // centralized emit won't fire a duplicate.
         emit_error_event(error.code(), &error.message, Some((*error.path).into()));
     }
 
@@ -1084,6 +1092,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                     Error {
                         message: "Request failed",
@@ -1121,6 +1130,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                     Error {
                         message: "Request failed",
@@ -1158,6 +1168,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                 ],
                 extensions: {},

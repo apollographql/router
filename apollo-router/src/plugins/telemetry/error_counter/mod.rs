@@ -61,9 +61,8 @@ pub(crate) async fn count_supergraph_errors(
 
     let (parts, stream) = response.response.into_parts();
 
-    // Capture the span so the span event emitted by count_operation_errors
-    // attaches to the supergraph span — the inspect closure runs at
-    // stream-poll time, outside the span's scope.
+    // The inspect closure runs at stream-poll time, outside this scope, so capture the
+    // supergraph span here for the event to attach to.
     let span = tracing::Span::current();
     let stream = stream.inspect(move |response_body| {
         let _enter = span.enter();
@@ -236,12 +235,15 @@ fn count_operation_errors<'a>(
         let maybe_code = error.extension_code();
 
         if send_otlp_errors {
-            // Emit the error code as a span event, paired with the metric below.
-            emit_error_event(
-                maybe_code.as_deref().unwrap_or(""),
-                &error.message,
-                error.path.clone(),
-            );
+            // Skip when an upstream site (connectors, demand_control) already emitted, so
+            // traces carry exactly one event per error. The metric still increments below.
+            if !error.span_event_emitted() {
+                emit_error_event(
+                    maybe_code.as_deref().unwrap_or(""),
+                    &error.message,
+                    error.path.clone(),
+                );
+            }
 
             let severity_str = severity
                 .unwrap_or(tracing::Level::ERROR.as_str())
