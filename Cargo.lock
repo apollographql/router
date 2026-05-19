@@ -7965,11 +7965,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
-<<<<<<< HEAD
  "windows-sys 0.59.0",
-=======
- "windows-sys 0.48.0",
->>>>>>> 38c02d73 (chore(deps): update tokio-astral-tar to 0.6.2 (#9459))
 ]
 
 [[package]]
