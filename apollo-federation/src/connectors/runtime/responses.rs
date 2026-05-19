@@ -265,9 +265,7 @@ fn is_success(
                 Value::Object(_) => "object",
             };
             warnings.push(Problem {
-                message: format!(
-                    "`isSuccess` must evaluate to a boolean, got {type_name}"
-                ),
+                message: format!("`isSuccess` must evaluate to a boolean, got {type_name}"),
                 path: String::new(),
                 count: 1,
                 location: ProblemLocation::IsSuccess,
@@ -843,7 +841,14 @@ mod tests {
             selection: std::sync::Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
-        let result = handle_raw_response(&data, &parts, key, &connector, NoopContext, &HeaderMap::new());
+        let result = handle_raw_response(
+            &data,
+            &parts,
+            key,
+            &connector,
+            NoopContext,
+            &HeaderMap::new(),
+        );
 
         // The request should fail because "ok" is not a boolean
         assert!(
@@ -853,7 +858,12 @@ mod tests {
 
         // A problem must be present so the debugger can show why it failed
         let problems = result.problems();
-        assert_eq!(problems.len(), 1, "expected one problem, got: {:?}", problems);
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one problem, got: {:?}",
+            problems
+        );
         assert!(
             problems[0].message.contains("string"),
             "problem message should mention the actual type, got: {:?}",
