@@ -986,9 +986,8 @@ where
 
     tracing::debug!(?payload, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
@@ -1265,9 +1264,8 @@ where
 
                 tracing::debug!(?payload, "externalized output");
                 // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-                // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-                // HttpClientService) intended for subgraph requests, not for the coprocessor
-                // endpoint
+                // context may carry extensions intended for subgraph requests, not for the
+                // coprocessor endpoint
                 //
                 // WARN: be careful if you're changing out this context to using the request's context; see
                 // above, but also validate what happens downstream for that context
@@ -1383,9 +1381,8 @@ where
 
     tracing::debug!(?payload, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
@@ -1551,9 +1548,8 @@ where
 
     tracing::debug!(?payload, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context

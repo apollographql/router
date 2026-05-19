@@ -457,10 +457,64 @@ impl RedisCacheStorage {
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
+        // When `required_to_start` is set, subscribe to each client's `connect`
+        // notification *before* kicking off connection tasks. fred's
+        // `Pool::wait_for_connect` subscribes only at the moment it is `.await`ed,
+        // so there is a race: if `connect_pool` exhausts its reconnection policy
+        // before `wait_for_connect` reaches the `recv()` call, the terminal
+        // `broadcast_connect(Err(..))` is fired before any subscriber exists. The
+        // broadcast channel does not buffer past events for late subscribers, and
+        // fred never sends another connect event (the pool has aborted), so
+        // `wait_for_connect` hangs indefinitely. We saw this surface in CI as the
+        // `connection_failure_blocks_startup` integration test timing out at the
+        // nextest 120 s deadline.
+        //
+        // We mirror fred's own `Pool::init` shape (clients/pool.rs `init`) which
+        // collects subscribers first and then calls `connect`, but keep the
+        // separate per-client `ConnectHandle`s that the downstream watcher task
+        // (see below) needs to detect a pool abort. This is a subscribe-before-
+        // publish fix; the broader connection lifecycle is unchanged.
+        let connect_rxs: Vec<_> = if self.redis_client_config.required_to_start {
+            client_pool
+                .clients()
+                .iter()
+                .map(|c| c.inner().notifications.connect.load().subscribe())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = client_pool.connect_pool();
         if self.redis_client_config.required_to_start {
-            client_pool.wait_for_connect().await?;
+            // Drive each pre-subscribed receiver to its first event. If any
+            // client's connect attempts ultimately fail, surface that error so the
+            // router can refuse to start (the contract documented on
+            // `required_to_start`).
+            for mut rx in connect_rxs {
+                loop {
+                    match rx.recv().await {
+                        Ok(Ok(())) => break,
+                        Ok(Err(e)) => return Err(Box::new(e)),
+                        Err(RecvError::Lagged(_)) => {
+                            // A lag means the broadcast queue overflowed between
+                            // the subscribe and recv; this only happens under
+                            // extreme load and is not a connect failure, so
+                            // re-recv on the SAME rx to wait for the next event.
+                            // Without the inner loop, `continue` would advance
+                            // the outer `for` and drop this client's receiver
+                            // without ever observing its connect.
+                            continue;
+                        }
+                        Err(RecvError::Closed) => {
+                            return Err(Box::new(RedisError::new(
+                                RedisErrorKind::Canceled,
+                                "redis connect notification channel closed before any connect attempt completed",
+                            )));
+                        }
+                    }
+                }
+            }
             tracing::trace!("redis connections established");
         }
 

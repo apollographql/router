@@ -680,9 +680,15 @@ mod tests {
         assert_eq!(mode, SpanMode::Deprecated);
     }
 
-    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
-    // it does complete first, then the http router call will be cancelled and we'll see an error
-    // log in our assert.
+    // Drive the http router call into its cancellation-handling path (where `CancelHandler`
+    // is constructed) and then deterministically cancel it before completion. With
+    // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an
+    // intervening `on_response` is what emits the "broken pipe" error log asserted on below.
+    //
+    // Historical note: this used to race a `Duration::from_nanos(100)` timeout against the
+    // call. Whether the future was polled even once before the timeout fired was a function
+    // of scheduler timing, not test logic, so the assertion was inherently flaky. See
+    // `flaky-test-fixes.md` (nanosecond-timeout-race anti-pattern).
     #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_log() {
         let mut http_router = crate::TestHarness::builder()
@@ -694,21 +700,7 @@ mod tests {
             .unwrap();
 
         async {
-            let _res = tokio::time::timeout(
-                std::time::Duration::from_nanos(100),
-                http_router.call(
-                    http::Request::builder()
-                        .method("POST")
-                        .uri("/")
-                        .header(ACCEPT, "application/json")
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::from_bytes(
-                            r#"{"query":"query { me { name }}"}"#,
-                        ))
-                        .unwrap(),
-                ),
-            )
-            .await;
+            cancel_after_first_poll(&mut http_router).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR
@@ -716,9 +708,8 @@ mod tests {
         .await
     }
 
-    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
-    // it does complete first, then the http router call will be cancelled and we'll not see an
-    // error log in our assert.
+    // Same shape as `request_cancel_log`, but with `experimental_log_on_broken_pipe = false`,
+    // so the snapshot asserts that no error log is emitted on cancellation.
     #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_no_log() {
         let mut http_router = crate::TestHarness::builder()
@@ -730,25 +721,54 @@ mod tests {
             .unwrap();
 
         async {
-            let _res = tokio::time::timeout(
-                std::time::Duration::from_nanos(100),
-                http_router.call(
-                    http::Request::builder()
-                        .method("POST")
-                        .uri("/")
-                        .header(ACCEPT, "application/json")
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(router::body::from_bytes(
-                            r#"{"query":"query { me { name }}"}"#,
-                        ))
-                        .unwrap(),
-                ),
-            )
-            .await;
+            cancel_after_first_poll(&mut http_router).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR
         ))
         .await
+    }
+
+    // Drive `http_router.call(...)` to its first `Pending` (which is what constructs the
+    // request's `CancelHandler` inside the production code path) and then drop the future to
+    // cancel it. Using `futures::poll!` instead of a `tokio::time::timeout` race makes
+    // "polled then cancelled" deterministic regardless of scheduler timing.
+    //
+    // The phase doc sketched a `tokio::sync::oneshot` + `tokio::select!` cancellation, which
+    // is the same shape any caller would use to cancel a real request; this helper is the
+    // synchronous-equivalent collapsed into a test-only single-task form because we don't
+    // need to `tokio::spawn` to observe cancellation here.
+    async fn cancel_after_first_poll(http_router: &mut crate::test_harness::HttpService) {
+        use std::task::Poll;
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(router::body::from_bytes(
+                r#"{"query":"query { me { name }}"}"#,
+            ))
+            .unwrap();
+
+        // `HttpService::call` already returns a `Pin<Box<dyn Future + Send>>`, so we can
+        // poll it via `.as_mut()` and explicitly drop it without `tokio::pin!` (which would
+        // shadow the binding with a `Pin<&mut _>` and make the subsequent `drop` a no-op
+        // on the underlying boxed future).
+        let mut call_fut = http_router.call(request);
+
+        // First poll drives the router synchronously through `CancelHandler::new` into the
+        // inner `tokio::task::spawn(task).await`, which returns `Pending`. After this point
+        // dropping the future will run `CancelHandler::Drop` with
+        // `got_first_response == false`.
+        let first = futures::poll!(call_fut.as_mut());
+        assert!(
+            matches!(first, Poll::Pending),
+            "expected first poll of the router call to be Pending so the request enters \
+             the cancellation-handling path; got {:?}",
+            first
+        );
+
+        drop(call_fut);
     }
 }

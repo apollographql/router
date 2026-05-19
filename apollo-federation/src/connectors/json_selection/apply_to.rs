@@ -98,7 +98,7 @@ impl JSONSelection {
 
         let computable: &dyn ApplyToInternal = match &self.inner {
             TopLevelSelection::Named(selection) => selection,
-            TopLevelSelection::Path(path_selection) => path_selection,
+            TopLevelSelection::Value(lit) => lit,
         };
 
         let dollar_shape = input_shape.clone();
@@ -138,7 +138,7 @@ impl Ranged for JSONSelection {
     fn range(&self) -> OffsetRange {
         match &self.inner {
             TopLevelSelection::Named(selection) => selection.range(),
-            TopLevelSelection::Path(path_selection) => path_selection.range(),
+            TopLevelSelection::Value(lit) => lit.range(),
         }
     }
 
@@ -386,9 +386,7 @@ impl ApplyToInternal for JSONSelection {
             TopLevelSelection::Named(named_selections) => {
                 named_selections.apply_to_path(data, vars, input_path, self.spec)
             }
-            TopLevelSelection::Path(path_selection) => {
-                path_selection.apply_to_path(data, vars, input_path, self.spec)
-            }
+            TopLevelSelection::Value(lit) => lit.apply_to_path(data, vars, input_path, self.spec),
         }
     }
 
@@ -404,8 +402,8 @@ impl ApplyToInternal for JSONSelection {
             TopLevelSelection::Named(selection) => {
                 selection.compute_output_shape(context, input_shape, dollar_shape)
             }
-            TopLevelSelection::Path(path_selection) => {
-                path_selection.compute_output_shape(context, input_shape, dollar_shape)
+            TopLevelSelection::Value(lit) => {
+                lit.compute_output_shape(context, input_shape, dollar_shape)
             }
         }
     }
@@ -463,7 +461,12 @@ impl ApplyToInternal for NamedSelection {
                 // usable as the output of NamedSelection::apply_to_path only if
                 // the NamedSelection has an implied single key, or by having a
                 // trailing SubSelection that guarantees object/null output.
-                if let Some(single_key) = self.path.get_single_key() {
+                let single_key = if let LitExpr::Path(path) = self.path.as_ref() {
+                    path.get_single_key()
+                } else {
+                    None
+                };
+                if let Some(single_key) = single_key {
                     if let Some(value) = value_opt {
                         output = Some(json!({ single_key.as_str(): value }));
                     }
@@ -1011,7 +1014,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
             LitExpr::Number(n) => (Some(JSON::Number(n.clone())), vec![]),
             LitExpr::Bool(b) => (Some(JSON::Bool(*b)), vec![]),
             LitExpr::Null => (Some(JSON::Null), vec![]),
-            LitExpr::Object(map) => {
+            LitExpr::LegacyObject(map) => {
                 let mut output = JSONMap::with_capacity(map.len());
                 let mut errors = Vec::new();
                 for (key, value) in map {
@@ -1023,6 +1026,15 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     }
                 }
                 (Some(JSON::Object(output)), errors)
+            }
+            LitExpr::Object(sub) => {
+                // LitExpr::Object shares grammar with SubSelection but NOT its
+                // `$` rebinding: `$` inside a literal object stays bound to
+                // the surrounding data. Nested `Key SubSelection` syntax
+                // (e.g. `{ foo { bar } }`) still rebinds `$` via the inner
+                // SubSelection, which is handled by NamedSelection itself.
+                let (output, errors) = sub.apply_selections_no_rebind(data, vars, input_path, spec);
+                (Some(output), errors)
             }
             LitExpr::Array(vec) => {
                 let mut output = Vec::with_capacity(vec.len());
@@ -1139,7 +1151,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 }
             }
 
-            LitExpr::Object(map) => {
+            LitExpr::LegacyObject(map) => {
                 let mut fields = Shape::empty_map();
                 for (key, value) in map {
                     fields.insert(
@@ -1152,6 +1164,13 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     );
                 }
                 Shape::object(fields, Shape::none(), locations)
+            }
+
+            LitExpr::Object(sub) => {
+                // Mirror the LitExpr::Object apply_to_path semantics: iterate
+                // NamedSelection shapes against the outer input/dollar shapes
+                // rather than rebinding $ (which SubSelection would do).
+                sub.compute_selections_shape_no_rebind(context, input_shape, dollar_shape)
             }
 
             LitExpr::Array(vec) => {
@@ -1223,6 +1242,87 @@ impl ApplyToInternal for WithRange<LitExpr> {
     }
 }
 
+impl SubSelection {
+    /// Apply each [`NamedSelection`] in `self.selections` to `data`, merging
+    /// outputs into an accumulating object. Unlike
+    /// [`ApplyToInternal::apply_to_path`] on `SubSelection`, this does **not**
+    /// rebind `$` — `vars` is threaded to each inner selection as-is. Callers
+    /// that want `SubSelection`'s `$`-to-`data` binding must prepare `vars`
+    /// before calling.
+    fn apply_selections_no_rebind(
+        &self,
+        data: &JSON,
+        vars: &VarsWithPathsMap,
+        input_path: &InputPath<JSON>,
+        spec: ConnectSpec,
+    ) -> (JSON, Vec<ApplyToError>) {
+        let mut output = JSON::Object(JSONMap::new());
+        let mut errors = Vec::new();
+
+        for named_selection in self.selections.iter() {
+            let (named_output_opt, apply_errors) =
+                named_selection.apply_to_path(data, vars, input_path, spec);
+            errors.extend(apply_errors);
+
+            let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
+
+            errors.extend(merge_errors.into_iter().map(|message| {
+                ApplyToError::new(message, input_path.to_vec(), self.range(), spec)
+            }));
+
+            if let Some(merged) = merged {
+                output = merged;
+            }
+        }
+
+        (output, errors)
+    }
+
+    /// Shape counterpart of [`Self::apply_selections_no_rebind`]: merge the
+    /// output shapes of each [`NamedSelection`] with [`Shape::all`] without
+    /// rebinding `$`. Callers pass the `dollar_shape` they want threaded.
+    fn compute_selections_shape_no_rebind(
+        &self,
+        context: &ShapeContext,
+        input_shape: Shape,
+        dollar_shape: Shape,
+    ) -> Shape {
+        let locations = self.shape_location(context.source_id());
+        let mut all_shape = Shape::unknown([]);
+
+        for named_selection in self.selections.iter() {
+            // Simplifying as we go with Shape::all keeps all_shape relatively
+            // small in the common case when all named_selection items return an
+            // object shape, since those object shapes can all be merged
+            // together into one object.
+            all_shape = Shape::all(
+                [
+                    all_shape,
+                    named_selection.compute_output_shape(
+                        context,
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                    ),
+                ],
+                locations.clone(),
+            );
+
+            // If any named_selection item returns null instead of an object,
+            // that nullifies the whole object and allows shape computation to
+            // bail out early.
+            if all_shape.is_null() {
+                break;
+            }
+        }
+
+        if all_shape.is_unknown() {
+            Shape::empty_object(locations)
+        } else {
+            all_shape
+        }
+    }
+}
+
 impl ApplyToInternal for SubSelection {
     fn apply_to_path(
         &self,
@@ -1241,24 +1341,7 @@ impl ApplyToInternal for SubSelection {
             vars
         };
 
-        let mut output = JSON::Object(JSONMap::new());
-        let mut errors = Vec::new();
-
-        for named_selection in self.selections.iter() {
-            let (named_output_opt, apply_errors) =
-                named_selection.apply_to_path(data, &vars, input_path, spec);
-            errors.extend(apply_errors);
-
-            let (merged, merge_errors) = json_merge(Some(&output), named_output_opt.as_ref());
-
-            errors.extend(merge_errors.into_iter().map(|message| {
-                ApplyToError::new(message, input_path.to_vec(), self.range(), spec)
-            }));
-
-            if let Some(merged) = merged {
-                output = merged;
-            }
-        }
+        let (output, errors) = self.apply_selections_no_rebind(data, &vars, input_path, spec);
 
         if !matches!(data, JSON::Object(_)) {
             let output_is_empty = match &output {
@@ -1313,40 +1396,7 @@ impl ApplyToInternal for SubSelection {
         // so we can ignore _previous_dollar_shape.
         let dollar_shape = input_shape.clone();
 
-        // Build up the merged object shape using Shape::all to merge the
-        // individual named_selection object shapes.
-        let mut all_shape = Shape::unknown([]);
-
-        for named_selection in self.selections.iter() {
-            // Simplifying as we go with Shape::all keeps all_shape relatively
-            // small in the common case when all named_selection items return an
-            // object shape, since those object shapes can all be merged
-            // together into one object.
-            all_shape = Shape::all(
-                [
-                    all_shape,
-                    named_selection.compute_output_shape(
-                        context,
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                    ),
-                ],
-                self.shape_location(context.source_id()),
-            );
-
-            // If any named_selection item returns null instead of an object,
-            // that nullifies the whole object and allows shape computation to
-            // bail out early.
-            if all_shape.is_null() {
-                break;
-            }
-        }
-
-        if all_shape.is_unknown() {
-            Shape::empty_object(self.shape_location(context.source_id()))
-        } else {
-            all_shape
-        }
+        self.compute_selections_shape_no_rebind(context, input_shape, dollar_shape)
     }
 }
 
@@ -2856,17 +2906,20 @@ mod tests {
         let valid_inline_path_selection = JSONSelection::named(SubSelection {
             selections: vec![NamedSelection {
                 prefix: NamingPrefix::None,
-                path: PathSelection {
-                    path: PathList::Key(
-                        Key::field("some").into_with_range(),
-                        PathList::Key(
-                            Key::field("object").into_with_range(),
-                            PathList::Empty.into_with_range(),
+                path: WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("some").into_with_range(),
+                            PathList::Key(
+                                Key::field("object").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
                         )
                         .into_with_range(),
-                    )
-                    .into_with_range(),
-                },
+                    }),
+                    None,
+                ),
             }],
             ..Default::default()
         });
@@ -3405,80 +3458,452 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_lit_paths() {
-        let data = json!({
+    // Shared fixture for the lit_paths_* family of tests, which each exercise
+    // exactly one literal-headed path shape in isolation so a regression
+    // in any one case cannot mask or be masked by another.
+    fn lit_paths_data() -> JSON {
+        json!({
             "value": {
                 "key": 123,
             },
-        });
+        })
+    }
 
+    #[test]
+    fn test_lit_paths_string_head_first() {
         assert_eq!(
-            selection!("$(\"a\")->first").apply_to(&data),
+            selection!("$(\"a\")->first").apply_to(&lit_paths_data()),
             (Some(json!("a")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_string_head_last_inner() {
         assert_eq!(
-            selection!("$('asdf'->last)").apply_to(&data),
+            selection!("$('asdf'->last)").apply_to(&lit_paths_data()),
             (Some(json!("f")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_number_head_add_outer() {
         assert_eq!(
-            selection!("$(1234)->add(1111)").apply_to(&data),
+            selection!("$(1234)->add(1111)").apply_to(&lit_paths_data()),
             (Some(json!(2345)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_number_head_add_inner() {
         assert_eq!(
-            selection!("$(1234->add(1111))").apply_to(&data),
+            selection!("$(1234->add(1111))").apply_to(&lit_paths_data()),
             (Some(json!(2345)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_path_head_mul_inner() {
         assert_eq!(
-            selection!("$(value.key->mul(10))").apply_to(&data),
+            selection!("$(value.key->mul(10))").apply_to(&lit_paths_data()),
             (Some(json!(1230)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_path_head_mul_outer() {
         assert_eq!(
-            selection!("$(value.key)->mul(10)").apply_to(&data),
+            selection!("$(value.key)->mul(10)").apply_to(&lit_paths_data()),
             (Some(json!(1230)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_path_head_typeof_inner() {
         assert_eq!(
-            selection!("$(value.key->typeof)").apply_to(&data),
+            selection!("$(value.key->typeof)").apply_to(&lit_paths_data()),
             (Some(json!("number")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_path_head_typeof_outer() {
         assert_eq!(
-            selection!("$(value.key)->typeof").apply_to(&data),
+            selection!("$(value.key)->typeof").apply_to(&lit_paths_data()),
             (Some(json!("number")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_array_head_last_outer() {
         assert_eq!(
-            selection!("$([1, 2, 3])->last").apply_to(&data),
+            selection!("$([1, 2, 3])->last").apply_to(&lit_paths_data()),
             (Some(json!(3)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_array_head_first_inner() {
         assert_eq!(
-            selection!("$([1, 2, 3]->first)").apply_to(&data),
+            selection!("$([1, 2, 3]->first)").apply_to(&lit_paths_data()),
             (Some(json!(1)), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_object_head_key_outer() {
         assert_eq!(
-            selection!("$({ a: 'ay', b: 1 }).a").apply_to(&data),
+            selection!("$({ a: 'ay', b: 1 }).a").apply_to(&lit_paths_data()),
             (Some(json!("ay")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_object_head_key_inner() {
         assert_eq!(
-            selection!("$({ a: 'ay', b: 2 }.a)").apply_to(&data),
+            selection!("$({ a: 'ay', b: 2 }.a)").apply_to(&lit_paths_data()),
             (Some(json!("ay")), vec![]),
         );
+    }
 
+    #[test]
+    fn test_lit_paths_negative_literal_precedence() {
+        // The `->` has lower precedence than the unary `-`, so `-1` is a
+        // completed expression before `->add(10)` is applied. Result is 9
+        // rather than -11.
         assert_eq!(
-            // Note that the -> has lower precedence than the -, so -1 is parsed
-            // as a completed expression before applying the ->add(10) method,
-            // giving 9 instead of -11.
-            selection!("$(-1->add(10))").apply_to(&data),
+            selection!("$(-1->add(10))").apply_to(&lit_paths_data()),
             (Some(json!(9)), vec![]),
+        );
+    }
+
+    // V0_4 cousins: the same shapes, but with the `$(...)` wrapper dropped
+    // where the unified grammar now accepts the bare literal head at the
+    // top level. These pin the round-trip story down per-shape.
+
+    #[test]
+    fn test_lit_paths_v0_4_string_head_first() {
+        assert_eq!(
+            selection!(r#""a"->first"#, ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!("a")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_string_head_last() {
+        assert_eq!(
+            selection!("'asdf'->last", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!("f")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_number_head_add() {
+        assert_eq!(
+            selection!("1234->add(1111)", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!(2345)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_array_head_last() {
+        assert_eq!(
+            selection!("[1, 2, 3]->last", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!(3)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_array_head_first() {
+        assert_eq!(
+            selection!("[1, 2, 3]->first", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!(1)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_object_head_key() {
+        assert_eq!(
+            selection!("{ a: 'ay', b: 1 }.a", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!("ay")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_negative_literal_precedence() {
+        assert_eq!(
+            selection!("-1->add(10)", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!(9)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_path_head_mul() {
+        assert_eq!(
+            selection!("value.key->mul(10)", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!(1230)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths_v0_4_path_head_typeof() {
+        assert_eq!(
+            selection!("value.key->typeof", ConnectSpec::V0_4).apply_to(&lit_paths_data()),
+            (Some(json!("number")), vec![]),
+        );
+    }
+
+    // Tests for dotted access to keys whose names happen to match reserved
+    // LitExpr shapes (true, false, null) or contain characters that require
+    // quoting. Each is isolated so a regression in any one case is legible.
+    fn reserved_key_data() -> JSON {
+        json!({
+            "true": "yes",
+            "false": "no",
+            "null": "nope",
+            "some property": "with spaces",
+            "weird \"quoted\" key": "escapes work",
+        })
+    }
+
+    #[test]
+    fn test_reserved_key_true() {
+        assert_eq!(
+            selection!("$.true").apply_to(&reserved_key_data()),
+            (Some(json!("yes")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_false() {
+        assert_eq!(
+            selection!("$.false").apply_to(&reserved_key_data()),
+            (Some(json!("no")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_null() {
+        assert_eq!(
+            selection!("$.null").apply_to(&reserved_key_data()),
+            (Some(json!("nope")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_quoted_with_space() {
+        assert_eq!(
+            selection!(r#"$."some property""#).apply_to(&reserved_key_data()),
+            (Some(json!("with spaces")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_quoted_with_escapes() {
+        assert_eq!(
+            selection!(r#"$."weird \"quoted\" key""#).apply_to(&reserved_key_data()),
+            (Some(json!("escapes work")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_v0_4_true() {
+        assert_eq!(
+            selection!("$.true", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!("yes")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_v0_4_false() {
+        assert_eq!(
+            selection!("$.false", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!("no")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_v0_4_null() {
+        assert_eq!(
+            selection!("$.null", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!("nope")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_reserved_key_v0_4_quoted_with_space() {
+        assert_eq!(
+            selection!(r#"$."some property""#, ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!("with spaces")), vec![]),
+        );
+    }
+
+    // In v0.3 and earlier, bare `true`/`false`/`null` parse as naked field
+    // names (`{ true: $.true }` etc.). In v0.4 they parse as JSON literals
+    // (LitExpr::Bool / LitExpr::Null). These tests pin that divergence.
+
+    #[test]
+    fn test_bare_keyword_true_v0_3_is_field_name() {
+        assert_eq!(
+            selection!("true", ConnectSpec::V0_3).apply_to(&reserved_key_data()),
+            (Some(json!({ "true": "yes" })), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_keyword_false_v0_3_is_field_name() {
+        assert_eq!(
+            selection!("false", ConnectSpec::V0_3).apply_to(&reserved_key_data()),
+            (Some(json!({ "false": "no" })), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_keyword_null_v0_3_is_field_name() {
+        assert_eq!(
+            selection!("null", ConnectSpec::V0_3).apply_to(&reserved_key_data()),
+            (Some(json!({ "null": "nope" })), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_keyword_true_v0_4_is_literal() {
+        assert_eq!(
+            selection!("true", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!(true)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_keyword_false_v0_4_is_literal() {
+        assert_eq!(
+            selection!("false", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!(false)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_keyword_null_v0_4_is_literal() {
+        assert_eq!(
+            selection!("null", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!(null)), vec![]),
+        );
+    }
+
+    // Same divergence for bare quoted strings: in v0.3 a quoted string at the
+    // top level is a naked single-Key field name; in v0.4 it's a String
+    // literal.
+
+    #[test]
+    fn test_bare_quoted_string_v0_3_is_field_name() {
+        assert_eq!(
+            selection!(r#""some property""#, ConnectSpec::V0_3).apply_to(&reserved_key_data()),
+            (Some(json!({ "some property": "with spaces" })), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_quoted_string_v0_4_is_literal() {
+        assert_eq!(
+            selection!(r#""some property""#, ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!("some property")), vec![]),
+        );
+    }
+
+    // The `?` PathList::Question operator propagates None when applied to a
+    // null value. Under v0.4 it composes with bare literal heads at the top
+    // level; `null?` short-circuits before any tail runs, `true?` / `false?`
+    // pass through.
+
+    #[test]
+    fn test_bare_null_question_v0_4_short_circuits() {
+        assert_eq!(
+            selection!("null?", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (None, vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_true_question_v0_4_passes_through() {
+        assert_eq!(
+            selection!("true?", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!(true)), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_bare_false_question_v0_4_passes_through() {
+        assert_eq!(
+            selection!("false?", ConnectSpec::V0_4).apply_to(&reserved_key_data()),
+            (Some(json!(false)), vec![]),
+        );
+    }
+
+    #[rstest]
+    #[case::number("1234", "1234")]
+    #[case::negative_number("-1", "-1")]
+    #[case::bool_true("true", "true")]
+    #[case::bool_false("false", "false")]
+    #[case::null("null", "null")]
+    #[case::string(r#""hello""#, r#""hello""#)]
+    #[case::array("[1, 2, 3]", "[1, 2, 3]")]
+    #[case::object("{ a: 1, b: 2 }", "{ a: 1, b: 2 }")]
+    #[case::object_key_access("{ a: 1, b: 2 }.a", "1")]
+    #[case::array_last("[1, 2, 3]->last", "3")]
+    #[case::array_first("[1, 2, 3]->first", "1")]
+    #[case::number_add("1234->add(1111)", "Int")]
+    #[case::null_question("null?", "None")]
+    #[case::true_question("true?", "true")]
+    #[case::nullish_coalescing(r#"$args.maybe ?? "fallback""#, r#"One<$args.maybe?!, "fallback">"#)]
+    #[case::multiline_nested_object(
+        r#"{
+            a: 1,
+            b: {
+                x: "hi",
+                y: [1, 2, 3],
+            },
+        }"#,
+        r#"{ a: 1, b: { x: "hi", y: [1, 2, 3] } }"#
+    )]
+    #[case::multiline_array_of_objects(
+        r#"[
+            { id: 1, label: "one" },
+            { id: 2, label: "two" },
+        ]"#,
+        r#"[{ id: 1, label: "one" }, { id: 2, label: "two" }]"#
+    )]
+    #[case::multiline_method_chain(
+        r#"[1, 2, 3]
+            ->map(@)
+            ->first"#,
+        "1"
+    )]
+    #[case::multiline_object_with_comment(
+        r#"{
+            # pick the user id
+            userid: $args.userid,
+            name: "fixed",
+        }"#,
+        r#"{ name: "fixed", userid: $args.userid }"#
+    )]
+    #[case::multiline_nullish_coalescing_chain(
+        r#"$args.a
+            ?? $args.b
+            ?? "fallback""#,
+        r#"One<$args.a?!, $args.b?!, "fallback">"#
+    )]
+    #[case::multiline_copy_paste_json(
+        r#"{
+            hello: "world",
+            count: 3,
+            items: ["a", "b", "c"],
+            when: $args.when,
+        }"#,
+        "{\n  count: 3,\n  hello: \"world\",\n  items: [\"a\", \"b\", \"c\"],\n  when: $args.when,\n}"
+    )]
+    fn test_v0_4_top_level_shape_literal(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(
+            selection!(input, ConnectSpec::V0_4).shape().pretty_print(),
+            expected,
         );
     }
 

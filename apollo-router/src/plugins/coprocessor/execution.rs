@@ -478,11 +478,7 @@ where
                 let co_processor_result = {
                     let _timer = get_coprocessor_timer(PipelineStep::ExecutionResponse);
                     payload
-                        .call(
-                            generator_client,
-                            &generator_coprocessor_url,
-                            generator_map_context.clone(),
-                        )
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
                 tracing::debug!(?co_processor_result, "co-processor returned");

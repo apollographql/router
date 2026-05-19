@@ -660,6 +660,14 @@ pub enum LicenseState {
 }
 
 impl LicenseState {
+    pub(crate) fn is_unlicensed(&self) -> bool {
+        matches!(self, LicenseState::Unlicensed)
+    }
+
+    pub(crate) fn is_licensed(&self) -> bool {
+        !self.is_unlicensed()
+    }
+
     pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
         match self {
             LicenseState::Licensed { limits }

@@ -308,8 +308,10 @@ impl Merger {
     /// `needs_join_field` checks `object_fields` / `interface_fields`. We map
     /// argument positions to their parent field positions to match the JS behavior:
     ///
+    /// ```js,ignore
     ///     // composition-js/src/merging/merge.ts — getFieldsWithFromContextDirective
     ///     const field = application.parent.parent; // argument → field
+    /// ```
     fn get_fields_with_from_context_directive(
         subgraphs: &[Subgraph<Validated>],
     ) -> DirectiveReferencers {
@@ -1262,13 +1264,13 @@ impl Merger {
 
             // validate the "from" argument
             let source_subgraph_name = self.get_override_from_argument(override_directive)?;
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
             if !self.names.contains(&source_subgraph_name) {
                 // error: unknown target
                 result.set_override_with_unknown_target(idx);
                 let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
                 let extra_msg = did_you_mean(suggestions);
-                let default_range =
-                    LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
                 self.error_reporter.add_hint(CompositionHint {
                     definition: HintCode::FromSubgraphDoesNotExist.definition(),
                     message: format!(
@@ -1304,7 +1306,10 @@ impl Merger {
                         "Field \"{}\" on subgraph \"{}\" no longer exists in the from subgraph. The @override directive can be removed.",
                         dest, subgraph_name
                     ),
-                    locations: Default::default(),
+                    locations: vec![SubgraphLocation {
+                        subgraph: subgraph_name.clone(),
+                        range: default_range.clone(),
+                    }],
                 });
             } else {
                 // Get the source subgraph index
@@ -1361,7 +1366,10 @@ impl Merger {
                             "Field \"{}\" on subgraph \"{}\" is not resolved anymore by the from subgraph (it is marked \"@external\" in \"{}\"). The @override directive can be removed.",
                             dest, subgraph_name, source_subgraph_name
                         ),
-                        locations: Default::default(),
+                        locations: vec![SubgraphLocation {
+                            subgraph: subgraph_name.clone(),
+                            range: default_range.clone(),
+                        }],
                     });
                 } else if overridden_field_is_referenced {
                     result.set_used_overridden(from_idx);
@@ -1373,7 +1381,10 @@ impl Merger {
                                 "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
                                 dest, source_subgraph_name
                             ),
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 } else {
@@ -1386,7 +1397,10 @@ impl Merger {
                                 "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
                                 dest, source_subgraph_name
                             ),
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 }
@@ -1434,7 +1448,10 @@ impl Merger {
                         self.error_reporter.add_hint(CompositionHint {
                             definition: HintCode::OverrideMigrationInProgress.definition(),
                             message,
-                            locations: Default::default(),
+                            locations: vec![SubgraphLocation {
+                                subgraph: source_subgraph_name.clone(),
+                                range: default_range.clone(),
+                            }],
                         });
                     }
                 }
@@ -1788,90 +1805,57 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             .iter()
             .map(|(_, name)| name.clone())
             .collect();
-        let mut access_control_sources: IndexMap<
-            ObjectFieldDefinitionPosition,
-            Sources<DirectiveTargetPosition>,
-        > = IndexMap::default();
         // For each merged object types, we check if we're missing a field from one of the implemented interface.
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
-        for (index, subgraph) in self.subgraphs.iter().enumerate() {
-            for itf_object in subgraph.interface_objects() {
-                let itf = InterfaceTypeDefinitionPosition {
-                    type_name: itf_object.type_name.clone(),
-                };
-                // Note it's possible that interface is abstracted away (as an interface object) in multiple
-                // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
-                // just copy the merged definition from the interface.
-                for implementer in itf.implementers(&self.merged)? {
-                    if matches!(
-                        implementer,
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
-                    ) {
-                        // @interfaceObject cannot be implemented by other interfaces
-                        self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
-                            message: format!(
-                                "Interfaces implementing @interfaceObject are not supported: @interfaceObject \"{itf}\" is implemented by an interface \"{implementer}\".",
-                            ),
-                        });
-                        continue;
-                    }
-
-                    // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
-                    // have a specific validation that return a user-friendly error in such incorrect cases, see
-                    // `post_merge_validations`). We must first check that there is some subgraph that implement
-                    // that field as an "interface object", since in that case the field will genuinely be provided
-                    for itf_obj_field in itf_object.fields(subgraph.schema().schema())? {
-                        // we skip @external fields as they are provided by other subgraphs
-                        if subgraph
-                            .metadata()
-                            .external_metadata()
-                            .is_external(&FieldDefinitionPosition::Object(itf_obj_field.clone()))
-                        {
-                            continue;
-                        }
-
-                        let ast_node_to_add =
-                            (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
-                        if implementer
-                            .field(itf_obj_field.field_name.clone())
-                            .try_get(self.merged.schema())
-                            .is_none()
-                        {
-                            let mut missing_obj_node = ast_node_to_add.clone();
-                            missing_obj_node.directives.retain(|d| {
-                                self.merged
-                                    .schema()
-                                    .directive_definitions
-                                    .contains_key(&d.name)
-                                    // filter access control directives for now as they will be merged later one
-                                    && !access_control_directive_names.contains(&d.name)
-                            });
-                            missing_obj_node.arguments.iter_mut().for_each(|arg| {
-                                arg.make_mut().directives.retain(|d| {
-                                    self.merged
-                                        .schema()
-                                        .directive_definitions
-                                        .contains_key(&d.name)
-                                });
-                            });
-
-                            // We add a special @join__field for those added field with no `graph` target. This
-                            // clarifies to the later extraction process that this particular field doesn't come
-                            // from any particular subgraph (it comes indirectly from an @interfaceObject type,
-                            // but it's very much indirect so ...).
-                            missing_obj_node
-                                .directives
-                                .push(JoinFieldBuilder::new().build());
-                            let merged_field = ObjectFieldDefinitionPosition {
-                                type_name: implementer.type_name().clone(),
-                                field_name: itf_obj_field.field_name.clone(),
+        for (name, extended_type) in &self.merged.schema().types {
+            if let ExtendedType::Object(object) = extended_type {
+                for intf in &object.implements_interfaces {
+                    if let Some(interface) = self.merged.schema().get_interface(&intf.name) {
+                        for (intf_field_name, intf_field) in &interface.fields {
+                            let candidate_field = ObjectFieldDefinitionPosition {
+                                type_name: name.clone(),
+                                field_name: intf_field_name.clone(),
                             };
-                            access_control_sources
-                                .entry(merged_field.clone())
-                                .or_default()
-                                .insert(index, Some(itf_obj_field.clone().into()));
-                            fields_to_insert.insert(merged_field, missing_obj_node);
+                            if !object.fields.contains_key(intf_field_name)
+                                && !fields_to_insert.contains_key(&candidate_field)
+                            {
+                                // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
+                                // have a specific validation that return a user-friendly error in such incorrect cases, see
+                                // `postMergeValidations`). We must first check that there is some subgraph that implement
+                                // that field as an "interface object", since in that case the field will genuinely be provided
+                                // by that subgraph at runtime.
+                                if self
+                                    .is_field_provided_by_an_interface_object(intf_field_name, intf)
+                                {
+                                    // Note it's possible that interface is abstracted away (as an interface object) in multiple
+                                    // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
+                                    // just copy the merged definition from the interface.
+                                    let mut missing_obj_node = (*intf_field.node).clone();
+                                    // PORT NOTE: since we are copying complete field AST directly it will include all args information as well.
+                                    // We only have to filter directives on field but we don't need any extra logic to filter arg directives as
+                                    //   1) access control directives are not applicable on args
+                                    //   2) we currently do not have a `@join__x` directive that is applied on arguments
+                                    // If this changes in the future we'll need to explicitly filter them as well.
+                                    missing_obj_node.directives.retain(|d| {
+                                        // filter access control directives for now as they will be merged later one
+                                        !access_control_directive_names.contains(&d.name)
+                                            // filter join__field directives as they will be added later on
+                                            && !self
+                                            .join_spec_definition
+                                            .is_spec_directive_name(&self.merged, &d.name)
+                                            .unwrap_or(false)
+                                    });
+                                    // We add a special @join__field for those added field with no `graph` target. This
+                                    // clarifies to the later extraction process that this particular field doesn't come
+                                    // from any particular subgraph (it comes indirectly from an @interfaceObject type,
+                                    // but it's very much indirect so ...).
+                                    missing_obj_node
+                                        .directives
+                                        .push(JoinFieldBuilder::new().build());
+                                    fields_to_insert.insert(candidate_field, missing_obj_node);
+                                }
+                            }
                         }
                     }
                 }
@@ -1885,7 +1869,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             for directive_name in &access_control_directive_names {
                 self.merge_applied_directive(
                     directive_name,
-                    access_control_sources.entry(dest.clone()).or_default(),
+                    &Default::default(),
                     &dest.clone().into(),
                 )?;
             }
@@ -1916,7 +1900,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn is_field_provided_by_an_interface_object(&self, field_name: &Name, itf_name: &Name) -> bool {
         self.subgraphs.iter().any(|subgraph| {
             let obj_pos = ObjectTypeDefinitionPosition {

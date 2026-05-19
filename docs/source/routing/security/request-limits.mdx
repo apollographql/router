@@ -19,6 +19,7 @@ limits:
     http_max_request_bytes: 2000000 # Default value: 2 MB
     http1_max_request_headers: 200 # Default value: 100
     http1_max_request_buf_size: 800kb # Default value: 400kib
+    http2_max_headers_list_bytes: 48KiB # Default value: 16KiB
 
     # Parser-based limits
     parser_max_tokens: 15000 # Default value
@@ -313,6 +314,13 @@ If router receives more headers than the buffer size, it responds to the client 
 ### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
+
+### `http2_max_headers_list_bytes`
+
+Limits the total size of the header list for your incoming HTTP/2 requests.
+The default value is 16KiB.
+
+If the router receives a request whose headers exceed the allowed size, Apollo Router rejects the request with `431 Request Header Fields Too Large`.
 
 ## Parser-based limits
 
