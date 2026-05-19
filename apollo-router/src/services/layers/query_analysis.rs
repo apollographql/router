@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -126,7 +127,8 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
         let compute_job_future = span.in_scope(||{
-            compute_job::execute(compute_job_type, move |_| {
+            compute_job::execute(compute_job_type, move |status| {
+                let check_cancelled = || status.check_for_cooperative_cancellation();
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
@@ -139,6 +141,7 @@ impl QueryAnalysisLayer {
                         &mut Default::default(),
                         &doc.operation.selection_set,
                         0,
+                        &check_cancelled,
                     );
                     if recursive_selections.is_none() {
                         if recursive_selections_check_enabled() {
@@ -183,8 +186,12 @@ impl QueryAnalysisLayer {
         fragment_cache: &mut HashMap<&'a Name, u32>,
         selection_set: &'a SelectionSet,
         mut count: u32,
+        check_cancelled: &dyn Fn() -> ControlFlow<()>,
     ) -> Option<u32> {
         for selection in &selection_set.selections {
+            if check_cancelled().is_break() {
+                return None;
+            }
             count = count
                 .checked_add(1)
                 .take_if(|v| *v <= Self::MAX_RECURSIVE_SELECTIONS)?;
@@ -195,6 +202,7 @@ impl QueryAnalysisLayer {
                         fragment_cache,
                         &field.selection_set,
                         count,
+                        check_cancelled,
                     )?;
                 }
                 Selection::InlineFragment(fragment) => {
@@ -203,6 +211,7 @@ impl QueryAnalysisLayer {
                         fragment_cache,
                         &fragment.selection_set,
                         count,
+                        check_cancelled,
                     )?;
                 }
                 Selection::FragmentSpread(fragment) => {
@@ -222,6 +231,7 @@ impl QueryAnalysisLayer {
                                 .expect("validation should have ensured referenced fragments exist")
                                 .selection_set,
                             count,
+                            check_cancelled,
                         )?;
                         fragment_cache.insert(name, count - old_count);
                     };
@@ -490,3 +500,188 @@ impl PartialEq for ParsedDocumentInner {
 }
 
 impl Eq for ParsedDocumentInner {}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::collections::HashMap;
+    use std::ops::ControlFlow;
+
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::validation::Valid;
+
+    use super::QueryAnalysisLayer;
+
+    fn parse_schema(sdl: &str) -> Valid<apollo_compiler::Schema> {
+        let ast = apollo_compiler::ast::Document::parse(sdl, "schema.graphql").unwrap();
+        ast.to_schema_validate().unwrap()
+    }
+
+    fn parse_executable(
+        schema: &Valid<apollo_compiler::Schema>,
+        query: &str,
+    ) -> Valid<ExecutableDocument> {
+        ExecutableDocument::parse_and_validate(schema, query, "query.graphql").unwrap()
+    }
+
+    const SCHEMA: &str = "type Query { a: String, b: Int, nested: Nested }
+        type Nested { x: String, y: String }";
+
+    #[test]
+    fn count_selections_without_cancellation() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(&schema, "{ a b }");
+        let op = doc.operations.get(None).unwrap();
+        let never_cancel = || ControlFlow::Continue(());
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &never_cancel,
+        );
+        assert_eq!(count, Some(2));
+    }
+
+    #[test]
+    fn count_selections_with_nested_fields() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(&schema, "{ a nested { x y } }");
+        let op = doc.operations.get(None).unwrap();
+        let never_cancel = || ControlFlow::Continue(());
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &never_cancel,
+        );
+        // a (1) + nested (2) + x (3) + y (4)
+        assert_eq!(count, Some(4));
+    }
+
+    #[test]
+    fn count_selections_with_fragment_spread() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(&schema, "{ a ...F } fragment F on Query { b }");
+        let op = doc.operations.get(None).unwrap();
+        let never_cancel = || ControlFlow::Continue(());
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &never_cancel,
+        );
+        // a (1) + FragmentSpread F (2) + b inside F (3)
+        assert_eq!(count, Some(3));
+    }
+
+    #[test]
+    fn cancellation_returns_none_immediately() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(&schema, "{ a b }");
+        let op = doc.operations.get(None).unwrap();
+        let always_cancel = || ControlFlow::Break(());
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &always_cancel,
+        );
+        assert_eq!(count, None);
+    }
+
+    #[test]
+    fn cancellation_mid_traversal() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(&schema, "{ a b nested { x y } }");
+        let op = doc.operations.get(None).unwrap();
+
+        let call_count = Cell::new(0u32);
+        let cancel_after_2 = || {
+            let n = call_count.get() + 1;
+            call_count.set(n);
+            if n > 2 {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &cancel_after_2,
+        );
+        assert_eq!(count, None);
+        // The check is called at each selection; after 2 passes it cancels on the 3rd
+        assert!(call_count.get() >= 3);
+    }
+
+    #[test]
+    fn cancellation_during_fragment_traversal() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(
+            &schema,
+            "{ ...F } fragment F on Query { a b nested { x y } }",
+        );
+        let op = doc.operations.get(None).unwrap();
+
+        let call_count = Cell::new(0u32);
+        let cancel_after_3 = || {
+            let n = call_count.get() + 1;
+            call_count.set(n);
+            if n > 3 {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &cancel_after_3,
+        );
+        assert_eq!(count, None);
+        assert!(call_count.get() <= 5);
+    }
+
+    #[test]
+    fn no_cancellation_completes_full_count() {
+        let schema = parse_schema(SCHEMA);
+        let doc = parse_executable(
+            &schema,
+            "{ a b nested { x y } ...F } fragment F on Query { a }",
+        );
+        let op = doc.operations.get(None).unwrap();
+
+        let call_count = Cell::new(0u32);
+        let never_cancel = || {
+            call_count.set(call_count.get() + 1);
+            ControlFlow::Continue(())
+        };
+
+        let count = QueryAnalysisLayer::count_recursive_selections(
+            &doc,
+            &mut HashMap::new(),
+            &op.selection_set,
+            0,
+            &never_cancel,
+        );
+        // a(1) + b(2) + nested(3) + x(4) + y(5) + FragmentSpread(6) + a inside F(7)
+        assert_eq!(count, Some(7));
+        // Check was called for every selection visited
+        assert_eq!(call_count.get(), 7);
+    }
+}
