@@ -1458,11 +1458,13 @@ mod test {
             response_errors_count: JsonPathInst::new("$[0].locations").unwrap(),
         };
         let res_with_locations = &crate::services::RouterResponse::fake_builder()
-            .errors(vec![crate::graphql::Error::builder()
-                .message("Error with locations")
-                .location(crate::graphql::Location { line: 1, column: 1 })
-                .location(crate::graphql::Location { line: 2, column: 3 })
-                .build()])
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Error with locations")
+                    .location(crate::graphql::Location { line: 1, column: 1 })
+                    .location(crate::graphql::Location { line: 2, column: 3 })
+                    .build(),
+            ])
             .build()
             .unwrap();
         assert_eq!(
