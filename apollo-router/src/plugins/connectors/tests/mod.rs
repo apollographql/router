@@ -414,14 +414,17 @@ async fn test_entity_references() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/posts"),
+    // The two per-user fetches run in parallel after the root /posts fetch,
+    // so their arrival order at the mock server is non-deterministic. Use
+    // Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/posts")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
@@ -1776,28 +1779,32 @@ async fn test_interface_object() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-          Matcher::new().method("GET").path("/itfs"),
-          Matcher::new().method("GET").path("/itfs/1/e"),
-          Matcher::new().method("GET").path("/itfs/2/e"),
-          Matcher::new().method("GET").path("/itfs/1"),
-          Matcher::new().method("GET").path("/itfs/2"),
-          Matcher::new()
-            .method("POST")
-            .path("/graphql")
-            .body(serde_json::json!({
-              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
-              "variables": {
-                "representations": [
-                  { "__typename": "Itf", "id": 1 },
-                  { "__typename": "Itf", "id": 2 }
-                ]
-              }
-            })),
-        ],
-    );
+    // The five entity-resolution fetches (per-id field fetches and the
+    // _entities POST) run in parallel after the root /itfs fetch, so their
+    // arrival order at the mock server is non-deterministic. Use
+    // Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/itfs")),
+        Plan::Parallel(vec![
+            Matcher::new().method("GET").path("/itfs/1/e"),
+            Matcher::new().method("GET").path("/itfs/2/e"),
+            Matcher::new().method("GET").path("/itfs/1"),
+            Matcher::new().method("GET").path("/itfs/2"),
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
+                  "variables": {
+                    "representations": [
+                      { "__typename": "Itf", "id": 1 },
+                      { "__typename": "Itf", "id": 2 }
+                    ]
+                  }
+                })),
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
