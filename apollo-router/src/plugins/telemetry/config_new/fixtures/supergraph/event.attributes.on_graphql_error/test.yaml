@@ -18,6 +18,8 @@ events:
     - graphql_response:
         data:
           hello: "world"
+        errors:
+          - message: "some error"
     - supergraph_response:
         status: 200
         data:
