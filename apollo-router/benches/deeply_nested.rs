@@ -68,7 +68,7 @@ async fn main() {
     assert!(
         request!(126)
             .unwrap_err()
-            .contains("service 'subgraph_1' response was malformed: recursion limit exceeded")
+            .contains("response was malformed: recursion limit exceeded")
     );
 
     // Stack overflow: the router process aborts before it can send a response

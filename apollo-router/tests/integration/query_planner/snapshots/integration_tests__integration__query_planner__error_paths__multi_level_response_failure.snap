@@ -42,7 +42,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [
         "topProducts",
         0
@@ -54,7 +54,7 @@ expression: response
       }
     },
     {
-      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [
         "topProducts",
         1
@@ -66,7 +66,7 @@ expression: response
       }
     },
     {
-      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [
         "topProducts",
         0,
@@ -81,7 +81,7 @@ expression: response
       }
     },
     {
-      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [
         "topProducts",
         0,
@@ -96,7 +96,7 @@ expression: response
       }
     },
     {
-      "message": "service 'accounts' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [
         "topProducts",
         1,
