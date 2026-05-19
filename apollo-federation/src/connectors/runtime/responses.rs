@@ -763,9 +763,8 @@ mod tests {
     use http::StatusCode;
     use http::response::Parts;
     use serde_json_bytes::Value;
-    use serde_json_bytes::json;
-
     use serde_json_bytes::Value as JsonValue;
+    use serde_json_bytes::json;
 
     use super::MappedResponse;
     use super::deserialize_response;
