@@ -2034,24 +2034,33 @@ impl IntegrationTest {
         //   3. CI scheduling slack between the router process draining its
         //      connections and the OS actually reaping the process.
         //
-        // Previously 3 s. Raised to 10 s when the harness began injecting
-        // a `connection_shutdown_timeout` default to prevent the 60 s
+        // History: 3 s → 10 s (when the harness began injecting a
+        // `connection_shutdown_timeout` default to prevent the 60 s
         // production default from hanging tests that hold HTTP/2 client
-        // connections open past the response (see `merge_overrides`).
-        self.assert_shutdown_with_deadline(Duration::from_secs(10))
+        // connections open past the response — see `merge_overrides`) →
+        // 20 s (this change). Three tests independently flaked at the 10 s
+        // boundary in the May 2026 de-flake cycle
+        // (test_http2_max_header_list_size_exceeded fixed in `4d1b3e04e`;
+        // test_unix_socket_max_header_list_size in the same commit;
+        // test_http1_connection_persistence in #9472), each one fixed via a
+        // per-test `graceful_shutdown_with_deadline(20)` override. An audit
+        // then surfaced ~75 more structurally-identical sites across the
+        // telemetry, coprocessor, and subscriptions integration files —
+        // far more than the per-test override pattern can sustainably cover.
+        // Widening the default closes the bug class for the whole harness;
+        // 20 s is still ≪ the production 60 s ceiling, so a real router-exit
+        // regression still surfaces via the panic + thread-dump below, just
+        // 10 s later than before. See T17 in `blog-details.md`.
+        self.assert_shutdown_with_deadline(Duration::from_secs(20))
             .await;
     }
 
-    /// Variant of `assert_shutdown` that lets a specific test widen the
-    /// shutdown-budget when its shutdown path has a documented drain race
-    /// the default 10 s budget cannot beat.
+    /// Variant of `assert_shutdown` with an explicit per-call deadline.
     ///
-    /// Used by tests that trip the default 10 s deadline with a known
-    /// fingerprint (typically a hyper-client pool drain race or
-    /// OpenTelemetry SDK shutdown ordering bug, neither of which can be
-    /// pinned without Linux `dump_stack_traces`). Widening the budget
-    /// per-test rather than via the shared default keeps the rest of the
-    /// harness honest about shutdown regressions.
+    /// Kept for tests that genuinely need a deadline different from the
+    /// default 20 s (either tighter — to assert a specific shutdown bound —
+    /// or wider for documented-slow paths). Most call sites should prefer
+    /// the bare `graceful_shutdown()` and let the default budget handle it.
     #[allow(dead_code)]
     pub async fn assert_shutdown_with_deadline(&mut self, deadline: Duration) {
         let router = self.router.as_mut().expect("router must have been started");
