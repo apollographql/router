@@ -66,6 +66,7 @@ async-compression = { version = "0.4.6", features = [
     "brotli",
     "gzip",
     "deflate",
+    "zstd",
 ] }
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }
@@ -266,10 +267,6 @@ hickory-resolver = "0.26.0"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
-memchr = "2.7.4"
-brotli = "8.0.0"
-zstd = "0.13.1"
-zstd-safe = "7.1.0"
 # note: AWS dependencies should always use the same version
 # note: hyper 1.0 update seems to mean this isn't true...
 aws-sigv4 = "1.2.6"
@@ -294,7 +291,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.1" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -321,6 +318,7 @@ fred = { version = "10.1.0", features = [
 futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"
+brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
 mockall = "0.14.0"
 num-traits = "0.2.19"

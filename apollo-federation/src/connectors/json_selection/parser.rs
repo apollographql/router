@@ -136,13 +136,27 @@ pub struct JSONSelection {
     pub spec: ConnectSpec,
 }
 
+/// Non-lossy top-level classification of a [`JSONSelection`]. A parse
+/// produces either a multi-entry `NamedSelectionList` ([`Self::Named`]) or
+/// a single [`LitExpr`] value ([`Self::Value`]). The [`LitExpr::Path`]
+/// variant covers the path-shaped case (e.g. `$args.foo.bar`); callers
+/// that care about paths specifically match on
+/// `TopLevelSelection::Value(lit)` and then on `lit.as_ref()` for
+/// `LitExpr::Path(_)`.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(super) enum TopLevelSelection {
-    // Although we reuse the SubSelection type for the JSONSelection::Named
-    // case, we parse it as a sequence of NamedSelection items without the
-    // {...} curly braces that SubSelection::parse expects.
+pub(crate) enum TopLevelSelection {
+    /// One or more [`NamedSelection`] items at the root (e.g. `id name`).
+    ///
+    /// Although we reuse the [`SubSelection`] type here, we parse it as a
+    /// sequence of `NamedSelection` items without the `{...}` curly braces
+    /// that [`SubSelection::parse`] expects.
     Named(SubSelection),
-    Path(PathSelection),
+    /// A single [`LitExpr`] at the root — bare path, bare literal, `LitPath`
+    /// method chain on a literal, object literal with trailing key access,
+    /// array, `OpChain`, etc. A `PathList::Expr` node appears here only
+    /// when the source contained an explicit `$(...)` wrapper (`ExprPath`).
+    /// Nothing in this module synthesizes `Expr` nodes from unwrapped input.
+    Value(WithRange<LitExpr>),
 }
 
 // To keep JSONSelection::parse consumers from depending on details of the nom
@@ -184,21 +198,21 @@ impl JSONSelection {
     }
 
     pub fn path(path: PathSelection) -> Self {
+        let range = path.range();
         Self {
-            inner: TopLevelSelection::Path(path),
+            inner: TopLevelSelection::Value(WithRange::new(LitExpr::Path(path), range)),
             spec: ConnectSpec::latest(),
         }
     }
 
-    pub(crate) fn if_named_else_path<T>(
-        &self,
-        if_named: impl Fn(&SubSelection) -> T,
-        if_path: impl Fn(&PathSelection) -> T,
-    ) -> T {
-        match &self.inner {
-            TopLevelSelection::Named(subselect) => if_named(subselect),
-            TopLevelSelection::Path(path) => if_path(path),
-        }
+    /// Borrow the top-level structure of the selection. A parsed
+    /// [`JSONSelection`] is either a multi-entry [`TopLevelSelection::Named`]
+    /// list or a single [`TopLevelSelection::Value`] (itself covering bare
+    /// paths, primitives, object literals, arrays, `LitPath` method chains,
+    /// and `OpChain`). Callers that care about the path-shaped case match
+    /// the `Value` arm and then inspect the inner `LitExpr` for `Path`.
+    pub(crate) fn top_level(&self) -> &TopLevelSelection {
+        &self.inner
     }
 
     pub fn empty() -> Self {
@@ -211,7 +225,13 @@ impl JSONSelection {
     pub fn is_empty(&self) -> bool {
         match &self.inner {
             TopLevelSelection::Named(subselect) => subselect.selections.is_empty(),
-            TopLevelSelection::Path(path) => *path.path == PathList::Empty,
+            TopLevelSelection::Value(lit) => match lit.as_ref() {
+                LitExpr::Path(path) => *path.path == PathList::Empty,
+                // A non-Path top-level `LitExpr` always carries content
+                // (even `null` is a valid non-empty selection), so nothing
+                // else is considered empty.
+                _ => false,
+            },
         }
     }
 
@@ -296,7 +316,8 @@ impl JSONSelection {
     fn parse_span(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_span_v0_3(input),
+            ConnectSpec::V0_3 => Self::parse_span_v0_3(input),
+            ConnectSpec::V0_4 => Self::parse_span_v0_4(input),
         }
     }
 
@@ -305,9 +326,12 @@ impl JSONSelection {
 
         match alt((
             all_consuming(terminated(
-                map(PathSelection::parse, |path| Self {
-                    inner: TopLevelSelection::Path(path),
-                    spec,
+                map(PathSelection::parse, |path| {
+                    let range = path.range();
+                    Self {
+                        inner: TopLevelSelection::Value(WithRange::new(LitExpr::Path(path), range)),
+                        spec,
+                    }
                 }),
                 // By convention, most ::parse methods do not consume trailing
                 // spaces_or_comments, so we need to consume them here in order
@@ -381,7 +405,7 @@ impl JSONSelection {
                     // selections without ..., and this complexity will go away.
                     if only.is_anonymous() || matches!(only.prefix, NamingPrefix::Spread(None)) {
                         return Self {
-                            inner: TopLevelSelection::Path(only.path.clone()),
+                            inner: TopLevelSelection::Value(only.path.clone()),
                             spec,
                         };
                     }
@@ -418,10 +442,107 @@ impl JSONSelection {
         }
     }
 
+    // connect/v0.4 simplifies the top-level grammar to
+    //
+    //     JSONSelection ::= LitExpr | NamedSelectionList
+    //
+    // where
+    //
+    //     LitExpr ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+    //
+    // A single LitExpr covers every literal-headed and path-headed shape
+    // (including `{…}`, `[…]`, `123->add(1)`, `$var.foo`, and method chains
+    // rooted on any of those), leaving NamedSelectionList to cover only the
+    // multi-entry naked forms like `id name` that a single expression cannot
+    // represent. The result is stored in `TopLevelSelection::Value(...)`
+    // exactly as `LitExpr::parse` produced it — no synthetic `PathList::Expr`
+    // wrapping; `PathList::Expr` appears only from a real `$(...)` in source.
+    fn parse_span_v0_4(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
+
+        fn lit_expr_top_level(input: Span) -> ParseResult<JSONSelection> {
+            let spec = get_connect_spec(&input);
+            let (input, _) = spaces_or_comments(input)?;
+            let (remainder, lit) = LitExpr::parse(input)?;
+            // Backtrack (non-fatal error) if the LitExpr did not consume the
+            // rest of the input (modulo trailing whitespace/comments), so
+            // `alt` can fall through to `naked_named` for multi-entry naked
+            // selections like `id name` that no single LitExpr can represent.
+            let (after_ws, _) = spaces_or_comments(remainder.clone())?;
+            if !after_ws.fragment().is_empty() {
+                return Err(nom::Err::Error(nom::error::Error::from_error_kind(
+                    remainder,
+                    nom::error::ErrorKind::Verify,
+                )));
+            }
+
+            // A naked single-key PathSelection like `a` or `a { b }` is
+            // ambiguous: it could mean "return `a`'s value" (flat) or "return
+            // an object whose `a` key holds `a`'s value" (Named-wrapped). The
+            // historical behavior is the latter, handled by `naked_named`, so
+            // fall through here to let that arm claim single-key paths.
+            if let LitExpr::Path(path) = lit.as_ref()
+                && path.is_single_key()
+            {
+                return Err(nom::Err::Error(nom::error::Error::from_error_kind(
+                    remainder,
+                    nom::error::ErrorKind::Verify,
+                )));
+            }
+
+            // Store the LitExpr verbatim. A source `$(…)` parses into
+            // `LitExpr::Path(PathSelection { Expr(…, …) })`; a bare literal,
+            // `LitPath`, array, operator chain, or explicit `{…}` (which is
+            // a `LitExpr::Object`) all land honestly as their own `LitExpr`
+            // variants with no wrapper synthesized around them.
+            Ok((
+                remainder,
+                JSONSelection {
+                    inner: TopLevelSelection::Value(lit),
+                    spec,
+                },
+            ))
+        }
+
+        let naked_named = map(SubSelection::parse_naked, |sub| {
+            if let (1, Some(only)) = (sub.selections.len(), sub.selections.first())
+                && (only.is_anonymous() || matches!(only.prefix, NamingPrefix::Spread(None)))
+            {
+                return Self {
+                    inner: TopLevelSelection::Value(only.path.clone()),
+                    spec,
+                };
+            }
+            Self {
+                inner: TopLevelSelection::Named(sub),
+                spec,
+            }
+        });
+
+        match all_consuming(terminated(
+            alt((lit_expr_top_level, naked_named)),
+            spaces_or_comments,
+        ))
+        .parse(input)
+        {
+            Ok((remainder, selection)) => {
+                if remainder.fragment().is_empty() {
+                    Ok((remainder, selection))
+                } else {
+                    Err(nom_fail_message(
+                        remainder,
+                        "Unexpected trailing characters",
+                    ))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match &self.inner {
             TopLevelSelection::Named(subselect) => Some(subselect),
-            TopLevelSelection::Path(path) => path.next_subselection(),
+            TopLevelSelection::Value(lit) => lit.as_ref().next_subselection(),
         }
     }
 
@@ -429,7 +550,7 @@ impl JSONSelection {
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match &mut self.inner {
             TopLevelSelection::Named(subselect) => Some(subselect),
-            TopLevelSelection::Path(path) => path.next_mut_subselection(),
+            TopLevelSelection::Value(lit) => lit.as_mut().next_mut_subselection(),
         }
     }
 
@@ -444,7 +565,7 @@ impl VarPaths for JSONSelection {
     fn var_paths(&self) -> Vec<&PathSelection> {
         match &self.inner {
             TopLevelSelection::Named(subselect) => subselect.var_paths(),
-            TopLevelSelection::Path(path) => path.var_paths(),
+            TopLevelSelection::Value(lit) => lit.as_ref().var_paths(),
         }
     }
 }
@@ -455,7 +576,14 @@ impl VarPaths for JSONSelection {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct NamedSelection {
     pub(super) prefix: NamingPrefix,
-    pub(super) path: PathSelection,
+    // The RHS of a `NamedSelection` is any `LitExpr`. A `PathList::Expr`
+    // node appears here only if the source contained an explicit `$(...)`
+    // wrapper — bare literal values like `alias: "Book"` are stored as
+    // their own `LitExpr` variant (e.g. `LitExpr::String`) without any
+    // synthetic wrapping. The field is kept named `path` for continuity
+    // with call sites that historically worked with a `PathSelection`,
+    // but it now accepts the full `LitExpr` surface.
+    pub(super) path: WithRange<LitExpr>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -495,6 +623,14 @@ impl Ranged for NamedSelection {
     }
 }
 
+// Lift a `PathSelection` into the `WithRange<LitExpr>` shape that
+// `NamedSelection.path` now uses. Used at call sites that historically
+// produced a `PathSelection` directly.
+fn path_value(path: PathSelection) -> WithRange<LitExpr> {
+    let range = path.range();
+    WithRange::new(LitExpr::Path(path), range)
+}
+
 impl NamedSelection {
     pub(super) fn has_single_output_key(&self) -> bool {
         self.get_single_key().is_some()
@@ -502,7 +638,12 @@ impl NamedSelection {
 
     pub(super) fn get_single_key(&self) -> Option<&WithRange<Key>> {
         match &self.prefix {
-            NamingPrefix::None => self.path.get_single_key(),
+            NamingPrefix::None => match self.path.as_ref() {
+                LitExpr::Path(path) => path.get_single_key(),
+                // Without a prefix, a bare non-path LitExpr is anonymous;
+                // it does not contribute a single key.
+                _ => None,
+            },
             NamingPrefix::Spread(_) => None,
             NamingPrefix::Alias(alias) => Some(&alias.name),
         }
@@ -510,7 +651,13 @@ impl NamedSelection {
 
     pub(super) fn is_anonymous(&self) -> bool {
         match &self.prefix {
-            NamingPrefix::None => self.path.is_anonymous(),
+            NamingPrefix::None => match self.path.as_ref() {
+                LitExpr::Path(path) => path.is_anonymous(),
+                // A non-path LitExpr (primitive, object, array, LitPath,
+                // LitOpChain) has no key of its own, so without an Alias
+                // or Spread prefix it is anonymous.
+                _ => true,
+            },
             NamingPrefix::Alias(_) => false,
             NamingPrefix::Spread(_) => false,
         }
@@ -539,9 +686,9 @@ impl NamedSelection {
         };
         Self {
             prefix,
-            path: PathSelection {
+            path: path_value(PathSelection {
                 path: WithRange::new(PathList::Key(name, tail), name_tail_range),
-            },
+            }),
         }
     }
 
@@ -591,7 +738,7 @@ impl NamedSelection {
                     remainder,
                     Self {
                         prefix: NamingPrefix::Alias(alias),
-                        path,
+                        path: path_value(path),
                     },
                 )),
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
@@ -613,7 +760,7 @@ impl NamedSelection {
                             remainder,
                             Self {
                                 prefix: NamingPrefix::Spread(None),
-                                path,
+                                path: path_value(path),
                             },
                         ))
                     } else {
@@ -641,9 +788,9 @@ impl NamedSelection {
                     input,
                     NamedSelection {
                         prefix: NamingPrefix::Alias(alias),
-                        path: PathSelection {
+                        path: path_value(PathSelection {
                             path: WithRange::new(PathList::Selection(group), group_range),
-                        },
+                        }),
                     },
                 )
             })
@@ -671,9 +818,9 @@ impl NamedSelection {
                         // can construct a PathList consisting of only a
                         // SubSelection here, for the sake of using the same
                         // machinery to process all NamedSelection nodes.
-                        path: PathSelection {
+                        path: path_value(PathSelection {
                             path: WithRange::new(PathList::Selection(sub), sub_range),
-                        },
+                        }),
                     },
                 ));
             }
@@ -683,7 +830,7 @@ impl NamedSelection {
                     remainder,
                     Self {
                         prefix: NamingPrefix::Alias(alias),
-                        path,
+                        path: path_value(path),
                     },
                 )
             })
@@ -728,7 +875,13 @@ impl NamedSelection {
                         // a higher level.
                         NamingPrefix::None
                     };
-                    (remainder, Self { prefix, path })
+                    (
+                        remainder,
+                        Self {
+                            prefix,
+                            path: path_value(path),
+                        },
+                    )
                 })
         }
     }
@@ -755,19 +908,25 @@ impl NamedSelection {
                         // can construct a PathList consisting of only a
                         // SubSelection here, for the sake of using the same
                         // machinery to process all NamedSelection nodes.
-                        path: PathSelection {
+                        path: path_value(PathSelection {
                             path: WithRange::new(PathList::Selection(sub), sub_range),
-                        },
+                        }),
                     },
                 ));
             }
 
-            PathSelection::parse(after_alias.clone()).map(|(remainder, path)| {
+            // In v0.4, a NamedSelection value after `alias:` accepts any
+            // `LitExpr` — bare JSON literals (`1`, `"x"`, `{...}`, `[...]`,
+            // `LitPath`, `LitOpChain`) as well as paths. We store the parsed
+            // `LitExpr` verbatim: a source `$(...)` produces `LitExpr::Path`
+            // with a `PathList::Expr` head, while a bare literal stays as its
+            // own `LitExpr` variant — no synthetic `PathList::Expr` wrapping.
+            LitExpr::parse(after_alias.clone()).map(|(remainder, lit)| {
                 (
                     remainder,
                     Self {
                         prefix: NamingPrefix::Alias(alias),
-                        path,
+                        path: lit,
                     },
                 )
             })
@@ -802,7 +961,13 @@ impl NamedSelection {
                         // a higher level.
                         NamingPrefix::None
                     };
-                    (remainder, Self { prefix, path })
+                    (
+                        remainder,
+                        Self {
+                            prefix,
+                            path: path_value(path),
+                        },
+                    )
                 })
         }
     }
@@ -810,7 +975,7 @@ impl NamedSelection {
     pub(crate) fn names(&self) -> Vec<&str> {
         if let Some(single_key) = self.get_single_key() {
             vec![single_key.as_str()]
-        } else if let Some(sub) = self.path.next_subselection() {
+        } else if let Some(sub) = self.next_subselection() {
             // Flatten and deduplicate the names of the NamedSelection
             // items in the SubSelection.
             let mut name_set = IndexSet::default();
@@ -823,15 +988,22 @@ impl NamedSelection {
         }
     }
 
-    /// Find the next subselection, if present
+    /// Find the next subselection, if present. Delegates to
+    /// [`LitExpr::next_subselection`].
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
-        self.path.next_subselection()
+        self.path.as_ref().next_subselection()
+    }
+
+    /// Mutable counterpart of [`Self::next_subselection`].
+    #[allow(unused)]
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        self.path.as_mut().next_mut_subselection()
     }
 }
 
 impl VarPaths for NamedSelection {
     fn var_paths(&self) -> Vec<&PathSelection> {
-        self.path.var_paths()
+        self.path.as_ref().var_paths()
     }
 }
 
@@ -868,7 +1040,14 @@ impl PathSelection {
         match self.path.as_ref() {
             PathList::Var(var, tail) => match var.as_ref() {
                 KnownVariable::External(namespace) => {
-                    let selection = tail.compute_selection_trie();
+                    // Build the variable's consumption trie via the fused
+                    // shape-computation machinery so we correctly traverse
+                    // through `->method(...)` arrow chains, `?` operators,
+                    // and nested subselections like
+                    // `$this.items->filter(@.product) { id name }`. The legacy
+                    // walker (`tail.compute_selection_trie()`) treats those as
+                    // opaque leaves; this one keeps walking. (RH-1345 / CNN-1093)
+                    let selection = tail.compute_consumption_trie(namespace);
                     let full_range = merge_ranges(var.range(), tail.range());
                     Some(VariableReference {
                         namespace: VariableNamespace {
@@ -885,7 +1064,6 @@ impl PathSelection {
         }
     }
 
-    #[allow(unused)]
     pub(super) fn is_single_key(&self) -> bool {
         self.path.is_single_key()
     }
@@ -1453,6 +1631,15 @@ impl VarPaths for PathList {
     }
 }
 
+// Sticky delimiter mode for `SubSelection::parse_naked_selections_v0_4`,
+// set by the first inter-item separator and enforced for the rest of the
+// list. See that function for the diagnostics emitted on mixed separators.
+enum NamedSelectionSeparator {
+    Undetermined,
+    Comma,
+    Space,
+}
+
 // SubSelection ::= "{" NakedSubSelection "}"
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -1496,7 +1683,14 @@ impl SubSelection {
     }
 
     fn parse_naked(input: Span) -> ParseResult<Self> {
-        match many0(NamedSelection::parse).parse(input.clone()) {
+        let selections_result = match get_connect_spec(&input) {
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 | ConnectSpec::V0_3 => {
+                Self::parse_naked_selections_legacy(input.clone())
+            }
+            ConnectSpec::V0_4 => Self::parse_naked_selections_v0_4(input.clone()),
+        };
+
+        match selections_result {
             Ok((remainder, selections)) => {
                 // Enforce that if selections has any anonymous NamedSelection
                 // elements, there is only one and it's the only NamedSelection in
@@ -1521,6 +1715,105 @@ impl SubSelection {
         }
     }
 
+    fn parse_naked_selections_legacy(input: Span) -> ParseResult<Vec<NamedSelection>> {
+        many0(NamedSelection::parse).parse(input)
+    }
+
+    // In connect/v0.4, a SubSelection body separates its NamedSelection items
+    // either entirely with commas (with an optional trailing comma) or entirely
+    // with whitespace. Mixing the two styles is an error. This unifies the
+    // shape of object literals (LitExpr::Object) with regular selection sets.
+    //
+    // Two mixed-separator cases are diagnosed with a targeted fatal error so
+    // users get a clear message instead of a generic "Eof" / "trailing
+    // characters" failure:
+    //
+    //   • whitespace-then-comma   `{ a b, c }`  — the comma is unexpected
+    //     because the list committed to whitespace after `a b`.
+    //   • comma-then-whitespace   `{ a, b c }`  — `c` is unexpected because
+    //     the list committed to commas after `a, b`, and `c` follows without
+    //     a preceding comma.
+    //
+    // Both errors point at the offending span (the stray comma, or the item
+    // missing its preceding comma).
+    fn parse_naked_selections_v0_4(input: Span) -> ParseResult<Vec<NamedSelection>> {
+        let mut selections: Vec<NamedSelection> = Vec::new();
+
+        // Try parsing the first NamedSelection. If none, we're done (empty body).
+        let mut rest = match NamedSelection::parse(input.clone()) {
+            Ok((r, sel)) => {
+                selections.push(sel);
+                r
+            }
+            Err(nom::Err::Error(_)) => return Ok((input, selections)),
+            Err(e) => return Err(e),
+        };
+
+        let mut mode = NamedSelectionSeparator::Undetermined;
+
+        loop {
+            let (after_ws, _) = spaces_or_comments(rest.clone())?;
+            let comma_attempt: ParseResult<char> = char(',').parse(after_ws.clone());
+
+            if let Ok((after_comma, _)) = comma_attempt {
+                if matches!(mode, NamedSelectionSeparator::Space) {
+                    // The final phrase before the colon ("Unexpected comma")
+                    // is rendered by `JSONSelectionParseError`'s Display impl
+                    // immediately before the offending fragment, which is why
+                    // the explanation goes first and the colon-led summary
+                    // lands at the end.
+                    return Err(nom_fail_message(
+                        after_ws,
+                        "Items in this selection list are separated by whitespace, so commas \
+                         cannot be mixed in. Use commas or whitespace consistently throughout \
+                         the list. Unexpected comma",
+                    ));
+                }
+                mode = NamedSelectionSeparator::Comma;
+                rest = after_comma;
+
+                match NamedSelection::parse(rest.clone()) {
+                    Ok((r, sel)) => {
+                        selections.push(sel);
+                        rest = r;
+                    }
+                    Err(nom::Err::Error(_)) => break, // trailing comma
+                    Err(e) => return Err(e),
+                }
+            } else {
+                if matches!(mode, NamedSelectionSeparator::Comma) {
+                    // A comma-separated list must stay comma-separated. If
+                    // another NamedSelection follows without a preceding
+                    // comma, that is an inconsistent-separator error; if no
+                    // NamedSelection follows, the list is simply over.
+                    if NamedSelection::parse(after_ws.clone()).is_ok() {
+                        // Likewise, the colon-led summary ("Missing comma
+                        // before item") lands at the end so the offending
+                        // item follows it directly when the error is shown.
+                        return Err(nom_fail_message(
+                            after_ws,
+                            "Items in this selection list are separated by commas, so each item \
+                             after the first needs a preceding comma. Use commas or whitespace \
+                             consistently throughout the list. Missing comma before item",
+                        ));
+                    }
+                    break;
+                }
+                match NamedSelection::parse(after_ws.clone()) {
+                    Ok((r, sel)) => {
+                        selections.push(sel);
+                        rest = r;
+                        mode = NamedSelectionSeparator::Space;
+                    }
+                    Err(nom::Err::Error(_)) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        Ok((rest, selections))
+    }
+
     // Returns an Iterator over each &NamedSelection that contributes a single
     // name to the output object. This is more complicated than returning
     // self.selections.iter() because some NamedSelection::Path elements can
@@ -1534,7 +1827,7 @@ impl SubSelection {
                 // If the PathSelection has an Alias, then it has a singular
                 // name and should be visited directly.
                 selections.push(selection);
-            } else if let Some(sub) = selection.path.next_subselection() {
+            } else if let Some(sub) = selection.next_subselection() {
                 // If the PathSelection does not have an Alias but does have a
                 // SubSelection, then it represents the PathWithSubSelection
                 // non-terminal from the grammar (see README.md + PR #6076),
@@ -2119,13 +2412,13 @@ mod tests {
             let expected = JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection {
                     prefix: NamingPrefix::Alias(Alias::new("hi")),
-                    path: PathSelection::from_slice(
+                    path: path_value(PathSelection::from_slice(
                         &[
                             Key::Field("hello".to_string()),
                             Key::Field("world".to_string()),
                         ],
                         None,
-                    ),
+                    )),
                 }],
                 ..Default::default()
             });
@@ -2146,13 +2439,13 @@ mod tests {
                     NamedSelection::field(None, Key::field("before").into_with_range(), None),
                     NamedSelection {
                         prefix: NamingPrefix::Alias(Alias::new("hi")),
-                        path: PathSelection::from_slice(
+                        path: path_value(PathSelection::from_slice(
                             &[
                                 Key::Field("hello".to_string()),
                                 Key::Field("world".to_string()),
                             ],
                             None,
-                        ),
+                        )),
                     },
                     NamedSelection::field(None, Key::field("after").into_with_range(), None),
                 ],
@@ -2199,7 +2492,7 @@ mod tests {
                     NamedSelection::field(None, Key::field("before").into_with_range(), None),
                     NamedSelection {
                         prefix: NamingPrefix::Alias(Alias::new("hi")),
-                        path: PathSelection::from_slice(
+                        path: path_value(PathSelection::from_slice(
                             &[
                                 Key::Field("hello".to_string()),
                                 Key::Field("world".to_string()),
@@ -2219,7 +2512,7 @@ mod tests {
                                 ],
                                 ..Default::default()
                             }),
-                        ),
+                        )),
                     },
                     NamedSelection::field(None, Key::field("after").into_with_range(), None),
                 ],
@@ -2277,7 +2570,10 @@ mod tests {
         assert_eq!(
             selection!(input, spec).strip_ranges(),
             JSONSelection {
-                inner: TopLevelSelection::Path(path_without_ranges),
+                inner: TopLevelSelection::Value(WithRange::new(
+                    LitExpr::Path(path_without_ranges),
+                    None,
+                )),
                 spec,
             },
         );
@@ -2409,17 +2705,32 @@ mod tests {
         }
 
         {
+            // In v0.4, `leggo: 'my ego'` binds `leggo` to the string literal
+            // `"my ego"` (LitExpr::String), matching the fully unified
+            // SubSelection/LitObject grammar where JSON literal heads always
+            // win over field-key interpretation. The AST stores the bare
+            // `LitExpr::String` directly — no `PathList::Expr` wrap, since
+            // that node is reserved for source `$(...)`. To look up a field
+            // called `my ego`, users write `leggo: $.'my ego'` instead.
+            let leggo_selection = if matches!(spec, ConnectSpec::V0_4) {
+                NamedSelection {
+                    prefix: NamingPrefix::Alias(Alias::new("leggo")),
+                    path: WithRange::new(LitExpr::String("my ego".to_string()), None),
+                }
+            } else {
+                NamedSelection::field(
+                    Some(Alias::new("leggo")),
+                    Key::quoted("my ego").into_with_range(),
+                    None,
+                )
+            };
             let expected = PathSelection::from_slice(
                 &[
                     Key::Field("nested".to_string()),
                     Key::Quoted("string literal".to_string()),
                 ],
                 Some(SubSelection {
-                    selections: vec![NamedSelection::field(
-                        Some(Alias::new("leggo")),
-                        Key::quoted("my ego").into_with_range(),
-                        None,
-                    )],
+                    selections: vec![leggo_selection],
                     ..Default::default()
                 }),
             );
@@ -2501,31 +2812,49 @@ mod tests {
         }
 
         {
+            // A quoted-string token immediately followed by `{ ... }` is
+            // *not* a LitPath in v0.4: per the grammar (NonEmptyPathTail
+            // excludes SubSelection), and per the explicit disambiguation
+            // rule documented in the README's "Literals followed by a
+            // SubSelection" section, such a token is reinterpreted as the
+            // `Key` of a `KeyPath` whose trailing `SubSelection` is the
+            // `{ ... }`. The resulting AST matches v0.3 verbatim.
+            let quoted_with_alias_value: WithRange<LitExpr> = path_value(PathSelection {
+                path: WithRange::new(
+                    PathList::Key(
+                        Key::quoted("quoted with alias").into_with_range(),
+                        WithRange::new(
+                            PathList::Selection(SubSelection {
+                                selections: vec![
+                                    NamedSelection::field(
+                                        None,
+                                        Key::field("id").into_with_range(),
+                                        None,
+                                    ),
+                                    NamedSelection::field(
+                                        Some(Alias::quoted("n a m e")),
+                                        Key::field("name").into_with_range(),
+                                        None,
+                                    ),
+                                ],
+                                ..Default::default()
+                            }),
+                            None,
+                        ),
+                    ),
+                    None,
+                ),
+            });
             let expected = PathSelection {
                 path: PathList::Var(
                     KnownVariable::Dollar.into_with_range(),
                     PathList::Key(
                         Key::field("results").into_with_range(),
                         PathList::Selection(SubSelection {
-                            selections: vec![NamedSelection::field(
-                                Some(Alias::quoted("non-identifier alias")),
-                                Key::quoted("quoted with alias").into_with_range(),
-                                Some(SubSelection {
-                                    selections: vec![
-                                        NamedSelection::field(
-                                            None,
-                                            Key::field("id").into_with_range(),
-                                            None,
-                                        ),
-                                        NamedSelection::field(
-                                            Some(Alias::quoted("n a m e")),
-                                            Key::field("name").into_with_range(),
-                                            None,
-                                        ),
-                                    ],
-                                    ..Default::default()
-                                }),
-                            )],
+                            selections: vec![NamedSelection {
+                                prefix: NamingPrefix::Alias(Alias::quoted("non-identifier alias")),
+                                path: quoted_with_alias_value,
+                            }],
                             ..Default::default()
                         })
                         .into_with_range(),
@@ -2626,7 +2955,7 @@ mod tests {
                         NamedSelection::field(None, Key::field("before").into_with_range(), None),
                         NamedSelection {
                             prefix: NamingPrefix::Alias(Alias::new("alias")),
-                            path: PathSelection {
+                            path: path_value(PathSelection {
                                 path: PathList::Var(
                                     KnownVariable::External(Namespace::Args.to_string())
                                         .into_with_range(),
@@ -2637,7 +2966,7 @@ mod tests {
                                     .into_with_range(),
                                 )
                                 .into_with_range(),
-                            },
+                            }),
                         },
                         NamedSelection::field(None, Key::field("after").into_with_range(), None),
                     ],
@@ -2665,7 +2994,7 @@ mod tests {
                                 ),
                                 NamedSelection {
                                     prefix: NamingPrefix::Alias(Alias::new("injected")),
-                                    path: PathSelection {
+                                    path: path_value(PathSelection {
                                         path: PathList::Var(
                                             KnownVariable::External(Namespace::Args.to_string())
                                                 .into_with_range(),
@@ -2676,7 +3005,7 @@ mod tests {
                                             .into_with_range(),
                                         )
                                         .into_with_range(),
-                                    },
+                                    }),
                                 },
                             ],
                             ..Default::default()
@@ -2869,13 +3198,13 @@ mod tests {
                 selections: vec![
                     NamedSelection {
                         prefix: NamingPrefix::Alias(Alias::new("value")),
-                        path: PathSelection {
+                        path: path_value(PathSelection {
                             path: PathList::Var(
                                 KnownVariable::Dollar.into_with_range(),
                                 PathList::Empty.into_with_range()
                             )
                             .into_with_range(),
-                        },
+                        }),
                     },
                     NamedSelection::field(
                         None,
@@ -2905,7 +3234,7 @@ mod tests {
             JSONSelection::named(SubSelection {
                 selections: vec![NamedSelection {
                     prefix: NamingPrefix::Alias(Alias::new("value")),
-                    path: PathSelection {
+                    path: path_value(PathSelection {
                         path: PathList::Var(
                             KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                             PathList::Selection(SubSelection {
@@ -2926,7 +3255,7 @@ mod tests {
                             .into_with_range(),
                         )
                         .into_with_range(),
-                    },
+                    }),
                 }],
                 ..Default::default()
             }),
@@ -3110,22 +3439,31 @@ mod tests {
             ),
         );
 
-        check_simple_lit_expr(spec, "$({})", LitExpr::Object(IndexMap::default()));
-        check_simple_lit_expr(
+        // v0.1–v0.3 use the legacy object literal grammar (Key: LitExpr).
+        // v0.4 unifies the body with SubSelection, where values must be
+        // PathSelections — literal values like `1` require `$(1)` wrapping,
+        // which is covered by dedicated v0.4 tests (see test_shorthand_object_property).
+        if matches!(
             spec,
-            "$({ a: 1, b: 2, c: 3 })",
-            LitExpr::Object({
-                let mut map = IndexMap::default();
-                for (key, value) in &[("a", "1"), ("b", "2"), ("c", "3")] {
-                    map.insert(
-                        Key::field(key).into_with_range(),
-                        LitExpr::Number(value.parse().expect("serde_json::Number parse error"))
-                            .into_with_range(),
-                    );
-                }
-                map
-            }),
-        );
+            ConnectSpec::V0_1 | ConnectSpec::V0_2 | ConnectSpec::V0_3
+        ) {
+            check_simple_lit_expr(spec, "$({})", LitExpr::LegacyObject(IndexMap::default()));
+            check_simple_lit_expr(
+                spec,
+                "$({ a: 1, b: 2, c: 3 })",
+                LitExpr::LegacyObject({
+                    let mut map = IndexMap::default();
+                    for (key, value) in &[("a", "1"), ("b", "2"), ("c", "3")] {
+                        map.insert(
+                            Key::field(key).into_with_range(),
+                            LitExpr::Number(value.parse().expect("serde_json::Number parse error"))
+                                .into_with_range(),
+                        );
+                    }
+                    map
+                }),
+            );
+        }
     }
 
     #[test]
@@ -3290,7 +3628,7 @@ mod tests {
                                             SubSelection {
                                                 selections: vec![NamedSelection {
                                                     prefix: NamingPrefix::Alias(Alias::new("x2")),
-                                                    path: PathSelection {
+                                                    path: path_value(PathSelection {
                                                         path: PathList::Key(
                                                             Key::field("x").into_with_range(),
                                                             PathList::Method(
@@ -3311,7 +3649,7 @@ mod tests {
                                                             .into_with_range(),
                                                         )
                                                         .into_with_range(),
-                                                    },
+                                                    }),
                                                 }],
                                                 ..Default::default()
                                             },
@@ -3328,7 +3666,7 @@ mod tests {
                                             SubSelection {
                                                 selections: vec![NamedSelection {
                                                     prefix: NamingPrefix::Alias(Alias::new("y2")),
-                                                    path: PathSelection {
+                                                    path: path_value(PathSelection {
                                                         path: PathList::Key(
                                                             Key::field("y").into_with_range(),
                                                             PathList::Method(
@@ -3351,7 +3689,7 @@ mod tests {
                                                             .into_with_range(),
                                                         )
                                                         .into_with_range(),
-                                                    },
+                                                    }),
                                                 }],
                                                 ..Default::default()
                                             },
@@ -3572,7 +3910,10 @@ mod tests {
             )
             .strip_ranges();
             let this_kind_path = match &sel.inner {
-                TopLevelSelection::Path(path) => path,
+                TopLevelSelection::Value(lit) => match lit.as_ref() {
+                    LitExpr::Path(path) => path,
+                    _ => panic!("Expected PathSelection"),
+                },
                 _ => panic!("Expected PathSelection"),
             };
             let this_a_path = parse("$this.a");
@@ -3743,7 +4084,7 @@ mod tests {
                             name: WithRange::new(Key::field("product"), Some(7..14)),
                             range: Some(7..15),
                         }),
-                        path: PathSelection {
+                        path: path_value(PathSelection {
                             path: WithRange::new(
                                 PathList::Var(
                                     WithRange::new(
@@ -3783,7 +4124,7 @@ mod tests {
                                 ),
                                 Some(15..37),
                             ),
-                        },
+                        }),
                     },
                     NamedSelection::field(
                         None,
@@ -3874,6 +4215,39 @@ mod tests {
         assert_eq!(z_trie.key_ranges("d").collect::<Vec<_>>(), vec![23..24]);
     }
 
+    /// Regression test for RH-1345 / CNN-1093 —
+    /// `CONNECTORS_CANNOT_RESOLVE_KEY` composition error from `->filter()` in
+    /// a `@connect(http: { body: })` mapping. The legacy walker treated
+    /// `PathList::Method` as an opaque leaf and stopped at it, so the
+    /// trailing subselection `{ id name }` was dropped from the variable's
+    /// consumption trie — and the synthesized `@key(fields: "items")` failed
+    /// validation because `items` looks scalar but isn't.
+    ///
+    /// With the fused-trie implementation of `variable_reference`, the
+    /// recursion continues through the `->filter(...)` *and* records the
+    /// predicate's input consumption — `@.product` inside the filter reads
+    /// `product` from each item of `$this.items`, so `product` joins
+    /// `id` / `name` in the trie. The legacy walker captured none of this.
+    #[test]
+    fn test_variable_reference_through_filter_subselection() {
+        let selection = JSONSelection::parse_with_spec(
+            "$this.items->filter(@.product) { id name }",
+            ConnectSpec::V0_4,
+        )
+        .unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 1);
+
+        let var_ref = var_paths[0]
+            .variable_reference::<crate::connectors::Namespace>()
+            .unwrap();
+        assert_eq!(
+            var_ref.namespace.namespace,
+            crate::connectors::Namespace::This
+        );
+        assert_eq!(var_ref.selection.to_string(), "items { id name product }");
+    }
+
     #[test]
     fn test_external_var_paths_no_variable() {
         let selection = JSONSelection::parse("a.b.c").unwrap();
@@ -3956,15 +4330,16 @@ mod tests {
         let spec = ConnectSpec::V0_2;
 
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
-        mul_with_dollars.if_named_else_path(
-            |named| {
-                panic!("Expected a path selection, got named: {named:?}");
+        match mul_with_dollars.top_level() {
+            TopLevelSelection::Value(lit) => match lit.as_ref() {
+                LitExpr::Path(path) => {
+                    assert_eq!(path.get_single_key(), None);
+                    assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
+                }
+                other => panic!("Expected a path selection, got {other:?}"),
             },
-            |path| {
-                assert_eq!(path.get_single_key(), None);
-                assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
-            },
-        );
+            other => panic!("Expected a path selection, got {other:?}"),
+        }
 
         assert_debug_snapshot!(mul_with_dollars);
     }
@@ -4221,15 +4596,16 @@ mod tests {
         let spec = ConnectSpec::V0_3;
 
         let mul_with_dollars = selection!("a->mul($.b, $.c)", spec);
-        mul_with_dollars.if_named_else_path(
-            |named| {
-                panic!("Expected a path selection, got named: {named:?}");
+        match mul_with_dollars.top_level() {
+            TopLevelSelection::Value(lit) => match lit.as_ref() {
+                LitExpr::Path(path) => {
+                    assert_eq!(path.get_single_key(), None);
+                    assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
+                }
+                other => panic!("Expected a path selection, got {other:?}"),
             },
-            |path| {
-                assert_eq!(path.get_single_key(), None);
-                assert_eq!(path.pretty_print(), "a->mul($.b, $.c)");
-            },
-        );
+            other => panic!("Expected a path selection, got {other:?}"),
+        }
 
         assert_debug_snapshot!(mul_with_dollars);
     }
@@ -4240,15 +4616,16 @@ mod tests {
 
         let a_plus_b_plus_c = JSONSelection::parse_with_spec("a->add(b, c)", spec);
         if let Ok(selection) = a_plus_b_plus_c {
-            selection.if_named_else_path(
-                |named| {
-                    panic!("Expected a path selection, got named: {named:?}");
+            match selection.top_level() {
+                TopLevelSelection::Value(lit) => match lit.as_ref() {
+                    LitExpr::Path(path) => {
+                        assert_eq!(path.pretty_print(), "a->add(b, c)");
+                        assert_eq!(path.get_single_key(), None);
+                    }
+                    other => panic!("Expected a path selection, got {other:?}"),
                 },
-                |path| {
-                    assert_eq!(path.pretty_print(), "a->add(b, c)");
-                    assert_eq!(path.get_single_key(), None);
-                },
-            );
+                other => panic!("Expected a path selection, got {other:?}"),
+            }
             assert_debug_snapshot!(selection);
         } else {
             panic!("Expected a valid selection, got error: {a_plus_b_plus_c:?}");
@@ -4261,8 +4638,8 @@ mod tests {
 
         let sum_a_plus_b_plus_c = JSONSelection::parse_with_spec("sum: a->add(b, c)", spec);
         if let Ok(selection) = sum_a_plus_b_plus_c {
-            selection.if_named_else_path(
-                |named| {
+            match selection.top_level() {
+                TopLevelSelection::Named(named) => {
                     for selection in named.selections_iter() {
                         assert_eq!(selection.pretty_print(), "sum: a->add(b, c)");
                         assert_eq!(
@@ -4270,11 +4647,9 @@ mod tests {
                             Some("sum")
                         );
                     }
-                },
-                |path| {
-                    panic!("Expected any number of named selections, got path: {path:?}");
-                },
-            );
+                }
+                other => panic!("Expected any number of named selections, got {other:?}"),
+            }
             assert_debug_snapshot!(selection);
         } else {
             panic!("Expected a valid selection, got error: {sum_a_plus_b_plus_c:?}");
@@ -4539,5 +4914,69 @@ mod tests {
         }
 
         assert_debug_snapshot!(ext);
+    }
+
+    #[test]
+    fn top_level_braced_subselection_v0_4() {
+        // `{ id name }` is the LitObject alternative of the unified v0.4
+        // grammar — it lands as a `Value(LitExpr::Object(sub))`, not as a
+        // `Named(sub)`, because the braces are a real token the user wrote.
+        // Bare `id name` remains the `NamedSelectionList` alternative and
+        // lands as `Named(sub)`.
+        let braced = JSONSelection::parse_with_spec("{ id name }", ConnectSpec::V0_4).unwrap();
+        let naked = JSONSelection::parse_with_spec("id name", ConnectSpec::V0_4).unwrap();
+        assert!(
+            matches!(
+                &braced.inner,
+                TopLevelSelection::Value(lit) if matches!(lit.as_ref(), LitExpr::Object(_)),
+            ),
+            "expected Value(LitExpr::Object(_)), got {:?}",
+            braced.inner,
+        );
+        assert!(matches!(naked.inner, TopLevelSelection::Named(_)));
+
+        // Empty `{}` is accepted as an empty object literal.
+        let empty_braced = JSONSelection::parse_with_spec("{}", ConnectSpec::V0_4).unwrap();
+        assert!(matches!(
+            &empty_braced.inner,
+            TopLevelSelection::Value(lit) if matches!(lit.as_ref(), LitExpr::Object(_)),
+        ));
+    }
+
+    #[test]
+    fn top_level_literal_array_v0_4() {
+        // `[1, 2, 3]` at the top level is an array literal, stored verbatim
+        // in `Value(LitExpr::Array(_))`. No synthetic `PathList::Expr`
+        // wrapping — that node is reserved for explicit `$(...)` in source.
+        let array = JSONSelection::parse_with_spec("[1, 2, 3]", ConnectSpec::V0_4).unwrap();
+        match &array.inner {
+            TopLevelSelection::Value(lit) => {
+                assert!(matches!(lit.as_ref(), LitExpr::Array(_)));
+            }
+            other => panic!("Expected TopLevelSelection::Value, got: {other:?}"),
+        }
+
+        // Empty `[]` is accepted.
+        let empty = JSONSelection::parse_with_spec("[]", ConnectSpec::V0_4).unwrap();
+        assert!(matches!(
+            &empty.inner,
+            TopLevelSelection::Value(lit) if matches!(lit.as_ref(), LitExpr::Array(_)),
+        ));
+
+        // Mixed element kinds: path expression, number, string.
+        let mixed =
+            JSONSelection::parse_with_spec(r#"[$.foo, 42, "x"]"#, ConnectSpec::V0_4).unwrap();
+        assert!(matches!(
+            &mixed.inner,
+            TopLevelSelection::Value(lit) if matches!(lit.as_ref(), LitExpr::Array(_)),
+        ));
+    }
+
+    #[test]
+    fn top_level_braces_and_brackets_rejected_in_v0_3() {
+        // The braces/brackets-at-top-level grammar is v0.4-only; v0.3 must
+        // still reject `{...}` and `[...]` as the whole JSONSelection.
+        assert!(JSONSelection::parse_with_spec("{ id name }", ConnectSpec::V0_3).is_err());
+        assert!(JSONSelection::parse_with_spec("[1, 2, 3]", ConnectSpec::V0_3).is_err());
     }
 }
