@@ -742,9 +742,9 @@ mod tests {
         assert_eq!(
             build_for_errors(SCHEMA),
             vec![
-                "cacheTag format is invalid: invalid path element at \"upc name\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"name upc\", which is not a single selection",
                 "cacheTag format is invalid: invalid path element at \"\", which is not a single selection",
-                "cacheTag format is invalid: invalid path element at \"first country\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"country first\", which is not a single selection",
             ]
         );
     }

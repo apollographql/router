@@ -166,6 +166,8 @@ impl Merger {
                     .into_iter()
                     .map(|d| (**d).clone())
                     .collect_vec();
+                // PORT NOTE: JS applies transforms for repeatable directives only
+                // this might have been a miss as it is currently only used for @context
                 if let Some(transform) =
                     &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
                 {
@@ -272,10 +274,12 @@ impl Merger {
                 let values = directive_counts
                     .keys()
                     .filter_map(|d| {
-                        d.specified_argument_by_name(&arg_def.name)
-                            .map(|v| v.as_ref())
+                        self.directive_arguments_with_defaults(d, &definition)
+                            .get(&arg_def.name)
+                            .copied()
+                            .flatten()
+                            .map(|v| v.as_ref().clone())
                     })
-                    .cloned()
                     .collect_vec();
                 if let Some(merged_value) = (merger.merge)(&arg_def.name, &values)? {
                     let merged_arg = Argument {

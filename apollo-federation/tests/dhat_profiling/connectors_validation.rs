@@ -10,7 +10,13 @@ fn valid_large_body() {
     const SCHEMA: &str = "src/connectors/validation/test_data/valid_large_body.graphql";
 
     const MAX_BYTES: usize = 275_000;
-    const MAX_ALLOCATIONS: u64 = 27_000;
+    // Bumped from 27_000 once the fused-trie consumption infrastructure
+    // landed: `compute_output_shape` now records into a `SelectionTrie`
+    // baton on every recursive step, which roughly doubles allocation
+    // count during connector validation. The total bytes are unchanged —
+    // only block count grew, dominated by short-lived `Vec`s that hold
+    // per-segment `Name::locations()` slices in `SelectionTrie::add_name`.
+    const MAX_ALLOCATIONS: u64 = 64_000;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 

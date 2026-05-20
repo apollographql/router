@@ -1,5 +1,6 @@
 /// ApplyTo is a trait for applying a JSONSelection to a JSON value, collecting
 /// any/all errors encountered in the process.
+use std::cell::RefCell;
 use std::hash::Hash;
 
 use apollo_compiler::collections::IndexMap;
@@ -12,6 +13,7 @@ use shape::ShapeCase;
 use shape::location::Location;
 use shape::location::SourceId;
 
+use super::Ref;
 use super::helpers::json_merge;
 use super::helpers::json_type_name;
 use super::immutable::InputPath;
@@ -23,6 +25,7 @@ use super::location::Ranged;
 use super::location::WithRange;
 use super::methods::ArrowMethod;
 use super::parser::*;
+use super::selection_trie::SelectionTrie;
 use crate::connectors::spec::ConnectSpec;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
@@ -200,7 +203,7 @@ pub(super) trait ApplyToInternal {
     ) -> Shape;
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) struct ShapeContext {
     /// [`ConnectSpec`] version derived from the [`JSONSelection`] that created
     /// this [`ShapeContext`].
@@ -216,14 +219,28 @@ pub(crate) struct ShapeContext {
     /// A shared source name to use for all locations originating from this
     /// `JSONSelection`.
     source_id: SourceId,
+
+    /// Consumption trie accumulated as a byproduct of `compute_output_shape`.
+    /// Wrapped in `Ref<RefCell<…>>` so all clones produced by
+    /// [`ShapeContext::with_named_shapes`] (or any other builder cloning) share
+    /// the *same* trie — each step of the recursion appends into one place.
+    /// Inspectable with [`ShapeContext::consumption`] after recursion ends.
+    consumption: Ref<RefCell<SelectionTrie>>,
 }
 
 impl ShapeContext {
     pub(crate) fn new(source_id: SourceId) -> Self {
+        // RefCell is not Sync, so Clippy flags this Arc as `arc_with_non_send_sync`.
+        // The context is constructed and consumed within a single static-analysis
+        // traversal (no thread crossings), so Arc is the wrong tool but Rc would
+        // diverge from the module-wide `Ref<T> = Arc<T>` shape-rs convention.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let consumption = Ref::new(RefCell::new(SelectionTrie::new()));
         Self {
             spec: ConnectSpec::latest(),
             named_shapes: IndexMap::default(),
             source_id,
+            consumption,
         }
     }
 
@@ -253,6 +270,59 @@ impl ShapeContext {
 
     pub(crate) fn source_id(&self) -> &SourceId {
         &self.source_id
+    }
+
+    /// Shared handle to the consumption trie that this context's
+    /// `compute_output_shape` invocations contribute to. Cloning this handle
+    /// is cheap; mutations via `borrow_mut()` are visible to every other
+    /// holder, including child contexts produced via `with_named_shapes`.
+    #[allow(dead_code)]
+    pub(crate) fn consumption(&self) -> &Ref<RefCell<SelectionTrie>> {
+        &self.consumption
+    }
+
+    /// Record the names attached to a shape produced during
+    /// `compute_output_shape` recursion. Each name describes the input path
+    /// that the shape was derived from; walking the name chain into the
+    /// consumption trie accumulates the union of all consumed paths.
+    ///
+    /// A shape's identity-bearing names live in two places:
+    ///
+    ///  1. `shape.case() == ShapeCase::Name(name, _)` — the case itself is a
+    ///     symbolic reference, with the `Name` chain as its only payload.
+    ///  2. `shape.names()` — name-metadata accumulated via shape-rs's
+    ///     `with_base_name` / `with_name` / per-step name propagation.
+    ///
+    /// Both sources are recorded.
+    ///
+    /// The `terminal` flag controls whether the deepest node of each
+    /// recorded name chain is marked as a [`SelectionTrie::is_leaf`].
+    /// Pass `true` from terminal recording sites (`PathList::Empty`,
+    /// `PathList::Method` call boundary) where the input value is
+    /// "explicitly consumed"; pass `false` for navigation-only sites
+    /// (`PathList::Key`) where we only want the trie to *contain* the
+    /// path without claiming it terminates a selection.
+    ///
+    /// Only the [`ShapeCase::Name`] case-name (the shape's "primary"
+    /// identity) is eligible to be marked as a leaf. Metadata names
+    /// from `shape.names()` accumulate the path structure as Names
+    /// propagate through field/item operations; marking those as
+    /// leaves too would cause the terminal `$root.a.b.c` recording to
+    /// incorrectly mark its ancestors `$root`, `$root.a`, and
+    /// `$root.a.b` as leaves as well.
+    #[allow(dead_code)]
+    pub(crate) fn record_consumption(&self, shape: &Shape, terminal: bool) {
+        let mut trie = self.consumption.borrow_mut();
+        if let ShapeCase::Name(name, _weak) = shape.case() {
+            let leaf = trie.add_name(name);
+            if terminal {
+                leaf.set_leaf();
+            }
+        }
+        for name in shape.names() {
+            // Metadata names contribute path structure, not leaf identity.
+            trie.add_name(name);
+        }
     }
 }
 
@@ -829,6 +899,17 @@ impl ApplyToInternal for WithRange<PathList> {
                     );
                 }
 
+                // Record the navigation path through this key step with
+                // `terminal = false`, so the structurally-traversed key
+                // appears in the consumption trie *as a non-leaf* — the
+                // path's actual leaf is recorded separately at the next
+                // `Empty` / `Method` boundary. This lets aliased
+                // selections like `users { name: $args.name }` capture
+                // `$root.users` as an internal node (necessary for
+                // upstream-existence guarantees) without marking it as a
+                // terminal selection.
+                context.record_consumption(&child_shape, false);
+
                 (child_shape, Some(tail))
             }
 
@@ -848,6 +929,12 @@ impl ApplyToInternal for WithRange<PathList> {
                     // errors at a higher level.
                     return input_shape;
                 }
+
+                // The method consumes whatever the input path resolved to;
+                // record the input's accumulated name(s) into the trie before
+                // invoking the method, since `method.shape(...)` typically
+                // does not propagate the original name through to its result.
+                context.record_consumption(&input_shape, true);
 
                 if let Some(method) = ArrowMethod::lookup(method_name) {
                     // Before connect/v0.3, we did not consult method.shape at
@@ -929,13 +1016,30 @@ impl ApplyToInternal for WithRange<PathList> {
                     // to $ or @.
                     return input_shape;
                 }
+
+                // The path terminates here — `Selection` is a leaf-position
+                // for the outer path (no `tail` after it). Record the input
+                // path as terminal so the trie has a leaf at the
+                // navigation's endpoint, matching the walker's behavior of
+                // marking a key followed by a subselection as leaf-with-
+                // children. Subsequent recursion into `selection` records
+                // additional consumption (e.g. the subselection's own
+                // fields) on top.
+                context.record_consumption(&input_shape, true);
+
                 (
                     selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
                     None,
                 )
             }
 
-            PathList::Empty => (input_shape, None),
+            PathList::Empty => {
+                // Terminal step — the accumulated name(s) on `input_shape`
+                // describe the deepest input path the surrounding path
+                // expression consumed. Record them into the trie.
+                context.record_consumption(&input_shape, true);
+                (input_shape, None)
+            }
         };
 
         if let Some(tail) = tail_opt {
@@ -1397,6 +1501,32 @@ impl ApplyToInternal for SubSelection {
         let dollar_shape = input_shape.clone();
 
         self.compute_selections_shape_no_rebind(context, input_shape, dollar_shape)
+    }
+}
+
+impl WithRange<PathList> {
+    /// Build a [`SelectionTrie`] describing every input path under
+    /// `namespace` (the variable name including the `$` prefix, e.g.
+    /// `"$this"`) that this tail consumes. Uses the fused-trie machinery in
+    /// [`Self::compute_output_shape`], so it correctly traverses through
+    /// arrow methods, conditional operators (`?`), nested subselections
+    /// (`$this.items->filter(...) { id name }`), and any predicate
+    /// sub-expressions inside method arguments — all of which the legacy
+    /// trie walker treats as opaque leaves.
+    pub(crate) fn compute_consumption_trie(&self, namespace: &str) -> SelectionTrie {
+        let context = ShapeContext::new(SourceId::Other("VariableReference".into()));
+        let var_shape = Shape::name(namespace, Vec::new());
+
+        // The recursion records into `context.consumption()` as a byproduct
+        // of computing the output shape; we discard the output shape here.
+        let _ = self.compute_output_shape(&context, var_shape.clone(), var_shape);
+
+        context
+            .consumption()
+            .borrow()
+            .get(namespace)
+            .cloned()
+            .unwrap_or_else(SelectionTrie::new)
     }
 }
 
