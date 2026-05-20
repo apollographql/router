@@ -10,6 +10,7 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -488,13 +489,8 @@ impl Request {
                 .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
                 .map(|(name, value)| (name.as_str().as_bytes(), value.as_bytes())),
         );
-        headers.sort_unstable();
-        for (name, value) in headers {
-            hasher.update(name);
-            hasher.update([0]);
-            hasher.update(value);
-            hasher.update([0]);
-        }
+        sort_and_hash(&mut hasher, headers);
+
         if !ignore_auth_context
             && let Some(claim) = self
                 .context
@@ -509,38 +505,42 @@ impl Request {
         if let Some(query) = &body.query {
             hasher.update(query.as_bytes());
         }
-        // `body.variables` and `body.extensions` are `serde_json_bytes::Map`
-        // (an `IndexMap` because the `preserve_order` feature is enabled), so
-        // they iterate in insertion order. Apply the same sort + NUL-delimiter
-        // pattern as the headers above so logically identical bodies hash
-        // identically regardless of insertion order, and concatenated
-        // (name, value) pairs cannot collide across distinct logical inputs.
-        let mut variables: Vec<(&ByteString, bytes::Bytes)> = body
-            .variables
-            .iter()
-            .map(|(name, value)| (name, value.to_bytes()))
-            .collect();
-        variables.sort_unstable_by(|a, b| a.0.inner().cmp(b.0.inner()));
-        for (name, value) in &variables {
-            hasher.update(name.inner());
-            hasher.update([0]);
-            hasher.update(value);
-            hasher.update([0]);
-        }
-        let mut extensions: Vec<(&ByteString, bytes::Bytes)> = body
-            .extensions
-            .iter()
-            .map(|(name, value)| (name, value.to_bytes()))
-            .collect();
-        extensions.sort_unstable_by(|a, b| a.0.inner().cmp(b.0.inner()));
-        for (name, value) in &extensions {
-            hasher.update(name.inner());
-            hasher.update([0]);
-            hasher.update(value);
-            hasher.update([0]);
-        }
+        // Apply the same sort + NUL-delimiter pattern as the headers above so
+        // logically identical bodies hash identically regardless of insertion order,
+        // and concatenated (name, value) pairs cannot collide across distinct logical
+        // inputs.
+
+        sort_and_hash(
+            &mut hasher,
+            body.variables
+                .iter()
+                .map(|(k, v)| (k.inner(), v.to_bytes())),
+        );
+        sort_and_hash(
+            &mut hasher,
+            body.extensions
+                .iter()
+                .map(|(k, v)| (k.inner(), v.to_bytes())),
+        );
 
         hex::encode(hasher.finalize())
+    }
+}
+
+/// Stabilizes the ordering of headers, bodies, variables, and so on before hashing to make
+/// same-but-differently ordered headers, bodies, variables, etc, produce the same hash
+fn sort_and_hash(
+    hasher: &mut Sha256,
+    pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+) {
+    let sorted = pairs
+        .into_iter()
+        .sorted_unstable_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
+    for (k, v) in sorted {
+        hasher.update(k.as_ref());
+        hasher.update([0]);
+        hasher.update(v.as_ref());
+        hasher.update([0]);
     }
 }
 
