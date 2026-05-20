@@ -2,6 +2,100 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.14.1] - 2026-05-20
+
+## 🐛 Fixes
+
+### Avoid spurious "meter provider after shutdown" error during router shutdown ([PR #9248](https://github.com/apollographql/router/pull/9248))
+
+The router no longer emits the spurious `cannot use meter provider after shutdown` error during shutdown.  The metrics aggregation layer now returns a noop instrument in that path instead of panicking.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9248
+
+### Use lazy idle eviction in connection pool to avoid inter-request TCP closes ([PR #9308](https://github.com/apollographql/router/pull/9308))
+
+When `pool_idle_timeout` was introduced in v2.13.0, the router unconditionally enabled a background timer that proactively closed idle connections exceeding the timeout. In some network environments, the TCP close sent by this background task raced with a new connection attempt and caused significant latency spikes on the next request.
+
+The router now uses lazy eviction: connections are only closed at checkout time, when a request finds a pooled connection that has exceeded `pool_idle_timeout`. No TCP closes are sent between requests. This matches router behavior before v2.13.0.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9308
+
+### Include URL and failure category in JWKS fetch error logs ([PR #9258](https://github.com/apollographql/router/pull/9258))
+
+When the JWKS server is unreachable, the router now logs a specific, actionable message including the URL and the failure category (timed out, connection failed, or generic failure) — replacing the previous vague `"could not get url"` message.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9258
+
+### Pick up hickory 0.26.1 to close two upstream DNS DoS advisories ([RUSTSEC-2026-0119](https://rustsec.org/advisories/RUSTSEC-2026-0119), [RUSTSEC-2026-0120](https://rustsec.org/advisories/RUSTSEC-2026-0120))
+
+The router's DNS resolver (via `hickory-resolver`) inherits two upstream advisories in `hickory-proto` / `hickory-net` 0.26.0.  Both are fixed in 0.26.1, which is now pinned in `Cargo.lock`.
+
+Source-built consumers were already insulated by caret-semver dependency declarations; this change picks up the fix in Apollo's pre-built binaries and Docker images.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9321
+
+### Return a single JSON response for unsupported defer-with-batch queries ([PR #9311](https://github.com/apollographql/router/pull/9311))
+
+Batched queries that use `@defer` are not supported by the router.  Previously these requests produced a malformed multipart response; they now return a single JSON response with errors that explicitly indicates the lack of support.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9311
+
+### Apply `http_max_request_bytes` only to the operations field, not file streams ([PR #9226](https://github.com/apollographql/router/pull/9226), [PR #9327](https://github.com/apollographql/router/pull/9327))
+
+Previously, `limits.http_max_request_bytes` (default 2 MB) was applied to the entire multipart body of file upload requests, causing large file uploads to be rejected even when `preview_file_uploads.protocols.multipart.limits.max_file_size` was configured to allow them.
+
+The limit now applies only to the GraphQL operations field (the query and variables). File data is bounded separately by `max_file_size`, enforced by the multer parser.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9226 and https://github.com/apollographql/router/pull/9327
+
+## 🛠 Maintenance
+
+### Instrument experimental config features with OTLP gauges ([PR #9330](https://github.com/apollographql/router/pull/9330))
+
+Adds `apollo.router.config.experimental_*` OTLP gauge metrics for all customer-facing experimental config flags, using the existing `populate_config_instrument!` pattern in `configuration/metrics.rs`.  This enables Apollo to track adoption of experimental features so we can inform decisions about which to promote or remove in future releases.
+
+Features now instrumented:
+
+- `experimental_chaos`
+- `experimental_type_conditioned_fetching`
+- `experimental_hoist_orphan_errors`
+- `experimental_log_on_broken_pipe`
+- `experimental_plans_limit`
+- `experimental_paths_limit`
+- `experimental_reuse_query_plans`
+- `experimental_cooperative_cancellation`
+- `experimental_prewarm_query_plan_cache`
+- `experimental_local_field_metrics`
+- `experimental_response_trace_id`
+- `experimental_otlp_endpoint`
+- `experimental_otlp_tracing_protocol`
+- `experimental_otlp_metrics_protocol`
+- `experimental_http2`
+- `experimental_http2_keep_alive_interval`
+- `experimental_http2_keep_alive_timeout`
+- `experimental_mock_subgraphs`
+- `experimental.expose_query_plan` (recorded as `apollo.router.config.experimental_expose_query_plan`)
+
+The mandatory `experimental_diagnostics` plugin is intentionally excluded because it is loaded on every router and would always report adoption as 100%.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9330
+
+### Avoid unnecessary clones on subgraph requests ([PR #9266](https://github.com/apollographql/router/pull/9266))
+
+The router now avoids some unnecessary memory allocations when making subgraph requests, particularly on the APQ (Automatic Persisted Queries) path.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9266
+
+### Improve query plan cache throughput with an in-memory fast path ([PR #9279](https://github.com/apollographql/router/pull/9279))
+
+Every query plan cache lookup — including cache hits — previously acquired the `wait_map` mutex before checking whether the value was in memory. On a warm cache this was pure overhead: the mutex was locked twice, a `broadcast::Sender` was allocated, and a cleanup task was spawned, all to be immediately discarded.
+
+A fast path now checks the in-memory cache before acquiring the mutex. On a hit the value is returned immediately; the `wait_map` path is only entered on a miss, which is the only case where deduplication is needed.
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/9279
+
+
+
 # [2.14.0] - 2026-04-28
 
 ## 🚀 Features
