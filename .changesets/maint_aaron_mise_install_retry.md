@@ -4,4 +4,4 @@ The `install_mise` step in `.circleci/config.yml` ran `mise install` exactly onc
 
 Wrap both invocations (Linux/macOS and Windows) in a 3-attempt loop with linear 5s/10s backoff. On the third failure the step still exits non-zero so genuine configuration errors are not masked.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9478
