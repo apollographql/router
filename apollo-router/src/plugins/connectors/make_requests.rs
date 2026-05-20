@@ -555,6 +555,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use insta::assert_debug_snapshot;
     use serde_json_bytes::Value;
@@ -2230,6 +2231,245 @@ mod tests {
         assert!(item.get("viewUri").is_none());
         assert_eq!(data["metadata"]["count"].as_i64(), Some(2));
         assert!(data["metadata"].get("total").is_none());
+    }
+
+    /// Full pipeline for entity fields: parse query →
+    /// `entities_with_fields_from_request()` → apply connector selection
+    /// → `apply_operation()`.
+    ///
+    /// Returns one `Value` per `EntityField` key produced (there can be
+    /// multiple when the entity field is aliased).
+    fn run_entity_pipeline(operation_str: &str) -> Vec<(String, Value)> {
+        const CONNECTOR_SELECTION: &str = r#"
+        name: display_name
+        avatarUrl: avatar_url
+    "#;
+        let schema = Arc::new(
+            Schema::parse_and_validate(
+                r#"
+                type Query { _: String }
+
+                type User {
+                    id: ID!
+                    profile(type: String): Profile
+                }
+
+                type Profile {
+                    name: String!
+                    avatarUrl: String!
+                }
+
+                extend type Query {
+                    _entities(representations: [_Any!]!): _Entity
+                }
+                scalar _Any
+                union _Entity = User
+                "#,
+                "schema.graphql",
+            )
+            .unwrap(),
+        );
+        let operation = Arc::new(
+            ExecutableDocument::parse_and_validate(&schema, operation_str, "op.graphql").unwrap(),
+        );
+        let variables = Variables {
+            variables: serde_json_bytes::json!({
+                "representations": [
+                    { "__typename": "User", "id": "1" }
+                ]
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            inverted_paths: Default::default(),
+            contextual_arguments: Default::default(),
+        };
+        let conn = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
+            id: ConnectId::new(
+                "subgraph".into(),
+                None,
+                name!(User),
+                name!(profile),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: Some("http://localhost/api".parse().unwrap()),
+                connect_template: "/profile".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse(CONNECTOR_SELECTION).unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test".into(),
+        };
+
+        let keys = super::entities_with_fields_from_request(Arc::new(conn), &operation, &variables)
+            .unwrap();
+
+        keys.into_iter()
+            .map(|key| {
+                let field_name = match &key {
+                    ResponseKey::EntityField { field_name, .. } => field_name.clone(),
+                    other => panic!("expected EntityField, got {other:?}"),
+                };
+
+                let inputs: IndexMap<String, Value> = Default::default();
+                let response = serde_json_bytes::json!({
+                    "display_name": "Foo",
+                    "avatar_url": "https://example.com/foo.png"
+                });
+                let (mapped_data, _) = key.selection().apply_with_vars(&response, &inputs);
+                let mapped = MappedResponse::Data {
+                    data: mapped_data.unwrap_or(Value::Null),
+                    key,
+                    problems: vec![],
+                };
+                let result = mapped.apply_operation(
+                    Some(operation.as_ref().as_ref()),
+                    &IndexMap::<String, IndexSet<String>>::default(),
+                );
+                let data = match result {
+                    MappedResponse::Data { data, .. } => data,
+                    other => panic!("expected Data, got {other:?}"),
+                };
+                (field_name, data)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn entity_no_aliases() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... on User { profile { name avatarUrl } }
+                }
+            }"#,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "profile");
+        assert_eq!(results[0].1["name"].as_str(), Some("Foo"));
+        assert_eq!(
+            results[0].1["avatarUrl"].as_str(),
+            Some("https://example.com/foo.png")
+        );
+    }
+
+    #[test]
+    fn entity_sub_field_alias_only() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... on User { profile { name pic: avatarUrl } }
+                }
+            }"#,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "profile");
+        assert_eq!(
+            results[0].1["pic"].as_str(),
+            Some("https://example.com/foo.png")
+        );
+        assert!(results[0].1.get("avatarUrl").is_none());
+    }
+
+    #[test]
+    fn entity_field_alias_only() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... on User { myProfile: profile { name avatarUrl } }
+                }
+            }"#,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "myProfile");
+        assert_eq!(results[0].1["name"].as_str(), Some("Foo"));
+        assert_eq!(
+            results[0].1["avatarUrl"].as_str(),
+            Some("https://example.com/foo.png")
+        );
+    }
+
+    // -- entity field alias + sub-field alias (the bug) -----------------------
+
+    #[test]
+    fn entity_field_alias_with_sub_field_alias() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... on User { myProfile: profile { name pic: avatarUrl } }
+                }
+            }"#,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "myProfile");
+        assert_eq!(results[0].1["name"].as_str(), Some("Foo"));
+        assert_eq!(
+            results[0].1["pic"].as_str(),
+            Some("https://example.com/foo.png")
+        );
+        assert!(
+            results[0].1.get("avatarUrl").is_none(),
+            "original name should not appear when aliased"
+        );
+    }
+
+    #[test]
+    fn multiple_entity_field_aliases_with_sub_field_aliases() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... on User {
+                        short: profile(type: "s") { name }
+                        full: profile(type: "f") { displayName: name pic: avatarUrl }
+                    }
+                }
+            }"#,
+        );
+        // Two aliased fields × one representation = 2 keys
+        assert_eq!(results.len(), 2);
+
+        let short = results.iter().find(|(n, _)| n == "short").unwrap();
+        assert_eq!(short.1["name"].as_str(), Some("Foo"));
+
+        let full = results.iter().find(|(n, _)| n == "full").unwrap();
+        assert_eq!(full.1["displayName"].as_str(), Some("Foo"));
+        assert_eq!(full.1["pic"].as_str(), Some("https://example.com/foo.png"));
+        assert!(full.1.get("name").is_none());
+        assert!(full.1.get("avatarUrl").is_none());
+    }
+
+    #[test]
+    fn entity_field_alias_with_fragment_spread() {
+        let results = run_entity_pipeline(
+            r#"query($representations: [_Any!]!) {
+                _entities(representations: $representations) {
+                    ... _userFields
+                }
+            }
+            fragment _userFields on User {
+                myProfile: profile { name pic: avatarUrl }
+            }"#,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "myProfile");
+        assert_eq!(results[0].1["name"].as_str(), Some("Foo"));
+        assert_eq!(
+            results[0].1["pic"].as_str(),
+            Some("https://example.com/foo.png")
+        );
+        assert!(results[0].1.get("avatarUrl").is_none());
     }
 }
 
