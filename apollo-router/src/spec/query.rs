@@ -921,6 +921,35 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+        // Track which named fragments have already been applied during this root
+        // selection-set traversal. Re-applying a `...Frag` at the same (input,
+        // output, root_type_name, path) is idempotent — the same fields would be
+        // written from the same input — so the second application can be skipped.
+        // This collapses exponential fragment-of-fragment blowups (e.g. `L1 = ...L0
+        // ...L0`, `L2 = ...L1 ...L1`, ...) into linear work.
+        let mut applied_fragments: HashSet<&'a str> = HashSet::new();
+        self.apply_root_selection_set_cached(
+            root_type_name,
+            selection_set,
+            parameters,
+            input,
+            output,
+            path,
+            &mut applied_fragments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_root_selection_set_cached<'a: 'b, 'b>(
+        &'a self,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
+        parameters: &mut FormatParameters,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        applied_fragments: &mut HashSet<&'a str>,
+    ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -1005,13 +1034,17 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
-                        self.apply_root_selection_set(
+                        // Inline fragments share the named-fragment cache with their
+                        // parent so an anonymous `... on T { ...Frag }` wrapper still
+                        // benefits from de-duplication of `...Frag`.
+                        self.apply_root_selection_set_cached(
                             root_type_name,
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
+                            applied_fragments,
                         )?;
                     }
                 }
@@ -1026,6 +1059,14 @@ impl Query {
                         continue;
                     }
 
+                    // Skip if we have already applied this named fragment during the
+                    // current root-selection-set traversal. The first application
+                    // wrote every reachable field; a second application would write
+                    // the same values, so it is safe to omit.
+                    if !applied_fragments.insert(name.as_str()) {
+                        continue;
+                    }
+
                     if let Some(Fragment {
                         type_condition,
                         selection_set,
@@ -1037,13 +1078,14 @@ impl Query {
                             || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {
-                            self.apply_root_selection_set(
+                            self.apply_root_selection_set_cached(
                                 root_type_name,
                                 selection_set,
                                 parameters,
                                 input,
                                 output,
                                 path,
+                                applied_fragments,
                             )?;
                         }
                     } else {
