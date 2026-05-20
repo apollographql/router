@@ -693,8 +693,7 @@ mod field_selection {
 
         pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
             let definition = self.field_position.get(self.schema.schema())?;
-            self.schema
-                .get_type(definition.ty.inner_named_type())
+            self.schema.get_type(definition.ty.inner_named_type())
         }
 
         pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
@@ -2203,10 +2202,9 @@ impl FieldSelection {
         // Operation creation and the creation of the ValidFederationSchema, it's safer to just
         // confirm it exists in this schema.
         field_position.get(schema.schema())?;
-        let is_composite = CompositeTypeDefinitionPosition::try_from(
-            schema.get_type(&field.selection_set.ty)?,
-        )
-        .is_ok();
+        let is_composite =
+            CompositeTypeDefinitionPosition::try_from(schema.get_type(&field.selection_set.ty)?)
+                .is_ok();
 
         Ok(Some(FieldSelection {
             field: Field {

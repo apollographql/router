@@ -335,8 +335,7 @@ fn add_requires_error(
             if other_subgraph.name == subgraph_name {
                 return Ok(None);
             }
-            let Ok(type_pos_in_other_subgraph) =
-                other_subgraph.schema().get_type(&type_name)
+            let Ok(type_pos_in_other_subgraph) = other_subgraph.schema().get_type(&type_name)
             else {
                 return Ok(None);
             };

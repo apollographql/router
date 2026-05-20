@@ -148,10 +148,7 @@ impl Merger {
 
             // we look up the actual type in the subgraph schema as it can be different than the one in the supergraph
             // (i.e. @interfaceObject in subgraph but an interface in supergraph)
-            if let Some(type_position) = subgraph
-                .schema()
-                .try_get_type(obj_or_itf.type_name())
-            {
+            if let Some(type_position) = subgraph.schema().try_get_type(obj_or_itf.type_name()) {
                 let object_or_interface_in_subgraph: ObjectOrInterfaceTypeDefinitionPosition =
                     type_position.try_into()?;
                 for field in object_or_interface_in_subgraph.fields(subgraph.schema().schema())? {
@@ -379,7 +376,7 @@ impl Merger {
             ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
         ) || subgraph
             .schema()
-            .try_get_type(&parent_name_in_supergraph)
+            .try_get_type(parent_name_in_supergraph)
             .is_some()
         {
             return Ok(interface_object_fields);
@@ -1182,11 +1179,7 @@ impl Merger {
                 // to switch `Sources` to be `IndexMap<usize, T>` instead of holding `Option<T>`.
                 _ => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
-                    if subgraph
-                        .schema()
-                        .try_get_type(parent_name)
-                        .is_some()
-                    {
+                    if subgraph.schema().try_get_type(parent_name).is_some() {
                         return Ok(true);
                     }
                 }

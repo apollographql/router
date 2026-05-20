@@ -177,9 +177,7 @@ impl Field {
                 .get(schema.schema())?
                 .ty
                 .inner_named_type();
-            return Ok(Some(
-                data.schema.get_type(base_ty_name)?.try_into()?,
-            ));
+            return Ok(Some(data.schema.get_type(base_ty_name)?.try_into()?));
         }
         if data.name() == &TYPENAME_FIELD {
             let Some(type_name) = parent_type

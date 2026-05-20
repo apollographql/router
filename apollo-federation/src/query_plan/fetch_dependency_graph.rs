@@ -1071,10 +1071,7 @@ impl FetchDependencyGraph {
         &self,
         type_name: &Name,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        Ok(self
-            .supergraph_schema
-            .get_type(type_name)?
-            .try_into()?)
+        Ok(self.supergraph_schema.get_type(type_name)?.try_into()?)
     }
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`. This method assumes
@@ -1370,9 +1367,8 @@ impl FetchDependencyGraph {
             };
 
             if condition.is_object_type() {
-                let Ok(condition_in_supergraph) = self
-                    .supergraph_schema
-                    .get_type(condition.type_name())
+                let Ok(condition_in_supergraph) =
+                    self.supergraph_schema.get_type(condition.type_name())
                 else {
                     // Note that we're checking the true supergraph, not the API schema, so even
                     // @inaccessible types will be found.
@@ -1408,8 +1404,7 @@ impl FetchDependencyGraph {
                         let p_node = self.node_weight(p)?;
                         let p_subgraph_name = &p_node.subgraph_name;
                         let p_subgraph_schema = get_subgraph_schema(p_subgraph_name)?;
-                        let Ok(type_in_parent) =
-                            p_subgraph_schema.get_type(condition.type_name())
+                        let Ok(type_in_parent) = p_subgraph_schema.get_type(condition.type_name())
                         else {
                             return Ok(false);
                         };
@@ -3012,7 +3007,7 @@ fn operation_for_entities_fetch(
         message: "Subgraphs should always have a query root (they should at least provides _entities)".to_string()
     })?;
 
-    let query_type = match subgraph_schema.get_type(&query_type_name)? {
+    let query_type = match subgraph_schema.get_type(query_type_name)? {
         TypeDefinitionPosition::Object(o) => o,
         _ => {
             return Err(SingleFederationError::InvalidSubgraph {
@@ -3050,9 +3045,8 @@ fn operation_for_entities_fetch(
         Some(selection_set),
     )?;
 
-    let type_position: CompositeTypeDefinitionPosition = subgraph_schema
-        .get_type(&query_type_name)?
-        .try_into()?;
+    let type_position: CompositeTypeDefinitionPosition =
+        subgraph_schema.get_type(query_type_name)?.try_into()?;
 
     let mut map = SelectionMap::new();
     map.insert(entities_call);
@@ -5271,8 +5265,9 @@ mod tests {
             .unwrap()
             .try_into()
             .unwrap();
-        let type_condition =
-            type_condition_name.as_ref().map(|n| schema.get_type(n).unwrap().try_into().unwrap());
+        let type_condition = type_condition_name
+            .as_ref()
+            .map(|n| schema.get_type(n).unwrap().try_into().unwrap());
         OpPathElement::InlineFragment(InlineFragment {
             schema: schema.clone(),
             parent_type_position: parent_type,

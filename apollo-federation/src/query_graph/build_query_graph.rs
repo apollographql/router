@@ -1392,9 +1392,8 @@ impl FederatedQueryGraphBuilder {
                     // used when an entity of a specific implementation is queried first, but then
                     // some of the requested fields are only provided by that @interfaceObject.
                     if is_interface_object {
-                        let type_in_supergraph_pos = self
-                            .supergraph_schema
-                            .get_type(type_pos.type_name())?;
+                        let type_in_supergraph_pos =
+                            self.supergraph_schema.get_type(type_pos.type_name())?;
                         let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
                             type_in_supergraph_pos
                         else {
@@ -2292,9 +2291,8 @@ impl FederatedQueryGraphBuilder {
                     }
                     .into());
                 };
-                let type_in_supergraph_pos = self
-                    .supergraph_schema
-                    .get_type(&type_pos.type_name)?;
+                let type_in_supergraph_pos =
+                    self.supergraph_schema.get_type(&type_pos.type_name)?;
                 let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
                     type_in_supergraph_pos
                 else {

@@ -58,9 +58,7 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
             let field = definition
                 .field(field_name.clone())
                 .get(self.original_schema.schema())?;
-            let field_type = self
-                .original_schema
-                .get_type(field.ty.inner_named_type())?;
+            let field_type = self.original_schema.get_type(field.ty.inner_named_type())?;
             let extended_field_type = field_type.get(self.original_schema.schema())?;
 
             // We only need to care about the type of the field if it isn't built-in
@@ -288,9 +286,7 @@ impl<'a> TypeShapeWalker<'a> {
         field_shape: &Shape,
     ) -> Result<(), FederationError> {
         let field = field_position.get(self.original_schema.schema())?;
-        let field_type = self
-            .original_schema
-            .get_type(field.ty.inner_named_type())?;
+        let field_type = self.original_schema.get_type(field.ty.inner_named_type())?;
         let extended_field_type = field_type.get(self.original_schema.schema())?;
 
         if !extended_field_type.is_built_in() {
@@ -620,11 +616,7 @@ impl<'a> TypeShapeWalker<'a> {
             };
 
             // Skip if already inserted (e.g., by another connector in this expansion)
-            if self
-                .to_schema
-                .try_get_type(implementer_name)
-                .is_some()
-            {
+            if self.to_schema.try_get_type(implementer_name).is_some() {
                 continue;
             }
 

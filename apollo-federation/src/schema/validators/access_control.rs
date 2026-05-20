@@ -326,8 +326,7 @@ impl<'validator> AccessControlValidator<'validator> {
                     if let Some(target_type_names) = self.contexts.get(context_arg.context) {
                         // we need to verify against all possible contexts
                         for target_type_name in target_type_names {
-                            let target_type =
-                                self.valid_schema.get_type(target_type_name)?;
+                            let target_type = self.valid_schema.get_type(target_type_name)?;
                             let target_type_auth_requirements =
                                 self.read_auth_requirements_from_element(&target_type)?;
                             if !auth_requirements_on_context

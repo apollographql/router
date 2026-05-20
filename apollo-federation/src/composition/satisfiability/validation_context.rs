@@ -78,9 +78,7 @@ impl ValidationContext {
         &self,
         field: &FieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        let Ok(type_in_supergraph) = self
-            .supergraph_schema
-            .get_type(field.parent().type_name())
+        let Ok(type_in_supergraph) = self.supergraph_schema.get_type(field.parent().type_name())
         else {
             bail!("Type {} should exist in the supergraph", field.parent());
         };

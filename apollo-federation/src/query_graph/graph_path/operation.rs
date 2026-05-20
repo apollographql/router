@@ -1265,9 +1265,7 @@ impl OpGraphPath {
                                 .ty
                                 .inner_named_type();
                             let is_operation_field_type_leaf = matches!(
-                                operation_field
-                                    .schema
-                                    .get_type(operation_field_type_name)?,
+                                operation_field.schema.get_type(operation_field_type_name)?,
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
@@ -1631,7 +1629,8 @@ impl OpGraphPath {
                         //   super-type of the tail type (since GraphQL allows a fragment as long as
                         //   there is an intersection). In that case, the whole operation element
                         //   simply cannot ever return anything.
-                        let type_condition_pos = supergraph_schema.get_type(&type_condition_name)?;
+                        let type_condition_pos =
+                            supergraph_schema.get_type(&type_condition_name)?;
                         let abstract_type_condition_pos: Option<AbstractTypeDefinitionPosition> =
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos

@@ -279,8 +279,7 @@ impl NormalizedTypeCondition {
         name: Name,
         schema: &ValidFederationSchema,
     ) -> Result<Option<Self>, FederationError> {
-        let other_ty: CompositeTypeDefinitionPosition =
-            schema.get_type(&name)?.try_into()?;
+        let other_ty: CompositeTypeDefinitionPosition = schema.get_type(&name)?.try_into()?;
         let other_types = get_ground_types(&other_ty, schema)?;
         let ground_set: Vec<ObjectTypeDefinitionPosition> = self
             .ground_set

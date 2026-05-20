@@ -958,9 +958,7 @@ mod helpers {
             mutation_alias: &Name,
             parent_type_name: &Name,
         ) -> Result<(), FederationError> {
-            if mutation_alias == parent_type_name
-                && to_schema.get_type(mutation_alias).is_ok()
-            {
+            if mutation_alias == parent_type_name && to_schema.get_type(mutation_alias).is_ok() {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
@@ -1581,9 +1579,7 @@ mod helpers {
             mutation_alias: &Name,
             parent_type_name: &Name,
         ) -> Result<(), FederationError> {
-            if mutation_alias == parent_type_name
-                && to_schema.get_type(mutation_alias).is_ok()
-            {
+            if mutation_alias == parent_type_name && to_schema.get_type(mutation_alias).is_ok() {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };

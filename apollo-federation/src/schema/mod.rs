@@ -168,21 +168,41 @@ impl FederationSchema {
         &self,
         type_name: &Name,
     ) -> Result<TypeDefinitionPosition, FederationError> {
-        self.try_get_type(type_name)
-            .ok_or_else(|| SingleFederationError::Internal {
+        self.try_get_type(type_name).ok_or_else(|| {
+            SingleFederationError::Internal {
                 message: format!("Schema has no type \"{type_name}\""),
-            }.into())
+            }
+            .into()
+        })
     }
 
     pub(crate) fn try_get_type(&self, type_name: &Name) -> Option<TypeDefinitionPosition> {
         let type_ = self.schema.types.get(type_name)?;
         Some(match type_ {
-            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name: type_name.clone() }.into(),
-            ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name: type_name.clone() }.into(),
-            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name: type_name.clone() }.into(),
-            ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name: type_name.clone() }.into(),
-            ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name: type_name.clone() }.into(),
-            ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition { type_name: type_name.clone() }.into(),
+            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
+            ExtendedType::Object(_) => ObjectTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
+            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
+            ExtendedType::Union(_) => UnionTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
+            ExtendedType::Enum(_) => EnumTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
+            ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition {
+                type_name: type_name.clone(),
+            }
+            .into(),
         })
     }
 

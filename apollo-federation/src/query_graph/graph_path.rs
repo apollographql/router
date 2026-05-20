@@ -1198,9 +1198,8 @@ where
                             }
                             _ => {}
                         }
-                        let pos_in_supergraph: CompositeTypeDefinitionPosition = supergraph_schema
-                            .get_type(pos.type_name())?
-                            .try_into()?;
+                        let pos_in_supergraph: CompositeTypeDefinitionPosition =
+                            supergraph_schema.get_type(pos.type_name())?.try_into()?;
                         if let CompositeTypeDefinitionPosition::Union(pos_in_supergraph) =
                             &pos_in_supergraph
                             && pos_in_supergraph
@@ -1247,9 +1246,7 @@ where
                                 return Ok(Some(selection));
                             };
                             let type_condition_pos: ObjectTypeDefinitionPosition =
-                                supergraph_schema
-                                    .get_type(type_condition)?
-                                    .try_into()?;
+                                supergraph_schema.get_type(type_condition)?.try_into()?;
                             if possible_runtime_types.contains(&type_condition_pos) {
                                 return Ok(Some(selection));
                             }
@@ -2035,8 +2032,7 @@ where
                     // conditions on key edges are those of the destination of the edge, and here
                     // we want to check if the field is overridden in the source of the edge. Hence,
                     // we get the matching definition in the input schema.
-                    let Ok(type_pos_in_subgraph) =
-                        subgraph_schema.get_type(field_pos.type_name())
+                    let Ok(type_pos_in_subgraph) = subgraph_schema.get_type(field_pos.type_name())
                     else {
                         continue;
                     };

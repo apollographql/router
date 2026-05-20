@@ -203,8 +203,8 @@ impl TransitionGraphPath {
                 if other_subgraph == field_subgraph {
                     return Ok(None);
                 }
-                let Some(type_pos_in_other_subgraph) = other_subgraph_schema
-                    .try_get_type(field_pos_in_subgraph.parent().type_name())
+                let Some(type_pos_in_other_subgraph) =
+                    other_subgraph_schema.try_get_type(field_pos_in_subgraph.parent().type_name())
                 else {
                     return Ok(None);
                 };
