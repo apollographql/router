@@ -77,7 +77,14 @@ async fn test_router_server_negotiates_http2_with_client() -> Result<(), BoxErro
         "Expected HTTP/2 to be negotiated"
     );
 
-    router.graceful_shutdown().await;
+    // T17: drop client before shutdown so the keep-alive pool releases its idle
+    // inbound socket; widen the budget to absorb slow-runner shutdown variance
+    // (matches the pattern in test_http2_max_header_list_size_exceeded).
+    drop(response);
+    drop(client);
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(20))
+        .await;
     Ok(())
 }
 
@@ -127,7 +134,14 @@ async fn test_router_server_falls_back_to_http1_with_client() -> Result<(), BoxE
         "Expected HTTP/1.1 to be negotiated as fallback"
     );
 
-    router.graceful_shutdown().await;
+    // T17: drop client before shutdown so the HTTP/1 keep-alive pool closes its
+    // idle inbound socket; widen the budget to absorb slow-runner shutdown
+    // variance. Same shape as the test_http2_negotiates_with_client fix above.
+    drop(response);
+    drop(client);
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(20))
+        .await;
     Ok(())
 }
 
@@ -464,7 +478,17 @@ async fn test_http1_connection_persistence(
         num_requests
     );
 
-    router.graceful_shutdown().await;
+    // T17: drop client before shutdown so its pooled keep-alive connections
+    // close and the router can drain. Without this, the server-side
+    // per-connection tasks block waiting for the local-half close and the
+    // harness's 10 s assert_shutdown budget trips on slow CI runners — observed
+    // on arm_linux at ~16 s wall clock the day after #9418 merged. Same shape
+    // as the fixes in test_http2_max_header_list_size_exceeded and
+    // test_unix_socket_max_header_list_size.
+    drop(client);
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(20))
+        .await;
     Ok(())
 }
 
