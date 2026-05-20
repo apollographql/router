@@ -178,31 +178,14 @@ impl FederationSchema {
 
     pub(crate) fn try_get_type(&self, type_name: &Name) -> Option<TypeDefinitionPosition> {
         let type_ = self.schema.types.get(type_name)?;
+        let type_name = type_name.clone();
         Some(match type_ {
-            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
-            ExtendedType::Object(_) => ObjectTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
-            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
-            ExtendedType::Union(_) => UnionTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
-            ExtendedType::Enum(_) => EnumTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
-            ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition {
-                type_name: type_name.clone(),
-            }
-            .into(),
+            ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::Union(_) => UnionTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
+            ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition { type_name }.into(),
         })
     }
 

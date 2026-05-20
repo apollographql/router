@@ -313,7 +313,7 @@ fn check_require(
     entity_require: &requires_selection::Selection,
 ) -> Result<(), AnalysisError> {
     let subgraph_entity_type_name = entity_response_shape.default_type_condition();
-    let subgraph_entity_type_pos = subgraph_schema.get_type(&subgraph_entity_type_name)?;
+    let subgraph_entity_type_pos = subgraph_schema.get_type(subgraph_entity_type_name)?;
     let directives = match &subgraph_entity_type_pos {
         TypeDefinitionPosition::Object(type_pos) => {
             let type_def = type_pos
