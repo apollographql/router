@@ -136,9 +136,9 @@ impl Merger {
             for interface in obj_or_itf.implemented_interfaces(&self.merged)? {
                 if subgraph
                     .schema()
-                    .get_type(interface.name.clone())
+                    .try_get_type(&interface.name)
                     .as_ref()
-                    .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                    .is_some_and(|ty| subgraph.is_interface_object_type(ty))
                 {
                     // This marks the subgraph as having a relevant @interfaceObject,
                     // even though we do not actively add that type's fields.
@@ -150,7 +150,7 @@ impl Merger {
             // (i.e. @interfaceObject in subgraph but an interface in supergraph)
             if let Some(type_position) = subgraph
                 .schema()
-                .try_get_type(obj_or_itf.type_name().clone())
+                .try_get_type(obj_or_itf.type_name())
             {
                 let object_or_interface_in_subgraph: ObjectOrInterfaceTypeDefinitionPosition =
                     type_position.try_into()?;
@@ -379,7 +379,7 @@ impl Merger {
             ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
         ) || subgraph
             .schema()
-            .try_get_type(parent_name_in_supergraph.clone())
+            .try_get_type(&parent_name_in_supergraph)
             .is_some()
         {
             return Ok(interface_object_fields);
@@ -1184,7 +1184,7 @@ impl Merger {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
                     if subgraph
                         .schema()
-                        .try_get_type(parent_name.clone())
+                        .try_get_type(parent_name)
                         .is_some()
                     {
                         return Ok(true);

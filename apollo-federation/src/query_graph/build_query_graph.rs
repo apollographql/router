@@ -464,7 +464,7 @@ impl SchemaQueryGraphBuilder {
             .base
             .query_graph
             .schema()?
-            .get_type(root_type_name.name.clone())?
+            .get_type(&root_type_name.name)?
         {
             TypeDefinitionPosition::Object(pos) => pos,
             _ => {
@@ -609,7 +609,7 @@ impl SchemaQueryGraphBuilder {
             .base
             .query_graph
             .schema()?
-            .get_type(field.ty.inner_named_type().clone())?
+            .get_type(field.ty.inner_named_type())?
             .try_into()?;
         let tail = self.add_type_recursively(tail_pos)?;
         if !skip_edge {
@@ -1394,7 +1394,7 @@ impl FederatedQueryGraphBuilder {
                     if is_interface_object {
                         let type_in_supergraph_pos = self
                             .supergraph_schema
-                            .get_type(type_pos.type_name().clone())?;
+                            .get_type(type_pos.type_name())?;
                         let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
                             type_in_supergraph_pos
                         else {
@@ -1450,7 +1450,7 @@ impl FederatedQueryGraphBuilder {
                             let other_schema =
                                 self.base.query_graph.schema_by_source(other_source)?;
                             let implementation_type_in_other_subgraph_pos: CompositeTypeDefinitionPosition =
-                                other_schema.get_type(implementation_type_in_supergraph_pos.type_name.clone())?.try_into()?;
+                                other_schema.get_type(&implementation_type_in_supergraph_pos.type_name)?.try_into()?;
                             let Ok(implementation_conditions) = parse_field_set(
                                 other_schema,
                                 implementation_type_in_other_subgraph_pos
@@ -1883,7 +1883,7 @@ impl FederatedQueryGraphBuilder {
             let schema = self.base.query_graph.schema_by_source(&source)?;
             let subgraph_data = self.subgraphs.get(&source)?;
             let field = field_definition_position.get(schema.schema())?;
-            let field_type_pos = schema.get_type(field.ty.inner_named_type().clone())?;
+            let field_type_pos = schema.get_type(field.ty.inner_named_type())?;
             let mut all_conditions = Vec::new();
             for directive in field
                 .directives
@@ -2294,7 +2294,7 @@ impl FederatedQueryGraphBuilder {
                 };
                 let type_in_supergraph_pos = self
                     .supergraph_schema
-                    .get_type(type_pos.type_name.clone())?;
+                    .get_type(&type_pos.type_name)?;
                 let TypeDefinitionPosition::Interface(type_in_supergraph_pos) =
                     type_in_supergraph_pos
                 else {

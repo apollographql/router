@@ -25,7 +25,7 @@ fn validate_no_external_on_interface_fields(
 ) -> Result<(), FederationError> {
     for type_name in schema.referencers().interface_types.keys() {
         let type_pos: InterfaceTypeDefinitionPosition =
-            schema.get_type(type_name.clone())?.try_into()?;
+            schema.get_type(type_name)?.try_into()?;
         for field_pos in type_pos.fields(schema.schema())? {
             let is_external = metadata
                 .external_metadata()

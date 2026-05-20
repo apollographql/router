@@ -252,7 +252,7 @@ fn validate_args_selection(
                 })?;
 
         let type_name = field.inner_named_type();
-        let type_def = schema.get_type(type_name.clone()).map_err(|e| {
+        let type_def = schema.get_type(type_name).map_err(|e| {
             SingleFederationError::InvalidGraphQL {
                 message: e.to_string(),
             }
@@ -474,7 +474,7 @@ fn build_selection_set(
                 message: format!("cannot create selection set with \"{key}\""),
             })?;
         let new_field_type_def = schema
-            .get_type(new_field.ty().inner_named_type().clone())
+            .get_type(new_field.ty().inner_named_type())
             .map_err(|e| SingleFederationError::InvalidGraphQL {
                 message: e.to_string(),
             })?;

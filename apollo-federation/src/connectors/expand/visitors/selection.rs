@@ -60,7 +60,7 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                 .get(self.original_schema.schema())?;
             let field_type = self
                 .original_schema
-                .get_type(field.ty.inner_named_type().clone())?;
+                .get_type(field.ty.inner_named_type())?;
             let extended_field_type = field_type.get(self.original_schema.schema())?;
 
             // We only need to care about the type of the field if it isn't built-in
@@ -167,7 +167,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
                     .inner_named_type();
 
                 let TypeDefinitionPosition::Object(field_type) =
-                    self.original_schema.get_type(field_type_name.clone())?
+                    self.original_schema.get_type(field_type_name)?
                 else {
                     return Ok(None);
                 };
@@ -290,7 +290,7 @@ impl<'a> TypeShapeWalker<'a> {
         let field = field_position.get(self.original_schema.schema())?;
         let field_type = self
             .original_schema
-            .get_type(field.ty.inner_named_type().clone())?;
+            .get_type(field.ty.inner_named_type())?;
         let extended_field_type = field_type.get(self.original_schema.schema())?;
 
         if !extended_field_type.is_built_in() {
@@ -518,7 +518,7 @@ impl<'a> TypeShapeWalker<'a> {
                         }
 
                         let type_def_pos =
-                            self.original_schema.get_type(Name::new(literal_value)?)?;
+                            self.original_schema.get_type(&Name::new(literal_value)?)?;
 
                         self.walk_type(&type_def_pos, shape)?;
                     } else {
@@ -622,7 +622,7 @@ impl<'a> TypeShapeWalker<'a> {
             // Skip if already inserted (e.g., by another connector in this expansion)
             if self
                 .to_schema
-                .try_get_type(implementer_name.clone())
+                .try_get_type(implementer_name)
                 .is_some()
             {
                 continue;
@@ -678,7 +678,7 @@ impl<'a> TypeShapeWalker<'a> {
 
         for member_name in def.members.iter() {
             if let TypeDefinitionPosition::Object(object_type_pos) =
-                self.original_schema.get_type(member_name.name.clone())?
+                self.original_schema.get_type(&member_name.name)?
             {
                 try_pre_insert!(self.to_schema, object_type_pos)?;
             }
@@ -702,7 +702,7 @@ impl<'a> TypeShapeWalker<'a> {
                     if let ShapeCase::String(Some(literal_value)) = type_name.case() {
                         let member_name = Name::new(literal_value)?;
                         if union_type.members.contains(&member_name) {
-                            let type_def_pos = self.original_schema.get_type(member_name)?;
+                            let type_def_pos = self.original_schema.get_type(&member_name)?;
                             self.walk_type(&type_def_pos, shape)?;
                         } else {
                             return Err(FederationError::internal(format!(

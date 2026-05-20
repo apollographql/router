@@ -190,7 +190,7 @@ pub(crate) fn convert_type_from_subgraph(
 ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
     if subgraph_schema.is_interface_object_type(ty.clone().into())? {
         let type_in_supergraph_pos: CompositeTypeDefinitionPosition = supergraph_schema
-            .get_type(ty.type_name().clone())?
+            .get_type(ty.type_name())?
             .try_into()?;
         ensure!(
             matches!(

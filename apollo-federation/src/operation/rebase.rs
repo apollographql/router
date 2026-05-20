@@ -178,7 +178,7 @@ impl Field {
                 .ty
                 .inner_named_type();
             return Ok(Some(
-                data.schema.get_type(base_ty_name.clone())?.try_into()?,
+                data.schema.get_type(base_ty_name)?.try_into()?,
             ));
         }
         if data.name() == &TYPENAME_FIELD {
@@ -189,7 +189,7 @@ impl Field {
             else {
                 return Ok(None);
             };
-            return Ok(Some(schema.get_type(type_name.clone())?.try_into()?));
+            return Ok(Some(schema.get_type(type_name)?.try_into()?));
         }
         if !self.can_rebase_on(parent_type)? {
             return Ok(None);
@@ -226,7 +226,7 @@ impl Field {
         }
         Ok(Some(
             schema
-                .get_type(field_definition.ty.inner_named_type().clone())?
+                .get_type(field_definition.ty.inner_named_type())?
                 .try_into()?,
         ))
     }
@@ -258,7 +258,7 @@ impl FieldSelection {
             .ty
             .inner_named_type();
         let rebased_base_type: CompositeTypeDefinitionPosition =
-            schema.get_type(rebased_type_name.clone())?.try_into()?;
+            schema.get_type(rebased_type_name)?.try_into()?;
 
         let selection_set_type = &selection_set.type_position;
         if self.field.schema == rebased.schema && &rebased_base_type == selection_set_type {
@@ -317,7 +317,7 @@ impl InlineFragment {
         };
 
         let rebased_type = schema
-            .get_type(ty.type_name().clone())
+            .get_type(ty.type_name())
             .ok()
             .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())?;
 
@@ -368,7 +368,7 @@ impl InlineFragment {
             .type_condition_position
             .clone()
             .and_then(|condition_position| {
-                parent_schema.try_get_type(condition_position.type_name().clone())
+                parent_schema.try_get_type(condition_position.type_name())
             })
             .map(|rebased_condition_position| {
                 CompositeTypeDefinitionPosition::try_from(rebased_condition_position)

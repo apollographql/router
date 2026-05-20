@@ -612,9 +612,7 @@ mod field_selection {
 
     impl PartialEq for Field {
         fn eq(&self, other: &Self) -> bool {
-            self.field_position.field_name() == other.field_position.field_name()
-                && self.key() == other.key()
-                && self.arguments == other.arguments
+            self.key() == other.key() && self.arguments == other.arguments
         }
     }
 
@@ -696,7 +694,7 @@ mod field_selection {
         pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
             let definition = self.field_position.get(self.schema.schema())?;
             self.schema
-                .get_type(definition.ty.inner_named_type().clone())
+                .get_type(definition.ty.inner_named_type())
         }
 
         pub(crate) fn is_leaf(&self) -> Result<bool, FederationError> {
@@ -1128,7 +1126,7 @@ impl SelectionSet {
         check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<SelectionSet, FederationError> {
         let type_position: CompositeTypeDefinitionPosition =
-            schema.get_type(selection_set.ty.clone())?.try_into()?;
+            schema.get_type(&selection_set.ty)?.try_into()?;
         let mut normalized_selections = vec![];
         SelectionSet::normalize_selections(
             &selection_set.selections,
@@ -2045,7 +2043,7 @@ fn compute_aliases_for_non_merging_fields(
                 if &previous.field_name == field_name
                     && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
                 {
-                    let output_type = schema.get_type(field_type.inner_named_type().clone())?;
+                    let output_type = schema.get_type(field_type.inner_named_type())?;
                     // If the type is non-composite, then we're all set. But if it is composite, we need to record the sub-selection to that response name
                     // as we need to "recurse" on the merged of both the previous and this new field.
                     if output_type.is_composite_type() {
@@ -2206,7 +2204,7 @@ impl FieldSelection {
         // confirm it exists in this schema.
         field_position.get(schema.schema())?;
         let is_composite = CompositeTypeDefinitionPosition::try_from(
-            schema.get_type(field.selection_set.ty.clone())?,
+            schema.get_type(&field.selection_set.ty)?,
         )
         .is_ok();
 
@@ -2291,7 +2289,7 @@ impl InlineFragmentSelection {
     ) -> Result<InlineFragmentSelection, FederationError> {
         let type_condition_position: Option<CompositeTypeDefinitionPosition> =
             if let Some(type_condition) = &inline_fragment.type_condition {
-                Some(schema.get_type(type_condition.clone())?.try_into()?)
+                Some(schema.get_type(type_condition)?.try_into()?)
             } else {
                 None
             };
