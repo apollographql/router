@@ -590,8 +590,7 @@ impl MappedResponse {
                         ResponseKey::RootField { name, .. } => {
                             for field in op.selection_set.selections.iter() {
                                 if let Selection::Field(field) = field
-                                    && field.alias.as_deref().unwrap_or(field.name.as_str())
-                                        == name.as_str()
+                                    && field.response_key() == name.as_str()
                                 {
                                     // Use the field's selection set type so that
                                     // __typename resolves to the return type (e.g.
@@ -623,7 +622,7 @@ impl MappedResponse {
                                                     frag.selection_set.selections.iter()
                                                 {
                                                     if let Selection::Field(field) = field_sel
-                                                        && field.name.as_str() == field_str
+                                                        && field.response_key() == field_str
                                                     {
                                                         new_sub.selections.extend(
                                                             field
@@ -637,7 +636,7 @@ impl MappedResponse {
                                             }
 
                                             Selection::Field(field) => {
-                                                if field.name.as_str() == field_str {
+                                                if field.response_key() == field_str {
                                                     new_sub.selections.extend(
                                                         field
                                                             .selection_set
@@ -657,7 +656,7 @@ impl MappedResponse {
                                                         fragment.selection_set.selections.iter()
                                                     {
                                                         if let Selection::Field(field) = field_sel
-                                                            && field.name.as_str() == field_str
+                                                            && field.response_key() == field_str
                                                         {
                                                             new_sub.selections.extend(
                                                                 field
