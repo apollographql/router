@@ -612,7 +612,9 @@ mod field_selection {
 
     impl PartialEq for Field {
         fn eq(&self, other: &Self) -> bool {
-            self.key() == other.key() && self.arguments == other.arguments
+            self.field_position.field_name() == other.field_position.field_name()
+                && self.key() == other.key()
+                && self.arguments == other.arguments
         }
     }
 

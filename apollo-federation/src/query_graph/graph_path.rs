@@ -257,7 +257,8 @@ impl ExcludedDestinations {
 impl PartialEq for ExcludedDestinations {
     /// See if two `ExcludedDestinations` have the same set of values, regardless of their ordering.
     fn eq(&self, other: &ExcludedDestinations) -> bool {
-        self.0.len() == other.0.len() && self.0.iter().all(|x| other.0.contains(x))
+        Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.len() == other.0.len() && self.0.iter().all(|x| other.0.contains(x)))
     }
 }
 
