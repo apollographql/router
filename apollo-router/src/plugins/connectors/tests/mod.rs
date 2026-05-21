@@ -286,14 +286,17 @@ async fn test_root_field_plus_entity() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
+    // The `/users/1` and `/users/2` entity fetches run in parallel after the
+    // root `/users` fetch resolves, so we can't rely on their wire ordering.
+    // Use Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
