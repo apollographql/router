@@ -1215,7 +1215,24 @@ mod body_limits {
         };
 
         let url = format!("http://{}", router.bind_address());
-        let response = reqwest::Client::new()
+        // Disable HTTP keep-alive so the test's inbound connection closes as soon as the
+        // response is consumed. With pooling enabled (reqwest's default), the connection
+        // sits idle in the client's pool past `graceful_shutdown()`; the router then has
+        // to wait out `connection_shutdown_timeout` (5 s default in this harness) before
+        // its per-connection task exits. That delay plus CI scheduling slack can push
+        // total shutdown past `assert_shutdown`'s 10 s budget and panic the test as
+        // "unable to shutdown router". The race only fires for the `chunk_size_1_None`
+        // variants because they finish uploading the body before the router responds
+        // 413 (so the connection is fully drained and pool-eligible), unlike the
+        // 100-byte-chunked variants which abort mid-upload and force the connection
+        // closed. See `no_keepalive_reqwest_client` in
+        // `tests/integration/subgraph_response.rs` and `tests/integration/coprocessor.rs`
+        // for the same pattern applied elsewhere.
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("reqwest client build");
+        let response = client
             .post(url)
             .header(
                 CONTENT_TYPE,
