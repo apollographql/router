@@ -116,7 +116,13 @@ pub fn handle_raw_response(
         .response(&connector.response_headers, Some(parts))
         .merge();
     let warnings = Vec::new();
-    let (success, warnings) = is_success(connector, data, parts, &inputs, warnings);
+    let (success, warnings) = is_success(
+        connector.error_settings.connect_is_success.as_ref(),
+        data,
+        parts,
+        &inputs,
+        warnings,
+    );
     if success {
         map_response(data, key, inputs, warnings)
     } else {
@@ -238,13 +244,13 @@ impl<'a> GraphQLDataMapper<'a> {
 // If the user has set a custom success condition selector, resolve that expression,
 // otherwise default to checking status code is 2XX
 fn is_success(
-    connector: &Connector,
+    is_success_selection: Option<&JSONSelection>,
     data: &Value,
     parts: &Parts,
     inputs: &IndexMap<String, Value>,
     mut warnings: Vec<Problem>,
 ) -> (bool, Vec<Problem>) {
-    let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
+    let Some(is_success_selection) = is_success_selection else {
         return (parts.status.is_success(), warnings);
     };
     let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
@@ -762,34 +768,19 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_compiler::name;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
     use http::response::Parts;
     use serde_json_bytes::Value;
-    use serde_json_bytes::Value as JsonValue;
     use serde_json_bytes::json;
 
     use super::MappedResponse;
     use super::deserialize_response;
-    use super::handle_raw_response;
-    use crate::connectors::ConnectId;
-    use crate::connectors::ConnectSpec;
-    use crate::connectors::ConnectorErrorsSettings;
+    use super::is_success;
     use crate::connectors::JSONSelection;
-    use crate::connectors::Label;
-    use crate::connectors::models::Connector;
-    use crate::connectors::runtime::inputs::ContextReader;
     use crate::connectors::runtime::inputs::RequestInputs;
     use crate::connectors::runtime::key::ResponseKey;
-
-    struct NoopContext;
-    impl ContextReader for NoopContext {
-        fn get_key(&self, _key: &str) -> Option<JsonValue> {
-            None
-        }
-    }
 
     fn make_parts(status: u16) -> Parts {
         http::Response::builder()
@@ -800,75 +791,19 @@ mod tests {
             .0
     }
 
-    fn make_connector(connect_is_success: Option<JSONSelection>) -> Connector {
-        Connector {
-            id: ConnectId::new(
-                "test_subgraph".into(),
-                None,
-                name!(Query),
-                name!(hello),
-                None,
-                0,
-            ),
-            transport: None,
-            selection: JSONSelection::parse("$.data").unwrap(),
-            config: None,
-            max_requests: None,
-            entity_resolver: None,
-            spec: ConnectSpec::V0_1,
-            schema_subtypes_map: Default::default(),
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            request_variable_keys: Default::default(),
-            response_variable_keys: Default::default(),
-            batch_settings: None,
-            error_settings: ConnectorErrorsSettings {
-                message: None,
-                source_extensions: None,
-                connect_extensions: None,
-                connect_is_success,
-            },
-            label: Label::from("test"),
-        }
-    }
-
     // Regression test for CNN-1022: when isSuccess evaluates to a non-boolean,
     // a problem must be surfaced so the debugger can explain the failure.
     #[test]
     fn is_success_non_boolean_emits_warning() {
-        // $.status resolves to a string ("ok"), not a boolean
-        let connector = make_connector(Some(JSONSelection::parse("$.status").unwrap()));
-        let data = json!({"status": "ok", "data": "hello"});
+        let selection = JSONSelection::parse("$.status").unwrap();
+        let data = json!({"status": "ok"});
         let parts = make_parts(200);
-        let key = ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        };
 
-        let result = handle_raw_response(
-            &data,
-            &parts,
-            key,
-            &connector,
-            NoopContext,
-            &HeaderMap::new(),
-        );
+        let (success, problems) =
+            is_success(Some(&selection), &data, &parts, &Default::default(), vec![]);
 
-        // The request should fail because "ok" is not a boolean
-        assert!(
-            matches!(result, MappedResponse::Error { .. }),
-            "expected Error when isSuccess evaluates to a non-boolean"
-        );
-
-        // A problem must be present so the debugger can show why it failed
-        let problems = result.problems();
-        assert_eq!(
-            problems.len(),
-            1,
-            "expected one problem, got: {:?}",
-            problems
-        );
+        assert!(!success, "non-boolean isSuccess should fail the request");
+        assert_eq!(problems.len(), 1, "expected one problem, got: {problems:?}");
         assert!(
             problems[0].message.contains("string"),
             "problem message should mention the actual type, got: {:?}",
