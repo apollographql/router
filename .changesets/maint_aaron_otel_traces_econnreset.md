@@ -12,4 +12,4 @@ Introduced a localhost wiremock (`start_demo_subgraphs_mock_server`) that serves
 
 Scope is intentionally narrow to ROUTER-1814: only `test_send_variable_value` is migrated to the mock-backed path. The same flake mode applies to other tests in this file that go through `get_trace_report` (e.g. `non_defer`, `test_client_name`, `test_send_header`); those will be addressed in follow-up tickets.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
