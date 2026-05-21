@@ -1013,25 +1013,28 @@ async fn test_args_and_this_in_header() {
     )
     .await;
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new()
-                .method("GET")
-                .header(
-                    HeaderName::from_str("x-from-args").unwrap(),
-                    HeaderValue::from_str("before 2 after").unwrap(),
-                )
-                .path("/users/2"),
-            Matcher::new()
-                .method("GET")
-                .header(
-                    HeaderName::from_str("x-from-this").unwrap(),
-                    HeaderValue::from_str("before 2 after").unwrap(),
-                )
-                .path("/users/2/nicknames"),
-        ],
-    );
+    // The user fetch (`/users/2`) and the nickname fetch (`/users/2/nicknames`)
+    // are both gated only on the `id` argument from the query — neither
+    // depends on the other's response — so the planner can dispatch them in
+    // parallel and wire-arrival order is non-deterministic. Use Plan::Parallel
+    // to assert without depending on order.
+    let plan = Plan::Parallel(vec![
+        Matcher::new()
+            .method("GET")
+            .header(
+                HeaderName::from_str("x-from-args").unwrap(),
+                HeaderValue::from_str("before 2 after").unwrap(),
+            )
+            .path("/users/2"),
+        Matcher::new()
+            .method("GET")
+            .header(
+                HeaderName::from_str("x-from-this").unwrap(),
+                HeaderValue::from_str("before 2 after").unwrap(),
+            )
+            .path("/users/2/nicknames"),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 mock! {
