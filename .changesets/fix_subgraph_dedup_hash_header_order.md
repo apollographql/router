@@ -13,4 +13,4 @@ This also fixes a macOS-only flake in
 `integration::subscriptions::ws_passthrough::test_subscription_ws_passthrough_dedup`,
 where header bucket ordering differed often enough to defeat dedup in practice.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9497
