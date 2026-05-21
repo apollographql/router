@@ -601,12 +601,12 @@ impl FetchDependencyGraphNodePath {
             .clone()
             .into_iter()
             .map(|pt| {
-                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(pt)?)?
+                let field = CompositeTypeDefinitionPosition::try_from(self.schema.get_type(&pt)?)?
                     .field(element.name().clone())?
                     .get(self.schema.schema())?;
                 let typ = self
                     .schema
-                    .get_type(field.ty.inner_named_type().clone())?
+                    .get_type(field.ty.inner_named_type())?
                     .try_into()?;
                 Ok(self
                     .schema
@@ -1071,10 +1071,7 @@ impl FetchDependencyGraph {
         &self,
         type_name: &Name,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        Ok(self
-            .supergraph_schema
-            .get_type(type_name.clone())?
-            .try_into()?)
+        Ok(self.supergraph_schema.get_type(type_name)?.try_into()?)
     }
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`. This method assumes
@@ -1370,9 +1367,8 @@ impl FetchDependencyGraph {
             };
 
             if condition.is_object_type() {
-                let Ok(condition_in_supergraph) = self
-                    .supergraph_schema
-                    .get_type(condition.type_name().clone())
+                let Ok(condition_in_supergraph) =
+                    self.supergraph_schema.get_type(condition.type_name())
                 else {
                     // Note that we're checking the true supergraph, not the API schema, so even
                     // @inaccessible types will be found.
@@ -1408,8 +1404,7 @@ impl FetchDependencyGraph {
                         let p_node = self.node_weight(p)?;
                         let p_subgraph_name = &p_node.subgraph_name;
                         let p_subgraph_schema = get_subgraph_schema(p_subgraph_name)?;
-                        let Ok(type_in_parent) =
-                            p_subgraph_schema.get_type(condition.type_name().clone())
+                        let Ok(type_in_parent) = p_subgraph_schema.get_type(condition.type_name())
                         else {
                             return Ok(false);
                         };
@@ -2354,7 +2349,7 @@ impl FetchDependencyGraph {
                     let field_definition = field_position.get(schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
                     type_ = schema
-                        .get_type(field_type.clone())?
+                        .get_type(field_type)?
                         .try_into()
                         .map_or_else(
                             |_| {
@@ -2368,7 +2363,7 @@ impl FetchDependencyGraph {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.type_condition_position {
                         type_ = schema
-                            .get_type(type_condition_position.type_name().clone())?
+                            .get_type(type_condition_position.type_name())?
                             .try_into()
                             .map_or_else(
                                 |_| {
@@ -3012,7 +3007,7 @@ fn operation_for_entities_fetch(
         message: "Subgraphs should always have a query root (they should at least provides _entities)".to_string()
     })?;
 
-    let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
+    let query_type = match subgraph_schema.get_type(query_type_name)? {
         TypeDefinitionPosition::Object(o) => o,
         _ => {
             return Err(SingleFederationError::InvalidSubgraph {
@@ -3050,9 +3045,8 @@ fn operation_for_entities_fetch(
         Some(selection_set),
     )?;
 
-    let type_position: CompositeTypeDefinitionPosition = subgraph_schema
-        .get_type(query_type_name.clone())?
-        .try_into()?;
+    let type_position: CompositeTypeDefinitionPosition =
+        subgraph_schema.get_type(query_type_name)?.try_into()?;
 
     let mut map = SelectionMap::new();
     map.insert(entities_call);
@@ -4050,7 +4044,7 @@ fn compute_nodes_for_op_path_element<'a>(
             let Ok(input_type) = CompositeTypeDefinitionPosition::try_from(
                 dependency_graph
                     .supergraph_schema
-                    .get_type(source_type.type_name().clone())?,
+                    .get_type(source_type.type_name())?,
             ) else {
                 bail!(
                     "Type {} should exist in the supergraph and be a composite type",
@@ -4218,7 +4212,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     // TODO: remove the `unwrap` with proper error handling, and ensure we have some intersection
     // between the wrapping_type type and the new type condition.
     let type_condition: CompositeTypeDefinitionPosition = supergraph_schema
-        .get_type(wrapping_type.type_name().clone())
+        .get_type(wrapping_type.type_name())
         .unwrap()
         .try_into()
         .unwrap();
@@ -4306,7 +4300,7 @@ fn create_fetch_initial_path(
     // supergraph). Doing this make sure we can rely on things like checking subtyping between
     // the types of a given path.
     let rebased_type: CompositeTypeDefinitionPosition = supergraph_schema
-        .get_type(dest_type.type_name().clone())?
+        .get_type(dest_type.type_name())?
         .try_into()?;
     Ok(Arc::new(wrap_selection_with_type_and_conditions(
         supergraph_schema,
@@ -4962,7 +4956,7 @@ fn inputs_for_require(
 
     let input_type: CompositeTypeDefinitionPosition = fetch_dependency_graph
         .supergraph_schema
-        .get_type(input_type_name.clone())?
+        .get_type(&input_type_name)?
         .try_into()
         .map_or_else(
             |_| {
@@ -5001,7 +4995,7 @@ fn inputs_for_require(
             // condition on the supergraph type (which is an interface) first, which lets the `mergeIn` work.
             let supergraph_intf_type: CompositeTypeDefinitionPosition = fetch_dependency_graph
                 .supergraph_schema
-                .get_type(entity_type_position.type_name.clone())?
+                .get_type(&entity_type_position.type_name)?
                 .try_into()?;
             if !supergraph_intf_type.is_interface_type() {
                 return Err(FederationError::internal(format!(
@@ -5166,7 +5160,7 @@ mod tests {
         let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
 
         let query_root = valid_schema
-            .get_type(name!("Query"))
+            .get_type(&name!("Query"))
             .unwrap()
             .try_into()
             .unwrap();
@@ -5228,7 +5222,7 @@ mod tests {
         let baz = object_field_element(&valid_schema, name!("Bar_1"), name!("baz"));
 
         let query_root = valid_schema
-            .get_type(name!("Query"))
+            .get_type(&name!("Query"))
             .unwrap()
             .try_into()
             .unwrap();
@@ -5267,12 +5261,13 @@ mod tests {
         type_condition_name: Option<Name>,
     ) -> OpPathElement {
         let parent_type = schema
-            .get_type(parent_type_name)
+            .get_type(&parent_type_name)
             .unwrap()
             .try_into()
             .unwrap();
-        let type_condition =
-            type_condition_name.map(|n| schema.get_type(n).unwrap().try_into().unwrap());
+        let type_condition = type_condition_name
+            .as_ref()
+            .map(|n| schema.get_type(n).unwrap().try_into().unwrap());
         OpPathElement::InlineFragment(InlineFragment {
             schema: schema.clone(),
             parent_type_position: parent_type,

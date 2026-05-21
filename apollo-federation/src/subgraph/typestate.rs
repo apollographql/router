@@ -8,6 +8,7 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
@@ -419,7 +420,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = self.state.schema.into();
         let field_set_scalar_name =
             schema.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
-        if let Some(field_set_scalar) = schema.try_get_type(field_set_scalar_name) {
+        if let Some(field_set_scalar) = schema.try_get_type(&field_set_scalar_name) {
             // rename _FieldSet scalar to federation__FieldSet
             field_set_scalar.rename(
                 &mut schema,
@@ -469,7 +470,7 @@ impl Subgraph<Expanded> {
             let default_name = default_operation_name(&op_type);
             if op_name.name != default_name {
                 operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                if self.schema().try_get_type(default_name.clone()).is_some() {
+                if self.schema().try_get_type(&default_name).is_some() {
                     return Err(SingleFederationError::root_already_used(
                         op_type,
                         default_name,
@@ -495,7 +496,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = schema.into();
         for (current_name, new_name) in &operation_types_to_rename {
             schema
-                .get_type(current_name.clone())?
+                .get_type(current_name)?
                 .rename(&mut schema, new_name.clone())?;
         }
         let schema = validate_subgraph_schema(schema)?;
@@ -573,7 +574,7 @@ fn normalize_root_types_in_subgraph_schema(
         let default_name = default_operation_name(&op_type);
         if op_name.name != default_name {
             operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-            if schema.try_get_type(default_name.clone()).is_some() {
+            if schema.try_get_type(&default_name).is_some() {
                 return Err(SingleFederationError::root_already_used(
                     op_type,
                     default_name,
@@ -586,7 +587,7 @@ fn normalize_root_types_in_subgraph_schema(
     let changed = !operation_types_to_rename.is_empty();
     for (current_name, new_name) in &operation_types_to_rename {
         schema
-            .get_type(current_name.clone())?
+            .get_type(current_name)?
             .rename(schema, new_name.clone())?;
         // Update metadata to reflect the type rename
         metadata.update_type_references(current_name, new_name);
@@ -724,24 +725,6 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn interface_objects(&self) -> Vec<ObjectTypeDefinitionPosition> {
-        let Ok(Some(interface_object_def)) = self
-            .metadata()
-            .federation_spec_definition()
-            .interface_object_directive_definition(self.schema())
-        else {
-            return vec![];
-        };
-
-        self.schema()
-            .referencers()
-            .get_directive(&interface_object_def.name)
-            .object_types
-            .iter()
-            .cloned()
-            .collect()
-    }
-
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
         if let TypeDefinitionPosition::Object(obj) = type_ {
             return self.metadata().is_interface_object_type(&obj.type_name);
@@ -750,13 +733,24 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 
     pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
-        self.schema()
+        let locations: Locations = self
+            .schema()
             .node_locations(node)
             .map(|range| SubgraphLocation {
                 subgraph: self.name.clone(),
                 range,
             })
-            .collect()
+            .collect();
+        if locations.is_empty() {
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
+            vec![SubgraphLocation {
+                subgraph: self.name.clone(),
+                range: default_range,
+            }]
+        } else {
+            locations
+        }
     }
 }
 

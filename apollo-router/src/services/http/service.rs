@@ -555,9 +555,10 @@ impl tower::Service<HttpRequest> for HttpClientService {
             .headers_mut()
             .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
 
-        let signing_params = context
+        let signing_params = http_request
             .extensions()
-            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
+            .get::<Arc<SigningParamsConfig>>()
+            .cloned();
 
         Box::pin(async move {
             let http_request = if let Some(signing_params) = signing_params {

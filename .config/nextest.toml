@@ -12,8 +12,7 @@
 # module, as they have a high failure rate, in general.
 retries = 2
 filter = '''
-   ( binary_id(=apollo-router::integration_tests) & test(#integration::subscriptions::ws_passthrough::*) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::connectors::authentication::test_aws_sig_v4_signing) )
+   ( binary_id(=apollo-router::integration_tests) & test(=integration::connectors::authentication::test_aws_sig_v4_signing) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::coprocessor::test_coprocessor_response_handling) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_valid_extensions_service_for_subgraph_error) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback_pure_error_payload) )

@@ -52,7 +52,9 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
-use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::HumanReadableListOptions;
+use crate::utils::human_readable::HumanReadableListPrefix;
+use crate::utils::human_readable::human_readable_list;
 use crate::utils::human_readable::human_readable_types;
 
 #[derive(Debug, Clone)]
@@ -134,9 +136,9 @@ impl Merger {
             for interface in obj_or_itf.implemented_interfaces(&self.merged)? {
                 if subgraph
                     .schema()
-                    .get_type(interface.name.clone())
+                    .try_get_type(&interface.name)
                     .as_ref()
-                    .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                    .is_some_and(|ty| subgraph.is_interface_object_type(ty))
                 {
                     // This marks the subgraph as having a relevant @interfaceObject,
                     // even though we do not actively add that type's fields.
@@ -146,10 +148,7 @@ impl Merger {
 
             // we look up the actual type in the subgraph schema as it can be different than the one in the supergraph
             // (i.e. @interfaceObject in subgraph but an interface in supergraph)
-            if let Some(type_position) = subgraph
-                .schema()
-                .try_get_type(obj_or_itf.type_name().clone())
-            {
+            if let Some(type_position) = subgraph.schema().try_get_type(obj_or_itf.type_name()) {
                 let object_or_interface_in_subgraph: ObjectOrInterfaceTypeDefinitionPosition =
                     type_position.try_into()?;
                 for field in object_or_interface_in_subgraph.fields(subgraph.schema().schema())? {
@@ -235,7 +234,7 @@ impl Merger {
                     match source {
                         Some(_source_field) => {
                             // Direct field definition in this subgraph
-                            Some(self.names[*i].clone())
+                            Some(format!("\"{}\"", self.names[*i]))
                         }
                         None => {
                             // Check for interface object fields
@@ -248,7 +247,7 @@ impl Merger {
 
                             // Build description for interface object abstraction
                             Some(format!(
-                                "{} (through @interfaceObject {})",
+                                "\"{}\" (through @interfaceObject {})",
                                 self.names[*i],
                                 human_readable_types(
                                     itf_object_fields.iter().map(|f| f.type_name.clone())
@@ -264,7 +263,16 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    human_readable_subgraph_names(defining_subgraphs.iter())
+                    human_readable_list(
+                        defining_subgraphs.iter().map(|s| s.as_str()),
+                        HumanReadableListOptions {
+                            prefix: Some(HumanReadableListPrefix {
+                                singular: "subgraph",
+                                plural: "subgraphs",
+                            }),
+                            ..Default::default()
+                        },
+                    )
                 ),
             };
 
@@ -368,7 +376,7 @@ impl Merger {
             ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
         ) || subgraph
             .schema()
-            .try_get_type(parent_name_in_supergraph.clone())
+            .try_get_type(parent_name_in_supergraph)
             .is_some()
         {
             return Ok(interface_object_fields);
@@ -701,7 +709,7 @@ impl Merger {
                     // field.
                     for field in itf_object_fields {
                         let subgraph_str = format!(
-                            "{} (through @interfaceObject field \"{}.{}\")",
+                            "\"{}\" (through @interfaceObject field \"{}.{}\")",
                             self.names[*idx], field.type_name, field.field_name
                         );
                         categorize_field(*idx, subgraph_str, &field.into());
@@ -711,7 +719,7 @@ impl Merger {
                     if !merge_context.is_used_overridden(*idx)
                         && !merge_context.is_unused_overridden(*idx)
                     {
-                        let subgraph = self.names[*idx].clone();
+                        let subgraph = format!("\"{}\"", self.names[*idx]);
                         categorize_field(*idx, subgraph, source);
                     }
                 }
@@ -719,7 +727,17 @@ impl Merger {
         }
 
         fn print_subgraphs<T: HasSubgraph>(arr: &[T]) -> String {
-            human_readable_subgraph_names(arr.iter().map(|s| s.subgraph()))
+            human_readable_list(
+                arr.iter().map(|s| s.subgraph().to_string()),
+                HumanReadableListOptions {
+                    prefix: Some(HumanReadableListPrefix {
+                        singular: "subgraph",
+                        plural: "subgraphs",
+                    }),
+                    output_length_limit: 500,
+                    ..Default::default()
+                },
+            )
         }
 
         if !non_shareable_sources.is_empty()
@@ -747,7 +765,7 @@ impl Merger {
 
             let extra_hint = if let Some(s) = subgraph_with_targetless_override {
                 format!(
-                    " (please note that \"{}.{}\" has an @override directive in \"{}\" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
+                    " (please note that \"{}.{}\" has an @override directive in {} that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
                     dest.type_name(),
                     dest.field_name(),
                     s.subgraph,
@@ -1161,11 +1179,7 @@ impl Merger {
                 // to switch `Sources` to be `IndexMap<usize, T>` instead of holding `Option<T>`.
                 _ => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
-                    if subgraph
-                        .schema()
-                        .try_get_type(parent_name.clone())
-                        .is_some()
-                    {
+                    if subgraph.schema().try_get_type(parent_name).is_some() {
                         return Ok(true);
                     }
                 }
