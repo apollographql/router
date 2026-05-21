@@ -1393,8 +1393,7 @@ mod operation_body_timeout {
                     Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
                 }
                 _ = cancel_rx => {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(std::io::Error::other(
                         "slow_body cancelled by test after response received",
                     ))
                 }
