@@ -177,7 +177,7 @@ limits:
     warn_only: true # warn_only mode always enabled
 ```
 
-If you'd rather not configure `limits` at all yet — or you want to capture the offending operations along with attributes like client name and operation name in your logs or APM — see [Logging operations that exceed a candidate limit](#logging-operations-that-exceed-a-candidate-limit) below.
+If you'd rather not configure `limits` at all yet — or you want to capture the offending operations along with attributes like client name and operation name in your logs or APM — see [Logging operations that exceed a candidate limit](#logging-operations-that-exceed-a-candidate-limit).
 
 ### Response format for exceeded limits
 
@@ -200,7 +200,7 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 
 If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
 
-### Logging current values of operations
+### Using telemetry to set operation-based limits
 
 Router telemetry can help you set operation limits, especially when you have a large number of existing operations. You can measure incoming operations over a fixed duration, then use the captured data as a baseline configuration.
 
@@ -290,7 +290,7 @@ You should also configure the router to [export metrics](/graphos/reference/rout
 
 #### Logging operations that exceed a candidate limit
 
-If you'd like to identify which operations — and which clients — would exceed a limit _before_ enforcing it, you can configure a [custom event](/graphos/reference/router/telemetry/instrumentation/events#custom-events) with a [`gt` condition](/graphos/reference/router/telemetry/instrumentation/conditions#gt) on the `query` selector. The router only logs the event when an operation exceeds the threshold, so you don't need to set `limits` or enable `warn_only` mode.
+If you'd like to identify which operations — and which clients — would exceed a limit before enforcing it, you can configure a [custom event](/graphos/reference/router/telemetry/instrumentation/events#custom-events) with a [`gt` condition](/graphos/reference/router/telemetry/instrumentation/conditions#gt) on the `query` selector. The router only logs the event when an operation exceeds the threshold, so you don't need to set `limits` or enable `warn_only` mode.
 
 This approach also lets you attach the client name and version (from the `apollographql-client-name` and `apollographql-client-version` headers) so you can see which clients are sending the offending operations:
 
@@ -325,7 +325,7 @@ telemetry:
               query: root_fields
 ```
 
-Repeat the block — with a different event name, selector, and threshold in `condition.gt` — for each of `depth`, `height`, and `root_fields` you want to track. Once you're confident in the values, you can switch over to enforcing them with `limits.max_*`.
+Repeat the block — with a different event name, selector, and threshold in `condition.gt` — for each of `depth`, `height`, and `root_fields` you want to track. After you're confident in the values, you can switch over to enforcing them with `limits.max_*`.
 
 ## Network-based limits
 
