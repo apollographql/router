@@ -4,4 +4,4 @@
 
 Wrap the `rstack` call in `tokio::task::spawn_blocking` + `tokio::time::timeout(10s)`. The function becomes `async`; the three callers are already in `async fn` so the migration is mechanical. On timeout, a clear message is logged so the operator knows the diagnostic was skipped — not that nothing happened. Happy-path `rstack::trace` on a responsive process completes in ~100 ms, well under the 10 s ceiling.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9492
