@@ -1,4 +1,4 @@
-### Fix macOS flake in unix_tests::test_unix_socket_max_header_list_size::case_1 ([PR #0](https://github.com/apollographql/router/pull/0))
+### Fix macOS flake in unix_tests::test_unix_socket_max_header_list_size::case_1 ([PR #9491](https://github.com/apollographql/router/pull/9491))
 
 `integration::http_server::unix_tests::test_unix_socket_max_header_list_size::case_1_header_within_limits_of_config` had a residual flake on macOS arm64 CI even after the `drop(sender) + graceful_shutdown_with_deadline(20s)` pattern from PR #9418 was applied to its shared `#[rstest]` function body.
 
@@ -6,4 +6,4 @@ The companion `case_2_header_bigger_than_config` (server rejects with 431 before
 
 Fix: drain the response body to its natural END_STREAM with `body.collect().await` before dropping the sender. Applied unconditionally (it's a no-op on the 431 path's empty body) to keep the test linear and avoid a status-conditional split. The `drop(sender) + graceful_shutdown_with_deadline(20s)` pattern from #9418 stays in place — this is additive, not a replacement.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9491
