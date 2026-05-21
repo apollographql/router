@@ -78,13 +78,12 @@ async fn test_router_server_negotiates_http2_with_client() -> Result<(), BoxErro
     );
 
     // T17: drop client before shutdown so the keep-alive pool releases its idle
-    // inbound socket; widen the budget to absorb slow-runner shutdown variance
-    // (matches the pattern in test_http2_max_header_list_size_exceeded).
+    // inbound socket before SIGTERM (matches the pattern in
+    // test_http2_max_header_list_size_exceeded). The 20 s default budget in
+    // `graceful_shutdown()` absorbs slow-runner shutdown variance.
     drop(response);
     drop(client);
-    router
-        .graceful_shutdown_with_deadline(Duration::from_secs(20))
-        .await;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -135,13 +134,12 @@ async fn test_router_server_falls_back_to_http1_with_client() -> Result<(), BoxE
     );
 
     // T17: drop client before shutdown so the HTTP/1 keep-alive pool closes its
-    // idle inbound socket; widen the budget to absorb slow-runner shutdown
-    // variance. Same shape as the test_http2_negotiates_with_client fix above.
+    // idle inbound socket before SIGTERM. Same shape as the
+    // test_http2_negotiates_with_client fix above. The 20 s default budget in
+    // `graceful_shutdown()` absorbs slow-runner shutdown variance.
     drop(response);
     drop(client);
-    router
-        .graceful_shutdown_with_deadline(Duration::from_secs(20))
-        .await;
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -480,15 +478,14 @@ async fn test_http1_connection_persistence(
 
     // T17: drop client before shutdown so its pooled keep-alive connections
     // close and the router can drain. Without this, the server-side
-    // per-connection tasks block waiting for the local-half close and the
-    // harness's 10 s assert_shutdown budget trips on slow CI runners — observed
-    // on arm_linux at ~16 s wall clock the day after #9418 merged. Same shape
-    // as the fixes in test_http2_max_header_list_size_exceeded and
-    // test_unix_socket_max_header_list_size.
+    // per-connection tasks block waiting for the local-half close — originally
+    // observed as the harness's then-10 s assert_shutdown budget firing at ~16 s
+    // wall clock on arm_linux the day after #9418 merged. Same shape as the
+    // fixes in test_http2_max_header_list_size_exceeded and
+    // test_unix_socket_max_header_list_size. The default budget is now 20 s
+    // (see `graceful_shutdown`), so bare `graceful_shutdown()` suffices.
     drop(client);
-    router
-        .graceful_shutdown_with_deadline(Duration::from_secs(20))
-        .await;
+    router.graceful_shutdown().await;
     Ok(())
 }
 

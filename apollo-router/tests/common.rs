@@ -1574,7 +1574,7 @@ impl IntegrationTest {
 
     /// Like `graceful_shutdown` but lets the caller widen the
     /// `assert_shutdown` budget. Use only for tests with a documented
-    /// shutdown-drain race that the default 10 s budget cannot beat.
+    /// shutdown-drain race that the default 20 s budget cannot beat.
     /// Prefer fixing the underlying race when possible.
     #[allow(dead_code)]
     #[cfg(target_family = "unix")]
