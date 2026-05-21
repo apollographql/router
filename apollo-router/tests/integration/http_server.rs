@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use http::StatusCode;
 use hyper_util::rt::TokioExecutor;
@@ -180,7 +181,21 @@ async fn test_http2_max_header_list_size_exceeded() -> Result<(), BoxError> {
         "Expected 431 Request Header Fields Too Large when header list exceeds 20MiB limit"
     );
 
-    router.graceful_shutdown().await;
+    // Drop response and client before shutdown so the h2 connection is closed and the router can
+    // drain its connections cleanly — otherwise graceful_shutdown hangs waiting for the open conn.
+    drop(response);
+    drop(client);
+    // Widen the shutdown budget on top of the dropped client: even after the
+    // hyper pool is dropped, the server-side h2 connection still goes through
+    // GOAWAY + the harness's 5 s `connection_shutdown_timeout` before the
+    // process can exit. On macOS arm64 CI the 21 MiB header upload leaves the
+    // kernel TCP/TLS path with enough residual work that the 10 s default
+    // assert_shutdown budget trips ~10% of the time. Pair the 20 s deadline
+    // with the upstream timeout to keep the test honest about real hangs while
+    // absorbing macOS scheduling jitter.
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(20))
+        .await;
     Ok(())
 }
 
@@ -234,6 +249,8 @@ async fn test_http2_max_header_list_size_within_limit() -> Result<(), BoxError> 
         "Expected HTTP/2 to be negotiated"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -285,6 +302,8 @@ async fn test_tcp_max_header_list_size_exceeded() -> Result<(), BoxError> {
         "Expected 431 Request Header Fields Too Large when header list exceeds 20MiB limit for TCP"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -340,6 +359,8 @@ async fn test_tcp_max_header_list_size_within_limit() -> Result<(), BoxError> {
         "Expected HTTP/2 to be negotiated for TCP"
     );
 
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -509,7 +530,20 @@ mod unix_tests {
             "Expected HTTP/2 to be negotiated for Unix socket"
         );
 
-        router.graceful_shutdown().await;
+        // Drop the h2 sender + response before shutdown so the spawned `conn`
+        // task observes the local-half close and the router can drain. Even
+        // then the server-side h2 connection still has to flush GOAWAY and run
+        // out the harness's 5 s `connection_shutdown_timeout` before the
+        // process can exit — and on macOS arm64 CI the
+        // `case_2_header_bigger_than_config` variant (21 MiB header) trips the
+        // default 10 s `assert_shutdown` budget ~10% of the time. Use a 20 s
+        // deadline to absorb macOS scheduling jitter while keeping the
+        // upstream timeout honest.
+        drop(response);
+        drop(sender);
+        router
+            .graceful_shutdown_with_deadline(Duration::from_secs(20))
+            .await;
 
         // clean up the socket file
         let _ = std::fs::remove_file(&socket_path);

@@ -5,6 +5,7 @@
 //! argument values.
 
 use apollo_compiler::collections::IndexMap;
+use nom::Parser;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -15,7 +16,6 @@ use nom::multi::many0;
 use nom::multi::many1;
 use nom::sequence::pair;
 use nom::sequence::preceded;
-use nom::sequence::tuple;
 
 use super::ParseResult;
 use super::PathList;
@@ -29,6 +29,7 @@ use super::location::ranged_span;
 use super::nom_error_message;
 use super::parser::Key;
 use super::parser::PathSelection;
+use super::parser::SubSelection;
 use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
 use crate::connectors::spec::ConnectSpec;
@@ -39,7 +40,22 @@ pub(crate) enum LitExpr {
     Number(serde_json::Number),
     Bool(bool),
     Null,
-    Object(IndexMap<WithRange<Key>, WithRange<LitExpr>>),
+    // Deprecated: `LegacyObject` is the v0.3-and-earlier object-literal shape
+    // produced by `parse_object`. It maps keys to `LitExpr` values with no
+    // notion of alias or spread. Connect v0.4+ parses object literals into
+    // `Object(SubSelection)` instead (see below), and this variant is
+    // scheduled for removal in v0.5.
+    LegacyObject(IndexMap<WithRange<Key>, WithRange<LitExpr>>),
+    // In v0.4+, object literals share their grammar with `SubSelection`: the
+    // body is a sequence of `NamedSelection` entries carrying the full
+    // alias / bare-path / spread vocabulary, with all-or-nothing comma
+    // placement. The AST is a single canonical shape — a `SubSelection` —
+    // rather than the restricted key/value map of `LegacyObject`.
+    Object(SubSelection),
+    // Array literals have the same AST shape in every spec version: a flat
+    // vector of element expressions with no `...` spread vocabulary. The v0.4
+    // grammar change only adjusts the comma-placement rules (all-or-nothing
+    // within a single array), not the AST.
     Array(Vec<WithRange<LitExpr>>),
     Path(PathSelection),
 
@@ -162,7 +178,9 @@ impl LitExpr {
     }
 
     fn parse_primary(input: Span) -> ParseResult<WithRange<Self>> {
-        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))
+            .parse(input.clone())
+        {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
                 // entire result, but we also want to greedily parse one or more
@@ -183,6 +201,26 @@ impl LitExpr {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
                         }
+                        // `NonEmptyPathTail` (the grammar tail attached to a
+                        // LitPath) admits only `?`, `.key`, and `->method`
+                        // continuations — never a `SubSelection`. So a literal
+                        // immediately followed by `{ ... }` cannot be a
+                        // LitPath: we re-parse the original input as a
+                        // `PathSelection` so the literal's source token is
+                        // reinterpreted as a `Key` (quoted string, or one of
+                        // the identifier-shaped `LitPrimitive`s `null` /
+                        // `true` / `false`) anchoring a `KeyPath` whose
+                        // trailing `SubSelection` is the `{ ... }`.
+                        //
+                        // See the README section "Literals followed by a
+                        // SubSelection". Wrap the literal in `$(...)` to force
+                        // the LitExpr-then-trailing-`{...}` reading.
+                        if matches!(subpath.as_ref(), PathList::Selection(_)) {
+                            return PathSelection::parse(input.clone()).map(|(remainder, path)| {
+                                let range = path.range();
+                                (remainder, WithRange::new(Self::Path(path), range))
+                            });
+                        }
                         let full_range = merge_ranges(initial_literal.range(), subpath.range());
                         Ok((
                             remainder,
@@ -196,6 +234,14 @@ impl LitExpr {
 
             // If we failed to parse a primitive, object, or array, try parsing
             // a PathSelection (which cannot be a LitPath).
+            //
+            // A fatal (`Err::Failure`) error from the inner parsers means one
+            // of them committed to the input and then hit a real syntax error
+            // (e.g. a mixed separator inside a SubSelection body). In that
+            // case we must propagate the failure rather than fall back to
+            // PathSelection, or the informative error gets replaced with
+            // whatever generic PathSelection error comes next.
+            Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
             Err(_) => PathSelection::parse(input.clone()).map(|(remainder, path)| {
                 let range = path.range();
                 (remainder, WithRange::new(Self::Path(path), range))
@@ -211,7 +257,8 @@ impl LitExpr {
             map(ranged_span("?!"), |qq| {
                 WithRange::new(LitOp::NoneCoalescing, qq.range())
             }),
-        ))(input)
+        ))
+        .parse(input)
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -228,12 +275,13 @@ impl LitExpr {
             map(ranged_span("null"), |n| {
                 WithRange::new(Self::Null, n.range())
             }),
-        ))(input)
+        ))
+        .parse(input)
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
     fn parse_number(input: Span) -> ParseResult<WithRange<Self>> {
-        let (suffix, (_, neg, _, num)) = tuple((
+        let (suffix, (_, neg, _, num)) = (
             spaces_or_comments,
             opt(ranged_span("-")),
             spaces_or_comments,
@@ -241,12 +289,12 @@ impl LitExpr {
                 map(
                     pair(
                         recognize(many1(one_of("0123456789"))),
-                        opt(tuple((
+                        opt((
                             spaces_or_comments,
                             ranged_span("."),
                             spaces_or_comments,
                             recognize(many0(one_of("0123456789"))),
-                        ))),
+                        )),
                     ),
                     |(int, frac)| {
                         let int_range = Some(
@@ -293,12 +341,12 @@ impl LitExpr {
                     },
                 ),
                 map(
-                    tuple((
+                    (
                         spaces_or_comments,
                         ranged_span("."),
                         spaces_or_comments,
                         recognize(many1(one_of("0123456789"))),
-                    )),
+                    ),
                     |(_, dot, _, frac)| {
                         let frac_range = Some(
                             frac.location_offset()..frac.location_offset() + frac.fragment().len(),
@@ -308,7 +356,8 @@ impl LitExpr {
                     },
                 ),
             )),
-        ))(input.clone())?;
+        )
+            .parse(input.clone())?;
 
         let mut number = String::new();
         if neg.is_some() {
@@ -338,10 +387,20 @@ impl LitExpr {
         )
     }
 
-    // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
+    // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"   (V0_1..V0_3)
+    // LitObject ::= SubSelection                                      (V0_4+)
+    //
+    // In v0.4+, object literals are syntactically identical to a `SubSelection`,
+    // so we delegate to `SubSelection::parse` and wrap the result in
+    // `LitExpr::Object(SubSelection)`. In v0.3 and earlier, object literals use
+    // the restricted `Key ":" LitExpr` shape and produce `LitExpr::LegacyObject`.
     fn parse_object(input: Span) -> ParseResult<WithRange<Self>> {
+        if input.extra.spec >= ConnectSpec::V0_4 {
+            return Self::parse_object_v0_4(input);
+        }
+
         let (input, _) = spaces_or_comments(input)?;
-        let (input, open_brace) = ranged_span("{")(input)?;
+        let (input, open_brace) = ranged_span("{").parse(input)?;
         let (mut input, _) = spaces_or_comments(input)?;
 
         let mut output = IndexMap::default();
@@ -350,7 +409,7 @@ impl LitExpr {
             output.insert(key, value);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
+            while let Ok((remainder, _)) = (spaces_or_comments, char(',')).parse(input.clone()) {
                 input = remainder;
                 if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
                     output.insert(key, value);
@@ -362,16 +421,23 @@ impl LitExpr {
         }
 
         let (input, _) = spaces_or_comments(input.clone())?;
-        let (input, close_brace) = ranged_span("}")(input)?;
+        let (input, close_brace) = ranged_span("}").parse(input)?;
 
         let range = merge_ranges(open_brace.range(), close_brace.range());
-        Ok((input, WithRange::new(Self::Object(output), range)))
+        Ok((input, WithRange::new(Self::LegacyObject(output), range)))
+    }
+
+    fn parse_object_v0_4(input: Span) -> ParseResult<WithRange<Self>> {
+        let (input, _) = spaces_or_comments(input)?;
+        let (remainder, sub) = SubSelection::parse(input)?;
+        let range = sub.range();
+        Ok((remainder, WithRange::new(Self::Object(sub), range)))
     }
 
     // LitProperty ::= Key ":" LitExpr | KeyPath (shorthand, V0_4+)
     fn parse_property(input: Span) -> ParseResult<(WithRange<Key>, WithRange<Self>)> {
         let full_result =
-            tuple((Key::parse, spaces_or_comments, char(':'), Self::parse))(input.clone());
+            (Key::parse, spaces_or_comments, char(':'), Self::parse).parse(input.clone());
 
         match full_result {
             Ok((remainder, (key, _, _, value))) => Ok((remainder, (key, value))),
@@ -400,20 +466,17 @@ impl LitExpr {
     }
 
     // LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
-    fn parse_array(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
+    pub(super) fn parse_array(input: Span) -> ParseResult<WithRange<Self>> {
+        (
             spaces_or_comments,
             ranged_span("["),
             spaces_or_comments,
             map(
-                opt(tuple((
+                opt((
                     Self::parse,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        Self::parse,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                ))),
+                    many0(preceded((spaces_or_comments, char(',')), Self::parse)),
+                    opt((spaces_or_comments, char(','))),
+                )),
                 |elements| {
                     let mut output = vec![];
                     if let Some((first, rest, _trailing_comma)) = elements {
@@ -425,11 +488,12 @@ impl LitExpr {
             ),
             spaces_or_comments,
             ranged_span("]"),
-        ))(input)
-        .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
-            let range = merge_ranges(open_bracket.range(), close_bracket.range());
-            (input, WithRange::new(output, range))
-        })
+        )
+            .parse(input)
+            .map(|(input, (_, open_bracket, _, output, _, close_bracket))| {
+                let range = merge_ranges(open_bracket.range(), close_bracket.range());
+                (input, WithRange::new(output, range))
+            })
     }
 
     #[cfg(test)]
@@ -444,6 +508,33 @@ impl LitExpr {
             _ => None,
         }
     }
+
+    /// The next `SubSelection` reachable through this `LitExpr`, if any.
+    ///
+    /// A path-shaped value delegates to the trailing `SubSelection` of its
+    /// `PathSelection` (if any). A bare `LitExpr::Object` value *is* the next
+    /// subselection — v0.4 unified object literals with `SubSelection`, so the
+    /// object body is itself a selection set. A `LitPath` delegates to its
+    /// tail, since its `PathList` can end in a `PathList::Selection`. Other
+    /// variants have no subselection to return.
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match self {
+            Self::Path(path) => path.next_subselection(),
+            Self::Object(sub) => Some(sub),
+            Self::LitPath(_, tail) => tail.next_subselection(),
+            _ => None,
+        }
+    }
+
+    /// Mutable counterpart of [`Self::next_subselection`].
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            Self::Path(path) => path.next_mut_subselection(),
+            Self::Object(sub) => Some(sub),
+            Self::LitPath(_, tail) => tail.next_mut_subselection(),
+            _ => None,
+        }
+    }
 }
 
 impl VarPaths for LitExpr {
@@ -451,10 +542,13 @@ impl VarPaths for LitExpr {
         let mut paths = vec![];
         match self {
             Self::String(_) | Self::Number(_) | Self::Bool(_) | Self::Null => {}
-            Self::Object(map) => {
+            Self::LegacyObject(map) => {
                 for value in map.values() {
                     paths.extend(value.var_paths());
                 }
+            }
+            Self::Object(sub) => {
+                paths.extend(sub.var_paths());
             }
             Self::Array(vec) => {
                 for value in vec {
@@ -590,7 +684,7 @@ mod tests {
     fn test_lit_expr_parse_objects() {
         check_parse(
             "{a: 1}",
-            LitExpr::Object({
+            LitExpr::LegacyObject({
                 let mut map = IndexMap::default();
                 map.insert(
                     Key::field("a").into_with_range(),
@@ -602,7 +696,7 @@ mod tests {
 
         check_parse(
             "{'a': 1}",
-            LitExpr::Object({
+            LitExpr::LegacyObject({
                 let mut map = IndexMap::default();
                 map.insert(
                     Key::quoted("a").into_with_range(),
@@ -623,7 +717,7 @@ mod tests {
                     b_key.into_with_range(),
                     LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
                 );
-                LitExpr::Object(map)
+                LitExpr::LegacyObject(map)
             }
             check_parse(
                 "{'a': 1, 'b': 2}",
@@ -778,7 +872,7 @@ mod tests {
         }
 
         {
-            let expected = LitExpr::Object({
+            let expected = LitExpr::LegacyObject({
                 let mut map = IndexMap::default();
                 map.insert(
                     Key::field("a").into_with_range(),
@@ -843,8 +937,11 @@ mod tests {
     fn test_literal_methods() {
         #[track_caller]
         fn check_parse_and_print(input: &str, expected: LitExpr) {
+            // These cases include `$(...)` wrappers that v0.4 would elide in
+            // pretty-printing; use V0_2 so the wrappers survive round-trip.
+            let spec = ConnectSpec::V0_2;
             let expected_inline = expected.pretty_print_with_indentation(true, 0);
-            match LitExpr::parse(new_span(input)) {
+            match LitExpr::parse(new_span_with_spec(input, spec)) {
                 Ok((remainder, parsed)) => {
                     assert!(span_is_all_spaces_or_comments(remainder));
                     assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
@@ -1071,7 +1168,7 @@ mod tests {
             "$({ a: \"ay\", b: 1 }).a",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
-                    LitExpr::Object({
+                    LitExpr::LegacyObject({
                         let mut map = IndexMap::default();
                         map.insert(
                             Key::field("a").into_with_range(),
@@ -1099,7 +1196,7 @@ mod tests {
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::LitPath(
-                        LitExpr::Object({
+                        LitExpr::LegacyObject({
                             let mut map = IndexMap::default();
                             map.insert(
                                 Key::field("a").into_with_range(),
@@ -1193,126 +1290,30 @@ mod tests {
     #[test]
     fn test_shorthand_object_property() {
         // Test shorthand object property syntax: { a } means { a: a }
-        // This is only supported in V0_4+
+        // This is only supported in V0_4+. Under V0_4, LitExpr::Object carries
+        // a SubSelection body (a Vec<NamedSelection>), so we verify the parsed
+        // shape by examining the output keys and spread prefixes.
 
-        // Build expected AST for { a: a } - a single-key path
-        let expected_a = LitExpr::Object({
-            let mut map = IndexMap::default();
-            map.insert(
-                Key::field("a").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("a").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map
-        });
+        fn object_keys(input: &str) -> Vec<String> {
+            let (remainder, parsed) = LitExpr::parse(new_span_with_spec(input, ConnectSpec::V0_4))
+                .unwrap_or_else(|e| panic!("Failed to parse '{input}': {e:?}"));
+            assert!(span_is_all_spaces_or_comments(remainder));
+            let LitExpr::Object(sub) = parsed.as_ref() else {
+                panic!("Expected Object for '{input}', got {:?}", parsed);
+            };
+            sub.selections
+                .iter()
+                .filter_map(|sel| sel.get_single_key().map(|k| k.as_str().to_string()))
+                .collect()
+        }
 
-        // Shorthand { a } should parse to the same AST as { a: a }
-        check_parse_with_spec("{ a }", ConnectSpec::V0_4, expected_a);
-
-        // Multi-property shorthand: { a, b }
-        let expected_ab = LitExpr::Object({
-            let mut map = IndexMap::default();
-            map.insert(
-                Key::field("a").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("a").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map.insert(
-                Key::field("b").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("b").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map
-        });
-
-        check_parse_with_spec("{ a, b }", ConnectSpec::V0_4, expected_ab);
-
-        // Mixed shorthand and explicit: { a, b: 1 }
-        let expected_mixed = LitExpr::Object({
-            let mut map = IndexMap::default();
-            map.insert(
-                Key::field("a").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("a").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map.insert(
-                Key::field("b").into_with_range(),
-                LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
-            );
-            map
-        });
-
-        check_parse_with_spec("{ a, b: 1 }", ConnectSpec::V0_4, expected_mixed);
-
-        // Shorthand with optional: { a?, b }
-        let expected_optional = LitExpr::Object({
-            let mut map = IndexMap::default();
-            map.insert(
-                Key::field("a").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("a").into_with_range(),
-                        PathList::Question(PathList::Empty.into_with_range()).into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map.insert(
-                Key::field("b").into_with_range(),
-                LitExpr::Path(PathSelection {
-                    path: PathList::Key(
-                        Key::field("b").into_with_range(),
-                        PathList::Empty.into_with_range(),
-                    )
-                    .into_with_range(),
-                })
-                .into_with_range(),
-            );
-            map
-        });
-
-        check_parse_with_spec("{ a?, b }", ConnectSpec::V0_4, expected_optional);
-
-        // Nested shorthand with subselection: { a? { b c? }, d }
-        // Note: inner braces are SubSelection (space-separated), not LitObject (comma-separated)
-        let input = "{ a? { b c? }, d }";
-        let (remainder, parsed) = LitExpr::parse(new_span_with_spec(input, ConnectSpec::V0_4))
-            .expect("Failed to parse nested shorthand");
-        assert!(span_is_all_spaces_or_comments(remainder));
-
-        // Verify it's an Object with keys "a" and "d"
-        let LitExpr::Object(map) = parsed.as_ref() else {
-            panic!("Expected Object, got {:?}", parsed);
-        };
-        assert_eq!(map.len(), 2);
-        let keys: Vec<_> = map.keys().map(|k| k.as_str()).collect();
-        assert!(keys.contains(&"a"), "Expected key 'a', got {:?}", keys);
-        assert!(keys.contains(&"d"), "Expected key 'd', got {:?}", keys);
+        assert_eq!(object_keys("{ a }"), vec!["a"]);
+        assert_eq!(object_keys("{ a, b }"), vec!["a", "b"]);
+        // Literal values still require $() wrapping in v0.4 NamedSelection
+        // values; bare-LitExpr values after `alias:` are a follow-up.
+        assert_eq!(object_keys("{ a, b: $(1) }"), vec!["a", "b"]);
+        assert_eq!(object_keys("{ a?, b }"), vec!["a", "b"]);
+        assert_eq!(object_keys("{ a? { b c? }, d }"), vec!["a", "d"]);
     }
 
     #[test]
@@ -1331,7 +1332,7 @@ mod tests {
     #[test]
     fn test_shorthand_pretty_print() {
         // Test that { a: a } pretty-prints as { a }
-        let obj = LitExpr::Object({
+        let obj = LitExpr::LegacyObject({
             let mut map = IndexMap::default();
             map.insert(
                 Key::field("a").into_with_range(),
@@ -1354,7 +1355,7 @@ mod tests {
         );
 
         // But { a: b } should NOT print as shorthand (different key/value names)
-        let obj_diff = LitExpr::Object({
+        let obj_diff = LitExpr::LegacyObject({
             let mut map = IndexMap::default();
             map.insert(
                 Key::field("a").into_with_range(),
@@ -1377,7 +1378,7 @@ mod tests {
         );
 
         // { a: 1 } should also NOT print as shorthand (value is not a path)
-        let obj_val = LitExpr::Object({
+        let obj_val = LitExpr::LegacyObject({
             let mut map = IndexMap::default();
             map.insert(
                 Key::field("a").into_with_range(),
@@ -1423,12 +1424,14 @@ mod tests {
             "Expected shorthand optional output, got: {printed}"
         );
 
-        // { a?: 1 } should NOT be shorthand (value is not a path matching the key)
+        // `a: a?` collapses to `a?` (shorthand). In v0.4, `b: $(1)` keeps its
+        // `$(...)` wrapper because `PathList::Expr` in the AST preserves what
+        // the user wrote; only the alias-matches-path shorthand collapses.
         let (_, parsed) =
-            LitExpr::parse(new_span_with_spec("{ a: a?, b: 1 }", ConnectSpec::V0_4)).unwrap();
+            LitExpr::parse(new_span_with_spec("{ a: a?, b: $(1) }", ConnectSpec::V0_4)).unwrap();
         let printed = parsed.pretty_print_with_indentation(true, 0);
         assert_eq!(
-            printed, "{ a?, b: 1 }",
+            printed, "{ a?, b: $(1) }",
             "Expected mixed shorthand output, got: {printed}"
         );
     }

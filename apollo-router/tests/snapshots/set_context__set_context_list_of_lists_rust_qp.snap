@@ -44,7 +44,7 @@ expression: response
               "operationKind": "query",
               "operationName": "QueryLL__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "3cc98e408337c75d964b374db3849c6d0b9bc6963c7b88fbf11759991435f14b",
+              "schemaAwareHash": "fa7ee8508f3a928946d8686baea705fa20f3da0ae3f98eda43e584dfcf041321",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -90,7 +90,7 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "cbab2c7e9b1728a93f300551230eb914e5e1d701376a60d57238d9efaceea9f5",
+                "schemaAwareHash": "7ddc40dce696114db612aa2b13c69aedf361745da8c10c9365271a72ac39f50c",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"

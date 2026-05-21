@@ -20,16 +20,14 @@ use crate::schema::position::EnumValueDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum EnumExampleAst {
-    #[allow(dead_code)]
     Field(Node<FieldDefinition>),
-    #[allow(dead_code)]
     Input(Node<InputValueDefinition>),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct EnumExample {
-    #[allow(dead_code)]
     pub coordinate: String,
     #[allow(dead_code)]
     pub element_ast: Option<EnumExampleAst>,
@@ -37,15 +35,12 @@ pub(crate) struct EnumExample {
 
 #[derive(Debug, Clone)]
 pub(crate) enum EnumTypeUsage {
-    #[allow(dead_code)]
     Input {
         input_example: EnumExample,
     },
-    #[allow(dead_code)]
     Output {
         output_example: EnumExample,
     },
-    #[allow(dead_code)]
     Both {
         input_example: EnumExample,
         output_example: EnumExample,
@@ -55,7 +50,6 @@ pub(crate) enum EnumTypeUsage {
 
 impl Merger {
     /// Merge enum type from multiple subgraphs
-    #[allow(dead_code)]
     pub(crate) fn merge_enum(
         &mut self,
         sources: Sources<Node<EnumType>>,
@@ -69,7 +63,7 @@ impl Merger {
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
             self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
+                definition: HintCode::UnusedEnumType.definition(),
                 message: format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
@@ -263,31 +257,32 @@ impl Merger {
         dest_name: &Name,
         value_name: &Name,
     ) {
-        // As soon as we find a subgraph that has the type but not the member, we hint.
-        for enum_type in sources.values().flatten() {
-            if !enum_type.values.contains_key(value_name) {
-                self.error_reporter.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForOutputEnum,
-                    format!(
-                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
-                    ),
-                    dest_name,
-                    sources,
-                    &self.subgraphs,
-                    |_| Some("yes".to_string()),
-                    |source, _| {
-                        if source.values.contains_key(value_name) {
-                            Some("yes".to_string())
-                        } else {
-                            Some("no".to_string())
-                        }
-                    },
-                    |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
-                    |_, subgraphs| format!(" but not in {subgraphs}"),
-                    false,
-                    false,
-                );
-            }
+        if sources
+            .values()
+            .flatten()
+            .any(|e| !e.values.contains_key(value_name))
+        {
+            self.error_reporter.report_mismatch_hint(
+                HintCode::InconsistentEnumValueForOutputEnum,
+                format!(
+                    "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
+                ),
+                dest_name,
+                sources,
+                &self.subgraphs,
+                |_| Some("yes".to_string()),
+                |source, _| {
+                    if source.values.contains_key(value_name) {
+                        Some("yes".to_string())
+                    } else {
+                        Some("no".to_string())
+                    }
+                },
+                |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                |_, subgraphs| format!(" but not in {subgraphs}"),
+                false,
+                false,
+            );
         }
     }
 }
@@ -305,12 +300,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::JOIN_VERSIONS;
     use crate::SpecDefinition;
+    use crate::composition::CompositionOptions;
     use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
     use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
-    use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::utils::FallibleOnceCell;

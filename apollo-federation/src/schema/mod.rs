@@ -9,6 +9,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
@@ -120,6 +121,11 @@ impl FederationSchema {
         self.links_metadata.as_deref()
     }
 
+    /// Subgraph metadata after [`FederationBlueprint::on_constructed`] populates it (see [`compute_subgraph_metadata`]).
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.subgraph_metadata.as_deref()
+    }
+
     pub(crate) fn referencers(&self) -> &Referencers {
         &self.referencers
     }
@@ -160,16 +166,20 @@ impl FederationSchema {
 
     pub(crate) fn get_type(
         &self,
-        type_name: Name,
+        type_name: &Name,
     ) -> Result<TypeDefinitionPosition, FederationError> {
-        let type_ =
-            self.schema
-                .types
-                .get(&type_name)
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{type_name}\""),
-                })?;
-        Ok(match type_ {
+        self.try_get_type(type_name).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: format!("Schema has no type \"{type_name}\""),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn try_get_type(&self, type_name: &Name) -> Option<TypeDefinitionPosition> {
+        let type_ = self.schema.types.get(type_name)?;
+        let type_name = type_name.clone();
+        Some(match type_ {
             ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
             ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
             ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name }.into(),
@@ -177,10 +187,6 @@ impl FederationSchema {
             ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
             ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition { type_name }.into(),
         })
-    }
-
-    pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
-        self.get_type(type_name).ok()
     }
 
     pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
@@ -323,6 +329,16 @@ impl FederationSchema {
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
             .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
+    ///
+    /// Requires [`Self::subgraph_metadata`] to be populated (e.g. after
+    /// [`FederationBlueprint::on_constructed`]). Matches the Fed 1 branch in
+    /// [`FederationBlueprint::ignore_parsed_field`]. Returns `false` if metadata is missing.
+    pub(crate) fn is_fed_1_subgraph(&self) -> bool {
+        self.subgraph_metadata()
+            .is_some_and(|meta| !meta.is_fed_2_schema())
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
@@ -1023,7 +1039,7 @@ impl FederationSchema {
     pub(crate) fn list_size_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ListSizeDirective<'_>> {
-        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)
         else {
             return Ok(Vec::new());
         };
@@ -1040,18 +1056,15 @@ impl FederationSchema {
                 self,
                 field_definition,
             ) {
-                Ok(Some(list_size_directive)) => {
+                Some(list_size_directive) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
                         parent_type: field_definition_position.type_name().clone(),
                         target: field_definition,
                     }));
                 }
-                Ok(None) => {
+                None => {
                     // No listSize directive found, continue
-                }
-                Err(error) => {
-                    applications.push(Err(error));
                 }
             }
         }
@@ -1422,18 +1435,15 @@ pub(crate) trait SchemaElement {
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let extensions = self.extensions();
-        // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // Note: No defined ordering between origins.
-        let first_extension = extensions.first();
-        if let Some(first_extension) = first_extension {
-            // If there is an extension, use the first extension.
-            ComponentOrigin::Extension((*first_extension).clone())
-        } else {
-            // Use the existing definition if exists, or maybe a new definition if no definition
-            // nor extensions exist.
-            ComponentOrigin::Definition
+        let (has_definition, extensions) = self.definition_and_extensions();
+        // Use extension origin only when extensions exist but no definition does
+        // (i.e., only extension elements are populated). Otherwise, use definition.
+        // For more details, see the comments in the `add_to_schema` method.
+        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
+        if !has_definition && let Some(first_extension) = extensions.first() {
+            return ComponentOrigin::Extension((*first_extension).clone());
         }
+        ComponentOrigin::Definition
     }
 }
 
@@ -1446,5 +1456,15 @@ impl SchemaElement for SchemaDefinition {
 impl SchemaElement for ExtendedType {
     fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
         self.iter_origins()
+    }
+}
+
+pub(crate) fn same_type(t1: &Type, t2: &Type) -> bool {
+    match (t1, t2) {
+        (Type::Named(n1), Type::Named(n2)) => n1 == n2,
+        (Type::NonNullNamed(n1), Type::NonNullNamed(n2)) => n1 == n2,
+        (Type::List(inner1), Type::List(inner2)) => same_type(inner1, inner2),
+        (Type::NonNullList(inner1), Type::NonNullList(inner2)) => same_type(inner1, inner2),
+        _ => false,
     }
 }

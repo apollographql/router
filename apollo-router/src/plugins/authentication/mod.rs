@@ -19,7 +19,6 @@ use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -132,6 +131,13 @@ struct JwksConf {
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
+    /// Allow tokens without an `exp` claim for this JWKS.
+    ///
+    /// Expired tokens with `exp` are still rejected.
+    /// Enable only when required by your issuer and with strict issuer/audience constraints.
+    #[schemars(default)]
+    #[serde(default)]
+    allow_missing_exp: bool,
     /// List of headers to add to the JWKS request
     #[serde(default)]
     headers: Vec<Header>,
@@ -345,6 +351,18 @@ impl AuthenticationPlugin {
 
         let mut list = vec![];
         for jwks_conf in &router_conf.jwt.jwks {
+            if jwks_conf.allow_missing_exp {
+                tracing::warn!(
+                    url = %jwks_conf.url,
+                    "authentication.router.jwt.jwks.allow_missing_exp is enabled; tokens without `exp` can be accepted for this JWKS"
+                );
+                if jwks_conf.issuers.is_none() && jwks_conf.audiences.is_none() {
+                    tracing::warn!(
+                        url = %jwks_conf.url,
+                        "authentication.router.jwt.jwks.allow_missing_exp is enabled without issuer/audience constraints; tokens without `exp` can be accepted for any issuer and audience on this JWKS"
+                    );
+                }
+            }
             let url: Url = Url::from_str(jwks_conf.url.as_str())?;
             list.push(JwksConfig {
                 url,
@@ -355,6 +373,7 @@ impl AuthenticationPlugin {
                     .as_ref()
                     .map(|algs| algs.iter().cloned().collect()),
                 poll_interval: jwks_conf.poll_interval,
+                allow_missing_exp: jwks_conf.allow_missing_exp,
                 headers: jwks_conf.headers.clone(),
             });
         }
@@ -568,7 +587,7 @@ fn authenticate(
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
     if let Some(keys) = jwks::search_jwks(jwks_manager, &criteria) {
-        let (issuers, audiences, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
+        let token_data = match jwks::decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
                 return failure_message(
@@ -581,32 +600,6 @@ fn authenticate(
             }
         };
 
-        if let Some(configured_issuers) = issuers {
-            let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
-            if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
-                return failure_message(
-                    request,
-                    config,
-                    err,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    source_of_extracted_jwt,
-                );
-            }
-        }
-
-        if let Some(configured_audiences) = audiences {
-            let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
-            if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
-                return failure_message(
-                    request,
-                    config,
-                    err,
-                    StatusCode::UNAUTHORIZED,
-                    source_of_extracted_jwt,
-                );
-            }
-        }
-
         if let Err(e) = request
             .context
             .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, token_data.claims.clone())
@@ -618,6 +611,9 @@ fn authenticate(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 source_of_extracted_jwt,
             );
+        }
+        if token_data.claims.get("exp").is_none() {
+            tracing::debug!("accepted JWT without `exp` claim");
         }
         // This is a metric and will not appear in the logs
         //
@@ -655,102 +651,6 @@ fn authenticate(
         StatusCode::UNAUTHORIZED,
         source_of_extracted_jwt,
     )
-}
-
-fn validate_issuers(
-    configured_issuers: &Issuers,
-    token_issuer: Option<&serde_json::Value>,
-) -> Result<(), AuthenticationError> {
-    let issuer_error = |actual: String| {
-        // Standardize issuer - sort it and join the elements with a comma
-        let mut issuers: Vec<String> = configured_issuers.iter().cloned().collect();
-        issuers.sort();
-
-        let expected = issuers.join(", ");
-        Err(AuthenticationError::InvalidIssuer {
-            expected,
-            token: actual,
-        })
-    };
-
-    if configured_issuers.is_empty() {
-        // No issuers to compare against
-        return Ok(());
-    }
-
-    match token_issuer {
-        None | Some(Value::Null) => {
-            // No issuer in token; allow this as well
-            Ok(())
-        }
-
-        Some(Value::String(token_issuer)) => {
-            // Check if this issuer is in our list
-            if configured_issuers.contains(token_issuer) {
-                Ok(())
-            } else {
-                issuer_error(token_issuer.to_string())
-            }
-        }
-
-        Some(unexpected_value) => {
-            // If the token has an incorrectly configured issuer, we cannot validate it against
-            // the configured issuers.
-            issuer_error(unexpected_value.to_string())
-        }
-    }
-}
-
-fn validate_audiences(
-    configured_audiences: &Audiences,
-    token_audiences: Option<&serde_json::Value>,
-) -> Result<(), AuthenticationError> {
-    let audience_error = |actual: String| {
-        // Standardize audience - sort it and join the elements with a comma
-        let mut audiences: Vec<String> = configured_audiences.iter().cloned().collect();
-        audiences.sort();
-
-        let expected = audiences.join(", ");
-        Err(AuthenticationError::InvalidAudience { expected, actual })
-    };
-
-    if configured_audiences.is_empty() {
-        // No audiences to compare against
-        return Ok(());
-    }
-
-    let Some(token_audiences) = token_audiences else {
-        return audience_error("<none>".to_string());
-    };
-
-    match token_audiences {
-        Value::String(token_audience) => {
-            // Check if this audience exists in our list
-            if configured_audiences.contains(token_audience) {
-                Ok(())
-            } else {
-                audience_error(token_audience.to_string())
-            }
-        }
-
-        Value::Array(token_audiences_arr) => {
-            // Check if any of these audiences is in our list
-            for token_audience in token_audiences_arr.iter().filter_map(|aud| aud.as_str()) {
-                if configured_audiences.contains(token_audience) {
-                    return Ok(());
-                }
-            }
-
-            // No matches, so return an error
-            audience_error(token_audiences.to_string())
-        }
-
-        unexpected_value => {
-            // If the token has incorrectly configured audiences, we cannot validate it against
-            // the configured audiences.
-            audience_error(unexpected_value.to_string())
-        }
-    }
 }
 
 // This macro allows us to use it in our plugin registry!

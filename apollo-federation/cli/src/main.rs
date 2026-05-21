@@ -12,6 +12,8 @@ use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
 use apollo_federation::bail;
 use apollo_federation::composition;
+use apollo_federation::composition::CompositionFailure;
+use apollo_federation::composition::CompositionOptions;
 use apollo_federation::composition::compose_with_connectors;
 use apollo_federation::composition::validate_satisfiability_with_connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
@@ -268,7 +270,7 @@ fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), AnyE
 
 fn compose_files_inner(
     file_paths: &[PathBuf],
-) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+) -> Result<composition::Supergraph<composition::Satisfiable>, CompositionFailure> {
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
     for path in file_paths {
@@ -286,28 +288,28 @@ fn compose_files_inner(
         }
     }
     if !errors.is_empty() {
-        // Subgraph errors
         let mut composition_errors = Vec::new();
         for error in errors {
             composition_errors.extend(error.to_composition_errors());
         }
-        return Err(composition_errors);
+        return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs)
+    compose_with_connectors(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from a Rover config YAML file.
 fn compose_from_config_inner(
     config_path: &Path,
-) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+) -> Result<composition::Supergraph<composition::Satisfiable>, CompositionFailure> {
     let config_str = read_input(config_path);
     let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
-        vec![CompositionError::MergeError {
+        CompositionFailure::from_errors(vec![CompositionError::MergeError {
             error: SingleFederationError::Internal {
                 message: format!("Failed to parse YAML config: {}", e),
             },
-        }]
+            locations: Vec::new(),
+        }])
     })?;
 
     let mut subgraphs = Vec::new();
@@ -324,20 +326,21 @@ fn compose_from_config_inner(
             } else {
                 config_dir.join(file_path)
             };
-            // Follow the same pattern as compose_files_inner - use unwrap for file I/O errors
             std::fs::read_to_string(&full_path).unwrap_or_else(|e| {
                 panic!("Failed to read schema file for subgraph '{}': {}", name, e)
             })
         } else {
-            // Return early with a composition error for missing schema specification
-            return Err(vec![CompositionError::MergeError {
-                error: SingleFederationError::Internal {
-                    message: format!(
-                        "Subgraph '{}' must specify either 'sdl' or 'file' in schema",
-                        name
-                    ),
+            return Err(CompositionFailure::from_errors(vec![
+                CompositionError::MergeError {
+                    error: SingleFederationError::Internal {
+                        message: format!(
+                            "Subgraph '{}' must specify either 'sdl' or 'file' in schema",
+                            name
+                        ),
+                    },
+                    locations: Vec::new(),
                 },
-            }]);
+            ]));
         };
 
         let result = typestate::Subgraph::parse(&name, &subgraph_config.routing_url, &doc_str);
@@ -352,15 +355,14 @@ fn compose_from_config_inner(
     }
 
     if !errors.is_empty() {
-        // Subgraph errors
         let mut composition_errors = Vec::new();
         for error in errors {
             composition_errors.extend(error.to_composition_errors());
         }
-        return Err(composition_errors);
+        return Err(CompositionFailure::from_errors(composition_errors));
     }
 
-    compose_with_connectors(subgraphs)
+    compose_with_connectors(subgraphs, CompositionOptions::default())
 }
 
 /// Compose a supergraph from multiple subgraph files.
@@ -369,10 +371,9 @@ fn compose_files(
 ) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
     match compose_files_inner(file_paths) {
         Ok(supergraph) => Ok(supergraph),
-        Err(errors) => {
-            // Print composition errors
-            print_composition_errors(&errors);
-            let num_errors = errors.len();
+        Err(failure) => {
+            print_composition_errors(&failure.errors);
+            let num_errors = failure.errors.len();
             Err(anyhow!("Error: found {num_errors} composition error(s)."))
         }
     }
@@ -384,10 +385,9 @@ fn compose_from_config(
 ) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
     match compose_from_config_inner(config_path) {
         Ok(supergraph) => Ok(supergraph),
-        Err(errors) => {
-            // Print composition errors
-            print_composition_errors(&errors);
-            let num_errors = errors.len();
+        Err(failure) => {
+            print_composition_errors(&failure.errors);
+            let num_errors = failure.errors.len();
             Err(anyhow!("Error: found {num_errors} composition error(s)."))
         }
     }
@@ -545,15 +545,15 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
 fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
-    match validate_satisfiability_with_connectors(supergraph) {
+    match validate_satisfiability_with_connectors(supergraph, &CompositionOptions::default()) {
         Ok(_) => {
             println!("[SUCCESS]");
             Ok(())
         }
-        Err(errors) => {
+        Err(failure) => {
             // Print composition errors
-            print_composition_errors(&errors);
-            let num_errors = errors.len();
+            print_composition_errors(&failure.errors);
+            let num_errors = failure.errors.len();
             Err(anyhow!(
                 "Error: found {num_errors} satisfiability error(s)."
             ))

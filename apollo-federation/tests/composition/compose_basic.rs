@@ -1,8 +1,12 @@
 use apollo_compiler::coord;
+use apollo_federation::subgraph::typestate::Subgraph;
+use apollo_federation::supergraph::Supergraph;
 use insta::assert_snapshot;
 use test_log::test;
 
 use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose;
 use super::compose_as_fed2_subgraphs;
 use super::extract_subgraphs_from_supergraph_result;
 
@@ -391,4 +395,278 @@ fn removes_redundant_join_field_directives() {
         has_join_field,
         "Field Product.description should have @join__field directive"
     );
+}
+
+// Regression test: enum usage tracking must not downgrade `Both` back to `Input` or `Output`
+// when a third (or later) field references the same enum in a position already seen.
+// Before the fix, the third output-position reference would overwrite `Both` → `Output`,
+// causing the ENUM_VALUE_MISMATCH error to be silently skipped.
+#[test]
+fn enum_value_mismatch_detected_with_multiple_output_fields() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          search(status: Status!): Result
+        }
+
+        type Result {
+          primary: Status!
+          secondary: Status!
+        }
+
+        enum Status {
+          ACTIVE
+          INACTIVE
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          other: Int
+        }
+
+        enum Status {
+          ACTIVE
+        }
+        "#,
+    };
+
+    // Status is used as input (Query.search(status:)) and output (Result.primary, Result.secondary).
+    // After processing: Input → Both → must stay Both (not downgrade to Output on the second output field).
+    // Value INACTIVE is only in subgraphA, so ENUM_VALUE_MISMATCH must be reported.
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "ENUM_VALUE_MISMATCH",
+            r#"Enum type "Status" is used as both input type (for example, as type of "Query.search(status:)") and output type (for example, as type of "Result.primary"), but value "INACTIVE" is not defined in all the subgraphs defining "Status": "INACTIVE" is defined in subgraph "subgraphA" but not in subgraph "subgraphB""#,
+        )],
+    );
+}
+
+// Same regression but with multiple input fields: ensures `Both` isn't downgraded to `Input`.
+// The merger processes object types alphabetically, so `Alpha` (output field) is merged before
+// `Beta` (input arguments). This creates the sequence: Output → Both → Input(BUG without fix).
+#[test]
+fn enum_value_mismatch_detected_with_multiple_input_fields() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          alpha: Alpha
+          beta: Beta
+        }
+
+        type Alpha {
+          status: Status!
+        }
+
+        type Beta {
+          filterA(status: Status!): String
+          filterB(status: Status!): String
+        }
+
+        enum Status {
+          ACTIVE
+          INACTIVE
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          other: Int
+        }
+
+        enum Status {
+          ACTIVE
+        }
+        "#,
+    };
+
+    // Status is used as output (Alpha.status) and input (Beta.filterA(status:), Beta.filterB(status:)).
+    // Merge order: Alpha.status(output) → Both via Beta.filterA(status:)(input) → must stay Both
+    // (not downgrade to Input on Beta.filterB(status:)).
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "ENUM_VALUE_MISMATCH",
+            r#"Enum type "Status" is used as both input type (for example, as type of "Beta.filterA(status:)") and output type (for example, as type of "Alpha.status"), but value "INACTIVE" is not defined in all the subgraphs defining "Status": "INACTIVE" is defined in subgraph "subgraphA" but not in subgraph "subgraphB""#,
+        )],
+    );
+}
+
+#[test]
+fn override_from_nonexistent_subgraph_hint_has_no_empty_did_you_mean() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          product: Product
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @override(from: "nonExistent") @shareable
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    let from_subgraph_hints: Vec<_> = supergraph
+        .hints()
+        .iter()
+        .filter(|h| h.code() == "FROM_SUBGRAPH_DOES_NOT_EXIST")
+        .collect();
+
+    assert_eq!(from_subgraph_hints.len(), 1);
+    let message = &from_subgraph_hints[0].message;
+    assert!(
+        !message.contains("Did you mean"),
+        "Hint message should not contain empty 'Did you mean' suggestion, got: {message}"
+    );
+    assert!(
+        message.ends_with("does not exist."),
+        "Hint message should end with 'does not exist.', got: {message}"
+    );
+}
+
+#[test]
+fn override_from_nonexistent_subgraph_hint_has_subgraph_location() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          product: Product
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @override(from: "nonExistent") @shareable
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Product @key(fields: "id") {
+          id: ID!
+          name: String! @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+
+    let from_subgraph_hints: Vec<_> = supergraph
+        .hints()
+        .iter()
+        .filter(|h| h.code() == "FROM_SUBGRAPH_DOES_NOT_EXIST")
+        .collect();
+
+    assert_eq!(from_subgraph_hints.len(), 1);
+    let hint = &from_subgraph_hints[0];
+    assert_eq!(
+        hint.locations.len(),
+        1,
+        "Hint should have exactly one location"
+    );
+    assert_eq!(
+        hint.locations[0].subgraph, "subgraphA",
+        "Hint location should reference the subgraph with @override"
+    );
+}
+
+/// Regression test: when subgraphs use `extend schema { query: Query }`,
+/// the supergraph SDL must be re-parseable without "duplicate definitions
+/// for the `query` root operation type" errors.
+#[test]
+fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
+    let sub1 = Subgraph::parse(
+        "s1",
+        "http://s1",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+            {
+              query: Query
+              mutation: Mutation
+            }
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+
+            type Query {
+              hello: String
+            }
+
+            type Mutation {
+              doThing: String
+            }
+        "#,
+    )
+    .unwrap();
+
+    let sub2 = Subgraph::parse(
+        "s2",
+        "http://s2",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@shareable"])
+            {
+              query: Query
+              mutation: Mutation
+            }
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+            enum link__Purpose { SECURITY EXECUTION }
+            scalar link__Import
+            scalar federation__FieldSet
+
+            type Query {
+              world: String
+            }
+
+            type Mutation {
+              doOther: String
+            }
+        "#,
+    )
+    .unwrap();
+
+    let supergraph = compose(vec![sub1, sub2]).expect("composition should succeed");
+    let sdl = supergraph.schema().schema().to_string();
+
+    Supergraph::parse(&sdl).expect("supergraph SDL should be re-parseable");
 }

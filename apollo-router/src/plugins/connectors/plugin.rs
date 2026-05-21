@@ -18,7 +18,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
 use crate::plugins::connectors::request_limit::RequestLimits;
-use crate::register_plugin;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
 use crate::services::supergraph;
@@ -57,6 +56,15 @@ impl Plugin for Connectors {
         if matches!(swap_result, Ok(false)) {
             tracing::warn!(
                 "Connector debugging is enabled, this may expose sensitive information."
+            );
+        }
+
+        #[allow(deprecated)]
+        if !init.config.subgraphs.is_empty() {
+            tracing::warn!(
+                "The `connectors.subgraphs` configuration field is deprecated and will be \
+                 removed in a future release. Rename it to `connectors.sources`. See \
+                 https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors"
             );
         }
 

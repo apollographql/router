@@ -278,10 +278,14 @@ impl AggregateMeterProvider {
         Arc<T>: Into<InstrumentWrapper>,
     {
         let mut guard = self.inner.lock();
-        let inner = guard
-            .as_mut()
-            .expect("cannot use meter provider after shutdown");
-        inner.create_registered_instrument(create_fn)
+        if let Some(inner) = guard.as_mut() {
+            inner.create_registered_instrument(create_fn)
+        } else {
+            // After shutdown, create a noop instrument via a temporary default Inner
+            // (which uses noop providers). The instrument won't be registered anywhere
+            // since the provider is already shut down, but callers won't panic.
+            Arc::new((create_fn)(&mut Inner::default()))
+        }
     }
 
     #[cfg(test)]
@@ -1057,5 +1061,16 @@ mod test {
         )
         .with_interval(Duration::from_millis(10))
         .build()
+    }
+
+    #[test]
+    fn test_create_registered_instrument_after_shutdown() {
+        let meter_provider = AggregateMeterProvider::default();
+        meter_provider.shutdown().unwrap();
+
+        // Must not panic — returns a noop instrument instead
+        let counter = meter_provider
+            .create_registered_instrument(|inner| inner.meter("test").u64_counter("c").build());
+        counter.add(1, &[]);
     }
 }

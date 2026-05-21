@@ -9,6 +9,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use tracing::instrument;
@@ -37,6 +38,7 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
+use crate::utils::human_readable::human_readable_subgraph_names;
 
 // TODO should this module be under subgraph mod?
 #[derive(Debug)]
@@ -69,6 +71,11 @@ impl UpgradeMetadata {
     fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
         self.orphan_extension_types.contains(type_name)
     }
+}
+
+pub(crate) struct UpgradeResult {
+    pub(crate) subgraph: Subgraph<Upgraded>,
+    pub(crate) interfaces_with_key_removed: IndexSet<Name>,
 }
 
 impl SchemaUpgrader {
@@ -111,7 +118,7 @@ impl SchemaUpgrader {
     pub(crate) fn upgrade(
         &self,
         subgraph: Subgraph<Expanded>,
-    ) -> Result<Subgraph<Upgraded>, SubgraphError> {
+    ) -> Result<UpgradeResult, SubgraphError> {
         let subgraph_name = subgraph.name.clone();
         self.upgrade_inner(subgraph)
             .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
@@ -120,7 +127,7 @@ impl SchemaUpgrader {
     pub(crate) fn upgrade_inner(
         &self,
         subgraph: Subgraph<Expanded>,
-    ) -> Result<Subgraph<Upgraded>, FederationError> {
+    ) -> Result<UpgradeResult, FederationError> {
         let orphan_extensions = subgraph.state.orphan_extension_types().clone();
         // PORT NOTE: this logic was done in JS SchemaUpgrader constructor
         trace!("upgrade_inner: into fed 2 subgraph");
@@ -129,10 +136,10 @@ impl SchemaUpgrader {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
         let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
-            key_directive_name: subgraph.key_directive_name()?.clone(),
-            requires_directive_name: subgraph.requires_directive_name()?.clone(),
-            provides_directive_name: subgraph.provides_directive_name()?.clone(),
-            extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            key_directive_name: subgraph.key_directive_name().clone(),
+            requires_directive_name: subgraph.requires_directive_name().clone(),
+            provides_directive_name: subgraph.provides_directive_name().clone(),
+            extends_directive_name: subgraph.extends_directive_name().clone(),
             metadata: subgraph.metadata().clone(),
             orphan_extension_types: orphan_extensions,
         };
@@ -157,7 +164,7 @@ impl SchemaUpgrader {
 
         self.remove_type_extensions(&upgrade_metadata, schema)?;
 
-        self.remove_directives_on_interface(&upgrade_metadata, schema)?;
+        let interface_key_types = self.remove_directives_on_interface(&upgrade_metadata, schema)?;
 
         // Note that this rule rely on being after `remove_directives_on_interface` in practice (in that it doesn't check interfaces).
         self.remove_provides_on_non_composite(&upgrade_metadata, schema)?;
@@ -180,7 +187,10 @@ impl SchemaUpgrader {
             .update_orphan_extension_types(filtered_orphan_extension_types);
 
         trace!("upgrade_inner: complete");
-        Ok(subgraph)
+        Ok(UpgradeResult {
+            subgraph,
+            interfaces_with_key_removed: interface_key_types,
+        })
     }
 
     /// Compute a new `orphan_extension_types` with only types that still have an extension in the upgraded schema.
@@ -191,7 +201,7 @@ impl SchemaUpgrader {
         orphan_extension_types
             .into_iter()
             .filter(|type_name| {
-                schema.try_get_type((*type_name).clone()).is_some_and(|ty| {
+                schema.try_get_type(type_name).is_some_and(|ty| {
                     let Ok(ty) = ty.get(schema.schema()) else {
                         return false;
                     };
@@ -237,6 +247,10 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
+                            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+                            //   extensions defined using federation @extends directive. Since fixing it would be
+                            //   a breaking change that could affect some customers, we are keeping current behavior
+                            //   to match JavaScript logic. We should fix this in the future versions.
                             Ok::<bool, FederationError>(
                                 !other_subgraph.is_orphan_extension_type(extended_type.name()),
                             )
@@ -424,6 +438,11 @@ impl SchemaUpgrader {
                         args.fields,
                         false,
                     )? {
+                        // We only consider "top-level" fields, the one of the type on which
+                        // the key is, because that's what fed1 does.
+                        if TypeDefinitionPosition::from(field.parent()) != *ty {
+                            continue;
+                        }
                         let external =
                             field.get_applied_directives(schema, &external_directive.name);
                         if !external.is_empty() {
@@ -582,7 +601,8 @@ impl SchemaUpgrader {
         &self,
         upgrade_metadata: &UpgradeMetadata,
         schema: &mut FederationSchema,
-    ) -> Result<(), FederationError> {
+    ) -> Result<IndexSet<Name>, FederationError> {
+        let mut interface_key_types = IndexSet::new();
         if let Some(key) = &upgrade_metadata.key_directive_name {
             for pos in schema
                 .referencers()
@@ -590,21 +610,33 @@ impl SchemaUpgrader {
                 .interface_types
                 .clone()
             {
+                interface_key_types.insert(pos.type_name.clone());
                 pos.remove_directive_name(schema, key);
-
-                let fields: Vec<_> = pos.fields(schema.schema())?.collect();
-                for field in fields {
-                    if let Some(provides) = &upgrade_metadata.provides_directive_name {
-                        field.remove_directive_name(schema, provides);
-                    }
-                    if let Some(requires) = &upgrade_metadata.requires_directive_name {
-                        field.remove_directive_name(schema, requires);
-                    }
-                }
             }
         }
 
-        Ok(())
+        if let Some(provides) = &upgrade_metadata.provides_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(provides)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, provides);
+            }
+        }
+        if let Some(requires) = &upgrade_metadata.requires_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(requires)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, requires);
+            }
+        }
+
+        Ok(interface_key_types)
     }
 
     fn remove_provides_on_non_composite(
@@ -623,7 +655,7 @@ impl SchemaUpgrader {
             let field = obj_field_pos.get(schema.schema())?;
             let return_type = field.ty.inner_named_type();
             if schema
-                .try_get_type(return_type.clone())
+                .try_get_type(return_type)
                 .is_some_and(|t| !t.is_composite_type())
             {
                 candidates.insert(obj_field_pos.clone());
@@ -871,64 +903,76 @@ impl SchemaUpgrader {
 fn inner_upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Either<Subgraph<Expanded>, Subgraph<Upgraded>>>, Vec<CompositionError>> {
-    let all_fed_2 = subgraphs
+    if subgraphs
         .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema());
-    let mut subgraphs_using_interface_object = vec![];
-    let mut fed_1_subgraphs = vec![];
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+    {
+        return Ok(subgraphs.into_iter().map(Either::Left).collect());
+    }
+    // Maps type name → set of subgraph names with @interfaceObject on that type (fed2 subgraphs).
+    let mut fed2_interface_object_types_to_subgraphs: IndexMap<Name, IndexSet<String>> =
+        IndexMap::new();
+    // Maps type name → set of subgraph names with interface @key on that type (fed1 subgraphs).
+    let mut fed1_interface_key_types_to_subgraphs: IndexMap<Name, IndexSet<String>> =
+        IndexMap::new();
     let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
     let upgraded_subgraphs = subgraphs
         .into_iter()
         .map(|subgraph| {
             if !subgraph.metadata().is_fed_2_schema() {
-                fed_1_subgraphs.push(subgraph.name.clone());
-                schema_upgrader.upgrade(subgraph).map(Either::Right)
+                let result = schema_upgrader.upgrade(subgraph)?;
+                for type_name in result.interfaces_with_key_removed {
+                    fed1_interface_key_types_to_subgraphs
+                        .entry(type_name)
+                        .or_default()
+                        .insert(result.subgraph.name.clone());
+                }
+                Ok(Either::Right(result.subgraph))
             } else {
-                if !all_fed_2
-                    && is_interface_object_used(&subgraph).map_err(|e| {
-                        SubgraphError::new_without_locations(subgraph.name.clone(), e)
-                    })?
-                {
-                    // If not all subgraphs are fed 2, we report all use of @interfaceObject below.
-                    subgraphs_using_interface_object.push(subgraph.name.clone())
-                };
+                subgraph
+                    .metadata()
+                    .interface_object_types()
+                    .iter()
+                    .for_each(|intf_object| {
+                        fed2_interface_object_types_to_subgraphs
+                            .entry(intf_object.clone())
+                            .or_default()
+                            .insert(subgraph.name.clone());
+                    });
                 Ok(Either::Left(subgraph))
             }
         })
-        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
+        .filter_map(|r| {
+            r.map_err(|e: SubgraphError| errors.extend(e.to_composition_errors()))
+                .ok()
+        })
         .collect();
+
+    for (intf_object_name, subgraphs_using_interface_object) in
+        &fed2_interface_object_types_to_subgraphs
+    {
+        if let Some(subgraphs_with_interface_keys_removed) =
+            fed1_interface_key_types_to_subgraphs.get(intf_object_name)
+        {
+            errors.push(CompositionError::InterfaceObjectUsageError {
+                message: format!(
+                    "The @interfaceObject directive is used on type \"{intf_object_name}\" in {}, \
+                    which requires other subgraphs to resolve its type name via an interface @key. \
+                    However, @key on an interface in a federation 1 subgraph does not mean it can \
+                    fulfill the __typename-resolution requirement that @interfaceObject depends on. \
+                    For {}, either upgrade them to federation 2 subgraphs or remove @key from the type.",
+                    human_readable_subgraph_names(subgraphs_using_interface_object.iter()),
+                    human_readable_subgraph_names(subgraphs_with_interface_keys_removed.iter()),
+                ),
+            });
+        }
+    }
 
     if !errors.is_empty() {
         return Err(errors);
     }
 
-    if !subgraphs_using_interface_object.is_empty() {
-        fn format_subgraph_names(subgraph_names: Vec<String>) -> String {
-            let prefix = if subgraph_names.len() == 1 {
-                "subgraph"
-            } else {
-                "subgraphs"
-            };
-            let formatted_subgraphs = subgraph_names
-                .iter()
-                .map(|s| format!("\"{s}\""))
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("{prefix} {formatted_subgraphs}")
-        }
-
-        let interface_object_subgraphs = format_subgraph_names(subgraphs_using_interface_object);
-        let fed_v1_subgraphs = format_subgraph_names(fed_1_subgraphs);
-        return Err(vec![CompositionError::InterfaceObjectUsageError {
-            message: format!(
-                "The @interfaceObject directive can only be used if all subgraphs have \
-            federation 2 subgraph schema (schema with a `@link` to \"https://specs.apollo.dev/federation\" \
-            version 2.0 or newer): @interfaceObject is used in {interface_object_subgraphs} but \
-            {fed_v1_subgraphs} is not a federation 2 subgraph schema."
-            ),
-        }]);
-    }
     Ok(upgraded_subgraphs)
 }
 
@@ -983,23 +1027,6 @@ pub fn upgrade_subgraphs_if_necessary(
     } else {
         Err(errors)
     }
-}
-
-fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, FederationError> {
-    if let Some(interface_object_def) = subgraph
-        .metadata()
-        .federation_spec_definition()
-        .interface_object_directive_definition(subgraph.schema())?
-    {
-        let referencers = subgraph
-            .schema()
-            .referencers()
-            .get_directive(interface_object_def.name.as_str());
-        if !referencers.object_types.is_empty() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 #[cfg(test)]
@@ -1151,6 +1178,63 @@ mod tests {
     }
 
     #[test]
+    fn preserves_external_on_nested_key_fields() {
+        // When a type extension uses a composite @key that traverses into another
+        // type (e.g. @key(fields: "profile { id }")), the upgrader should only
+        // strip @external from the top-level fields on the extension itself, not
+        // from nested fields on other types.
+        let s1 = Subgraph::parse(
+            "subgraphA",
+            "",
+            r#"
+            extend type Entity @key(fields: "profile { id }") {
+              profile: Profile @external
+              value: Int
+            }
+
+            type Profile {
+              id: ID! @external
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse(
+            "subgraphB",
+            "",
+            r#"
+            type Entity @key(fields: "profile { id }") {
+              profile: Profile
+              name: String
+            }
+
+            type Profile {
+              id: ID!
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        let s1_schema = s1.schema().schema();
+        let profile_id = coord!(Profile.id)
+            .lookup_field(s1_schema)
+            .expect("Profile.id field exists");
+        assert!(
+            profile_id.directives.has("external"),
+            "Profile.id should retain @external after upgrade"
+        );
+    }
+
+    #[test]
     #[ignore]
     fn update_federation_directive_non_string_arguments() {
         let s = Subgraph::parse(
@@ -1273,11 +1357,11 @@ mod tests {
 
     #[test]
     fn reject_interface_object_usage_if_not_all_subgraphs_are_fed2() {
-        // Note that this test both validates the rejection of fed1 subgraph when @interfaceObject is used somewhere, but also
-        // illustrate why we do so: fed1 schema can use @key on interface for backward compatibility, but it is ignored and
-        // the schema upgrader removes them. Given that actual support for @key on interfaces is necesarry to make @interfaceObject
-        // work, it would be really confusing to not reject the example below right away, since it "looks" like it the @key on
-        // the interface in the 2nd subgraph should work, but it actually won't.
+        // This test validates that when a fed2 subgraph uses @interfaceObject on a type that also
+        // has an interface @key in a fed1 subgraph, we produce a targeted error. @key on an
+        // interface in a Fed 1 subgraph does not indicate it can resolve type names for that
+        // interface via _entities, which is required for @interfaceObject to work correctly,
+        // so we reject this combination explicitly.
 
         let s1 = Subgraph::parse("s1", "", r#"
             extend schema
@@ -1319,7 +1403,328 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert_eq!(
             errors[0].to_string(),
-            r#"The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to "https://specs.apollo.dev/federation" version 2.0 or newer): @interfaceObject is used in subgraph "s1" but subgraph "s2" is not a federation 2 subgraph schema."#
+            r#"The @interfaceObject directive is used on type "A" in subgraph "s1", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraph "s2", either upgrade them to federation 2 subgraphs or remove @key from the type."#
+        );
+    }
+
+    #[test]
+    fn allows_interface_object_usage_when_no_fed1_subgraph_has_interface_key() {
+        // When @interfaceObject is used in a fed2 subgraph but no fed1 subgraph has @key on the
+        // corresponding interface type, there is no conflict and composition should succeed.
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // s2 is a fed1 subgraph but has @key only on object type B, not on any interface named A.
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            type B @key(fields: "id") {
+                id: String
+                y: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // Should NOT error: @interfaceObject on "A" in s1 has no conflicting fed1 interface @key.
+        upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("should succeed");
+    }
+
+    #[test]
+    fn allows_interface_object_usage_when_all_subgraphs_are_fed2() {
+        // When all subgraphs are fed2, the upgrader is never invoked, so @interfaceObject
+        // combined with @key on an interface in another fed2 subgraph is perfectly valid.
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // s2 is also a fed2 subgraph with @key on interface A.
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key"])
+
+            interface A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+
+            type X implements A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // Should NOT error: all subgraphs are fed2, no upgrader involved.
+        upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("should succeed");
+    }
+
+    #[test]
+    fn allows_fed1_interface_key_without_interface_object_in_any_fed2_subgraph() {
+        // A fed1 subgraph with @key on an interface is fine on its own — the key is simply
+        // stripped during upgrade. No error should be raised when no fed2 subgraph uses
+        // @interfaceObject on that type.
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                b: B
+            }
+
+            type B @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // s2 is a fed1 subgraph with @key on interface A — but no fed2 subgraph uses
+        // @interfaceObject on type A.
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+
+            type X implements A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // Should NOT error: no fed2 subgraph uses @interfaceObject on type A.
+        upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("should succeed");
+    }
+
+    #[test]
+    fn reports_multiple_errors_for_multiple_conflicting_types() {
+        // When a fed2 subgraph uses @interfaceObject on two different types (A and B), and a
+        // fed1 subgraph has @key on both interface A and interface B, two separate errors must be
+        // emitted — one per conflicting type.
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+            }
+
+            type B @key(fields: "id") @interfaceObject {
+                id: String
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+            }
+
+            type XA implements A @key(fields: "id") {
+                id: String
+            }
+
+            interface B @key(fields: "id") {
+                id: String
+            }
+
+            type XB implements B @key(fields: "id") {
+                id: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let errors = inner_upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors.iter().any(|e| e.to_string().contains(r#"type "A""#)),
+            "expected error mentioning type A"
+        );
+        assert!(
+            errors.iter().any(|e| e.to_string().contains(r#"type "B""#)),
+            "expected error mentioning type B"
+        );
+    }
+
+    #[test]
+    fn error_message_includes_all_fed2_subgraphs_using_interface_object_on_same_type() {
+        // When multiple fed2 subgraphs all use @interfaceObject on the same type, all their names
+        // must appear in the error message.
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse("s2", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                y: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s3 = Subgraph::parse(
+            "s3",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+            }
+
+            type X implements A @key(fields: "id") {
+                id: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let errors =
+            inner_upgrade_subgraphs_if_necessary(vec![s1, s2, s3]).expect_err("should fail");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].to_string(),
+            r#"The @interfaceObject directive is used on type "A" in subgraphs "s1" and "s2", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraph "s3", either upgrade them to federation 2 subgraphs or remove @key from the type."#
+        );
+    }
+
+    #[test]
+    fn error_message_includes_all_fed1_subgraphs_with_interface_key_on_same_type() {
+        // When multiple fed1 subgraphs all have @key on the same interface type, all their names
+        // must appear in the error message (the "For ..." part).
+        let s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+            }
+
+            type X implements A @key(fields: "id") {
+                id: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s3 = Subgraph::parse(
+            "s3",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+            }
+
+            type Y implements A @key(fields: "id") {
+                id: String
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let errors =
+            inner_upgrade_subgraphs_if_necessary(vec![s1, s2, s3]).expect_err("should fail");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].to_string(),
+            r#"The @interfaceObject directive is used on type "A" in subgraph "s1", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraphs "s2" and "s3", either upgrade them to federation 2 subgraphs or remove @key from the type."#
         );
     }
 
@@ -2176,12 +2581,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {
@@ -2279,12 +2681,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {
@@ -2317,6 +2716,52 @@ scalar _FieldSet
 
                 scalar link__Import
             "###
+        );
+    }
+
+    #[test]
+    fn removes_provides_and_requires_from_interface_fields_without_key() {
+        let s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+            directive @extends on OBJECT | INTERFACE
+
+            scalar _FieldSet
+
+            type Query {
+              product: Product
+            }
+
+            type Author @key(fields: "id") {
+              id: ID! @external
+              name: String
+            }
+
+            interface Product {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+
+            type Book implements Product @key(fields: "id") {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let result = upgrade_subgraphs_if_necessary(vec![s1]);
+        assert!(
+            result.is_ok(),
+            "Expected upgrade to succeed but got: {:?}",
+            result.err()
         );
     }
 }

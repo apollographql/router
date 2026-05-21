@@ -16,6 +16,7 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -264,8 +265,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::parser::Parser::new()
-            .recursion_limit(configuration.limits.parser_max_recursion)
-            .token_limit(configuration.limits.parser_max_tokens);
+            .recursion_limit(configuration.limits.router.parser_max_recursion)
+            .token_limit(configuration.limits.router.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(errors) => {
@@ -751,20 +752,28 @@ impl Query {
                     }
 
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-
                         path.push(ResponsePathElement::Key(field_name.as_str()));
                         let res = self.format_value(
                             parameters,
@@ -822,6 +831,10 @@ impl Query {
                     //
                     // Without that information, this is the best we can do without construction a
                     // much more complicated reformatting heuristic.
+                    //
+                    // This formatter processes fragments sequentially rather than pre-merging them
+                    // via CollectFields (as the GraphQL spec prescribes) — root cause of several
+                    // correctness bugs, tracked in ROUTER-740.
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
@@ -929,19 +942,28 @@ impl Query {
                             output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
                         path.push(ResponsePathElement::Key(field_name_str));
                         let res = self.format_value(
                             parameters,

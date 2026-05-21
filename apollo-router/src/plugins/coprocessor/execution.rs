@@ -46,8 +46,8 @@ pub(super) struct ExecutionResponseConf {
     pub(super) headers: bool,
     /// Send the context
     pub(super) context: ContextConf,
-    /// Send the body
-    pub(super) body: bool,
+    /// Send the body (can be true/false or selective with data/errors/extensions)
+    pub(super) body: BodyConf,
     /// Send the SDL
     pub(super) sdl: bool,
     /// Send the HTTP status
@@ -236,18 +236,21 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client, &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ExecutionRequest);
+        payload
+            .call(http_client, &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -373,9 +376,7 @@ where
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
-    let body_to_send = response_config
-        .body
-        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
+    let body_to_send = filter_graphql_response_body(&first, &response_config.body);
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
@@ -393,17 +394,20 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let start = Instant::now();
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = payload
-        .call(http_client.clone(), &coprocessor_url, Context::new())
-        .await;
+    let co_processor_result = {
+        // Instantiate timer within the scope of this coprocessor run so it will be
+        // dropped automatically when the run goes out of scope
+        let _timer = get_coprocessor_timer(PipelineStep::ExecutionResponse);
+        payload
+            .call(http_client.clone(), &coprocessor_url, Context::new())
+            .await
+        // elapsed time is recorded
+    };
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -412,7 +416,7 @@ where
 
     // Check if the incoming GraphQL response was valid according to GraphQL spec
     let incoming_payload_was_valid =
-        crate::plugins::coprocessor::was_incoming_payload_valid(&first, response_config.body);
+        crate::plugins::coprocessor::was_incoming_payload_valid(&first, &response_config.body);
 
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
@@ -423,6 +427,7 @@ where
         co_processor_output.body,
         response_validation,
         incoming_payload_was_valid,
+        &response_config.body,
     )?;
 
     if let Some(control) = co_processor_output.control {
@@ -452,10 +457,8 @@ where
             let response_config_context = response_config.context.clone();
 
             async move {
-                let body_to_send = response_config.body.then(|| {
-                    serde_json_bytes::to_value(&deferred_response)
-                        .expect("serialization will not fail")
-                });
+                let body_to_send =
+                    filter_graphql_response_body(&deferred_response, &response_config.body);
                 let context_to_send = response_config_context.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
@@ -472,46 +475,53 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
-                    .await;
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::ExecutionResponse);
+                    payload
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
+                        .await
+                };
                 tracing::debug!(?co_processor_result, "co-processor returned");
-                let co_processor_output = co_processor_result?;
+                let result: Result<graphql::Response, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
 
-                validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
-
-                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
-                let incoming_payload_was_valid =
-                    crate::plugins::coprocessor::was_incoming_payload_valid(
-                        &deferred_response,
-                        response_config.body,
-                    );
-
-                // Third, process our reply and act on the contents. Our processing logic is
-                // that we replace "bits" of our incoming response with the updated bits if they
-                // are present in our co_processor_output. If they aren't present, just use the
-                // bits that we sent to the co_processor.
-                let new_deferred_response = handle_graphql_response(
-                    deferred_response,
-                    co_processor_output.body,
-                    response_validation,
-                    incoming_payload_was_valid,
-                )?;
-
-                if let Some(context) = co_processor_output.context {
-                    update_context_from_coprocessor(
-                        &generator_map_context,
-                        context,
-                        &response_config_context,
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::ExecutionResponse,
                     )?;
-                }
 
-                // We return the deferred_response into our stream of response chunks
-                Ok::<_, BoxError>(new_deferred_response)
+                    // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                    let incoming_payload_was_valid =
+                        crate::plugins::coprocessor::was_incoming_payload_valid(
+                            &deferred_response,
+                            &response_config.body,
+                        );
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+                    let new_deferred_response = handle_graphql_response(
+                        deferred_response,
+                        co_processor_output.body,
+                        response_validation,
+                        incoming_payload_was_valid,
+                        &response_config.body,
+                    )?;
+
+                    if let Some(context) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            context,
+                            &response_config_context,
+                        )?;
+                    }
+
+                    Ok(new_deferred_response)
+                }
+                .await;
+                record_coprocessor_operation(PipelineStep::ExecutionResponse, result.is_ok());
+                result
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {
@@ -553,8 +563,10 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::services::execution;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -844,7 +856,7 @@ mod tests {
             response: ExecutionResponseConf {
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -981,7 +993,7 @@ mod tests {
             response: ExecutionResponseConf {
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,
@@ -1086,6 +1098,87 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn deferred_chunk_metric_incremented_for_all_chunks() {
+        // Tests that apollo.router.operations.coprocessor is recorded for every deferred
+        // execution response chunk, not only the first.
+        //
+        // Bug: record_coprocessor_operation was missing from mapped_stream, so metrics
+        // were never recorded for deferred chunks even when the coprocessor was called.
+        // The execution stage calls the coprocessor unconditionally for all chunks.
+        async {
+            let execution_stage = ExecutionStage {
+                request: Default::default(),
+                response: ExecutionResponseConf {
+                    body: BodyConf::All(true),
+                    ..Default::default()
+                },
+            };
+
+            let mut mock_execution_service = MockExecutionService::new();
+            mock_execution_service
+                .expect_call()
+                .returning(|req: execution::Request| {
+                    Ok(execution::Response::fake_stream_builder()
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 1 }))
+                                .has_next(true)
+                                .build(),
+                        )
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 2 }))
+                                .has_next(false)
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
+
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = serde_json_bytes::json!({
+                        "version": 1,
+                        "stage": "ExecutionResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = execution_stage.as_service(
+                mock_http_client,
+                mock_execution_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false,
+            );
+
+            let request = execution::Request::fake_builder().build();
+            let mut res = service.oneshot(request).await.unwrap();
+            // Drain the stream to force the lazy mapped_stream to run
+            while res.response.body_mut().next().await.is_some() {}
+
+            // Both chunks trigger the coprocessor (execution stage has no condition check).
+            // Before the fix, the metric was only recorded for the first chunk (total: 1).
+            // After the fix, it is recorded for every chunk (total: 2).
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionResponse,
+                2,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
+    }
+
     // Helper function to create execution stage for validation tests
     fn create_execution_stage_for_response_validation_test() -> ExecutionStage {
         ExecutionStage {
@@ -1093,7 +1186,7 @@ mod tests {
             response: ExecutionResponseConf {
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
-                body: true,
+                body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
                 url: None,

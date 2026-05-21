@@ -1,5 +1,4 @@
-use apollo_federation::composition::compose;
-use apollo_federation::error::CompositionError;
+use apollo_federation::composition::CompositionFailure;
 use apollo_federation::subgraph::test_utils::remove_indentation;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Satisfiable;
@@ -7,11 +6,12 @@ use apollo_federation::supergraph::Supergraph;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
+use super::compose;
 use super::extract_subgraphs_from_supergraph_result;
 
 fn compose_services(
     service_list: &[ServiceDefinition<'_>],
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
     for service in service_list {
@@ -30,7 +30,7 @@ fn compose_services(
         }
     }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(CompositionFailure::from_errors(errors));
     }
 
     compose(subgraphs)
@@ -102,8 +102,8 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           name: String!
         }
         "#);
@@ -119,8 +119,8 @@ mod basic_type_extensions {
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
         assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           price: Int!
         }
         "#);
@@ -177,8 +177,8 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           price: Int!
         }
         "#);
@@ -187,8 +187,8 @@ mod basic_type_extensions {
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
         assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           name: String!
         }
         "#);
@@ -263,8 +263,8 @@ mod basic_type_extensions {
             .get("subgraphA")
             .expect("Expected subgraphA to be present");
         assert_snapshot!(get_type(subgraph_a_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           price: Int!
         }
         "#);
@@ -272,12 +272,12 @@ mod basic_type_extensions {
         let subgraph_b_extracted = subgraphs
             .get("subgraphB")
             .expect("Expected subgraphB to be present");
-        assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @r#"
+        assert_snapshot!(get_type(subgraph_b_extracted, "Product"), @"
         type Product {
-          sku: String! @federation__shareable
+          sku: String! @shareable
           name: String!
         }
-        "#);
+        ");
         assert_snapshot!(get_type(subgraph_b_extracted, "Query"), @r#"
         type Query {
           products: [Product!]
@@ -289,8 +289,8 @@ mod basic_type_extensions {
             .get("subgraphC")
             .expect("Expected subgraphC to be present");
         assert_snapshot!(get_type(subgraph_c_extracted, "Product"), @r#"
-        type Product @federation__key(fields: "sku", resolvable: true) {
-          sku: String! @federation__shareable
+        type Product @key(fields: "sku") {
+          sku: String! @shareable
           color: String!
         }
         "#);
@@ -327,6 +327,79 @@ mod validations {
                 "EXTENSION_WITH_NO_BASE",
                 r#"[subgraphB] Type "A" is an extension type, but there is no type definition for "A" in any subgraph."#,
             )],
+        );
+    }
+
+    #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
+    fn errors_if_extends_directive_has_no_definition_counterpart() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                type Query {
+                    q: String
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "subgraphB",
+            type_defs: r#"
+                type A @key(fields: "k") @extends {
+                    k: ID!
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a, subgraph_b]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "EXTENSION_WITH_NO_BASE",
+                r#"[subgraphB] Type "A" is an extension type, but there is no type definition for "A" in any subgraph."#,
+            )],
+        );
+    }
+
+    #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
+    fn errors_if_multiple_subgraphs_all_use_extends_directive_with_no_base() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                type Query {
+                    q: String
+                }
+
+                type Product @key(fields: "id") @extends {
+                    id: ID! @external
+                }
+            "#,
+        };
+
+        let subgraph_b = ServiceDefinition {
+            name: "subgraphB",
+            type_defs: r#"
+                type Product @key(fields: "id") @extends {
+                    id: ID! @external
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a, subgraph_b]);
+        assert_composition_errors(
+            &result,
+            &[
+                (
+                    "EXTENSION_WITH_NO_BASE",
+                    r#"[subgraphA] Type "Product" is an extension type, but there is no type definition for "Product" in any subgraph."#,
+                ),
+                (
+                    "EXTENSION_WITH_NO_BASE",
+                    r#"[subgraphB] Type "Product" is an extension type, but there is no type definition for "Product" in any subgraph."#,
+                ),
+            ],
         );
     }
 
@@ -734,7 +807,9 @@ mod override_tests {
             "#,
         };
 
-        let errors = compose_services(&[subgraph_a, subgraph_b]).unwrap_err();
+        let errors = compose_services(&[subgraph_a, subgraph_b])
+            .unwrap_err()
+            .errors;
         assert_eq!(
             errors.len(),
             1,

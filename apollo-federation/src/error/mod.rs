@@ -131,6 +131,17 @@ pub struct SubgraphLocation {
 
 pub type Locations = Vec<SubgraphLocation>;
 
+/// Supergraph coordinates carried on `@inaccessible` API schema errors so composition can attach
+/// subgraph source locations (port of JS `inaccessible_elements` / `inaccessible_referencers`
+/// extensions and `updateInaccessibleErrorsWithLinkToSubgraphs`). Those locations are surfaced on
+/// [`CompositionError::MergeError`] as [`SubgraphLocation`] entries (Rust equivalent of JS
+/// `withModifiedErrorNodes`).
+#[derive(Clone, Debug, Default)]
+pub struct InaccessibleCompositionLinks {
+    pub elements: Vec<String>,
+    pub referencers: Vec<String>,
+}
+
 pub(crate) trait HasLocations {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
 }
@@ -150,7 +161,10 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{error}")]
-    MergeError { error: SingleFederationError },
+    MergeError {
+        error: SingleFederationError,
+        locations: Locations,
+    },
     #[error("{error}")]
     MergeValidationError { error: SingleFederationError },
     #[error("{message}")]
@@ -271,7 +285,10 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{message}")]
-    InterfaceFieldNoImplem { message: String },
+    InterfaceFieldNoImplem {
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
@@ -465,8 +482,9 @@ impl CompositionError {
                     locations,
                 }
             }
-            Self::InterfaceFieldNoImplem { message } => Self::InterfaceFieldNoImplem {
+            Self::InterfaceFieldNoImplem { message, locations } => Self::InterfaceFieldNoImplem {
                 message: format!("{message}{appendix}"),
+                locations,
             },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
@@ -498,6 +516,7 @@ impl CompositionError {
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
             | Self::InvalidFieldSharing { locations, .. }
+            | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
             | Self::InputFieldDefaultMismatch { locations, .. } => locations.extend(new_locations),
             // Remaining errors do not have an obvious way to appending locations, so we do nothing
@@ -516,8 +535,10 @@ impl CompositionError {
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
             | Self::InvalidFieldSharing { locations, .. }
+            | Self::MergeError { locations, .. }
             | Self::ArgumentDefaultMismatch { locations, .. }
-            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
+            | Self::InputFieldDefaultMismatch { locations, .. }
+            | Self::InterfaceFieldNoImplem { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -771,19 +792,40 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
     #[error("{message}")]
-    ReferencedInaccessible { message: String },
+    ReferencedInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    DefaultValueUsesInaccessible { message: String },
+    DefaultValueUsesInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    QueryRootTypeInaccessible { message: String },
+    QueryRootTypeInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    RequiredInaccessible { message: String },
+    RequiredInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    ImplementedByInaccessible { message: String },
+    ImplementedByInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    DisallowedInaccessible { message: String },
+    DisallowedInaccessible {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
-    OnlyInaccessibleChildren { message: String },
+    OnlyInaccessibleChildren {
+        message: String,
+        links: InaccessibleCompositionLinks,
+    },
     #[error("{message}")]
     RequiredInputFieldMissingInSomeSubgraph { message: String },
     #[error("{message}")]

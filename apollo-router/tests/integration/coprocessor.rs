@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
 use serde_json::json;
@@ -15,6 +16,18 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::redact_cache_debug_query_hash;
+
+/// Build a `reqwest::Client` that disables HTTP keep-alive so each request
+/// closes its TCP connection on completion.
+/// `test_coprocessor_response_handling` runs many sequential router
+/// processes; any one inheriting an idle inbound connection at SIGTERM
+/// flakes `assert_shutdown` against its 10 s budget.
+fn no_keepalive_reqwest_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build")
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -187,6 +200,7 @@ async fn test_full_pipeline(
             include_str!("fixtures/coprocessor.router.yaml")
                 .replace("<replace>", &coprocessor_address),
         )
+        .reqwest_client(no_keepalive_reqwest_client())
         .build()
         .await;
 
@@ -200,7 +214,14 @@ async fn test_full_pipeline(
         "Failed at stage {stage}"
     );
 
-    router.graceful_shutdown().await;
+    // Widen the shutdown budget to 30 s. With many sequential pipeline
+    // iterations in `test_coprocessor_response_handling`, even a small
+    // per-shot probability of an OTel SDK / pool drain race compounds into
+    // visible flake. Pair with the no-keepalive client above to neutralise
+    // the inbound-connection arm of the race.
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(30))
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -723,6 +744,11 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
 
     assert_eq!(cache_keys, expected);
 
+    // Shut down the wiremock coprocessor before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    drop(mock_server);
+
     router.graceful_shutdown().await;
 
     Ok(())
@@ -825,7 +851,7 @@ async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::Bo
     let uds = UnixListener::bind(&sock_path).expect("bind uds");
     let expected_path_owned = expected_path.to_string();
 
-    tokio::spawn(async move {
+    let coprocessor_handle = tokio::spawn(async move {
         loop {
             let (stream, _) = uds.accept().await.expect("accept");
             let io = TokioIo::new(stream);
@@ -891,6 +917,17 @@ async fn test_coprocessor_unix_domain_socket_with_path() -> Result<(), tower::Bo
     // if we get a 200 it's because we've hit the target path; see above for how this works, but
     // any path _not_ explicitly the one we've set (/api/v1/coprocessor) will return a 500
     assert_eq!(response.status(), 200);
+
+    // The response body is never read, so the Response struct still pins an open TCP
+    // connection to the router.  Drop it before shutdown so the router's drain can complete
+    // within the assert_shutdown budget.
+    drop(response);
+
+    // Shut down the coprocessor accept loop before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    // Aborting the task drops the UnixListener and any in-flight serve_connection futures.
+    coprocessor_handle.abort();
 
     router.graceful_shutdown().await;
     Ok(())
@@ -1003,8 +1040,13 @@ async fn test_coprocessor_per_stage_unix_socket_urls() -> Result<(), tower::BoxE
         }
     });
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS sockets are already bound and ready to queue connections — both
+    // `UnixListener::bind` calls above returned synchronously, which is the
+    // moment the kernel starts accepting incoming connections into the listen
+    // backlog. The accept loops in the spawned tasks just drain that backlog.
+    // The previous fixed 100 ms sleep here was a defensive pause with no race
+    // to defend against (and a sibling UDS coprocessor test above does not use
+    // it). Removing the sleep eliminates the slow-CI flake risk.
 
     // Configure router with per-stage Unix socket URLs
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1145,8 +1187,11 @@ async fn test_coprocessor_mixed_http_and_unix_socket_urls() -> Result<(), tower:
         .mount(&supergraph_mock_server)
         .await;
 
-    // Wait a moment for servers to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound and accepting connections from the
+    // moment `UnixListener::bind` returned above; the wiremock HTTP mock
+    // server is similarly ready to serve the moment `MockServer::start` has
+    // returned. The previous fixed 100 ms sleep was a defensive pause with no
+    // race to defend against. Removing it eliminates the slow-CI flake risk.
 
     // Configure router with MIXED transports: Unix socket for router, HTTP for supergraph
     let router_uds_url = format!("unix://{}", router_sock_path.display());
@@ -1291,8 +1336,11 @@ async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), B
         }
     });
 
-    // Wait for server to be ready
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // The UDS socket is already bound from the synchronous `UnixListener::bind`
+    // above — the kernel queues incoming connections into the listen backlog
+    // until the spawned task accepts them. The previous fixed 100 ms sleep was
+    // a defensive pause with no race to defend against; removing it
+    // eliminates the slow-CI flake risk.
 
     let uds_url = format!("unix://{}", sock_path.display());
     let config = format!(
@@ -1334,6 +1382,93 @@ coprocessor:
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_success() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_no_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor and return successfully
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_metrics_logged_on_timeout() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Let the mock server act as a coprocessor
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Expect a small query and respond with a short delay
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_delay(Duration::from_secs(5)).set_body_json(json!({"version":1,"stage":"RouterRequest","control":"continue","body":"{\"query\":\"query {topProducts{name}}\",\"variables\":{}}","method":"POST"})),
+        )
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_metrics_with_timeout.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // This query is small and should make it to the coprocessor
+    let (_trace_id, response) = router.execute_default_query().await;
+    // But the router should timeout due to the config
+    assert_eq!(response.status(), 504);
+
+    // Specifically checking for 1 result in the "<= 5 sec" bucket here
+    router.assert_metrics_contains(r#"apollo_router_operations_coprocessor_duration_bucket{coprocessor_stage="RouterRequest",otel_scope_name="apollo/router",le="5"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
@@ -1360,6 +1495,17 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
         .mount(&mock_coprocessor)
         .await;
 
+    // The `connectors.sources.connectors.jsonPlaceholder` stanza is required for the
+    // `IntegrationTest` harness to auto-inject an `override_url` pointing at the local
+    // wiremock subgraph (see `merge_overrides` in `tests/common.rs`: the override is
+    // only inserted if the config already declares `connectors.sources`). Without it
+    // the connector falls through to the schema's `https://jsonplaceholder.typicode.com/`
+    // baseURL and makes a real network request — which on CircleCI's amd_linux_test /
+    // arm_linux_test executors hangs past the router's 30 s subgraph timeout and the
+    // request returns `504 GATEWAY_TIMEOUT`. That was the
+    // `test_connector_coprocessor_request_response` flake on PR #9339's CircleCI build
+    // 366174 (`assertion left == right; left: 504; right: 200`). An empty stanza is
+    // enough — the harness fills in `override_url` per-source.
     let config = format!(
         r#"
         include_subgraph_errors:
@@ -1376,6 +1522,8 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
                         body: true
                         headers: true
                         status_code: true
+        connectors:
+            sources: {{}}
         "#,
         mock_coprocessor.uri()
     );
@@ -1426,6 +1574,11 @@ async fn test_connector_coprocessor_request_response() -> Result<(), BoxError> {
         called_stages.contains(&"ConnectorResponse".to_string()),
         "ConnectorResponse stage should have been called, got: {called_stages:?}"
     );
+
+    // Shut down the wiremock coprocessor before signalling the router.  Leaving it running
+    // keeps the router's outbound keep-alive connection to the coprocessor live; the router's
+    // drain then waits for it to close and the test's 3s shutdown budget expires as a "hang."
+    drop(mock_coprocessor);
 
     router.graceful_shutdown().await;
     Ok(())
@@ -1499,4 +1652,560 @@ async fn test_connector_coprocessor_failure_returns_graphql_error() -> Result<()
 
     router.graceful_shutdown().await;
     Ok(())
+}
+
+/// Verifies that the `on_graphql_error` coprocessor condition fires exactly once
+/// per response chunk that contains a GraphQL error, for both deferred and
+/// non-deferred queries.
+///
+/// Each test wires up a router, a coprocessor, and four mock subgraph servers.
+/// The coprocessor is configured to call into the `RouterResponse` and
+/// `SupergraphResponse` stages when `on_graphql_error` is true. Tests cover a
+/// matrix of deferred vs. non-deferred queries combined with errors from the
+/// initial response, a deferred chunk, a deeply-nested deferred chunk, and two
+/// chunks at once.
+///
+/// For non-deferred queries the whole response arrives in one part. For deferred
+/// queries the response is a `multipart/mixed` stream with one initial part and
+/// three incremental parts. In both cases the coprocessor should fire once per
+/// part that contains an error — no more, no less.
+mod coprocessor_selectors_on_potentially_deferred_responses {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::RwLock;
+    use std::time::Duration;
+
+    use serde_json::json;
+    use serde_json::value::Value;
+    use tokio_stream::StreamExt;
+    use tower::BoxError;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::Query;
+    use crate::integration::common::graph_os_enabled;
+
+    const ON_ERROR_CONFIG: &str = include_str!("fixtures/coprocessor_conditional.router.yaml");
+    const NO_ERROR_CONFIG: &str =
+        include_str!("fixtures/coprocessor_conditional_no_error.router.yaml");
+
+    fn query(deferred: bool) -> Query {
+        let query_str = if deferred {
+            r#"query Q { topProducts { name ... @defer { inStock } ... @defer { reviews { id author { username ... @defer { name } } } } } }"#
+        } else {
+            r#"query Q { topProducts { name inStock reviews { id author { username name } } } }"#
+        };
+
+        Query::builder()
+            .traced(true)
+            .body(json!({"query": query_str}))
+            .header("Accept", "multipart/mixed;deferSpec=20220824")
+            .build()
+    }
+
+    fn products_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "products error", "path": [] }]})
+        } else {
+            json!({
+                "data": {
+                    "topProducts": [
+                        { "__typename": "Product", "name": "Table", "upc": "1" },
+                        { "__typename": "Product", "name": "Chair", "upc": "2" },
+                    ]
+                },
+            })
+        }
+    }
+
+    fn inventory_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "inventory error", "path": [] }]})
+        } else {
+            json!({"data": {"_entities": [{"inStock": true}, {"inStock": false}]}})
+        }
+    }
+
+    fn reviews_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "reviews error", "path": [] }]})
+        } else {
+            json!({
+                "data": {
+                    "_entities": [
+                        {"reviews": [{"id": "1", "author": {"__typename": "User", "username": "@ada", "id": "1"}}, {"id": "1", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                        {"reviews": [{"id": "3", "author": {"__typename": "User", "username": "@alan", "id": "2"}}]},
+                    ]
+                }
+            })
+        }
+    }
+
+    fn accounts_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "accounts error", "path": [] }]})
+        } else {
+            json!({"data": {"_entities": [{"name": "Ada"}, {"name": "Alan"}]}})
+        }
+    }
+
+    fn response_template(response_json: Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(response_json)
+    }
+
+    fn delayed_response_template(response_json: Value, delay: u64) -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .set_delay(Duration::from_millis(delay))
+            .set_body_json(response_json)
+    }
+
+    /// Core helper: starts mock servers for the coprocessor and four subgraphs,
+    /// runs the router with the given `config_template` (which must contain
+    /// `<replace>` where the coprocessor URL should go), executes `query`, and
+    /// returns the list of response chunks and a map of coprocessor hit counts
+    /// keyed by stage name.
+    async fn send_query_with_config(
+        config_template: &str,
+        query: Query,
+        subgraph_response_products: ResponseTemplate,
+        subgraph_response_inventory: ResponseTemplate,
+        subgraph_response_reviews: ResponseTemplate,
+        subgraph_response_accounts: ResponseTemplate,
+    ) -> Result<(Vec<String>, HashMap<String, usize>), BoxError> {
+        let coprocessor_hits: Arc<RwLock<HashMap<String, usize>>> =
+            Arc::new(RwLock::new(HashMap::default()));
+        let coprocessor_hits_clone = coprocessor_hits.clone();
+        let coprocessor_response = move |req: &wiremock::Request| {
+            let req_body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = req_body.as_object()?.get("stage")?.as_str()?.to_string();
+
+            let mut binding = coprocessor_hits_clone.write().ok()?;
+            let entry = binding.entry(stage).or_default();
+            *entry += 1;
+            Some(response_template(req_body))
+        };
+
+        let mock_coprocessor = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(move |r: &wiremock::Request| coprocessor_response(r).unwrap())
+            .mount(&mock_coprocessor)
+            .await;
+
+        let mock_products = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_products)
+            .mount(&mock_products)
+            .await;
+
+        let mock_inventory = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_inventory)
+            .mount(&mock_inventory)
+            .await;
+
+        let mock_reviews = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_reviews)
+            .mount(&mock_reviews)
+            .await;
+
+        let mock_accounts = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_accounts)
+            .mount(&mock_accounts)
+            .await;
+
+        let mut router = IntegrationTest::builder()
+            .config(config_template.replace("<replace>", &mock_coprocessor.uri()))
+            .subgraph_override("products", mock_products.uri())
+            .subgraph_override("inventory", mock_inventory.uri())
+            .subgraph_override("reviews", mock_reviews.uri())
+            .subgraph_override("accounts", mock_accounts.uri())
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let (_, response) = router.execute_query(query).await;
+        assert_eq!(response.status(), 200);
+
+        let mut raw_body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(Ok(chunk)) = stream.next().await {
+            raw_body.extend_from_slice(&chunk);
+        }
+
+        router.read_logs();
+        router.print_logs();
+
+        // Split on the multipart boundary to count parts independent of TCP chunking.
+        // Filter by presence of `{` to select only the JSON body parts.
+        let body_str = String::from_utf8(raw_body).unwrap();
+        let response_chunks: Vec<String> = if body_str.contains("--graphql") {
+            body_str
+                .split("--graphql")
+                .filter(|s| s.contains('{'))
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            vec![body_str]
+        };
+
+        eprintln!("{coprocessor_hits:?}");
+        for r in &response_chunks {
+            eprintln!("{r}");
+        }
+
+        // NB: should be ok to read and clone bc response should have finished
+        Ok((response_chunks, coprocessor_hits.read().unwrap().clone()))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_not_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_not_deferred_first_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(true)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deferred_first_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // NB: interestingly this still spawns the deferred tasks
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(true)),
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_not_deferred_second_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(true)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deferred_second_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(true), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_not_deferred_nested_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(true)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deferred_nested_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(true), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_not_deferred_second_and_nested_response_failures() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(true)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(true)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deferred_second_and_nested_response_failures() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            ON_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(true), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(true), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 2);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 2);
+
+        Ok(())
+    }
+
+    // --- on_graphql_error: false ---
+    // The `on_graphql_error: false` condition is the complement: it fires when
+    // a response chunk contains *no* GraphQL errors.  The tests below verify
+    // that the condition works symmetrically with the `true` case above.
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_non_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // No errors → on_graphql_error: false evaluates to true → coprocessor fires.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_non_deferred_with_errors() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Errors present → on_graphql_error: false evaluates to false → coprocessor
+        // must not fire.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(false),
+            response_template(products_response(true)),
+            response_template(inventory_response(false)),
+            response_template(reviews_response(false)),
+            response_template(accounts_response(false)),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 1);
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // All 4 chunks are error-free → coprocessor fires once per chunk.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 4);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 4);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_with_error_in_first_chunk() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Error in the initial chunk only: the 3 error-free deferred chunks
+        // each trigger the coprocessor; the initial chunk does not.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(true)), // error in initial chunk
+            delayed_response_template(inventory_response(false), 100),
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 3);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_false_deferred_with_error_in_deferred_chunk() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Error in one deferred chunk (inventory → second chunk): the initial
+        // chunk and the two remaining deferred chunks trigger the coprocessor;
+        // the error chunk does not.
+        let (response_chunks, coprocessor_hits) = send_query_with_config(
+            NO_ERROR_CONFIG,
+            query(true),
+            response_template(products_response(false)),
+            delayed_response_template(inventory_response(true), 100), // error in deferred chunk
+            delayed_response_template(reviews_response(false), 200),
+            delayed_response_template(accounts_response(false), 100),
+        )
+        .await?;
+        assert_eq!(response_chunks.len(), 4);
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 3);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 3);
+
+        Ok(())
+    }
 }

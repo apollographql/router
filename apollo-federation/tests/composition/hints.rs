@@ -3,6 +3,7 @@ use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 
 use crate::composition::ServiceDefinition;
+use crate::composition::compose;
 use crate::composition::compose_as_fed2_subgraphs;
 
 /// Helper to assert that a supergraph has no hints
@@ -246,10 +247,75 @@ mod entity_consistency {
             r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraph "Subgraph1"."#,
         );
     }
+
+    #[test]
+    fn inconsistent_entity_hint_includes_locations_for_extension_types() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @key(fields: "k") {
+                    k: Int
+                    v1: String
+                }
+            "#,
+        };
+
+        // Subgraph2 uses `extend type` without a base definition — the compiler
+        // creates a synthetic Node with no source location. The hint must still
+        // include a location for this subgraph.
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                extend type T @shareable {
+                    k: Int
+                    v2: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                extend type T @key(fields: "k") {
+                    k: Int
+                    v3: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENTITY",
+            r#"Type "T" is declared as an entity (has a @key applied) in some but not all defining subgraphs: it has no @key in subgraph "Subgraph2" but has some @key in subgraphs "Subgraph1" and "Subgraph3"."#,
+        );
+
+        let hint = result
+            .hints()
+            .iter()
+            .find(|h| h.code() == "INCONSISTENT_ENTITY")
+            .expect("should have INCONSISTENT_ENTITY hint");
+
+        let mut subgraph_names: Vec<&str> = hint
+            .locations
+            .iter()
+            .map(|loc| loc.subgraph.as_str())
+            .collect();
+        subgraph_names.sort();
+
+        assert_eq!(
+            subgraph_names,
+            vec!["Subgraph1", "Subgraph2", "Subgraph3"],
+            "Hint locations must include all subgraphs, including those using extend type"
+        );
+    }
 }
 
 mod value_type_fields {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 
@@ -286,6 +352,54 @@ mod value_type_fields {
             "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
             r#"Field "T.b" of non-entity object type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
+    }
+
+    #[test]
+    fn hints_on_value_type_field_emits_single_hint_when_multiple_subgraphs_missing_field() {
+        // Regression test: before the fix, hint_on_inconsistent_value_type_field was missing
+        // a break after emitting the hint. Since report_mismatch_hint already examines all
+        // sources internally, the loop would emit duplicate identical hints — one per subgraph
+        // missing the field.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                type T @shareable {
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type T @shareable {
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_OBJECT_VALUE_TYPE_FIELD",
+            r#"Field "T.b" of non-entity object type "T" is defined in some but not all subgraphs that define "T": "T.b" is defined in subgraph "Subgraph1" but not in subgraphs "Subgraph2" and "Subgraph3"."#,
+        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
     }
 
     #[test]
@@ -595,6 +709,54 @@ mod enum_hints {
             "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraph \"Subgraph2\".",
         );
     }
+
+    #[test]
+    fn hints_on_output_enum_value_emits_single_hint_when_multiple_subgraphs_missing_value() {
+        // Regression test: before the fix, hint_on_inconsistent_output_enum_value was missing
+        // an early return after emitting the hint. Since report_mismatch_hint already examines
+        // all sources internally, the loop would emit duplicate identical hints — one per
+        // subgraph missing the value.
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: T
+                }
+
+                enum T {
+                    V1
+                    V2
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                enum T {
+                    V1
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ENUM_VALUE_FOR_OUTPUT_ENUM",
+            "Value \"V2\" of enum type \"T\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"T\": \"V2\" is defined in subgraph \"Subgraph1\" but not in subgraphs \"Subgraph2\" and \"Subgraph3\".",
+        );
+        assert_eq!(result.hints().len(), 1, "Expected exactly 1 hint");
+    }
 }
 
 mod executable_directives {
@@ -661,6 +823,15 @@ mod executable_directives {
             &composition_result,
             "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
             r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#,
+        );
+
+        assert!(
+            !composition_result
+                .schema()
+                .schema()
+                .directive_definitions
+                .contains_key("t"),
+            "Directive @t should be removed from the supergraph when locations have no intersection"
         );
     }
 
@@ -857,12 +1028,13 @@ In subgraph "Subgraph2", the description is:
             name: "Subgraph1",
             type_defs: r#"
                 type Query {
-                    a: Int
+                  t: T
                 }
 
-                type T @shareable {
-                    "I don't know what I'm doing"
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  "First description"
+                  f: Int @shareable
                 }
             "#,
         };
@@ -870,9 +1042,10 @@ In subgraph "Subgraph2", the description is:
         let subgraph2 = ServiceDefinition {
             name: "Subgraph2",
             type_defs: r#"
-                type T @shareable {
-                    "Return a super secret integer"
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  "Second description"
+                  f: Int @shareable
                 }
             "#,
         };
@@ -880,11 +1053,12 @@ In subgraph "Subgraph2", the description is:
         let subgraph3 = ServiceDefinition {
             name: "Subgraph3",
             type_defs: r#"
-                type T @shareable {
-                    """
-                    Return a super secret integer
-                    """
-                    f: Int
+                type T @key(fields: "id") {
+                  id: ID!
+                  """
+                  Second description
+                  """
+                  f: Int @shareable
                 }
             "#,
         };
@@ -893,13 +1067,13 @@ In subgraph "Subgraph2", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Subgraph1"):
+            r#"Element "T.f" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraphs "Subgraph2" and "Subgraph3"):
   """
-  I don't know what I'm doing
+  Second description
   """
-In subgraphs "Subgraph2" and "Subgraph3", the description is:
+In subgraph "Subgraph1", the description is:
   """
-  Return a super secret integer
+  First description
   """"#,
         );
     }
@@ -944,13 +1118,13 @@ In subgraphs "Subgraph2" and "Subgraph3", the description is:
         assert_has_hint(
             &result,
             "INCONSISTENT_DESCRIPTION",
-            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Users"):
-  """
-  Represents a user order
-  """
-In subgraph "Orders", the description is:
+            r#"Element "Order" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph "Orders"):
   """
   Reference type to order entity in ONE GRAPH
+  """
+In subgraph "Users", the description is:
+  """
+  Represents a user order
   """"#,
         );
 
@@ -965,7 +1139,7 @@ In subgraph "Orders", the description is:
         let desc = order_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
-            "Represents a user order",
+            "Reference type to order entity in ONE GRAPH",
             "supergraph should use chosen description"
         );
     }
@@ -1014,7 +1188,12 @@ In subgraph "Orders", the description is:
 
         let result =
             compose_as_fed2_subgraphs(&[catalog_subgraph, inventory_subgraph, reviews_subgraph])
-                .unwrap();
+                .expect("successfully composed");
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            "Element \"Product\" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph \"Catalog\"):\n  \"\"\"\n  Product in the catalog\n  \"\"\"\nIn subgraph \"Inventory\", the description is:\n  \"\"\"\n  Inventory product entity\n  \"\"\" and \nIn subgraph \"Reviews\", the description is:\n  \"\"\"\n  Product for reviews\n  \"\"\"",
+        );
 
         let api_schema = result
             .to_api_schema(Default::default())
@@ -1023,7 +1202,7 @@ In subgraph "Orders", the description is:
             .schema()
             .types
             .get("Product")
-            .expect("Product type in schema");
+            .expect("Product type exists in schema");
         let desc = product_type.description().map(|n| n.as_str()).unwrap_or("");
         assert_eq!(
             desc.trim(),
@@ -1079,6 +1258,11 @@ In subgraph "Orders", the description is:
         let result =
             compose_as_fed2_subgraphs(&[reviews_subgraph, catalog_subgraph, inventory_subgraph])
                 .unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_DESCRIPTION",
+            "Element \"Product\" has inconsistent descriptions across subgraphs. The supergraph will use description (from subgraph \"Catalog\"):\n  \"\"\"\n  Product in the catalog\n  \"\"\"\nIn subgraph \"Inventory\", the description is:\n  \"\"\"\n  Inventory product entity\n  \"\"\" and \nIn subgraph \"Reviews\", the description is:\n  \"\"\"\n  Product for reviews\n  \"\"\"",
+        );
 
         let api_schema = result
             .to_api_schema(Default::default())
@@ -1514,6 +1698,43 @@ mod non_repeatable_directive_arguments {
             "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"Replaced by field 'b'\"} (from subgraphs \"Subgraph2\" and \"Subgraph4\"), but found arguments {reason: \"because\"} in subgraph \"Subgraph1\" and no arguments in subgraph \"Subgraph3\".",
         );
     }
+
+    #[test]
+    fn includes_subgraphs_without_directive_in_mismatch_hint() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "because")
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable @deprecated(reason: "Replaced by field 'b'")
+                }
+            "#,
+        };
+
+        let subgraph3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type Query {
+                    a: String @shareable
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2, subgraph3]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS",
+            "Non-repeatable directive @deprecated is applied to \"Query.a\" in multiple subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"because\"} (from subgraph \"Subgraph1\"), but found arguments {reason: \"Replaced by field 'b'\"} in subgraph \"Subgraph2\" and  in subgraph \"Subgraph3\".",
+        );
+    }
 }
 
 mod shareable_runtime_types {
@@ -1658,7 +1879,6 @@ Otherwise the @shareable contract will be broken."#,
 }
 
 mod implicit_federation_upgrades {
-    use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 

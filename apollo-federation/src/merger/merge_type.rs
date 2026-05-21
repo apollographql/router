@@ -19,7 +19,7 @@ use crate::schema::position::TypeDefinitionPosition;
 impl Merger {
     #[instrument(skip(self))]
     pub(in crate::merger) fn merge_type(&mut self, type_def: &Name) -> Result<(), FederationError> {
-        let Ok(dest) = self.merged.get_type(type_def.clone()) else {
+        let Ok(dest) = self.merged.get_type(type_def) else {
             bail!(
                 "Type \"{}\" is missing, but it should have been shallow-copied to the supergraph schema",
                 type_def
@@ -28,7 +28,7 @@ impl Merger {
         let mut sources =
             IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let source = subgraph.schema().get_type(type_def.clone()).ok();
+            let source = subgraph.schema().try_get_type(type_def);
             sources.insert(idx, source);
         }
 
@@ -108,6 +108,10 @@ impl Merger {
                 continue;
             };
 
+            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+            //   extensions defined using federation @extends directive. Since fixing it would be
+            //   a breaking change that could affect some customers, we are keeping current behavior
+            //   to match JavaScript logic. We should fix this in the future versions.
             if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
@@ -144,8 +148,7 @@ impl Merger {
             let subgraph = &self.subgraphs[*idx];
             let is_interface_object = subgraph.is_interface_object_type(source);
 
-            let key_directive_name = subgraph.key_directive_name()?;
-            let keys = if let Some(key_directive_name) = &key_directive_name {
+            let keys = if let Some(key_directive_name) = &subgraph.key_directive_name() {
                 source.get_applied_directives(subgraph.schema(), key_directive_name)
             } else {
                 Vec::new()
@@ -168,8 +171,6 @@ impl Merger {
                 // If this type has keys, we apply a `@join__type` for each key.
                 let extends_directive_name = subgraph
                     .extends_directive_name()
-                    .ok()
-                    .flatten()
                     .clone()
                     .unwrap_or(FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC);
 

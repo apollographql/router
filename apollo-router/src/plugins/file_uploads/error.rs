@@ -1,4 +1,5 @@
 use bytesize::ByteSize;
+use http::StatusCode;
 use thiserror::Error;
 
 use crate::graphql;
@@ -61,6 +62,19 @@ pub(super) enum FileUploadError {
 
     #[error("{0}")]
     AxumError(#[from] axum::Error),
+}
+
+impl FileUploadError {
+    pub(super) fn http_status_code(&self) -> StatusCode {
+        match self {
+            // Only "operations" and "map" have multer SizeLimits configured; file parts are
+            // checked separately in SubgraphFileProxyStream and return MaxFileSizeLimitExceeded.
+            FileUploadError::InvalidMultipartRequest(multer::Error::FieldSizeExceeded {
+                ..
+            }) => StatusCode::PAYLOAD_TOO_LARGE,
+            _ => StatusCode::BAD_REQUEST,
+        }
+    }
 }
 
 impl From<FileUploadError> for graphql::Error {

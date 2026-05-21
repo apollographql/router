@@ -1,0 +1,181 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':semanticCommits',
+  ],
+  customManagers: [
+    // A slight variation on the pattern documented within Renovate's docs:
+    // => https://docs.renovatebot.com/modules/manager/regex/
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.tool-versions$/',
+        '/(^|/)Dockerfile[^/]*$/',
+        '/^rust-toolchain\\.toml$/',
+        '/^docs/.*?\\.mdx$/',
+        '/^.config/mise/.*?\\.toml$/',
+        '/^apollo-router/Cargo\\.toml$/',
+        '/^apollo-router/README\\.md$/',
+      ],
+      matchStrings: [
+        '(#|<!--)\\s*renovate-automation: rustc version\\s*(?:-->)?\\n[^.]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\b',
+      ],
+      depNameTemplate: 'rust',
+      datasourceTemplate: 'docker',
+    },
+  ],
+  packageRules: [
+    // Group all non-major dependencies in a single, auto-merged PR. They usually don't require manual intervention.
+    {
+      matchCurrentVersion: '>= 1.0.0',
+      matchManagers: ['cargo', 'npm'],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
+      ],
+      groupName: 'all non-major packages >= 1.0',
+      groupSlug: 'all-non-major-gte-1.0',
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Auto-merge patch updates pre-1.0. Not grouped because they are more likely to require manual intervention.
+    {
+      matchCurrentVersion: '< 1.0.0',
+      matchManagers: ['cargo', 'npm'],
+      matchUpdateTypes: ['patch'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Auto-merge non-major updates from other package managers (these usually don't come in batches)
+    {
+      matchManagers: ['docker', 'mise', 'github-actions', 'circleci'],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
+      ],
+      minimumReleaseAge: '5 days',
+      automerge: true,
+    },
+
+    // Require explicit approval for updates of pinned dependencies, which are usually pinned for a reason!
+    {
+      matchManagers: ['cargo'],
+      matchCurrentValue: '/^=/',
+      dependencyDashboardApproval: true,
+      automerge: false,
+      groupName: null,
+      groupSlug: null,
+    },
+
+    // Put all the rustc dependencies in a single PR.
+    //
+    // Note the two `matchPackageNames` entries: the `mise` manager reports
+    // rust as `rust-lang/rust` (its upstream `packageName`), while the other
+    // three managers report it as just `rust`.  Renovate's `matchPackageNames`
+    // only matches against `packageName` — not `depName` — so we have to list
+    // both to catch every manager's view of the Rust release.
+    //
+    // The `minimumReleaseAge` here aligns the soak window across all four
+    // managers: otherwise `dockerfile` / `custom.regex` / `rust-release-channel`
+    // open their PR immediately while `mise` waits out its own 5-day soak
+    // (set below), and the two halves never meet in the same PR.
+    {
+      matchPackageNames: ['rust', 'rust-lang/rust'],
+      matchManagers: ['custom.regex', 'dockerfile', 'mise', 'rust-release-channel'],
+      groupName: 'rustc',
+      minimumReleaseAge: '5 days',
+    },
+
+    // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
+    // underlying package is deprecated. The package works as-is and we can
+    // consider replacing it in the future. We'll allow 0.8.x just in case
+    // there HAPPEN to be any security updates that we need to be aware of.
+    // See: https://github.com/dtolnay/serde-yaml/releases/tag/0.9.34
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['serde_yaml'],
+      allowedVersions: '0.8.x',
+    },
+
+    // We're currently constrained in our ability to update the `tracing`
+    // packages to the latest versions because of our usage.  As an extension
+    // of the same concern, we cannot update our `opentelemetry` packages since
+    // those are tightly intertwined.  This exception puts those packages into
+    // their own group and away from other dep updates until the time that
+    // those problems are no longer.  For more details, see the explainations
+    // in the `/apollo-router/Cargo.toml` file around the declarations for
+    // `^opentelemetry` and `^tracing` packages.
+    {
+      matchManagers: [
+        'cargo',
+      ],
+      groupName: 'cargo tracing packages',
+      groupSlug: 'cargo-tracing-packages',
+      matchPackageNames: [
+        '/^tracing/',
+        '/^opentelemetry/',
+      ],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Various monorepos / crates that are often released together
+    {
+      groupName: 'apollo-rs crates',
+      groupSlug: 'rust-apollo-rs-updates',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^apollo-(parser|compiler|smith)$/'],
+      automerge: true,
+    },
+    {
+      groupName: 'rand crates',
+      groupSlug: 'rust-rand',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rand$/', '/^rand[-_]/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+    {
+      groupName: 'nom crates',
+      groupSlug: 'rust-nom',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^nom$/', '/^nom[-_]/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+    {
+      groupName: 'axum crates',
+      groupSlug: 'rust-axum',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+    {
+      groupName: 'jemalloc crates',
+      groupSlug: 'rust-jemalloc',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^tikv-jemallocator$/', '/^tikv-jemalloc-/'],
+      automerge: true,
+      minimumReleaseAge: '5 days',
+    },
+
+    // Separate out Rhai updates, and recommend adding a changeset
+    {
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^rhai$/'],
+      automerge: false,
+      prBodyNotes: ["> [!IMPORTANT]\n> Rhai updates can cause breaking changes for users. Make sure to add a [`feat_`-prefixed changeset](https://github.com/apollographql/router/blob/dev/.changesets/README.md#conventions-used-in-this-changesets-directory) to alert users of the upgrade!"],
+      // Exclude Rhai from the >= 1.0 group
+      groupName: null,
+      groupSlug: null,
+    },
+  ],
+}

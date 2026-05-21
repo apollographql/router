@@ -261,6 +261,7 @@ impl LinkSpecDefinition {
             spec_alias: alias,
             imports,
             purpose: None,
+            line_column_range: None,
         });
         Ok(())
             .and_try(

@@ -1,0 +1,30 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/requestless_uses_request_data.graphql
+---
+[
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.greeting`: selection consumes `$root` (the response body) but the directive has no transport (no `http:`)\nDetails: $root { message }",
+        locations: [
+            18:21..19:16,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.code`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
+        locations: [
+            25:21..26:16,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.trace`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
+        locations: [
+            33:16..33:25,
+            33:26..33:33,
+            33:34..33:39,
+        ],
+    },
+]

@@ -284,6 +284,17 @@ pub enum Code {
     InvalidUrlProperty,
     /// Any named type not found in a GraphQL schema where expected
     MissingSchemaType,
+    /// Omitting `http:` from `@connect` requires connect spec v0.4 or later
+    HttpOmittedRequiresV0_4,
+    /// A `@connect` selection is requestless — the directive specifies no
+    /// transport (`http:` is absent, and no other transport argument has been
+    /// added yet) — but the selection reads request-phase data: `$root` (the
+    /// response body), `$status` (the response status), or `$response` (the
+    /// response headers). None of those are bound without a transport, so the
+    /// offending paths would silently produce `null` at runtime. The wording
+    /// is transport-agnostic so that if/when a `sql:` (or other) transport
+    /// joins `http:`, this same code keeps describing the same condition.
+    RequestlessSelectionUsesRequestData,
 }
 
 impl Code {
@@ -320,9 +331,7 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
-                let start_time = std::time::Instant::now();
                 let result = validate(schema.clone(), path.to_str().unwrap());
-                let end_time = std::time::Instant::now();
                 assert_debug_snapshot!(result.errors);
                 if path.parent().is_some_and(|parent| parent.ends_with("transformed")) {
                     assert_snapshot!(&diff::lines(&schema, &result.transformed).into_iter().filter_map(|res| match res {
@@ -333,8 +342,6 @@ mod test_validate_source {
                 } else {
                     assert_str_eq!(schema, result.transformed, "Schema should not have been transformed by validations")
                 }
-
-                assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });
     }

@@ -491,7 +491,8 @@ async fn test_count_operation_errors_with_extended_config_enabled() {
             .path(Path::from("obj/field"))
             .build();
 
-        count_operation_errors(&[error], &context, &config);
+        let errors = [error];
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -551,7 +552,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
             .unwrap()
         });
 
-        count_operation_errors(&errors, &context, &config);
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -644,7 +645,7 @@ async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_e
             .unwrap()
         });
 
-        count_operation_errors(&errors, &context, &config);
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",

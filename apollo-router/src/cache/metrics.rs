@@ -124,6 +124,15 @@ pub(crate) struct RedisMetricsCollector {
     metrics_interval: Duration,
 }
 
+/// Test-only accessor for checking whether the metrics task has been aborted
+#[cfg(test)]
+impl RedisMetricsCollector {
+    #[allow(dead_code)]
+    pub(crate) fn abort_handle(&self) -> Option<AbortHandle> {
+        self.abort_handle.lock().clone()
+    }
+}
+
 impl Drop for RedisMetricsCollector {
     fn drop(&mut self) {
         if let Some(handle) = self.abort_handle.lock().take() {
@@ -174,7 +183,11 @@ impl RedisMetricsCollector {
             .with_current_meter_provider(),
         );
 
-        *self.abort_handle.lock() = Some(handle.abort_handle());
+        let mut guard = self.abort_handle.lock();
+        if let Some(old) = guard.take() {
+            old.abort();
+        }
+        *guard = Some(handle.abort_handle());
     }
 
     /// Collect metrics from all Redis clients
@@ -229,6 +242,8 @@ impl RedisMetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::KeyValue;
+
     use super::*;
     use crate::cache::redis::RedisCacheStorage;
     use crate::cache::redis::RedisKey;
@@ -325,8 +340,20 @@ mod tests {
             assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
-            // Pause to ensure that queue length is zero & metrics have been exported
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // Poll until command queue length is zero (fixed sleeps are flaky under CI load).
+            let queue_attrs = &[KeyValue::new("kind", "test")];
+            for _ in 0..50 {
+                if crate::metrics::collect_metrics().assert(
+                    "apollo.router.cache.redis.command_queue_length",
+                    MetricType::Gauge,
+                    0.0,
+                    false,
+                    queue_attrs,
+                ) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
 
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so

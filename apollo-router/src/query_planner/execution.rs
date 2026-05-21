@@ -157,7 +157,7 @@ impl PlanNode {
                                 .in_current_span()
                                 .await;
                             value.type_aware_deep_merge(v, parameters.schema);
-                            errors.extend(err.into_iter());
+                            errors.extend(err);
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -185,7 +185,7 @@ impl PlanNode {
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
                             value.type_aware_deep_merge(v, parameters.schema);
-                            errors.extend(err.into_iter());
+                            errors.extend(err);
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -414,7 +414,7 @@ impl PlanNode {
                                 ))
                                 .await;
                             value.type_aware_deep_merge(v, parameters.schema);
-                            errors.extend(err.into_iter());
+                            errors.extend(err);
 
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
@@ -462,7 +462,7 @@ impl PlanNode {
                                     ))
                                     .await;
                                 value.type_aware_deep_merge(v, parameters.schema);
-                                errors.extend(err.into_iter());
+                                errors.extend(err);
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
                                 // For queries like {get @skip(if: true) {id name}}
@@ -482,7 +482,7 @@ impl PlanNode {
                                 ))
                                 .await;
                             value.type_aware_deep_merge(v, parameters.schema);
-                            errors.extend(err.into_iter());
+                            errors.extend(err);
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
                             // For queries like {get @include(if: false) {id name}}
@@ -569,7 +569,7 @@ impl DeferredNode {
                     // will not happen
                     if let Some(Ok((deferred_value, err))) = v {
                         value.type_aware_deep_merge(deferred_value, &sc);
-                        errors.extend(err.into_iter())
+                        errors.extend(err)
                     }
                 }
             }

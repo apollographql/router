@@ -5,6 +5,8 @@ description: Configure per-user caching with private data, create custom cache k
 minVersion: Router v2.10.0
 ---
 
+import RedisTls from '../../../../../shared/redis-tls.mdx';
+
 Beyond basic response caching, the router supports customization for caching private data, modifying cache keys, and advanced Redis configuration.
 
 ## When to customize
@@ -254,28 +256,13 @@ or, if configured with multiple URLs:
 
 ### TLS and authentication
 
-For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+<RedisTls />
 
-```yaml title="router.yaml"
-# Enable response caching globally
-response_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      # Configure Redis globally
-      redis:
-        urls: [ "rediss://redis.example.com:6379" ]
-        #highlight-start
-        username: root
-        password: ${env.REDIS_PASSWORD}
-        tls:
-          certificate_authorities: ${file./path/to/ca.crt}
-          client_authentication:
-            certificate_chain: ${file./path/to/certificate_chain.pem}
-            key: ${file./path/to/key.pem}
-        #highlight-end
-```
+<Note>
+
+Nest this `tls` configuration under `response_cache.subgraph.all`.
+
+</Note>
 
 ### Timeout configuration
 
@@ -356,3 +343,26 @@ response_cache:
         urls: ["redis://..."]
         pool_size: 15
 ```
+
+## Suppressing the `Cache-Control` client response header
+
+By default, router includes a `Cache-Control` header in the supergraph response sent to clients, reflecting the computed cache policy—for example, `Cache-Control: max-age=300, public`.
+
+Set `include_cache_control_header_on_router_response: false` to suppress this header when:
+
+- Router sits behind a CDN or reverse proxy that manages caching headers
+- Downstream clients misinterpret `Cache-Control` headers from router
+- You want internal Redis caching active while preventing clients from caching responses
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  include_cache_control_header_on_router_response: false
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+```
+
+When `include_cache_control_header_on_router_response` is `false`, router omits the `Cache-Control` header from client responses. All internal caching behavior—Redis storage, TTL enforcement, cache key computation, and the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger)—remains unchanged.

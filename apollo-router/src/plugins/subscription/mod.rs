@@ -16,6 +16,7 @@ use self::callback::CallbackService;
 use self::notification::Notify;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
@@ -23,7 +24,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
-use crate::register_plugin;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -36,6 +36,9 @@ pub(crate) mod notification;
 pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
+pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
+pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
@@ -45,6 +48,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
+pub(crate) const SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY: &str =
+    "apollo::subscription::subgraph_name";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -62,11 +67,15 @@ pub(crate) struct SubscriptionConfig {
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
     /// Configure subgraph subscription deduplication
-    pub(crate) deduplication: DeduplicationConfig,
+    pub(crate) deduplication: SubgraphConfiguration<DeduplicationConfig>,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+    /// Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) max_lifetime: Option<Duration>,
 }
 
 /// Subscription deduplication configuration
@@ -80,6 +89,15 @@ pub(crate) struct DeduplicationConfig {
     /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
     /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
     pub(crate) ignored_headers: HashSet<String>,
+    /// When true, JWT claims from the authorization context are excluded from the deduplication key.
+    /// Use this when your subgraph data does not vary by user identity and you want authenticated
+    /// users to share a single subgraph WebSocket connection.
+    ///
+    /// Security note: with this enabled, a user may receive events from a connection originally
+    /// opened by a different user.  Only enable this when subgraph subscription data is truly
+    /// non-personalized.
+    /// (default: false)
+    pub(crate) ignore_auth_context: bool,
 }
 
 impl Default for DeduplicationConfig {
@@ -87,6 +105,7 @@ impl Default for DeduplicationConfig {
         Self {
             enabled: true,
             ignored_headers: Default::default(),
+            ignore_auth_context: false,
         }
     }
 }
@@ -96,9 +115,10 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            deduplication: DeduplicationConfig::default(),
+            deduplication: SubgraphConfiguration::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
+            max_lifetime: None,
         }
     }
 }
@@ -253,7 +273,7 @@ impl Plugin for Subscription {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let mut callback_hmac_key = None;
-        if init.config.mode.callback.is_some() {
+        if let Some(callback) = &init.config.mode.callback {
             callback_hmac_key = Some(
                 SUBSCRIPTION_CALLBACK_HMAC_KEY
                     .get_or_init(|| Uuid::new_v4().to_string())
@@ -261,16 +281,10 @@ impl Plugin for Subscription {
             );
             #[cfg(not(test))]
             init.notify
-                .set_ttl(
-                    init.config
-                        .mode
-                        .callback
-                        .as_ref()
-                        .expect("we checked in the condition the callback conf")
-                        .heartbeat_interval
-                        .into_option(),
-                )
+                .set_ttl(callback.heartbeat_interval.into_option())
                 .await?;
+            #[cfg(test)]
+            let _ = callback;
         }
 
         Ok(Subscription {
@@ -1060,9 +1074,84 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.deduplication.enabled);
+        assert!(sub_config.deduplication.all.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
+        assert!(sub_config.max_lifetime.is_none());
+
+        // ignore_auth_context: explicit true via global all
+        let cfg_ignore_auth: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            },
+            "deduplication": { "all": { "ignore_auth_context": true } }
+        }))
+        .unwrap();
+        assert!(cfg_ignore_auth.deduplication.all.ignore_auth_context);
+
+        // ignore_auth_context: default is false when field is absent
+        let cfg_default_auth: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!cfg_default_auth.deduplication.all.ignore_auth_context);
+
+        // per-subgraph override: disable dedup for one subgraph while keeping it enabled globally
+        let cfg_per_subgraph: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "callback": {
+                    "public_url": "https://example.com/callback",
+                    "subgraphs": ["accounts"]
+                }
+            },
+            "deduplication": {
+                "all": { "enabled": true },
+                "subgraphs": {
+                    "article": { "enabled": false }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(cfg_per_subgraph.deduplication.get("accounts").enabled);
+        assert!(!cfg_per_subgraph.deduplication.get("article").enabled);
+    }
+
+    #[test]
+    fn it_test_subscription_config_max_lifetime() {
+        let config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "callback": {
+                    "public_url": "http://localhost:4000/subscription/callback",
+                    "path": "/subscription/callback",
+                }
+            },
+            "max_lifetime": "10m"
+        }))
+        .unwrap();
+
+        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600)));
+
+        let config_no_lifetime: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "mode": {
+                "callback": {
+                    "public_url": "http://localhost:4000/subscription/callback",
+                    "path": "/subscription/callback",
+                }
+            }
+        }))
+        .unwrap();
+
+        assert!(config_no_lifetime.max_lifetime.is_none());
     }
 }
 

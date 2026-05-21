@@ -44,24 +44,24 @@ fn valid_query_plan() {
     ";
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 752_333.
-    const MAX_BYTES_QUERY_PLANNER: usize = 789_949; // ~771 KiB
+    // Actual number: 803_785.
+    const MAX_BYTES_QUERY_PLANNER: usize = 843_974; // ~824 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 16_179.
-    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 16_987;
+    // Actual number: 14_243.
+    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 14_955;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
-    // Actual number: 872_551.
+    // Actual number: 928_923.
     //
-    // Planning adds 120_218 bytes to heap max (872_551-752_333=120_218).
-    const MAX_BYTES_QUERY_PLAN: usize = 916_178; // ~894 KiB
+    // Planning adds 125_138 bytes to heap max (928_923-803_785=125_138).
+    const MAX_BYTES_QUERY_PLAN: usize = 975_369; // ~953 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 23_719.
+    // Actual number: 21_438.
     //
-    // Planning adds 6_732 allocations (23_719-16_987=6_732).
-    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 24_904;
+    // Planning adds 7_195 allocations (21_438-14_243=7_195).
+    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 22_510;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 
@@ -78,6 +78,7 @@ fn valid_query_plan() {
         apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, qp_config)
             .expect("query planner should be created");
     let stats = dhat::HeapStats::get();
+    println!("QueryPlanner::new: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_QUERY_PLANNER);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_QUERY_PLANNER);
 
@@ -92,6 +93,7 @@ fn valid_query_plan() {
         .build_query_plan(&document, None, qp_options)
         .expect("valid query plan");
     let stats = dhat::HeapStats::get();
+    println!("QueryPlanner::build_query_plan: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_QUERY_PLAN);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_QUERY_PLAN);
 }

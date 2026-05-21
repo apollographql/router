@@ -1,0 +1,296 @@
+# Test workflow — exercises `cargo xtask release prepare` and the prep-PR
+# flow on a GitHub Actions runner.  Designed to graduate to `dev` later
+# (renamed and minus the push trigger), so the inputs and shape match what
+# the eventual `release-dispatch.yml` will expect.
+#
+# Two trigger paths:
+#
+#   - `workflow_dispatch` — the future graduation path.  Won't actually fire
+#     until this file lands on the default branch (`dev`).  Keeps the inputs
+#     in place so the call shape is locked in.
+#
+#   - `push` to `abernix/test-prep-action-*` — the current sandbox.  Picks
+#     `version` from the branch-name suffix and `dry_run` from a commit
+#     message marker (`[execute]` opts in to actually opening a PR).
+#
+# Defaults to **dry-run**: prepares, diffs, logs auto-tag would-do — does
+# not commit, push, or open a PR unless explicitly opted in.
+
+name: Test release prep
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Target version (e.g., 2.14.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Read-only run — don't commit, push, or open the prep PR"
+        required: false
+        default: true
+        type: boolean
+  push:
+    branches:
+      - "abernix/test-prep-action-*"
+
+jobs:
+  test-prep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to push the prep branch (when not dry-run)
+      pull-requests: write     # to open the prep PR (when not dry-run)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version + mode
+        id: vars
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION='${{ inputs.version }}'
+            DRY_RUN='${{ inputs.dry_run }}'
+          else
+            # Branch name like abernix/test-prep-action-2.14.0 → version 2.14.0
+            VERSION="${GITHUB_REF_NAME##*-}"
+            # Default dry-run unless commit message contains `[execute]`.
+            if git log -1 --format=%B "$GITHUB_SHA" | grep -qF '[execute]'; then
+              DRY_RUN=false
+            else
+              DRY_RUN=true
+            fi
+          fi
+          echo "Resolved: version=$VERSION dry_run=$DRY_RUN"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # Diagnostic: list available env var NAMES (values redacted by GHA for
+      # secrets) so we can confirm what's plumbed in.  Helpful for sanity-
+      # checking that secrets like APOLLO_BOT2_GITHUB_PAT are wired up.
+      # ---------------------------------------------------------------------
+      - name: Log env variable names (values redacted)
+        env:
+          # Surface the secret here so it shows up in the env list when set.
+          # GHA still redacts the actual value in logs.
+          APOLLO_BOT2_GITHUB_PAT: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          echo "::group::Environment variable names"
+          env | cut -d= -f1 | sort
+          echo "::endgroup::"
+          echo
+          if [ -n "${APOLLO_BOT2_GITHUB_PAT:-}" ]; then
+            echo "✓ APOLLO_BOT2_GITHUB_PAT is set (token length: ${#APOLLO_BOT2_GITHUB_PAT})"
+          else
+            echo "✗ APOLLO_BOT2_GITHUB_PAT is NOT set — add it as a repo secret to enable apollo-bot2 auth."
+          fi
+
+      # ---------------------------------------------------------------------
+      # Auth check: prove APOLLO_BOT2_GITHUB_PAT actually authenticates as
+      # the apollo-bot2 user.  Read-only — just calls /user.  This is the
+      # gate before we can trust this PAT for tag-push in a future workflow.
+      # ---------------------------------------------------------------------
+      - name: Authenticate as apollo-bot2
+        env:
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::APOLLO_BOT2_GITHUB_PAT secret not configured — skipping auth check."
+            echo "  Configure it (Settings → Secrets and variables → Actions) to enable this step."
+            exit 0
+          fi
+          echo "Attempting to authenticate as apollo-bot2..."
+          IDENTITY=$(gh api user --jq '"login=\(.login) id=\(.id) type=\(.type)"')
+          echo "✓ Authenticated: $IDENTITY"
+          # Loud failure if it's NOT apollo-bot2 — catches the wrong-PAT case.
+          case "$IDENTITY" in
+            *login=apollo-bot2*) echo "  Identity matches expectation (apollo-bot2)." ;;
+            *) echo "::error::Authenticated user is not apollo-bot2.  Check the PAT owner." ; exit 1 ;;
+          esac
+
+      - name: Install dev environment (mise)
+        uses: jdx/mise-action@v4
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+          helm version --short
+          helm-docs --version || true
+          cargo about --version || true
+          cargo deny --version || true
+
+      - name: Run release prepare (no commit, no push)
+        run: cargo xtask release prepare ${{ steps.vars.outputs.version }}
+
+      - name: Show resulting diff
+        run: |
+          echo "::group::git diff"
+          git diff
+          echo "::endgroup::"
+          echo "::group::git status"
+          git status --short
+          echo "::endgroup::"
+
+      - name: Verify diff is non-empty
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::error::release prepare produced no changes — that's suspicious."
+            exit 1
+          fi
+
+      - name: Verify CHANGELOG.md gained a v${{ steps.vars.outputs.version }} entry
+        run: |
+          VERSION='${{ steps.vars.outputs.version }}'
+          if ! grep -q "^# \[${VERSION}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing the v${VERSION} heading."
+            exit 1
+          fi
+          echo "Found v${VERSION} heading in CHANGELOG.md"
+
+      # ---------------------------------------------------------------------
+      # Auto-tag observability (logs only — does not push tags).
+      #
+      # The eventual `auto-tag-release.yml` workflow (M2) fires on push to
+      # `main`/`main-v*` and tags the merge commit's second parent.  Auth for
+      # actual tag pushes likely needs `apollo-bot2`, not the default
+      # github-actions[bot] — that's a separate M2 problem.
+      #
+      # For now: log what auto-tag WOULD do, including the exact commit SHA.
+      # ---------------------------------------------------------------------
+      - name: Log what auto-tag would do (including exact SHA)
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.vars.outputs.version }}'
+
+          # `release prepare` has set apollo-router/Cargo.toml to the target
+          # version.  In production, auto-tag reads this from the version
+          # branch's tip (the merge commit's second parent on main).
+          PREPARED_VERSION=$(grep '^version = ' apollo-router/Cargo.toml | head -1 | cut -d'"' -f2)
+          PREPARED_SHA=$(git rev-parse HEAD)
+          echo "::group::Auto-tag would-do analysis"
+          echo "Prepared apollo-router version: $PREPARED_VERSION"
+          echo "Prepared commit SHA:            $PREPARED_SHA"
+          echo "Branch ref:                     ${GITHUB_REF_NAME}"
+          echo "Triggering commit ($GITHUB_SHA): $(git log -1 --format='%s' "$GITHUB_SHA")"
+          echo
+
+          # Latest released tag on origin — proxy for "main's current version"
+          # since we're not running on main directly.
+          LATEST_TAG=$(git tag --list 'v*' --no-contains HEAD --sort=-v:refname \
+            | head -1)
+          LATEST_VERSION="${LATEST_TAG#v}"
+          echo "Latest release tag (proxy for main's current version): ${LATEST_TAG:-<none>}"
+
+          if [ -z "$LATEST_VERSION" ]; then
+            DECISION="WOULD TAG v$PREPARED_VERSION (first release on this line)"
+          elif [ "$PREPARED_VERSION" = "$LATEST_VERSION" ]; then
+            DECISION="WOULD SKIP — prepared version equals latest tag (no version change)"
+          else
+            if git rev-parse "v$PREPARED_VERSION" >/dev/null 2>&1; then
+              EXISTING_SHA=$(git rev-parse "v$PREPARED_VERSION")
+              DECISION="WOULD SKIP — tag v$PREPARED_VERSION already exists at $EXISTING_SHA (idempotent)"
+            else
+              DECISION="WOULD TAG v$PREPARED_VERSION"
+            fi
+          fi
+          echo
+          echo "Decision: $DECISION"
+          echo
+
+          # The actual tag-target SHA for the future merge to main is NOT this
+          # commit — it's the second parent of the merge commit on main.  After
+          # the prep PR squash-merges to ${VERSION}, that branch's HEAD becomes
+          # a new SHA, and that new SHA is what gets tagged when the release
+          # PR (${VERSION} → main) merges.
+          echo "Note on tag-target SHA:"
+          echo "  - In production, auto-tag tags the SECOND PARENT of the merge"
+          echo "    commit on main: \$(git rev-parse \$MERGE_COMMIT^2)."
+          echo "  - That SHA equals ${VERSION}'s HEAD at merge time, which can"
+          echo "    only be known after the prep PR squash-merges and any other"
+          echo "    backports land.  The current HEAD ($PREPARED_SHA) is just"
+          echo "    a preview snapshot, not the final tag target."
+          echo "::endgroup::"
+          echo
+          echo "Reminder: actual tag push from CI requires apollo-bot2's PAT,"
+          echo "not the default github-actions[bot].  Until that's wired up,"
+          echo "a human pushes the tag manually after the merge to main."
+
+      # ---------------------------------------------------------------------
+      # Below this point: only runs when explicitly opted in.
+      # ---------------------------------------------------------------------
+      - name: Stop here in dry-run mode
+        if: steps.vars.outputs.dry_run == 'true'
+        run: |
+          echo "Dry-run mode — not committing, pushing, or opening the prep PR."
+          echo "  - workflow_dispatch: pass dry_run=false to actually run"
+          echo "  - push trigger:      include '[execute]' in commit message"
+
+      - name: Commit prep on a fresh branch
+        if: steps.vars.outputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          PREP_BRANCH="prep-${{ steps.vars.outputs.version }}"
+          git checkout -b "$PREP_BRANCH"
+          git add -A
+          git commit -m "prep release: v${{ steps.vars.outputs.version }}"
+          echo "PREP_BRANCH=$PREP_BRANCH" >> "$GITHUB_ENV"
+
+      - name: Push prep branch
+        if: steps.vars.outputs.dry_run != 'true'
+        run: git push origin "$PREP_BRANCH"
+
+      - name: Extract this release's CHANGELOG section
+        if: steps.vars.outputs.dry_run != 'true'
+        run: |
+          perl -0777 \
+            -sne 'print "$1\n" if m{
+              (?:\#\s\[v?\Q$version\E\]\s.*?\n$)
+              \s*
+              (.*?)
+              \s*
+              (?=^\#\s\[[^\]]+\]\s)
+            }msx' -- \
+              -version="${{ steps.vars.outputs.version }}" \
+              CHANGELOG.md > this_release.md
+
+      - name: Open prep PR
+        if: steps.vars.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION='${{ steps.vars.outputs.version }}'
+          BODY=$(cat <<EOF
+          > **Note**
+          >
+          > When approved, this PR will merge into **the \`$VERSION\` branch** which will — upon being approved itself — merge into \`main\`.
+          >
+          > **Things to review in this PR**:
+          >  - Changelog correctness (preview below; see _Files Changed_ for the true reality)
+          >  - Version bumps
+          >  - That it targets the right release branch (\`$VERSION\` in this case!)
+          >
+          > Opened automatically by the \`test-release-prep\` workflow.
+          ---
+          $(cat this_release.md)
+          EOF
+          )
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$VERSION" \
+            --head "$PREP_BRANCH" \
+            --title "prep release: v$VERSION" \
+            --body "$BODY"
+
+      - name: Done
+        run: |
+          if [ '${{ steps.vars.outputs.dry_run }}' = 'true' ]; then
+            echo "Dry-run complete.  No PR opened."
+          else
+            echo "Prep PR opened from $PREP_BRANCH into ${{ steps.vars.outputs.version }}."
+          fi

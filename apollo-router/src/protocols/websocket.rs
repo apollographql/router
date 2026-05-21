@@ -438,6 +438,8 @@ where
                 let mut interval =
                     tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                // the error type must match the sink
+                #[allow(clippy::result_large_err)]
                 let mut heartbeat_stream = IntervalStream::new(interval)
                     .map(|_| Ok(ClientMessage::Ping { payload: None }))
                     .take_until(close_sentinel);
@@ -791,7 +793,18 @@ mod tests {
                        "It should be no pending messages"
                    );
 
-                   tokio::time::sleep(duration).await;
+                   // Use `advance` (deterministic) rather than `sleep` (which can auto-advance
+                   // further while we await network I/O below, firing extra heartbeat ticks
+                   // and racing the "no pending messages" assertion that follows).
+                   tokio::time::advance(duration).await;
+
+                   // Resume real time BEFORE awaiting the network read of the heartbeat ping.
+                   // While paused, awaiting I/O can trigger tokio's idle auto-advance, which
+                   // would cause the client's heartbeat interval to tick again (every 60s of
+                   // virtual time) and produce additional pending messages. Once resumed, the
+                   // next interval tick is 60s of real time away, well past the test lifetime.
+                   tokio::time::resume();
+
                    let ping_message = socket.next().await.unwrap().unwrap();
                    assert_eq!(ping_message, AxumWsMessage::text(
                        serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
@@ -801,7 +814,6 @@ mod tests {
                        socket.next().now_or_never().is_none(),
                        "It should be no pending messages"
                    );
-                   tokio::time::resume();
                 }
 
                 socket

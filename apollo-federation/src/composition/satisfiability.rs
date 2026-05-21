@@ -10,10 +10,11 @@ use tracing::instrument;
 use tracing::trace;
 
 use crate::api_schema;
+use crate::composition::CompositionFailure;
+use crate::composition::CompositionOptions;
 use crate::composition::satisfiability::validation_traversal::ValidationTraversal;
 use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::merger::merge::CompositionOptions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::build_supergraph_api_query_graph;
@@ -23,26 +24,31 @@ use crate::supergraph::Merged;
 use crate::supergraph::Satisfiable;
 use crate::supergraph::Supergraph;
 
-#[instrument(skip(supergraph))]
+#[instrument(skip(supergraph, options))]
 pub fn validate_satisfiability(
     mut supergraph: Supergraph<Merged>,
-) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    options: &CompositionOptions,
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let supergraph_schema = supergraph.schema().clone();
     let mut errors = vec![];
     let mut hints = supergraph.hints_mut().drain(..).collect();
-    validate_satisfiability_inner(supergraph, &mut errors, &mut hints).map_err(|e| {
-        vec![CompositionError::InternalError {
-            message: e.to_string(),
-        }]
-    })?;
+    if let Err(e) = validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints) {
+        return Err(CompositionFailure {
+            errors: vec![CompositionError::InternalError {
+                message: e.to_string(),
+            }],
+            hints,
+        });
+    }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(CompositionFailure { errors, hints });
     }
     Ok(Supergraph::<Satisfiable>::new(supergraph_schema, hints))
 }
 
 fn validate_satisfiability_inner(
     supergraph: Supergraph<Merged>,
+    options: &CompositionOptions,
     errors: &mut Vec<CompositionError>,
     hints: &mut Vec<CompositionHint>,
 ) -> Result<(), FederationError> {
@@ -64,8 +70,7 @@ fn validate_satisfiability_inner(
         supergraph_schema.clone(),
         Arc::new(api_schema_query_graph),
         Arc::new(federated_query_graph),
-        // TODO: Pass composition options through once upstream function APIs have been updated.
-        &Default::default(),
+        options,
         errors,
         hints,
     )?;
@@ -203,6 +208,7 @@ type T implements I
     #[test]
     fn test_satisfiability_basic() {
         let supergraph = Supergraph::parse(TEST_SUPERGRAPH).unwrap();
-        _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
+        _ = validate_satisfiability(supergraph, &CompositionOptions::default())
+            .expect("Supergraph should be satisfiable");
     }
 }

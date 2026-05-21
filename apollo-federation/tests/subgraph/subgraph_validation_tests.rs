@@ -485,7 +485,51 @@ mod fieldset_based_directives {
             err,
             [(
                 "REQUIRES_INVALID_FIELDS",
-                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T". If the field is defined in another subgraph, you need to add it to this subgraph with @external."#,
+                r#"[S] On field "T.g", for @requires(fields: "f b"): Cannot query field "b" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_key() {
+        let schema_str = r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id unknown") {
+                id: ID!
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "KEY_INVALID_FIELDS",
+                r#"[S] On type "T", for @key(fields: "id unknown"): Cannot query field "unknown" on type "T" (the field should either be added to this subgraph or, if it should not be resolved by this subgraph, you need to add it to this subgraph with @external)."#,
+            )]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_provides() {
+        let schema_str = r#"
+            type Query {
+                t: T @provides(fields: "unknown")
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+            }
+        "#;
+        let err = build_for_errors(schema_str);
+
+        assert_errors!(
+            err,
+            [(
+                "PROVIDES_INVALID_FIELDS",
+                r#"[S] On field "Query.t", for @provides(fields: "unknown"): Cannot query field "unknown" on type "T" (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."#,
             )]
         );
     }
@@ -883,7 +927,7 @@ mod custom_error_message_for_misnamed_directives {
    │                            ─────────┬─────────
    │                                     ╰─────────── directive not defined
 ───╯
-Did you mean "@key"?"#,
+ Did you mean "@key"?"#,
                     ),
                     (
                         "INVALID_GRAPHQL",
@@ -905,7 +949,7 @@ Did you mean "@key"?"#,
    │                                     ────┬────
    │                                         ╰────── directive not defined
 ───╯
-Did you mean "@shareable"?{}"#,
+ Did you mean "@shareable"?{}"#,
                             fed_ver.extra_msg
                         ),
                     ),
@@ -992,6 +1036,22 @@ mod link_handling_tests {
     use test_log::test;
 
     use super::*;
+
+    /// `apollo-compiler` / Ariadne may change box-drawing or span formatting; the stable contract is
+    /// the GraphQL validation message for duplicate non-repeatable `@key` applications.
+    fn assert_non_repeatable_key_duplicate_error(errors: &[(String, String)]) {
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got {errors:#?}"
+        );
+        assert_eq!(errors[0].0, "INVALID_GRAPHQL");
+        let msg = &errors[0].1;
+        assert!(
+            msg.contains("non-repeatable directive key can only be used once per location"),
+            "unexpected diagnostic:\n{msg}"
+        );
+    }
 
     // There are a few whitespace differences between this and the JS version, but the more important difference is that
     // the links are added as a new extension instead of being attached to the top-level schema definition. We may need
@@ -1504,42 +1564,13 @@ type Query {
         "#;
 
         // Test for fed2 (with @key being @link-ed)
-        assert_errors!(
-            build_for_errors(doc),
-            [(
-                "INVALID_GRAPHQL",
-                r###"
-                [S] Error: non-repeatable directive key can only be used once per location
-                   ╭─[ S:2:39 ]
-                   │
-                 2 │             type T @key(fields: "k1") @key(fields: "k2") {
-                   │                    ──┬─               ─────────┬────────  
-                   │                      ╰──────────────────────────────────── directive `@key` first called here
-                   │                                                │          
-                   │                                                ╰────────── directive `@key` called again here
-                ───╯
-                "###
-            )]
-        );
+        assert_non_repeatable_key_duplicate_error(&build_for_errors(doc));
 
         // Test for fed1
-        assert_errors!(
-            build_for_errors_with_option(doc, BuildOption::AsIs),
-            [(
-                "INVALID_GRAPHQL",
-                r###"
-                [S] Error: non-repeatable directive key can only be used once per location
-                   ╭─[ S:2:39 ]
-                   │
-                 2 │             type T @key(fields: "k1") @key(fields: "k2") {
-                   │                    ──┬─               ─────────┬────────  
-                   │                      ╰──────────────────────────────────── directive `@key` first called here
-                   │                                                │          
-                   │                                                ╰────────── directive `@key` called again here
-                ───╯
-                "###
-            )]
-        );
+        assert_non_repeatable_key_duplicate_error(&build_for_errors_with_option(
+            doc,
+            BuildOption::AsIs,
+        ));
     }
 }
 

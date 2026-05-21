@@ -296,7 +296,7 @@ impl QueryPlanner {
                 let is_interface_object = query_graph
                     .subgraphs()
                     .map(|(_name, schema)| {
-                        let Some(position) = schema.try_get_type(position.type_name.clone()) else {
+                        let Some(position) = schema.try_get_type(&position.type_name) else {
                             return Ok(false);
                         };
                         schema.is_interface_object_type(position)
@@ -317,7 +317,7 @@ impl QueryPlanner {
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
             let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
-                match subgraph.try_get_type(position.type_name().clone())? {
+                match subgraph.try_get_type(position.type_name())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
                     // "stand-in" for all possible runtime types, they don't create inconsistencies by themselves
@@ -605,7 +605,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
         supergraph_schema
             .schema()
             .root_operation(operation.root_kind.into())
-            .and_then(|name| supergraph_schema.get_type(name.clone()).ok())
+            .and_then(|name| supergraph_schema.get_type(name).ok())
             .and_then(|ty| ty.try_into().ok())
     } else {
         None
