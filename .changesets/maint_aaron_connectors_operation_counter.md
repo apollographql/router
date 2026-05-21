@@ -10,4 +10,4 @@ The test issues `query { users { id name username } }` against a mocked subgraph
 
 The fix swaps the positional matcher list for the existing `Plan::Sequence(Plan::Fetch, Plan::Parallel(...))` helper — the same pattern already used by `test_root_field_plus_entity_plus_requires` and `test_entity_references` for exactly this scenario. The parallel branch matches by set membership rather than position, so request ordering between the two entity fetches no longer affects the result. The counter assertion is unchanged.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9488
