@@ -548,8 +548,14 @@ mod unix_tests {
         //
         // Draining is unconditional (both cases) because the 431 path either
         // has no body or has a trivially small one, so the await is essentially
-        // free; the conditional would just be noise.
-        let _ = body.collect().await;
+        // free; the conditional would just be noise. Bound the drain itself
+        // with a 5 s timeout and panic loudly on error/timeout so a real bug
+        // here surfaces instead of being silently swallowed by `let _ =`.
+        match tokio::time::timeout(Duration::from_secs(5), body.collect()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!("body drain error (non-fatal): {e:?}"),
+            Err(_) => panic!("body drain timed out after 5s (non-fatal)"),
+        }
 
         // Drop the h2 sender before shutdown so the spawned `conn` task
         // observes the local-half close and the router can drain. Even then
