@@ -1649,7 +1649,7 @@ impl IntegrationTest {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        self.dump_stack_traces();
+        self.dump_stack_traces().await;
         panic!(
             "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
             logs = self.logs.join("\n")
@@ -1703,7 +1703,7 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv()
                 && line.contains(msg)
             {
-                self.dump_stack_traces();
+                self.dump_stack_traces().await;
                 panic!(
                     "'{msg}' detected in logs. Log dump below:\n\n{logs}",
                     logs = self.logs.join("\n")
@@ -2076,7 +2076,7 @@ impl IntegrationTest {
             }
         }
 
-        self.dump_stack_traces();
+        self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 
@@ -2089,33 +2089,55 @@ impl IntegrationTest {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn dump_stack_traces(&self) {
-        if let Ok(trace) = rstack::TraceOptions::new()
-            .symbols(true)
-            .thread_names(true)
-            .trace(self.pid() as u32)
-        {
-            println!("dumped stack traces");
-            for thread in trace.threads() {
-                println!(
-                    "thread id: {}, name: {}",
-                    thread.id(),
-                    thread.name().unwrap_or("<unknown>")
-                );
-
-                for frame in thread.frames() {
+    pub async fn dump_stack_traces(&self) {
+        // rstack uses PTRACE_ATTACH under the hood with no internal timeout.
+        // If the target is in TASK_UNINTERRUPTIBLE or has wedged signal
+        // handling, the attach blocks indefinitely — outliving the panic the
+        // caller was about to fire and letting nextest's slow-timeout kill
+        // the whole process without surfacing the original deadline message.
+        // Bound the diagnostic on a blocking thread so the caller's panic
+        // always gets to run.
+        let pid = self.pid() as u32;
+        let trace_fut = tokio::task::spawn_blocking(move || {
+            rstack::TraceOptions::new()
+                .symbols(true)
+                .thread_names(true)
+                .trace(pid)
+        });
+        match tokio::time::timeout(Duration::from_secs(10), trace_fut).await {
+            Ok(Ok(Ok(trace))) => {
+                println!("dumped stack traces");
+                for thread in trace.threads() {
                     println!(
-                        "  {}",
-                        frame.symbol().map(|s| s.name()).unwrap_or("<unknown>")
+                        "thread id: {}, name: {}",
+                        thread.id(),
+                        thread.name().unwrap_or("<unknown>")
                     );
+
+                    for frame in thread.frames() {
+                        println!(
+                            "  {}",
+                            frame.symbol().map(|s| s.name()).unwrap_or("<unknown>")
+                        );
+                    }
                 }
             }
-        } else {
-            println!("failed to dump stack trace");
+            Ok(Ok(Err(_))) => {
+                println!("failed to dump stack trace");
+            }
+            Ok(Err(_)) => {
+                println!("dump_stack_traces blocking task panicked");
+            }
+            Err(_) => {
+                println!(
+                    "dump_stack_traces timed out after 10s — likely wedged child; \
+                     the panic that follows is authoritative"
+                );
+            }
         }
     }
     #[cfg(not(target_os = "linux"))]
-    pub fn dump_stack_traces(&self) {}
+    pub async fn dump_stack_traces(&self) {}
 
     #[allow(dead_code)]
     pub(crate) fn force_flush(&self) {
