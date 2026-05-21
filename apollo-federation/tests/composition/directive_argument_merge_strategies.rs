@@ -31,9 +31,9 @@ mod tests {
 
                 type T
                   @key(fields: "k")
-                  @cost(weight: "3")
+                  @cost(weight: 3)
                 {
-                    k: ID @cost(weight: "1")
+                    k: ID @cost(weight: 1)
                 }
                 "#,
         };
@@ -43,11 +43,11 @@ mod tests {
             type_defs: r#"
                 type T
                   @key(fields: "k")
-                  @cost(weight: "2")
+                  @cost(weight: 2)
                 {
-                    k: ID @cost(weight: "5")
+                    k: ID @cost(weight: 5)
                     a: Int
-                    b: String @cost(weight: "4")
+                    b: String @cost(weight: 4)
                 }
                 "#,
         };

@@ -17,5 +17,5 @@ subgraphs:
 
         type T {
           id: ID!
-          f: String @cost(weight: "10")
+          f: String @cost(weight: 10)
         }

@@ -33,7 +33,7 @@ directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINIT
 
 directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
-directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
@@ -90,7 +90,7 @@ type Query @join__type(graph: ONE) @join__type(graph: TWO) {
 }
 
 type T @join__type(graph: ONE) @custom2 {
-  field: String @join__field(graph: ONE, type: "String") @cost(weight: 5) @custom3
+  field: String @join__field(graph: ONE, type: "String") @cost(weight: "5") @custom3
 }
 
 type X @join__type(graph: TWO, key: "id") {

@@ -183,24 +183,24 @@ fn subgraph_with_cost() -> Subgraph<Initial> {
         @link(url: "https://specs.apollo.dev/federation/v2.9")
         @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
 
-    enum AorB @cost(weight: "15") {
+    enum AorB @cost(weight: 15) {
       A
       B
     }
 
     input InputTypeWithCost {
-      somethingWithCost: Int @cost(weight: "20")
+      somethingWithCost: Int @cost(weight: 20)
     }
 
-    scalar ExpensiveInt @cost(weight: "30")
+    scalar ExpensiveInt @cost(weight: 30)
 
-    type ExpensiveObject @cost(weight: "40") {
+    type ExpensiveObject @cost(weight: 40) {
       id: ID
     }
 
     type Query {
-      fieldWithCost: Int @cost(weight: "5")
-      argWithCost(arg: Int @cost(weight: "10")): Int
+      fieldWithCost: Int @cost(weight: 5)
+      argWithCost(arg: Int @cost(weight: 10)): Int
       enumWithCost: AorB
       inputWithCost(someInput: InputTypeWithCost): Int
       scalarWithCost: ExpensiveInt
@@ -235,24 +235,24 @@ fn subgraph_with_renamed_cost() -> Subgraph<Initial> {
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
 
-    enum AorB @renamedCost(weight: "15") {
+    enum AorB @renamedCost(weight: 15) {
       A
       B
     }
 
     input InputTypeWithCost {
-      somethingWithCost: Int @renamedCost(weight: "20")
+      somethingWithCost: Int @renamedCost(weight: 20)
     }
 
-    scalar ExpensiveInt @renamedCost(weight: "30")
+    scalar ExpensiveInt @renamedCost(weight: 30)
 
-    type ExpensiveObject @renamedCost(weight: "40") {
+    type ExpensiveObject @renamedCost(weight: 40) {
       id: ID
     }
 
     type Query {
-      fieldWithCost: Int @renamedCost(weight: "5")
-      argWithCost(arg: Int @renamedCost(weight: "10")): Int
+      fieldWithCost: Int @renamedCost(weight: 5)
+      argWithCost(arg: Int @renamedCost(weight: 10)): Int
       enumWithCost: AorB
       inputWithCost(someInput: InputTypeWithCost): Int
       scalarWithCost: ExpensiveInt
@@ -283,24 +283,24 @@ fn subgraph_with_cost_from_federation_spec() -> Subgraph<Initial> {
         "subgraphWithCost",
         "",
         r#"
-    enum AorB @cost(weight: "15") {
+    enum AorB @cost(weight: 15) {
       A
       B
     }
 
     input InputTypeWithCost {
-      somethingWithCost: Int @cost(weight: "20")
+      somethingWithCost: Int @cost(weight: 20)
     }
 
-    scalar ExpensiveInt @cost(weight: "30")
+    scalar ExpensiveInt @cost(weight: 30)
 
-    type ExpensiveObject @cost(weight: "40") {
+    type ExpensiveObject @cost(weight: 40) {
       id: ID
     }
 
     type Query {
-      fieldWithCost: Int @cost(weight: "5")
-      argWithCost(arg: Int @cost(weight: "10")): Int
+      fieldWithCost: Int @cost(weight: 5)
+      argWithCost(arg: Int @cost(weight: 10)): Int
       enumWithCost: AorB
       inputWithCost(someInput: InputTypeWithCost): Int
       scalarWithCost: ExpensiveInt
@@ -330,24 +330,24 @@ fn subgraph_with_renamed_cost_from_federation_spec() -> Subgraph<Initial> {
     Subgraph::parse("subgraphWithCost", "", r#"
       extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: [{ name: "@cost", as: "@renamedCost" }])
 
-      enum AorB @renamedCost(weight: "15") {
+      enum AorB @renamedCost(weight: 15) {
         A
         B
       }
 
       input InputTypeWithCost {
-        somethingWithCost: Int @renamedCost(weight: "20")
+        somethingWithCost: Int @renamedCost(weight: 20)
       }
 
-      scalar ExpensiveInt @renamedCost(weight: "30")
+      scalar ExpensiveInt @renamedCost(weight: 30)
 
-      type ExpensiveObject @renamedCost(weight: "40") {
+      type ExpensiveObject @renamedCost(weight: 40) {
         id: ID
       }
 
       type Query {
-        fieldWithCost: Int @renamedCost(weight: "5")
-        argWithCost(arg: Int @renamedCost(weight: "10")): Int
+        fieldWithCost: Int @renamedCost(weight: 5)
+        argWithCost(arg: Int @renamedCost(weight: 10)): Int
         enumWithCost: AorB
         inputWithCost(someInput: InputTypeWithCost): Int
         scalarWithCost: ExpensiveInt
@@ -580,7 +580,7 @@ fn errors_when_subgraphs_use_different_names() {
             @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
 
         type Query {
-            field1: Int @cost(weight: "5")
+            field1: Int @cost(weight: 5)
         }
     "#,
     )
@@ -592,7 +592,7 @@ fn errors_when_subgraphs_use_different_names() {
             @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{ name: "@cost", as: "@renamedCost" }])
 
         type Query {
-            field2: Int @renamedCost(weight: "10")
+            field2: Int @renamedCost(weight: 10)
         }
     "#).unwrap();
     let errors = compose(vec![
@@ -622,7 +622,7 @@ fn hints_when_merging_cost_arguments() {
             @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@cost", "@shareable"])
 
         type Query {
-            sharedWithCost: Int @shareable @cost(weight: "0.5")
+            sharedWithCost: Int @shareable @cost(weight: "5")
         }
     "#,
     )
@@ -636,7 +636,7 @@ fn hints_when_merging_cost_arguments() {
             @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@cost", "@shareable"])
 
         type Query {
-            sharedWithCost: Int @shareable @cost(weight: "10.25")
+            sharedWithCost: Int @shareable @cost(weight: "10")
         }
     "#,
     )
@@ -659,7 +659,7 @@ fn hints_when_merging_cost_arguments() {
         .iter()
         .find(|d| d.name == "cost")
         .expect("Expected @cost directive to be present on Query.sharedWithCost");
-    assert_eq!(cost_directive.to_string(), r#"@cost(weight: "10.25")"#);
+    assert_eq!(cost_directive.to_string(), r#"@cost(weight: "10")"#);
 }
 
 #[test]
