@@ -1,0 +1,5 @@
+---
+source: apollo-federation/tests/composition/compose_directive.rs
+expression: "r#\"shared_field: shared: String @foo(name: \"test\")\"#"
+---
+shared_field: shared: String @foo(name: "test")
