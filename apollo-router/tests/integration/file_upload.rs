@@ -1447,7 +1447,10 @@ mod operation_body_timeout {
         // pending request body. The fix is to cancel that body once the
         // response is in hand, drop the reqwest client to close the pooled
         // connection, then signal shutdown to the router.
-        let mut router = IntegrationTest::builder().config(STRICT_CONFIG).build().await;
+        let mut router = IntegrationTest::builder()
+            .config(STRICT_CONFIG)
+            .build()
+            .await;
         router.start().await;
         router.assert_started().await;
         let url = format!("http://{}", router.bind_address());
