@@ -1636,7 +1636,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Windows runners spawn subprocesses and dispatch filesystem-watch
+        // events noticeably slower than Unix, so reload-driven waits run
+        // close to the 30 s ceiling. Give Windows extra headroom.
+        let deadline = Instant::now()
+            + if cfg!(windows) {
+                Duration::from_secs(60)
+            } else {
+                Duration::from_secs(30)
+            };
         loop {
             while let Ok(line) = self.stdio_rx.try_recv() {
                 self.logs.push(line.clone());
