@@ -31,9 +31,9 @@ mod tests {
 
                 type T
                   @key(fields: "k")
-                  @cost(weight: 3)
+                  @cost(weight: "3")
                 {
-                    k: ID @cost(weight: 1)
+                    k: ID @cost(weight: "1")
                 }
                 "#,
         };
@@ -43,11 +43,11 @@ mod tests {
             type_defs: r#"
                 type T
                   @key(fields: "k")
-                  @cost(weight: 2)
+                  @cost(weight: "2")
                 {
-                    k: ID @cost(weight: 5)
+                    k: ID @cost(weight: "5")
                     a: Int
-                    b: String @cost(weight: 4)
+                    b: String @cost(weight: "4")
                 }
                 "#,
         };
@@ -87,7 +87,7 @@ mod tests {
             .iter()
             .find(|d| d.name == "cost")
             .expect("@cost directive should be present on T");
-        assert_eq!(t_cost_directive.to_string(), r#"@cost(weight: 3)"#);
+        assert_eq!(t_cost_directive.to_string(), r#"@cost(weight: "3")"#);
 
         let k = coord!(T.k)
             .lookup_field(schema)
@@ -97,7 +97,7 @@ mod tests {
             .iter()
             .find(|d| d.name == "cost")
             .expect("@cost directive should be present on T.k");
-        assert_eq!(k_cost_directive.to_string(), r#"@cost(weight: 5)"#);
+        assert_eq!(k_cost_directive.to_string(), r#"@cost(weight: "5")"#);
 
         let b = coord!(T.b)
             .lookup_field(schema)
@@ -107,7 +107,7 @@ mod tests {
             .iter()
             .find(|d| d.name == "cost")
             .expect("@cost directive should be present on T.b");
-        assert_eq!(b_cost_directive.to_string(), r#"@cost(weight: 4)"#);
+        assert_eq!(b_cost_directive.to_string(), r#"@cost(weight: "4")"#);
     }
 
     #[test]

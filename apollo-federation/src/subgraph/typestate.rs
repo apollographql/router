@@ -27,6 +27,7 @@ use crate::error::SingleFederationError;
 use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::cost_spec_definition::CostSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
@@ -915,6 +916,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     // Now we fill in the missing definitions
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
+    CostSpecDefinition::normalize_cost_directive_arguments(&mut schema);
 
     // Since we backfilled definitions, we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
