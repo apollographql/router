@@ -4,4 +4,4 @@ The router’s @cost directive originally only accepted integer weight arguments
 
 With this change, @cost may be written as @cost(weight: 0.5) or @cost(weight: "0.5") and the router treats both as a floating‑point value. Backwards‑compatibility is preserved for integer weights. The GraphQL schema has been updated to advertise Float as the argument type, and the weight is stored in an f64 internally. Validation ensures the value is non‑negative and finite. Unit tests verify that fractional weights reduce the calculated field cost accordingly.
 
-By @ashokk1990 in https://github.com/apollographql/router/pull/9483
+By ashokk1990 [@ashokk1990](https://github.com/ashokk1990)  in https://github.com/apollographql/router/pull/9484
