@@ -6,4 +6,4 @@ The test built a single-shot streaming body and posted it through the default `r
 
 The fix builds the request with `reqwest::Client::builder().pool_max_idle_per_host(0)`, matching the existing `no_keepalive_reqwest_client` pattern already used in `tests/integration/subgraph_response.rs` and `tests/integration/coprocessor.rs` for the same race. The test now closes its TCP connection as soon as the response is consumed, so the router exits within its normal shutdown window.
 
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/0
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9490
