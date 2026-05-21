@@ -66,16 +66,13 @@ async fn wait_for_redis_responsive(per_attempt: Duration, total: Duration) {
         // Build a fresh client each attempt so we exercise the same cold-start path
         // the router's pool exercises, not a long-lived warm connection.
         let attempt = async {
-            let config = fred::prelude::Config::from_url(REDIS_URL)
-                .map_err(|e| format!("config: {e}"))?;
+            let config =
+                fred::prelude::Config::from_url(REDIS_URL).map_err(|e| format!("config: {e}"))?;
             let client = Builder::from_config(config)
                 .build()
                 .map_err(|e| format!("build: {e}"))?;
             client.init().await.map_err(|e| format!("init: {e}"))?;
-            let _: () = client
-                .ping(None)
-                .await
-                .map_err(|e| format!("ping: {e}"))?;
+            let _: () = client.ping(None).await.map_err(|e| format!("ping: {e}"))?;
             // Best-effort tidy-up; ignore errors during teardown.
             let _ = client.quit().await;
             Ok::<(), String>(())
