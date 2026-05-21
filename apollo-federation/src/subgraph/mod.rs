@@ -758,7 +758,7 @@ directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD
 directive @federation__policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
-directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @federation__cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 enum link__Purpose {
   """

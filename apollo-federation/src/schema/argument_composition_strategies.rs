@@ -9,6 +9,7 @@ use apollo_compiler::schema::Type;
 use apollo_compiler::ty;
 use itertools::Itertools;
 
+use crate::link::cost_spec_definition::CostWeightValue;
 use crate::schema::FederationSchema;
 
 #[derive(Clone, Copy, Debug)]
@@ -168,6 +169,15 @@ fn max_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
         // PORT_NOTE: JS uses `Math.max` which returns `-Infinity` for empty values.
         //            Here, we use `i32::MIN`.
         .unwrap_or_else(|| Value::Int(i32::MIN.into()))
+}
+
+fn max_numeric_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
+    values
+        .filter_map(|val| val.cost_weight().map(|weight| (val, weight)))
+        .max_by(|x, y| x.1.total_cmp(&y.1))
+        .map(|(val, _)| val)
+        .cloned()
+        .unwrap_or_else(|| Value::String(f64::NEG_INFINITY.to_string()))
 }
 
 fn min_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
@@ -368,7 +378,7 @@ impl MaxArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![ty!(Int!)],
+                supported_types: vec![ty!(Int!), ty!(String!)],
             },
         }
     }
@@ -384,7 +394,7 @@ impl ArgumentComposition for MaxArgumentCompositionStrategy {
     }
 
     fn merge_values(&self, values: &[Value]) -> Option<Value> {
-        max_int_value(values.iter()).into()
+        max_numeric_value(values.iter()).into()
     }
 }
 

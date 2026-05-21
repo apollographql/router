@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/extract_subgraphs.rs
+assertion_line: 698
 expression: snapshot
 ---
 subgraph-a
@@ -42,7 +43,7 @@ directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT |
 
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 
-directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @federation__cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
@@ -122,7 +123,7 @@ directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT |
 
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 
-directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @federation__cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 

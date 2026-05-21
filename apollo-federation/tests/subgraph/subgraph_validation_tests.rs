@@ -1889,7 +1889,7 @@ mod cost_tests {
             }
 
             interface A {
-                x: Int @cost(weight: 10)
+                x: Int @cost(weight: "10")
             }
         "#;
 

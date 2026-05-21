@@ -267,7 +267,7 @@ fn extracts_demand_control_directives() {
           query: Query
         }
         
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+        directive @cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
         
         directive @cost__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
         
@@ -291,7 +291,7 @@ fn extracts_demand_control_directives() {
         
         enum AorB
           @join__type(graph: SUBGRAPHWITHCOST)
-          @cost(weight: 15)
+          @cost(weight: "15")
         {
           A @join__enumValue(graph: SUBGRAPHWITHCOST)
           B @join__enumValue(graph: SUBGRAPHWITHCOST)
@@ -299,11 +299,11 @@ fn extracts_demand_control_directives() {
         
         scalar ExpensiveInt
           @join__type(graph: SUBGRAPHWITHCOST)
-          @cost(weight: 30)
+          @cost(weight: "30")
         
         type ExpensiveObject
           @join__type(graph: SUBGRAPHWITHCOST)
-          @cost(weight: 40)
+          @cost(weight: "40")
         {
           id: ID
         }
@@ -317,7 +317,7 @@ fn extracts_demand_control_directives() {
         input InputTypeWithCost
           @join__type(graph: SUBGRAPHWITHCOST)
         {
-          somethingWithCost: Int @cost(weight: 20)
+          somethingWithCost: Int @cost(weight: "20")
         }
         
         input join__ContextArgument {
@@ -356,8 +356,8 @@ fn extracts_demand_control_directives() {
           @join__type(graph: SUBGRAPHWITHCOST)
           @join__type(graph: SUBGRAPHWITHLISTSIZE)
         {
-          fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: 5)
-          argWithCost(arg: Int @cost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
+          fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: "5")
+          argWithCost(arg: Int @cost(weight: "10")): Int @join__field(graph: SUBGRAPHWITHCOST)
           enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
           inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
           scalarWithCost: ExpensiveInt @join__field(graph: SUBGRAPHWITHCOST)
@@ -413,13 +413,13 @@ fn extracts_renamed_demand_control_directives() {
       
       directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
       
-      directive @renamedCost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+      directive @renamedCost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
       
       directive @renamedListSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
       
       enum AorB
         @join__type(graph: SUBGRAPHWITHCOST)
-        @renamedCost(weight: 15)
+        @renamedCost(weight: "15")
       {
         A @join__enumValue(graph: SUBGRAPHWITHCOST)
         B @join__enumValue(graph: SUBGRAPHWITHCOST)
@@ -427,11 +427,11 @@ fn extracts_renamed_demand_control_directives() {
       
       scalar ExpensiveInt
         @join__type(graph: SUBGRAPHWITHCOST)
-        @renamedCost(weight: 30)
+        @renamedCost(weight: "30")
       
       type ExpensiveObject
         @join__type(graph: SUBGRAPHWITHCOST)
-        @renamedCost(weight: 40)
+        @renamedCost(weight: "40")
       {
         id: ID
       }
@@ -445,7 +445,7 @@ fn extracts_renamed_demand_control_directives() {
       input InputTypeWithCost
         @join__type(graph: SUBGRAPHWITHCOST)
       {
-        somethingWithCost: Int @renamedCost(weight: 20)
+        somethingWithCost: Int @renamedCost(weight: "20")
       }
       
       input join__ContextArgument {
@@ -484,8 +484,8 @@ fn extracts_renamed_demand_control_directives() {
         @join__type(graph: SUBGRAPHWITHCOST)
         @join__type(graph: SUBGRAPHWITHLISTSIZE)
       {
-        fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @renamedCost(weight: 5)
-        argWithCost(arg: Int @renamedCost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
+        fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @renamedCost(weight: "5")
+        argWithCost(arg: Int @renamedCost(weight: "10")): Int @join__field(graph: SUBGRAPHWITHCOST)
         enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
         inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
         scalarWithCost: ExpensiveInt @join__field(graph: SUBGRAPHWITHCOST)

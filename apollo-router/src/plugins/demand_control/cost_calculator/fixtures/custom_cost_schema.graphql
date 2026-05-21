@@ -6,7 +6,7 @@ schema
 }
 
 directive @cost(
-  weight: Int!
+  weight: String!
 ) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @join__directive(
@@ -67,19 +67,19 @@ type A @join__type(graph: SUBGRAPHWITHLISTSIZE) {
   id: ID
 }
 
-enum AorB @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 15) {
+enum AorB @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: "15") {
   A @join__enumValue(graph: SUBGRAPHWITHCOST)
   B @join__enumValue(graph: SUBGRAPHWITHCOST)
 }
 
-scalar ExpensiveInt @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 30)
+scalar ExpensiveInt @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: "30")
 
-type ExpensiveObject @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: 40) {
+type ExpensiveObject @join__type(graph: SUBGRAPHWITHCOST) @cost(weight: "40") {
   id: ID
 }
 
 input InputTypeWithCost @join__type(graph: SUBGRAPHWITHCOST) {
-  somethingWithCost: Int @cost(weight: 20)
+  somethingWithCost: Int @cost(weight: "20")
 }
 
 input join__ContextArgument {
@@ -119,8 +119,8 @@ enum link__Purpose {
 type Query
   @join__type(graph: SUBGRAPHWITHCOST)
   @join__type(graph: SUBGRAPHWITHLISTSIZE) {
-  fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: 5)
-  argWithCost(arg: Int @cost(weight: 10)): Int
+  fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: "5")
+  argWithCost(arg: Int @cost(weight: "10")): Int
     @join__field(graph: SUBGRAPHWITHCOST)
   enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
   inputWithCost(someInput: InputTypeWithCost): Int

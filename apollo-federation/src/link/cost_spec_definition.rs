@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -151,6 +152,87 @@ impl CostSpecDefinition {
         Ok(Directive { name, arguments })
     }
 
+    pub(crate) fn normalize_cost_directive_arguments(schema: &mut FederationSchema) {
+        let Some(cost_directive_name) = Self::cost_directive_name(schema) else {
+            return;
+        };
+        normalize_cost_schema_directives(
+            &mut schema.schema_mut().schema_definition.make_mut().directives,
+            &cost_directive_name,
+        );
+
+        for ty in schema.schema_mut().types.values_mut() {
+            match ty {
+                ExtendedType::Object(object) => {
+                    let object = object.make_mut();
+                    normalize_cost_schema_directives(&mut object.directives, &cost_directive_name);
+                    for field in object.fields.values_mut() {
+                        let field = field.make_mut();
+                        normalize_cost_ast_directives(&mut field.directives, &cost_directive_name);
+                        for argument in &mut field.arguments {
+                            normalize_cost_ast_directives(
+                                &mut argument.make_mut().directives,
+                                &cost_directive_name,
+                            );
+                        }
+                    }
+                }
+                ExtendedType::Interface(interface) => {
+                    let interface = interface.make_mut();
+                    normalize_cost_schema_directives(
+                        &mut interface.directives,
+                        &cost_directive_name,
+                    );
+                    for field in interface.fields.values_mut() {
+                        let field = field.make_mut();
+                        normalize_cost_ast_directives(&mut field.directives, &cost_directive_name);
+                        for argument in &mut field.arguments {
+                            normalize_cost_ast_directives(
+                                &mut argument.make_mut().directives,
+                                &cost_directive_name,
+                            );
+                        }
+                    }
+                }
+                ExtendedType::InputObject(input_object) => {
+                    let input_object = input_object.make_mut();
+                    normalize_cost_schema_directives(
+                        &mut input_object.directives,
+                        &cost_directive_name,
+                    );
+                    for field in input_object.fields.values_mut() {
+                        normalize_cost_ast_directives(
+                            &mut field.make_mut().directives,
+                            &cost_directive_name,
+                        );
+                    }
+                }
+                ExtendedType::Union(union_) => {
+                    normalize_cost_schema_directives(
+                        &mut union_.make_mut().directives,
+                        &cost_directive_name,
+                    );
+                }
+                ExtendedType::Scalar(scalar) => {
+                    normalize_cost_schema_directives(
+                        &mut scalar.make_mut().directives,
+                        &cost_directive_name,
+                    );
+                }
+                ExtendedType::Enum(enum_) => {
+                    let enum_ = enum_.make_mut();
+                    normalize_cost_schema_directives(&mut enum_.directives, &cost_directive_name);
+                    for value in enum_.values.values_mut() {
+                        normalize_cost_ast_directives(
+                            &mut value.make_mut().directives,
+                            &cost_directive_name,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     propagate_demand_control_directives!(
         propagate_demand_control_directives,
         DirectiveList,
@@ -270,7 +352,7 @@ impl CostSpecDefinition {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(Int!)),
+                    get_type: |_, _| Ok(ty!(String!)),
                     default_value: None,
                 },
                 composition_strategy: Some(ArgumentCompositionStrategy::Max),
@@ -286,7 +368,14 @@ impl CostSpecDefinition {
             ],
             Some(DirectiveCompositionOptions {
                 supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
-                static_argument_transform: None,
+                static_argument_transform: Some(Rc::new(|_, mut arguments| {
+                    if let Some(weight) = arguments.get_mut(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)
+                        && let Some(serialized_weight) = cost_weight_as_string(weight)
+                    {
+                        *weight = Value::String(serialized_weight);
+                    }
+                    arguments
+                })),
                 use_join_directive: false,
             }),
         )
@@ -376,12 +465,12 @@ pub(crate) static COST_VERSIONS: LazyLock<SpecDefinitions<CostSpecDefinition>> =
     });
 
 pub struct CostDirective {
-    weight: i32,
+    weight: f64,
 }
 
 impl CostDirective {
     pub fn weight(&self) -> f64 {
-        self.weight as f64
+        self.weight
     }
 
     pub(crate) fn from_directives(
@@ -391,7 +480,8 @@ impl CostDirective {
         directives
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
-            .to_i32()
+            .as_ref()
+            .cost_weight()
             .map(|weight| Self { weight })
     }
 
@@ -402,8 +492,62 @@ impl CostDirective {
         directives
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
-            .to_i32()
+            .as_ref()
+            .cost_weight()
             .map(|weight| Self { weight })
+    }
+}
+
+pub(crate) trait CostWeightValue {
+    fn cost_weight(&self) -> Option<f64>;
+}
+
+impl CostWeightValue for Value {
+    fn cost_weight(&self) -> Option<f64> {
+        match self {
+            Value::String(value) => value.parse::<f64>().ok(),
+            value => value.to_f64(),
+        }
+        .filter(|weight| weight.is_finite())
+    }
+}
+
+fn cost_weight_as_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(weight) => Some(weight.clone()),
+        Value::Int(_) | Value::Float(_) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn normalize_cost_directive(directive: &mut Directive, cost_directive_name: &Name) {
+    if &directive.name != cost_directive_name {
+        return;
+    }
+    if let Some(argument) = directive
+        .arguments
+        .iter_mut()
+        .find(|argument| argument.name == COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)
+    {
+        let argument = argument.make_mut();
+        if let Some(serialized_weight) = cost_weight_as_string(argument.value.as_ref()) {
+            argument.value = Node::new(Value::String(serialized_weight));
+        }
+    }
+}
+
+fn normalize_cost_schema_directives(
+    directives: &mut apollo_compiler::schema::DirectiveList,
+    cost_directive_name: &Name,
+) {
+    for directive in directives {
+        normalize_cost_directive(directive.make_mut(), cost_directive_name);
+    }
+}
+
+fn normalize_cost_ast_directives(directives: &mut DirectiveList, cost_directive_name: &Name) {
+    for directive in directives {
+        normalize_cost_directive(directive.make_mut(), cost_directive_name);
     }
 }
 

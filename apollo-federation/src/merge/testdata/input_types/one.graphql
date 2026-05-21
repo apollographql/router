@@ -54,7 +54,7 @@ directive @federation__requiresScopes(
 ) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
 directive @federation__cost(
-  weight: Int!
+  weight: String!
 ) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @federation__listSize(

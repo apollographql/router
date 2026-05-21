@@ -30,7 +30,7 @@ subgraphs:
         }
 
         type T @custom2 {
-          field: String @custom3 @cost(weight: 5)
+          field: String @custom3 @cost(weight: "5")
         }
 
         # bug fix: if a customer tries to define @defer this way, it should be ignored

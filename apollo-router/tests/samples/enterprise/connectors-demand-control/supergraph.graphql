@@ -9,7 +9,7 @@ schema
   query: Query
 }
 
-directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @cost(weight: String!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
@@ -70,5 +70,5 @@ type T
   @join__type(graph: CONNECTORS)
 {
   id: ID!
-  f: String @cost(weight: 10)
+  f: String @cost(weight: "10")
 }
