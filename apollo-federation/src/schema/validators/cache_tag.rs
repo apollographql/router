@@ -252,11 +252,12 @@ fn validate_args_selection(
                 })?;
 
         let type_name = field.inner_named_type();
-        let type_def = schema.get_type(type_name.clone()).map_err(|e| {
-            SingleFederationError::InvalidGraphQL {
-                message: e.to_string(),
-            }
-        })?;
+        let type_def =
+            schema
+                .get_type(type_name)
+                .map_err(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.to_string(),
+                })?;
         if !sel.is_leaf() {
             let type_def = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_def).map_err(
                 |_| SingleFederationError::CacheTagInvalidFormat {
@@ -473,11 +474,12 @@ fn build_selection_set(
             .map_err(|_| SingleFederationError::CacheTagInvalidFormat {
                 message: format!("cannot create selection set with \"{key}\""),
             })?;
-        let new_field_type_def = schema
-            .get_type(new_field.ty().inner_named_type().clone())
-            .map_err(|e| SingleFederationError::InvalidGraphQL {
-                message: e.to_string(),
-            })?;
+        let new_field_type_def =
+            schema
+                .get_type(new_field.ty().inner_named_type())
+                .map_err(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.to_string(),
+                })?;
 
         if !sel.is_leaf() {
             ObjectOrInterfaceTypeDefinitionPosition::try_from(new_field_type_def).map_err(
@@ -742,9 +744,9 @@ mod tests {
         assert_eq!(
             build_for_errors(SCHEMA),
             vec![
-                "cacheTag format is invalid: invalid path element at \"upc name\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"name upc\", which is not a single selection",
                 "cacheTag format is invalid: invalid path element at \"\", which is not a single selection",
-                "cacheTag format is invalid: invalid path element at \"first country\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"country first\", which is not a single selection",
             ]
         );
     }
