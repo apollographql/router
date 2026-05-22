@@ -1342,6 +1342,10 @@ mod test {
         assert_eq!(
             selector.on_response(res_single_error),
             Some(opentelemetry::Value::I64(1))
+        );
+    }
+
+    #[test]
     fn router_on_graphql_error_on_response() {
         use serde_json_bytes::Value;
 
