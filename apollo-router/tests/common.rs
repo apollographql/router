@@ -1656,13 +1656,13 @@ impl IntegrationTest {
         );
     }
 
-    /// Sync fn using a loop to println!() each log
     #[allow(dead_code)]
     pub fn logs(&mut self) -> Vec<String> {
         self.read_logs();
         self.logs.clone()
     }
 
+    /// Sync fn using a loop to println!() each log
     #[allow(dead_code)]
     pub fn print_logs(&self) {
         for line in &self.logs {

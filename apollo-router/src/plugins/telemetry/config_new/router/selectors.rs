@@ -348,20 +348,7 @@ impl Selector for RouterSelector {
                             let data: serde_json_bytes::Value =
                                 serde_json_bytes::to_value(errors).ok()?;
 
-                            let result = response_errors_count.find(&data);
-                            // JSONPath find returns:
-                            // - Array if multiple matches
-                            // - Single value (unwrapped) if one match
-                            // - Null if no matches
-                            let count = if let Some(arr) = result.as_array() {
-                                arr.len()
-                            } else if result.is_null() {
-                                0
-                            } else {
-                                // Single matched element (returned unwrapped)
-                                1
-                            };
-
+                            let count = response_errors_count.select(&data).count();
                             Some(opentelemetry::Value::I64(count as i64))
                         })
                 }),
@@ -622,6 +609,12 @@ impl Selector for RouterSelector {
                     | RouterSelector::RequestDuration { .. }
                     | RouterSelector::OnGraphQLError { .. }
                     | RouterSelector::ContextId { .. }
+                    // TODO: on_response_event is not yet wired in the router's streaming pipeline,
+                    // so these selectors only work for non-streaming (on: response) events.
+                    // See PR #9365 for the supergraph equivalent. Streaming support is a follow-up.
+                    | RouterSelector::ResponseErrors { .. }
+                    | RouterSelector::ResponseErrorsCount { .. }
+                    | RouterSelector::ResponseErrorsField { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -1456,6 +1449,27 @@ mod test {
         assert_eq!(
             selector.on_response_event(&(), &ctx),
             Some(opentelemetry::Value::Bool(false))
+        );
+
+        // Edge case: JSONPath selects a single match whose value is itself an array.
+        // $[0].locations selects the locations array of the first error — this should
+        // count as 1 match (one error touched), not as the length of the locations array.
+        let selector_locations = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[0].locations").unwrap(),
+        };
+        let res_with_locations = &crate::services::RouterResponse::fake_builder()
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Error with locations")
+                    .location(crate::graphql::Location { line: 1, column: 1 })
+                    .location(crate::graphql::Location { line: 2, column: 3 })
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_locations.on_response(res_with_locations),
+            Some(opentelemetry::Value::I64(1))
         );
     }
 }
