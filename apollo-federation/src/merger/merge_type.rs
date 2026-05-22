@@ -51,7 +51,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Union(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -62,7 +62,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Enum(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -73,7 +73,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
