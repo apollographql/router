@@ -464,7 +464,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                             let type_condition_in_supergraph_pos = self
                                 .parameters
                                 .supergraph_schema
-                                .get_type(type_condition_pos.type_name().clone())?;
+                                .get_type(type_condition_pos.type_name())?;
                             possible_runtime_types.insert(
                                 self.parameters.supergraph_schema.possible_runtime_types(
                                     type_condition_in_supergraph_pos.try_into()?,

@@ -734,7 +734,7 @@ impl Merger {
                     subgraphs_with_interface_obj
                         .insert(pos.type_name().clone(), subgraph.name.clone());
                 }
-                if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
+                if let Ok(previous) = self.merged.get_type(pos.type_name()) {
                     if expects_interface
                         && !matches!(previous, TypeDefinitionPosition::Interface(_))
                     {
@@ -761,7 +761,7 @@ impl Merger {
                 .get(type_name)
                 .cloned()
                 .unwrap_or_default();
-            if let Ok(mismatched_type) = self.merged.get_type(type_name.clone()) {
+            if let Ok(mismatched_type) = self.merged.get_type(type_name) {
                 self.report_mismatched_type_definitions(&mismatched_type, &subgraphs);
             }
         }
@@ -777,12 +777,12 @@ impl Merger {
             let mut found_interface = false;
             let mut subgraphs_with_type = IndexSet::new();
             for subgraph in &self.subgraphs {
-                let type_in_subgraph = subgraph.schema().get_type(type_name.clone());
-                if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
+                let type_in_subgraph = subgraph.schema().try_get_type(type_name);
+                if matches!(type_in_subgraph, Some(TypeDefinitionPosition::Interface(_))) {
                     found_interface = true;
                     break;
                 }
-                if type_in_subgraph.is_ok() {
+                if type_in_subgraph.is_some() {
                     subgraphs_with_type.insert(subgraph.name.clone());
                 }
             }
@@ -829,14 +829,7 @@ impl Merger {
             .subgraphs
             .iter()
             .enumerate()
-            .map(|(idx, sg)| {
-                (
-                    idx,
-                    sg.schema()
-                        .get_type(mismatched_type.type_name().clone())
-                        .ok(),
-                )
-            })
+            .map(|(idx, sg)| (idx, sg.schema().get_type(mismatched_type.type_name()).ok()))
             .collect();
         let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
             let type_kind_description =
@@ -1030,7 +1023,7 @@ impl Merger {
     }
 
     fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
-        let dest = self.merged.get_type(type_def.clone())?;
+        let dest = self.merged.get_type(type_def)?;
         let dest: ObjectOrInterfaceTypeDefinitionPosition = dest.try_into().map_err(|_| {
             internal_error!(
                 "Expected type {} to be an Object or Interface type, but it is not",
@@ -1095,8 +1088,7 @@ impl Merger {
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
             let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
                 .schema()
-                .get_type(obj.type_name.clone())
-                .ok()
+                .try_get_type(&obj.type_name)
                 .and_then(|ty| ty.try_into().ok());
             subgraph_types.insert(idx, maybe_ty);
         }

@@ -42,7 +42,7 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
 
         let input_type = self
             .original_schema
-            .get_type(field_def.ty.inner_named_type().clone())?;
+            .get_type(field_def.ty.inner_named_type())?;
         match input_type {
             TypeDefinitionPosition::Scalar(pos) => {
                 try_pre_insert!(self.to_schema, pos)?;
@@ -90,7 +90,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
         let field_type = field.get(self.original_schema.schema())?;
         let inner_type = self
             .original_schema
-            .get_type(field_type.ty.inner_named_type().clone())?;
+            .get_type(field_type.ty.inner_named_type())?;
         match inner_type {
             TypeDefinitionPosition::InputObject(input) => Ok(Some(input)),
             TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => Ok(None),

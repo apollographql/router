@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.14.0"
+version = "2.14.2"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.14.0"
+version = "2.14.2"
 dependencies = [
  "addr2line 0.26.1",
  "ahash",
@@ -314,7 +314,7 @@ dependencies = [
  "console",
  "cookie",
  "crossbeam-channel",
- "ctor 1.0.5",
+ "ctor 1.0.6",
  "dashmap",
  "derivative",
  "derive_more",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.14.0"
+version = "2.14.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -1910,9 +1910,9 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "378f0974ae2468eaf63aa036dbe9c926b0dc7ea64c156f2ea618bc2f75b934f0"
+checksum = "6d765eb1c0bda10d31e0ea185f5ee15da532d60b0912d2bd1441783439e749c5"
 dependencies = [
  "link-section",
  "linktime-proc-macro",
@@ -2234,7 +2234,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2442,7 +2442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4066,9 +4066,9 @@ checksum = "9e69cdf6b85b5c8dce514f694089a2cf8b1a702f6cd28607bcb3cf296c9778db"
 
 [[package]]
 name = "link-section"
-version = "0.16.1"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8600ca3dbe044f07955b443ff606c50f45295b863289bbe7d0844d50cf11e4"
+checksum = "4d1e908a416d6e9f725743b84a36feea40c4c131e805fbc26d61f9f451f36080"
 
 [[package]]
 name = "linked-hash-map"
@@ -4446,7 +4446,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6139,7 +6139,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6828,9 +6828,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.39.1"
+version = "0.39.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4deba334e1190ba7cb498327affa11e5ece10d26a30ab2f27fcf09504b8d8b6"
+checksum = "14311e7e9a03114cd4b65eedd54e8fed2945e17f08586ae97ef53bc0669f9581"
 dependencies = [
  "libc",
  "memchr",
@@ -6888,7 +6888,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8022,7 +8022,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8712,7 +8712,9 @@ dependencies = [
  "once_cell",
  "regex",
  "reqwest",
+ "semver",
  "serde",
+ "serde_json",
  "tar",
  "tempfile",
  "tinytemplate",
