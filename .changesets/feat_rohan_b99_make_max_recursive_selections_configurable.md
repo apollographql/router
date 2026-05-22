@@ -8,8 +8,7 @@ limits:
     max_recursive_selections: 10000000  # default
 ```
 
-Reducing this value further restricts the complexity of operations the router will accept. The existing escape hatch (`APOLLO_ROUTER_DISABLE_SECURITY_RECURSIVE_SELECTIONS_CHECK`) still applies when the limit is exceeded. If the value of `limits.router.max_recursive_selections` is set to null, no checks will be made.
-
+Reducing this value further restricts the complexity of operations the router will accept. The existing escape hatch (`APOLLO_ROUTER_DISABLE_SECURITY_RECURSIVE_SELECTIONS_CHECK`) still applies when the limit is exceeded.
 
 Previously, setting `limits.router.warn_only` would not affect the max recursive selections check, this has now been changed to only emit a warning log if `warn_only` is set to true.
 
