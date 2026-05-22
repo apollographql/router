@@ -4369,10 +4369,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4380,10 +4387,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
@@ -4650,10 +4664,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4661,10 +4682,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
