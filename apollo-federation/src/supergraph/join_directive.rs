@@ -145,7 +145,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(intf_pos.type_name.clone())
+                    .try_get_type(&intf_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
@@ -191,7 +191,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(intf_field_pos.type_name.clone())
+                    .try_get_type(&intf_field_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
@@ -234,7 +234,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(obj_pos.type_name.clone())
+                    .try_get_type(&obj_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Object(_)))
                     .unwrap_or_default()
                 {

@@ -8,6 +8,7 @@ use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
 use crate::Context;
+use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
@@ -403,13 +404,15 @@ impl Selector for RouterSelector {
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
-            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+            RouterSelector::OnGraphQLError { on_graphql_error } => {
                 let contains_error = response
                     .context
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -423,6 +426,21 @@ impl Selector for RouterSelector {
                 .map(opentelemetry::Value::from),
             RouterSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(response.context.id.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn on_response_event(&self, _response: &(), ctx: &Context) -> Option<opentelemetry::Value> {
+        match self {
+            RouterSelector::OnGraphQLError { on_graphql_error } => {
+                let chunk_has_errors = ctx
+                    .get_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Some(opentelemetry::Value::Bool(
+                    chunk_has_errors == *on_graphql_error,
+                ))
             }
             _ => None,
         }
@@ -1169,5 +1187,116 @@ mod test {
             .build()
             .unwrap();
         assert!(selector.on_request(&request).is_none());
+    }
+
+    #[test]
+    fn router_on_graphql_error_on_response() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
+
+        // on_graphql_error: true — true when errors present, false when not
+        let selector_true = RouterSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let ctx_with_errors = crate::Context::default();
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors = RouterResponse::fake_builder()
+            .context(ctx_with_errors)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_with_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let response_no_errors = RouterResponse::fake_builder().build().unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = RouterSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let ctx_with_errors2 = crate::Context::default();
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors2 = RouterResponse::fake_builder()
+            .context(ctx_with_errors2)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_false.on_response(&response_with_errors2),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn on_response_event_on_graphql_error_true() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        let selector = RouterSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+
+        // chunk with errors → returns true
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        // chunk without errors → returns false
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // key absent → defaults to false (no errors)
+        let ctx = crate::Context::default();
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn on_response_event_on_graphql_error_false() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        let selector = RouterSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+
+        // chunk without errors → returns true (matches "no errors" condition)
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        // chunk with errors → returns false (doesn't match "no errors" condition)
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
     }
 }

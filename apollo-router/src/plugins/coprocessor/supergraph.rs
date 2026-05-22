@@ -360,9 +360,10 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    if !response_config.condition.evaluate_response(&response) {
-        return Ok(response);
-    }
+    // Evaluate HTTP-level conditions before moving response.response — after into_parts() the
+    // response is partially moved and can no longer be borrowed as a whole.
+    let response_condition_matches = response_config.condition.evaluate_response(&response);
+
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
@@ -376,77 +377,85 @@ where
         BoxError::from("Coprocessor cannot convert body into future due to problem with first part")
     })?;
 
-    // Now we process our first chunk of response
-    // Encode headers, body, status, context, sdl to create a payload
-    let headers_to_send = response_config
-        .headers
-        .then(|| externalize_header_map(&parts.headers));
-    let body_to_send = filter_graphql_response_body(&first, &response_config.body);
-    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable::supergraph_builder()
-        .stage(PipelineStep::SupergraphResponse)
-        .id(response.context.id.clone())
-        .and_headers(headers_to_send)
-        .and_body(body_to_send)
-        .and_context(context_to_send)
-        .and_status_code(status_to_send)
-        .and_sdl(sdl_to_send.clone())
-        .and_has_next(first.has_next)
-        .build();
+    // The first chunk should call the coprocessor if either the HTTP-level condition (status,
+    // headers) or the chunk-level condition (on_graphql_error) matches.
+    let chunk_condition_matches = response_config
+        .condition
+        .evaluate_event_response(&first, &response.context);
+    let new_body = if response_condition_matches || chunk_condition_matches {
+        // Now we process our first chunk of response
+        // Encode headers, body, status, context, sdl to create a payload
+        let headers_to_send = response_config
+            .headers
+            .then(|| externalize_header_map(&parts.headers));
+        let body_to_send = filter_graphql_response_body(&first, &response_config.body);
+        let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+        let context_to_send = response_config.context.get_context(&response.context);
 
-    // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+        let payload = Externalizable::supergraph_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .id(response.context.id.clone())
+            .and_headers(headers_to_send)
+            .and_body(body_to_send)
+            .and_context(context_to_send)
+            .and_status_code(status_to_send)
+            .and_sdl(sdl_to_send.clone())
+            .and_has_next(first.has_next)
+            .build();
 
-    // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
-    // we don't intend for coprocessor calls; if in the future we change it, make sure to
-    // understand what could be sent to coprocessors and how that might affect their behavior
-    let co_processor_result = {
-        // Instantiate timer within the scope of this coprocessor run so it will be
-        // dropped automatically when the run goes out of scope
-        let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
-        payload
-            .call(http_client.clone(), &coprocessor_url, Context::new())
-            .await
-        // elapsed time is recorded
+        // Second, call our co-processor and get a reply.
+        tracing::debug!(?payload, "externalized output");
+        // We use a new context here to avoid any risk of carrying extensions to coprocessor calls
+        // that we don't intend for coprocessor calls; if in the future we change it, make sure to
+        // understand what could be sent to coprocessors and how that might affect their behavior
+        let co_processor_result = {
+            let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
+            payload
+                .call(http_client.clone(), &coprocessor_url, Context::new())
+                .await
+        };
+        // Indicate the stage was executed to raise execution metric on parent
+        *executed = true;
+
+        tracing::debug!(?co_processor_result, "co-processor returned");
+        let co_processor_output = co_processor_result?;
+
+        validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
+
+        // Check if the incoming GraphQL response was valid according to GraphQL spec
+        let incoming_payload_was_valid =
+            crate::plugins::coprocessor::was_incoming_payload_valid(&first, &response_config.body);
+
+        // Third, process our reply and act on the contents. Our processing logic is
+        // that we replace "bits" of our incoming response with the updated bits if they
+        // are present in our co_processor_output. If they aren't present, just use the
+        // bits that we sent to the co_processor.
+        let new_body = handle_graphql_response(
+            first,
+            co_processor_output.body,
+            response_validation,
+            incoming_payload_was_valid,
+            &response_config.body,
+        )?;
+
+        if let Some(control) = co_processor_output.control {
+            parts.status = control.get_http_status()?
+        }
+
+        if let Some(context) = co_processor_output.context {
+            update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        }
+
+        if let Some(headers) = co_processor_output.headers {
+            parts.headers = internalize_header_map(headers)?;
+        }
+
+        new_body
+    } else {
+        first
     };
-    // Indicate the stage was executed to raise execution metric on parent
-    *executed = true;
-
-    tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
-
-    validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
-
-    // Check if the incoming GraphQL response was valid according to GraphQL spec
-    let incoming_payload_was_valid =
-        crate::plugins::coprocessor::was_incoming_payload_valid(&first, &response_config.body);
-
-    // Third, process our reply and act on the contents. Our processing logic is
-    // that we replace "bits" of our incoming response with the updated bits if they
-    // are present in our co_processor_output. If they aren't present, just use the
-    // bits that we sent to the co_processor.
-    let new_body = handle_graphql_response(
-        first,
-        co_processor_output.body,
-        response_validation,
-        incoming_payload_was_valid,
-        &response_config.body,
-    )?;
-
-    if let Some(control) = co_processor_output.control {
-        parts.status = control.get_http_status()?
-    }
-
-    if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
-    }
-
-    if let Some(headers) = co_processor_output.headers {
-        parts.headers = internalize_header_map(headers)?;
-    }
 
     // Clone all the bits we need
     let context = response.context.clone();
@@ -486,50 +495,55 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
-                    .await;
+                // Use a new context to avoid carrying request extensions into the coprocessor
+                // HTTP call, consistent with how the initial chunk is handled.
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::SupergraphResponse);
+                    payload
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
+                        .await
+                };
                 tracing::debug!(?co_processor_result, "co-processor returned");
-                let co_processor_output = co_processor_result?;
+                let result: Result<graphql::Response, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
 
-                validate_coprocessor_output(
-                    &co_processor_output,
-                    PipelineStep::SupergraphResponse,
-                )?;
-
-                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
-                let incoming_payload_was_valid =
-                    crate::plugins::coprocessor::was_incoming_payload_valid(
-                        &deferred_response,
-                        &response_config.body,
-                    );
-
-                // Third, process our reply and act on the contents. Our processing logic is
-                // that we replace "bits" of our incoming response with the updated bits if they
-                // are present in our co_processor_output. If they aren't present, just use the
-                // bits that we sent to the co_processor.
-                let new_deferred_response = handle_graphql_response(
-                    deferred_response,
-                    co_processor_output.body,
-                    response_validation,
-                    incoming_payload_was_valid,
-                    &response_config.body,
-                )?;
-
-                if let Some(context) = co_processor_output.context {
-                    update_context_from_coprocessor(
-                        &generator_map_context,
-                        context,
-                        &response_config_context,
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::SupergraphResponse,
                     )?;
-                }
 
-                // We return the deferred_response into our stream of response chunks
-                Ok(new_deferred_response)
+                    // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                    let incoming_payload_was_valid =
+                        crate::plugins::coprocessor::was_incoming_payload_valid(
+                            &deferred_response,
+                            &response_config.body,
+                        );
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+                    let new_deferred_response = handle_graphql_response(
+                        deferred_response,
+                        co_processor_output.body,
+                        response_validation,
+                        incoming_payload_was_valid,
+                        &response_config.body,
+                    )?;
+
+                    if let Some(context) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            context,
+                            &response_config_context,
+                        )?;
+                    }
+
+                    Ok(new_deferred_response)
+                }
+                .await;
+                record_coprocessor_operation(PipelineStep::SupergraphResponse, result.is_ok());
+                result
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {
@@ -571,8 +585,10 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::router;
     use crate::services::supergraph;
@@ -1293,6 +1309,102 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3 }, "hasNext": false }),
         );
+    }
+
+    #[tokio::test]
+    async fn deferred_chunk_metric_incremented_when_on_graphql_error_matches() {
+        // Tests that apollo.router.operations.coprocessor is recorded when a deferred
+        // supergraph response chunk matches the on_graphql_error condition, even when the
+        // first chunk did not match.
+        //
+        // Bug: record_coprocessor_operation was missing from mapped_stream, so metrics
+        // were never recorded for deferred chunks even when the coprocessor was called.
+        async {
+            let supergraph_stage = SupergraphStage {
+                request: Default::default(),
+                response: SupergraphResponseConf {
+                    condition: Condition::Eq([
+                        SelectorOrValue::Selector(SupergraphSelector::OnGraphQLError {
+                            on_graphql_error: true,
+                        }),
+                        SelectorOrValue::Value(true.into()),
+                    ]),
+                    body: BodyConf::All(true),
+                    ..Default::default()
+                },
+            };
+
+            let mut mock_supergraph_service = MockSupergraphService::new();
+            mock_supergraph_service
+                .expect_call()
+                .returning(|req: supergraph::Request| {
+                    Ok(supergraph::Response::fake_stream_builder()
+                        // Chunk 1: no errors — on_graphql_error condition is false → not called
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 1 }))
+                                .has_next(true)
+                                .build(),
+                        )
+                        // Chunk 2: has errors — on_graphql_error condition is true → coprocessor called
+                        .response(
+                            graphql::Response::builder()
+                                .error(
+                                    crate::graphql::Error::builder()
+                                        .message("deferred error")
+                                        .build(),
+                                )
+                                .has_next(false)
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
+
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = serde_json_bytes::json!({
+                        "version": 1,
+                        "stage": "SupergraphResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = supergraph_stage.as_service(
+                mock_http_client,
+                mock_supergraph_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false,
+            );
+
+            let request = supergraph::Request::canned_builder()
+                .query("query Test { hello }")
+                .build()
+                .unwrap();
+
+            let mut res = service.oneshot(request).await.unwrap();
+            // Drain the stream to force the lazy mapped_stream to run
+            while res.response.body_mut().next().await.is_some() {}
+
+            // Coprocessor should have been called exactly once — for the deferred chunk
+            // with errors. Before the fix, the metric was silently dropped.
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                1,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
     }
 
     // Helper function to create supergraph stage for validation tests

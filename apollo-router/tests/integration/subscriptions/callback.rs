@@ -130,6 +130,45 @@ async fn wait_for_callbacks(
     panic!("expected {expected_count} callbacks within {deadline:?}, got {count}");
 }
 
+/// Poll the router's HTTP endpoint until it accepts a request
+/// (any HTTP-level response is sufficient), or `deadline` expires.
+///
+/// `router.assert_started().await` only waits for the
+/// `GraphQL endpoint exposed at ...` log line emitted in
+/// `axum_factory::axum_http_server_factory::create` immediately
+/// after the `TcpListener` is bound but BEFORE the spawned
+/// server task is actually polled. The kernel will accept TCP
+/// handshakes against the bound listener as soon as `bind()`
+/// returns, but the userspace `accept()` loop is not running
+/// yet. Under CI scheduling pressure (e.g. flake-bash with 10x
+/// parallel branches) the gap between log-emit and the accept
+/// loop being polled can be long enough that an early POST
+/// from the test client is closed by the kernel's
+/// RST-on-overflow path, producing
+/// `reqwest::Error: error sending request for url (...)` —
+/// the surface that crashed
+/// `test_subscription_callback_error_payload` on
+/// `test-amd_linux_test`.
+///
+/// A HEAD against `/` won't return a useful status (the
+/// supergraph rejects non-POST GraphQL), but it WILL complete
+/// the request once the server task is actually polling
+/// connections, which is the signal we need.
+async fn wait_for_router_ready(url: &str, deadline: tokio::time::Duration) {
+    let start = tokio::time::Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(tokio::time::Duration::from_secs(1))
+        .build()
+        .expect("build reqwest client");
+    while start.elapsed() < deadline {
+        if client.head(url).send().await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    }
+    panic!("router at {url} did not accept HTTP requests within {deadline:?}");
+}
+
 async fn verify_callback_events(
     callback_state: &CallbackTestState,
     expected_user_events: Vec<serde_json::Value>,
@@ -372,6 +411,18 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
+
+    // `assert_started` only matches the `GraphQL endpoint exposed`
+    // log line, which is emitted before the axum server task is
+    // actually polling connections — see `wait_for_router_ready`
+    // doc for details. Poll the bound address until the router
+    // actually answers an HTTP request before sending the
+    // subscription POST, so the test's initial `execute_query`
+    // can't race the kernel's RST-on-overflow path under heavy CI
+    // scheduling pressure (the failure surface previously observed
+    // on `test-amd_linux_test`).
+    let router_url = format!("http://{}/", router.bind_address());
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(30)).await;
 
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
 

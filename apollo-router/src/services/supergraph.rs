@@ -17,6 +17,7 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::Context;
+use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::Error;
 use crate::graphql;
@@ -204,9 +205,11 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
-        if !errors.is_empty() {
+        let has_errors = !errors.is_empty();
+        if has_errors {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -329,9 +332,11 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
-        if !errors.is_empty() {
+        let has_errors = !errors.is_empty();
+        if has_errors {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -357,9 +362,11 @@ impl Response {
     }
 
     pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
-        if !response.errors.is_empty() {
+        let has_errors = !response.errors.is_empty();
+        if has_errors {
             context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         }
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
 
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
@@ -437,9 +444,11 @@ impl Response {
     fn check_for_errors(self) -> Self {
         let context = self.context.clone();
         self.map_stream(move |response| {
-            if !response.errors.is_empty() {
+            let has_errors = response.contains_errors();
+            if has_errors {
                 context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
             }
+            context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(has_errors));
             response
         })
     }

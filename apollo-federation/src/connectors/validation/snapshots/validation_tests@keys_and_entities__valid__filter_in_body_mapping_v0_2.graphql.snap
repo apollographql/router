@@ -1,0 +1,7 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+assertion_line: 324
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/valid/filter_in_body_mapping_v0_2.graphql
+---
+[]

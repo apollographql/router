@@ -203,8 +203,8 @@ impl TransitionGraphPath {
                 if other_subgraph == field_subgraph {
                     return Ok(None);
                 }
-                let Some(type_pos_in_other_subgraph) = other_subgraph_schema
-                    .try_get_type(field_pos_in_subgraph.parent().type_name().clone())
+                let Some(type_pos_in_other_subgraph) =
+                    other_subgraph_schema.try_get_type(field_pos_in_subgraph.parent().type_name())
                 else {
                     return Ok(None);
                 };
@@ -416,7 +416,7 @@ impl TransitionGraphPath {
                                     graph.schema_by_source(&head_weight.source)?;
                                 let parent_type_pos_in_subgraph: CompositeTypeDefinitionPosition =
                                     subgraph_schema.get_type(
-                                        field_definition_position.parent().type_name().clone()
+                                        field_definition_position.parent().type_name()
                                     )?.try_into()?;
                                 let details = match reason {
                                     Some(UnsatisfiedConditionReason::NoPostRequireKey) => {
@@ -534,7 +534,7 @@ impl TransitionGraphPath {
                             .name;
                         let parent_type_pos = field_definition_position.parent();
                         let parent_type_pos_in_subgraph =
-                            subgraph_schema.try_get_type(parent_type_pos.type_name().clone());
+                            subgraph_schema.try_get_type(parent_type_pos.type_name());
                         if parent_type_pos_in_subgraph.is_none()
                             && tail_type_pos.type_name() != parent_type_pos.type_name()
                         {
@@ -917,7 +917,7 @@ impl TransitionPathWithLazyIndirectPaths {
                             continue;
                         }
                         let parent_type_pos_in_subgraph =
-                            subgraph_schema.try_get_type(parent_type_pos.type_name().clone());
+                            subgraph_schema.try_get_type(parent_type_pos.type_name());
                         let Some(Ok(parent_type_pos_in_subgraph)) = parent_type_pos_in_subgraph
                             .map(CompositeTypeDefinitionPosition::try_from)
                         else {
@@ -940,7 +940,7 @@ impl TransitionPathWithLazyIndirectPaths {
                         //    for is an implementation of that interface, and there are no keys on
                         //    the interface.
                         let tail_type_pos_in_subgraph =
-                            subgraph_schema.try_get_type(tail_type_pos.type_name().clone());
+                            subgraph_schema.try_get_type(tail_type_pos.type_name());
                         if let Some(tail_type_pos_in_subgraph) = tail_type_pos_in_subgraph {
                             // `tail_type_pos_in_subgraph` exists, so it's either equal to
                             // `parent_type_pos_in_subgraph`, or it's an interface of it. In any

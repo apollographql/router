@@ -599,7 +599,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
-            } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            } => Some((response.response.body().errors.is_empty() != *on_graphql_error).into()),
             SubgraphSelector::SubgraphResendCount {
                 subgraph_resend_count,
                 default,
@@ -2097,35 +2097,41 @@ mod test {
 
     #[test]
     fn subgraph_on_graphql_error() {
-        let selector = SubgraphSelector::OnGraphQLError {
+        let selector_true = SubgraphSelector::OnGraphQLError {
             subgraph_on_graphql_error: true,
         };
+        let response_with_error = crate::services::SubgraphResponse::fake_builder()
+            .error(
+                graphql::Error::builder()
+                    .message("not found")
+                    .extension_code("NOT_FOUND")
+                    .build(),
+            )
+            .build();
+        let response_no_error = crate::services::SubgraphResponse::fake_builder()
+            .data(serde_json_bytes::json!({"hello": ["bonjour", "hello", "ciao"]}))
+            .build();
+
+        // on_graphql_error: true — true when errors present, false when not
         assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake_builder()
-                        .error(
-                            graphql::Error::builder()
-                                .message("not found")
-                                .extension_code("NOT_FOUND")
-                                .build()
-                        )
-                        .build()
-                )
-                .unwrap(),
+            selector_true.on_response(&response_with_error).unwrap(),
             opentelemetry::Value::Bool(true)
         );
-
         assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
-                            "hello": ["bonjour", "hello", "ciao"]
-                        }))
-                        .build()
-                )
-                .unwrap(),
+            selector_true.on_response(&response_no_error).unwrap(),
+            opentelemetry::Value::Bool(false)
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = SubgraphSelector::OnGraphQLError {
+            subgraph_on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_error).unwrap(),
+            opentelemetry::Value::Bool(true)
+        );
+        assert_eq!(
+            selector_false.on_response(&response_with_error).unwrap(),
             opentelemetry::Value::Bool(false)
         );
     }

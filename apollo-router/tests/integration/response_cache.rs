@@ -854,7 +854,16 @@ async fn cache_control_merging_single_fetch() {
     // Router responds with `max-age` even if a single subgraph used `s-maxage`
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 120, but the response's `max-age` is recomputed from a stored
+    // `created` epoch-seconds value each time it is serialized, so a wall-clock
+    // second can tick between subgraph response and the router writing the
+    // header. Accept 119 or 120 to avoid that race.
+    assert!(
+        (119..=120).contains(&max_age),
+        "expected max-age 119 or 120, got '{cache_control}'"
+    );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -1067,7 +1076,16 @@ async fn cache_control_merging_multi_fetch() {
     // The smaller value is used.
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 60, but the response's `max-age` is recomputed from a stored
+    // `created` epoch-seconds value each time it is serialized, so a wall-clock
+    // second can tick between subgraph response and the router writing the
+    // header. Accept 59 or 60 to avoid that race.
+    assert!(
+        (59..=60).contains(&max_age),
+        "expected max-age 59 or 60, got '{cache_control}'"
+    );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 

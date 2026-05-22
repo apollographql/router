@@ -165,7 +165,7 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
         link: Option<&Arc<Link>>,
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
-        let existing = schema.try_get_type(actual_name.clone());
+        let existing = schema.try_get_type(&actual_name);
         if let Some(existing) = existing {
             // Ignore redundant type specifications if they are are both scalar types.
             return ensure_expected_type_kind(TypeKind::Scalar, &existing);
@@ -207,7 +207,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
         let field_specs = (self.fields)(schema);
-        let existing = schema.try_get_type(actual_name.clone());
+        let existing = schema.try_get_type(&actual_name);
         if let Some(existing) = existing {
             // ensure existing definition is an object type
             ensure_expected_type_kind(TypeKind::Object, &existing)?;
@@ -272,7 +272,7 @@ impl TypeAndDirectiveSpecification for UnionTypeSpecification {
         let members = (self.members)(schema);
         // PORT_NOTE: The JS version sorts the members by name.
         // TODO(ROUTER-1223): Sort members here. Currently, doing it breaks `plugins::cache` tests.
-        let existing = schema.try_get_type(actual_name.clone());
+        let existing = schema.try_get_type(&actual_name);
 
         // ensure new union has at least one member
         if members.is_empty() {
@@ -356,7 +356,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
         link: Option<&Arc<Link>>,
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
-        let existing = schema.try_get_type(actual_name.clone());
+        let existing = schema.try_get_type(&actual_name);
         if let Some(existing) = existing {
             ensure_expected_type_kind(TypeKind::Enum, &existing)?;
             let existing_type = existing.get(schema.schema())?;
@@ -460,7 +460,7 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
             .into_iter()
             .map(|spec| spec.resolve(schema, link).map(|r| (r.name.clone(), r)))
             .collect::<Result<IndexMap<Name, ResolvedArgumentSpecification>, FederationError>>()?;
-        let existing = schema.try_get_type(actual_name.clone());
+        let existing = schema.try_get_type(&actual_name);
         if let Some(existing) = existing {
             let mut errors: Vec<SingleFederationError> = vec![];
             // ensure existing definition is InputObject
