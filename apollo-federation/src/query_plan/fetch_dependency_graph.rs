@@ -5604,7 +5604,7 @@ mod tests {
             .unwrap()
             .clone();
         let parent_type: CompositeTypeDefinitionPosition = subgraph_schema
-            .get_type(name!("T"))
+            .get_type(&name!("T"))
             .unwrap()
             .try_into()
             .unwrap();
