@@ -78,9 +78,7 @@ impl ValidationContext {
         &self,
         field: &FieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        let Ok(type_in_supergraph) = self
-            .supergraph_schema
-            .get_type(field.parent().type_name().clone())
+        let Ok(type_in_supergraph) = self.supergraph_schema.get_type(field.parent().type_name())
         else {
             bail!("Type {} should exist in the supergraph", field.parent());
         };
@@ -240,7 +238,7 @@ type T implements I
     fn is_shareable_field(context: &ValidationContext, type_name: &str, field_name: &str) -> bool {
         let supergraph_schema = &context.supergraph_schema;
         let type_pos = supergraph_schema
-            .get_type(Name::new_unchecked(type_name))
+            .get_type(&Name::new_unchecked(type_name))
             .unwrap();
         let type_pos = CompositeTypeDefinitionPosition::try_from(type_pos).unwrap();
         let field_pos = type_pos.field(Name::new_unchecked(field_name)).unwrap();

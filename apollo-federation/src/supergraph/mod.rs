@@ -866,7 +866,7 @@ fn add_empty_type(
             }
             let subgraph_type_definition_position = subgraph
                 .schema
-                .get_type(type_definition_position.type_name().clone())?;
+                .get_type(type_definition_position.type_name())?;
             match &subgraph_type_definition_position {
                 TypeDefinitionPosition::Scalar(_) => {
                     return Err(SingleFederationError::Internal {
@@ -913,7 +913,7 @@ fn add_empty_type(
                 .context_directive(&subgraph.schema, context_name.to_owned())?;
             let subgraph_type_definition_position: CompositeTypeDefinitionPosition = subgraph
                 .schema
-                .get_type(type_definition_position.type_name().clone())?
+                .get_type(type_definition_position.type_name())?
                 .try_into()?;
             subgraph_type_definition_position
                 .insert_directive(&mut subgraph.schema, Component::new(context_directive))?;
@@ -1120,7 +1120,7 @@ fn extract_interface_type_content(
                     ),
                 }
             })?;
-            Ok(match subgraph.schema.get_type(type_name)? {
+            Ok(match subgraph.schema.get_type(&type_name)? {
                 TypeDefinitionPosition::Object(pos) => {
                     if !is_interface_object {
                         return Err(
@@ -2087,7 +2087,7 @@ fn remove_inactive_applications(
                     .provides_directive_arguments(directive)?
                     .fields;
                 let Ok(parent_type_pos) = CompositeTypeDefinitionPosition::try_from(
-                    schema.get_type(field.ty.inner_named_type().clone())?,
+                    schema.get_type(field.ty.inner_named_type())?,
                 ) else {
                     // PORT_NOTE: JS composition ignores this error. A proper field set validation
                     //            should be done elsewhere.
@@ -2269,7 +2269,7 @@ fn is_external_or_has_external_implementations(
     selection: &Node<executable::Field>,
 ) -> Result<bool, FederationError> {
     let type_pos: CompositeTypeDefinitionPosition =
-        schema.get_type(parent_type_name.clone())?.try_into()?;
+        schema.get_type(parent_type_name)?.try_into()?;
     let field_pos = type_pos.field(selection.name.clone())?;
     let field = field_pos.get(schema.schema())?;
     if field.directives.has(external_directive_definition_name) {
