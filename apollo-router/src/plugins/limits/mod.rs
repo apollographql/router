@@ -112,7 +112,7 @@ pub(crate) struct RouterLimitsConfig {
     /// fragment spreads in an operation. This protects against extremely large or
     /// deeply nested operations that could consume excessive resources during
     /// query planning. Default: 10000000 (10 million).
-    pub(crate) max_recursive_selections: Option<u32>,
+    pub(crate) max_recursive_selections: u32,
 
     /// If set to true (which is the default is dev mode),
     /// requests that exceed a `max_*` limit are *not* rejected.
@@ -166,7 +166,7 @@ impl Default for RouterLimitsConfig {
             max_root_fields: None,
             max_aliases: None,
 
-            max_recursive_selections: Some(10_000_000),
+            max_recursive_selections: 10_000_000,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,

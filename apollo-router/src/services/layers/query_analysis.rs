@@ -78,7 +78,7 @@ pub(crate) struct QueryAnalysisLayer {
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
     metrics_reference_mode: ApolloMetricsReferenceMode,
-    max_recursive_selections: Option<u32>,
+    max_recursive_selections: u32,
     warn_only: bool,
 }
 
@@ -140,41 +140,39 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
                 .and_then(|doc| {
-                    if let Some(limit) = max_recursive_selections {
-                        let recursive_selections = Self::count_recursive_selections(
-                            &doc.executable,
-                            &mut Default::default(),
-                            &doc.operation.selection_set,
-                            0,
-                            limit,
-                        );
-                        if recursive_selections.is_none() {
-                            if recursive_selections_check_enabled() {
-                                if warn_only {
-                                    tracing::warn!(
-                                        operation_name = ?operation_name,
-                                        limit,
-                                        "operation exceeded maximum recursive selections limit",
-                                    );
-                                } else {
-                                    return Err(SpecError::ValidationError(ValidationErrors {
-                                        errors: vec![GraphQLError {
-                                            message:
-                                                "Maximum recursive selections limit exceeded in this operation"
-                                                    .to_string(),
-                                            locations: Default::default(),
-                                            path: Default::default(),
-                                            extensions: Default::default(),
-                                        }],
-                                    }))
-                                }
-                            } else {
-                                tracing::info!(
+                    let recursive_selections = Self::count_recursive_selections(
+                        &doc.executable,
+                        &mut Default::default(),
+                        &doc.operation.selection_set,
+                        0,
+                        max_recursive_selections,
+                    );
+                    if recursive_selections.is_none() {
+                        if recursive_selections_check_enabled() {
+                            if warn_only {
+                                tracing::warn!(
                                     operation_name = ?operation_name,
-                                    limit,
-                                    "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
+                                    max_recursive_selections,
+                                    "operation exceeded maximum recursive selections limit",
                                 );
+                            } else {
+                                return Err(SpecError::ValidationError(ValidationErrors {
+                                    errors: vec![GraphQLError {
+                                        message:
+                                            "Maximum recursive selections limit exceeded in this operation"
+                                                .to_string(),
+                                        locations: Default::default(),
+                                        path: Default::default(),
+                                        extensions: Default::default(),
+                                    }],
+                                }))
                             }
+                        } else {
+                            tracing::info!(
+                                operation_name = ?operation_name,
+                                max_recursive_selections,
+                                "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
+                            );
                         }
                     }
                     Ok(doc)
