@@ -209,6 +209,9 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
+                // Remember whether the source value at this path was already
+                // null before we tried to build the entity representation.
+                let source_was_null = value.is_null();
                 let mut value = execute_selection_set(value, requires, schema, None);
                 let value_ok = value.as_object().map(|o| !o.is_empty()).unwrap_or(false);
                 if value_ok {
@@ -223,11 +226,10 @@ impl Variables {
                             debug_assert!(inverted_paths.len() == values.len());
                         }
                     }
-                } else {
+                } else if !source_was_null {
                     // `execute_selection_set` returned an unusable representation
-                    // (Null or empty object) — the entity is effectively skipped.
-                    // Record the path so end-of-execution can emit an
-                    // UNSATISFIED_FETCH_CONDITION error against the final data.
+                    // (Null or empty object) and the source value was non-null,
+                    // so the entity is skipped — record the path.
                     unsatisfied_paths.push(path.clone());
                 }
             });

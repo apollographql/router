@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
-use parking_lot::Mutex;
+use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -17,7 +18,6 @@ use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
 use super::log;
-use super::selection::type_condition_matches;
 use super::subscription::SubscriptionHandle;
 use crate::Context;
 use crate::axum_factory::CanceledRequest;
@@ -81,7 +81,7 @@ impl QueryPlan {
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
-        let skipped_entity_paths: Mutex<Vec<(Path, Arc<ResponseKeyTree>)>> = Mutex::new(Vec::new());
+        let skipped_entity_paths = Default::default();
 
         let (value, mut errors) = self
             .root
@@ -112,8 +112,9 @@ impl QueryPlan {
             );
         }
 
+        let skipped_entity_paths = skipped_entity_paths.lock().await;
         emit_unsatisfied_fetch_errors(
-            std::mem::take(&mut *skipped_entity_paths.lock()),
+            &skipped_entity_paths,
             &self.query,
             schema.as_ref(),
             &supergraph_request.body().variables,
@@ -145,12 +146,6 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
-    /// Entries describing entities whose `_entities` fetch was skipped because
-    /// a required input was unsatisfied. Each entry pairs the entity-root path
-    /// with a tree of response keys the skipped fetch would have produced for
-    /// that entity (filtered by `__typename`). Accumulated across execution;
-    /// consumed at end-of-execution to generate `UNSATISFIED_FETCH_CONDITION`
-    /// errors against the final merged data.
     pub(crate) skipped_entity_paths: &'a Mutex<Vec<(Path, Arc<ResponseKeyTree>)>>,
 }
 
@@ -335,7 +330,8 @@ impl PlanNode {
                                 parameters.schema.as_ref(),
                                 &parameters.supergraph_request.body().variables,
                                 parameters.skipped_entity_paths,
-                            );
+                            )
+                            .await;
                         }
 
                         match opt_variables {
@@ -661,8 +657,9 @@ impl DeferredNode {
                     errors.extend(primary_errors)
                 }
 
+                let deferred_skipped_paths = deferred_skipped_paths.lock().await;
                 emit_unsatisfied_fetch_errors(
-                    std::mem::take(&mut *deferred_skipped_paths.lock()),
+                    &deferred_skipped_paths,
                     &query,
                     &sc,
                     &orig.body().variables,
@@ -721,23 +718,22 @@ impl DeferredNode {
 // Skipped-entity error generation
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Tree of response keys produced by a subgraph fetch for one entity, filtered
-/// to fragments matching the entity's `__typename` and not excluded by
-/// `@skip`/`@include`. The walker uses this at end-of-execution to tell
-/// "missing because this fetch was skipped" apart from "missing for some
-/// other reason" (e.g. a coprocessor stripped the field from a different
-/// fetch). An empty `children` map with `is_list_stop: false` is a scalar/enum
-/// leaf; `is_list_stop: true` marks a list-typed field — anything under the
-/// list is considered covered (we have no per-index info inside the tree).
+/// Tree of response keys produced by a subgraph fetch for one entity,
+/// over-approximated: we descend through every selection (including lists and
+/// undecidable type conditions) so that every possible leaf the skipped fetch
+/// could have produced shows up in `children`. Leaves are never fetched twice
+/// by another subgraph, so any missing leaf in the final response is a true
+/// positive `UNSATISFIED_FETCH_CONDITION`. Intermediate composite fields may
+/// be filled by another subgraph — those are not by themselves errors, only
+/// their genuinely-missing leaves are.
 #[derive(Default, Debug)]
 pub(crate) struct ResponseKeyTree {
-    is_list_stop: bool,
     children: HashMap<Name, ResponseKeyTree>,
 }
 
 impl ResponseKeyTree {
     fn is_empty(&self) -> bool {
-        self.children.is_empty() && !self.is_list_stop
+        self.children.is_empty()
     }
 }
 
@@ -747,7 +743,7 @@ impl ResponseKeyTree {
 ///
 /// Trees are deduped per `__typename` so a batched `_entities` skip of N
 /// entities of the same type costs one tree build and N `Arc::clone`s.
-fn record_skipped_entities(
+async fn record_skipped_entities(
     unsatisfied_paths: Vec<Path>,
     fetch_node: &FetchNode,
     parent_value: &Value,
@@ -755,40 +751,54 @@ fn record_skipped_entities(
     variables: &Object,
     accumulator: &Mutex<Vec<(Path, Arc<ResponseKeyTree>)>>,
 ) {
-    let mut accumulator = accumulator.lock();
-    let mut tree_cache: HashMap<Option<String>, Option<Arc<ResponseKeyTree>>> = HashMap::new();
+    let Ok(parsed) = fetch_node.operation.as_parsed() else {
+        // shouldn't happen -> skip recording
+        return;
+    };
+    let operation = parsed.operations.get(fetch_node.operation_name.as_deref());
+    let Ok(operation) = operation else {
+        // shouldn't happen -> skip recording
+        return;
+    };
+
+    let mut accumulator = accumulator.lock().await;
+    let mut tree_cache: HashMap<String, Arc<ResponseKeyTree>> = HashMap::new();
     for entity_path in unsatisfied_paths {
         let entity_data = get_value_at_path(parent_value, &entity_path);
-        let entity_type_key = typename_of(entity_data).map(str::to_owned);
-        let tree = tree_cache
-            .entry(entity_type_key.clone())
-            .or_insert_with(|| {
-                entity_response_key_tree(fetch_node, entity_type_key.as_deref(), schema, variables)
-                    .map(Arc::new)
-            });
-        if let Some(tree) = tree {
+        let entity_type = typename_of(entity_data).map(str::to_owned);
+        let Some(entity_type) = entity_type else {
+            // No `__typename` on the entity data - Drop this path silently rather than guessing.
+            continue;
+        };
+        let tree = tree_cache.entry(entity_type.clone()).or_insert_with(|| {
+            let tree = entity_response_key_tree(
+                operation,
+                &parsed.fragments,
+                &entity_type,
+                schema,
+                variables,
+            );
+            Arc::new(tree)
+        });
+        if !tree.is_empty() {
             accumulator.push((entity_path, tree.clone()));
         }
     }
 }
 
-/// Build a tree of response keys for a subgraph `_entities` fetch, filtered
-/// to fragments matching `entity_type` and not excluded by `@skip`/`@include`.
-/// Returns `None` when the operation isn't an `_entities` fetch or the tree
-/// would be empty.
+/// Build the over-approximated tree of response keys for a subgraph
+/// `_entities` fetch, anchored at `entity_type` (the runtime `__typename`).
+/// Iterates the operation's top-level `_entities` selection and accumulates
+/// keys via `collect_response_key_tree`. Returns an empty tree when the
+/// operation has no `_entities` field, or every fragment at that level
+/// definitely does not match the entity type.
 fn entity_response_key_tree(
-    fetch_node: &FetchNode,
-    entity_type: Option<&str>,
+    operation: &apollo_compiler::Node<executable::Operation>,
+    fragments: &IndexMap<Name, apollo_compiler::Node<executable::Fragment>>,
+    entity_type: &str,
     schema: &Schema,
     variables: &Object,
-) -> Option<ResponseKeyTree> {
-    let parsed = fetch_node.operation.as_parsed().ok()?;
-    let operation = parsed
-        .operations
-        .anonymous
-        .as_ref()
-        .or_else(|| parsed.operations.named.values().next())?;
-
+) -> ResponseKeyTree {
     let mut tree = ResponseKeyTree::default();
     for sel in &operation.selection_set.selections {
         if let executable::Selection::Field(f) = sel
@@ -796,30 +806,115 @@ fn entity_response_key_tree(
         {
             collect_response_key_tree(
                 &f.selection_set,
-                parsed,
-                entity_type,
-                schema,
+                Some(entity_type),
+                fragments,
                 variables,
+                schema,
                 &mut tree,
             );
         }
     }
-    if tree.is_empty() { None } else { Some(tree) }
+    tree
 }
 
-/// Recursively populate `tree` from a subgraph selection set. Descends through
-/// inline fragments and named fragment spreads, filtering by `entity_type`
-/// against each fragment's type condition. Skips `__typename`. Stops at
-/// list-typed fields (marks `is_list_stop`) since the tree has no array
-/// indices.
+/// Static three-valued resolution of a fragment type condition against the current type. Returns
+/// following values:
+/// - `Some(true)` when the condition definitely matches the runtime type
+/// - `Some(false)` when it definitely does not
+/// - `None` when static analysis cannot decide (the current type is abstract, or we have no
+///   current type because we descended into a field and lost type info).
+fn static_type_condition_match(
+    schema: &Schema,
+    current_type: &str,
+    type_condition: &str,
+) -> Option<bool> {
+    if current_type == type_condition {
+        return Some(true);
+    }
+    let current = schema.supergraph_schema().types.get(current_type)?;
+    let cond = schema.supergraph_schema().types.get(type_condition)?;
+
+    use apollo_compiler::schema::ExtendedType::*;
+    match current {
+        Object(o) => match cond {
+            Object(c) => Some(o.name == c.name),
+            Interface(i) => Some(o.implements_interfaces.contains(&i.name)),
+            Union(u) => Some(u.members.contains(&o.name)),
+            _ => Some(false),
+        },
+        // Abstract current type: undecidable without runtime info.
+        Interface(_) | Union(_) => None,
+        _ => Some(false),
+    }
+}
+
+/// Pick the more concrete of `current` and `condition` as the new current type.
+fn walker_refine_type<'a>(schema: &Schema, current: &'a str, condition: &'a str) -> &'a str {
+    use apollo_compiler::schema::ExtendedType::*;
+    if matches!(
+        schema.supergraph_schema().types.get(current),
+        Some(Object(_))
+    ) {
+        return current;
+    }
+    if matches!(
+        schema.supergraph_schema().types.get(condition),
+        Some(Object(_))
+    ) {
+        return condition;
+    }
+    current
+}
+
+/// Pick the more concrete of two types as the current type. Prefers a concrete object type over an
+/// abstract interface/union or an unknown type.
+fn refine_runtime_type<'a>(
+    schema: &Schema,
+    runtime: Option<&'a str>,
+    condition: &'a str,
+) -> Option<&'a str> {
+    use apollo_compiler::schema::ExtendedType::*;
+    if matches!(
+        runtime.and_then(|t| schema.supergraph_schema().types.get(t)),
+        Some(Object(_))
+    ) {
+        return runtime;
+    }
+    if matches!(
+        schema.supergraph_schema().types.get(condition),
+        Some(Object(_))
+    ) {
+        return Some(condition);
+    }
+    runtime
+}
+
+/// Recursively populate `tree` from a subgraph selection set, over-approximating
+/// the keys the skipped fetch would have produced.
+///
+/// "Over-approximate" means:
+/// - Descend through every composite field's sub-selection (including list-typed
+///   fields), so leaves nested arbitrarily deep land in `tree`.
+/// - Descend through inline fragments and named fragment spreads even when
+///   their type condition is statically undecidable (the current type is
+///   abstract, or we descended into a field and lost runtime type info).
+///   Definite no-match (`Some(false)`) is the only short-circuit.
+///
+/// We may collect leaves that wouldn't actually have been produced at runtime
+/// (e.g. a fragment on a sibling concrete object that didn't end up matching
+/// the runtime type), but that is fine: a leaf is only emitted as an error
+/// when it's also missing from the final merged response. Since leaves are
+/// never fetched twice across subgraphs, a missing leaf from this set is a
+/// true positive — `UNSATISFIED_FETCH_CONDITION` for the skipped fetch.
 fn collect_response_key_tree(
     selection_set: &executable::SelectionSet,
-    document: &executable::ExecutableDocument,
-    entity_type: Option<&str>,
-    schema: &Schema,
+    runtime_type: Option<&str>,
+    fragments: &IndexMap<Name, apollo_compiler::Node<executable::Fragment>>,
     variables: &Object,
+    schema: &Schema,
     tree: &mut ResponseKeyTree,
 ) {
+    let current_type = runtime_type.unwrap_or(selection_set.ty.as_str());
     for sel in &selection_set.selections {
         match sel {
             executable::Selection::Field(f) => {
@@ -831,15 +926,13 @@ fn collect_response_key_tree(
                     continue;
                 }
                 let entry = tree.children.entry(key.clone()).or_default();
-                if f.ty().is_list() {
-                    entry.is_list_stop = true;
-                } else if !f.selection_set.selections.is_empty() {
+                if !f.selection_set.selections.is_empty() {
                     collect_response_key_tree(
                         &f.selection_set,
-                        document,
                         None,
-                        schema,
+                        fragments,
                         variables,
+                        schema,
                         entry,
                     );
                 }
@@ -848,41 +941,46 @@ fn collect_response_key_tree(
                 if IncludeSkip::parse(&frag.directives).should_skip(variables) {
                     continue;
                 }
-                let matches = frag
-                    .type_condition
-                    .as_ref()
-                    .is_none_or(|cond| type_condition_matches(schema, entity_type, cond.as_str()));
-                if matches {
-                    collect_response_key_tree(
-                        &frag.selection_set,
-                        document,
-                        entity_type,
-                        schema,
-                        variables,
-                        tree,
-                    );
+                let matches = match frag.type_condition.as_ref() {
+                    None => Some(true),
+                    Some(cond) => static_type_condition_match(schema, current_type, cond.as_str()),
+                };
+                if matches == Some(false) {
+                    continue;
                 }
+                let refined = match frag.type_condition.as_ref() {
+                    Some(cond) => refine_runtime_type(schema, runtime_type, cond.as_str()),
+                    None => runtime_type,
+                };
+                collect_response_key_tree(
+                    &frag.selection_set,
+                    refined,
+                    fragments,
+                    variables,
+                    schema,
+                    tree,
+                );
             }
             executable::Selection::FragmentSpread(spread) => {
                 if IncludeSkip::parse(&spread.directives).should_skip(variables) {
                     continue;
                 }
-                if let Some(fragment) = document.fragments.get(&spread.fragment_name)
-                    && type_condition_matches(
-                        schema,
-                        entity_type,
-                        fragment.type_condition().as_str(),
-                    )
-                {
-                    collect_response_key_tree(
-                        &fragment.selection_set,
-                        document,
-                        entity_type,
-                        schema,
-                        variables,
-                        tree,
-                    );
+                let Some(fragment) = fragments.get(&spread.fragment_name) else {
+                    continue;
+                };
+                let cond = fragment.type_condition().as_str();
+                if static_type_condition_match(schema, current_type, cond) == Some(false) {
+                    continue;
                 }
+                let refined = refine_runtime_type(schema, runtime_type, cond);
+                collect_response_key_tree(
+                    &fragment.selection_set,
+                    refined,
+                    fragments,
+                    variables,
+                    schema,
+                    tree,
+                );
             }
         }
     }
@@ -918,14 +1016,10 @@ fn typename_of(value: &Value) -> Option<&str> {
 /// in lockstep with the response-data walk. Coverage check is O(1) per leaf.
 ///
 /// Two kinds of navigation: by response key (composite descent) and by array
-/// index (list element descent). A node carries:
-/// - `covered`: a leaf-level skipped fetch ends here.
-/// - `covers_all_below`: a list-stop leaf in a `ResponseKeyTree` was grafted
-///   here, so anything reachable from this node is covered.
+/// index (list element descent). A node with no `by_key`/`by_index` entries
+/// is a leaf-level skip target — the skipped fetch ended here.
 #[derive(Default, Debug)]
 struct SkipTreeNode {
-    covered: bool,
-    covers_all_below: bool,
     by_key: HashMap<String, SkipTreeNode>,
     by_index: HashMap<usize, SkipTreeNode>,
 }
@@ -955,30 +1049,20 @@ impl SkipTreeNode {
     }
 }
 
-/// Copy a `ResponseKeyTree`'s structure into a `SkipTreeNode`,
-/// preserving list-stop semantics as `covers_all_below`.
+/// Copy a `ResponseKeyTree`'s structure into a `SkipTreeNode`. A leaf in the
+/// source tree (no children) maps to a leaf in the target (no `by_key`/
+/// `by_index` entries).
 fn graft_response_key_tree(target: &mut SkipTreeNode, tree: &ResponseKeyTree) {
-    if tree.is_list_stop {
-        target.covers_all_below = true;
-        return;
-    }
-    if tree.children.is_empty() {
-        target.covered = true;
-        return;
-    }
     for (key, child) in &tree.children {
         let target_child = target.by_key.entry(key.as_str().to_owned()).or_default();
         graft_response_key_tree(target_child, child);
     }
 }
 
-/// Cursor into a `SkipTreeNode`, advanced in lockstep with the response-data
-/// walk. `AllBelow` is a sticky synthetic state propagated from list-stop
-/// grafts.
+/// Cursor into a `SkipTreeNode`, advanced in lockstep with the response-data walk.
 #[derive(Copy, Clone)]
 enum SkipState<'a> {
     None,
-    AllBelow,
     At(&'a SkipTreeNode),
 }
 
@@ -989,8 +1073,6 @@ impl<'a> SkipState<'a> {
 
     fn descend_key(self, key: &str) -> Self {
         match self {
-            Self::AllBelow => Self::AllBelow,
-            Self::At(t) if t.covers_all_below => Self::AllBelow,
             Self::At(t) => match t.by_key.get(key) {
                 Some(child) => Self::At(child),
                 None => Self::None,
@@ -999,42 +1081,40 @@ impl<'a> SkipState<'a> {
         }
     }
 
+    /// Walk one step into a list element.
+    /// - No per-index entries → pass through (`by_key` applies uniformly to
+    ///   every element).
+    /// - `by_index` has this index → descend into its per-entity subtree.
+    /// - `by_index` has entries but not this one → the index is not covered.
     fn descend_index(self, i: usize) -> Self {
         match self {
-            Self::AllBelow => Self::AllBelow,
-            Self::At(t) if t.covers_all_below => Self::AllBelow,
-            Self::At(t) => match t.by_index.get(&i) {
-                Some(child) => Self::At(child),
-                // No per-index branch → pass through the same composite node:
-                // a tree built from "friends { name }" (no list-stop) has the
-                // walker at the `friends` node when entering the array, and
-                // the inner-element walk should continue from that same node
-                // (which has `name` as a child).
-                None => Self::At(t),
-            },
+            Self::At(t) => {
+                if t.by_index.is_empty() {
+                    Self::At(t)
+                } else if let Some(child) = t.by_index.get(&i) {
+                    Self::At(child)
+                } else {
+                    Self::None
+                }
+            }
             Self::None => Self::None,
         }
     }
 
-    fn is_covered(&self) -> bool {
-        match self {
-            Self::AllBelow => true,
-            Self::At(t) => t.covered || t.covers_all_below,
-            Self::None => false,
-        }
+    /// True iff this state corresponds to any node in the master tree (leaf
+    /// or intermediate). The walker emits at a missing/null position whenever
+    /// the position is in the skip tree at all.
+    fn is_present(&self) -> bool {
+        !matches!(self, Self::None)
     }
 }
 
-/// End-of-execution entry point: fold the per-entity `(Path, ResponseKeyTree)`
-/// entries into a single `SkipTreeNode`, then walk the user's operation
-/// against `value` and append `UNSATISFIED_FETCH_CONDITION` errors to
-/// `errors`. No-op when `skipped` is empty so callers can invoke
-/// unconditionally.
-///
-/// Both the primary response (in `QueryPlan::execute`) and each `@defer`
-/// chunk (in `DeferredNode::execute`) call this with their own accumulator.
+/// End-of-execution entry point: fold the per-entity `(Path, ResponseKeyTree)` entries into a
+/// single `SkipTreeNode`, then walk the user's operation against `value` and append
+/// `UNSATISFIED_FETCH_CONDITION` errors to `errors`. No-op when `skipped` is empty so callers can
+/// invoke unconditionally.
 fn emit_unsatisfied_fetch_errors(
-    skipped: Vec<(Path, Arc<ResponseKeyTree>)>,
+    skipped: &[(Path, Arc<ResponseKeyTree>)],
     query: &Query,
     schema: &Schema,
     variables: &Object,
@@ -1044,9 +1124,10 @@ fn emit_unsatisfied_fetch_errors(
     if skipped.is_empty() {
         return;
     }
-    let master = SkipTreeNode::build(&skipped);
+    let master = SkipTreeNode::build(skipped);
     collect_unsatisfied_fetch_errors(
         &query.operation.selection_set,
+        query.operation.kind().default_type_name(),
         &query.fragments,
         schema,
         variables,
@@ -1055,6 +1136,105 @@ fn emit_unsatisfied_fetch_errors(
         SkipState::root(&master),
         errors,
     );
+}
+
+/// True iff the user's selection set at this composite contains a non-null
+/// field that the skipped fetch was going to provide and that is missing from
+/// the response data. When this is true, `format_response` will null-bubble
+/// from that leaf up to this composite, so the walker coalesces per-leaf
+/// emissions into a single error at the composite path.
+///
+/// Recurses through inline fragments and fragment spreads, honoring
+/// `@skip`/`@include` and applying `static_type_condition_match` strictly:
+/// only definite matches are descended into.
+fn composite_has_nonnull_miss(
+    selection_set: &[Selection],
+    current_type: &str,
+    fragments: &Fragments,
+    schema: &Schema,
+    variables: &Object,
+    value: &Value,
+    skip: SkipState<'_>,
+) -> bool {
+    for selection in selection_set {
+        match selection {
+            Selection::Field {
+                name,
+                alias,
+                field_type,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if name.as_str() == TYPENAME {
+                    continue;
+                }
+                if !field_type.is_non_null() {
+                    continue;
+                }
+                let response_key = alias.as_ref().unwrap_or(name).as_str();
+                let field_value = value.as_object().and_then(|o| o.get(response_key));
+                let missing = match field_value {
+                    None => true,
+                    Some(v) => v.is_null(),
+                };
+                if !missing {
+                    continue;
+                }
+                if skip.descend_key(response_key).is_present() {
+                    return true;
+                }
+            }
+            Selection::InlineFragment {
+                type_condition,
+                selection_set: sub,
+                include_skip,
+                ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                if static_type_condition_match(schema, current_type, type_condition) == Some(true) {
+                    let refined = walker_refine_type(schema, current_type, type_condition.as_str());
+                    if composite_has_nonnull_miss(
+                        sub, refined, fragments, schema, variables, value, skip,
+                    ) {
+                        return true;
+                    }
+                }
+            }
+            Selection::FragmentSpread {
+                name, include_skip, ..
+            } => {
+                if include_skip.should_skip(variables) {
+                    continue;
+                }
+                let Some(fragment) = fragments.get(name) else {
+                    continue;
+                };
+                if static_type_condition_match(schema, current_type, &fragment.type_condition)
+                    == Some(true)
+                {
+                    let refined =
+                        walker_refine_type(schema, current_type, &fragment.type_condition);
+                    if composite_has_nonnull_miss(
+                        &fragment.selection_set,
+                        refined,
+                        fragments,
+                        schema,
+                        variables,
+                        value,
+                        skip,
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// End-of-execution walker: traverse the user's selection set against the
@@ -1066,6 +1246,7 @@ fn emit_unsatisfied_fetch_errors(
 #[allow(clippy::too_many_arguments)]
 fn collect_unsatisfied_fetch_errors(
     selection_set: &[Selection],
+    parent_type: &str,
     fragments: &Fragments,
     schema: &Schema,
     variables: &Object,
@@ -1077,7 +1258,30 @@ fn collect_unsatisfied_fetch_errors(
     let current_type = value
         .as_object()
         .and_then(|o| o.get(TYPENAME))
-        .and_then(|v| v.as_str());
+        .and_then(|v| v.as_str())
+        .unwrap_or(parent_type);
+
+    // Pre-scan: if a non-null missing field below this composite is covered
+    // by the skip tree, format_response will null-bubble to here. Emit one
+    // error at this composite instead of descending and emitting per-leaf.
+    if composite_has_nonnull_miss(
+        selection_set,
+        current_type,
+        fragments,
+        schema,
+        variables,
+        value,
+        skip,
+    ) {
+        output.push(
+            Error::builder()
+                .message("Could not fetch field")
+                .path(current_path.clone())
+                .extension_code("UNSATISFIED_FETCH_CONDITION")
+                .build(),
+        );
+        return;
+    }
 
     for selection in selection_set {
         match selection {
@@ -1086,6 +1290,7 @@ fn collect_unsatisfied_fetch_errors(
                 alias,
                 selection_set: sub,
                 include_skip,
+                field_type,
                 ..
             } => {
                 if include_skip.should_skip(variables) {
@@ -1105,7 +1310,8 @@ fn collect_unsatisfied_fetch_errors(
                 let field_skip = skip.descend_key(response_key);
 
                 if missing {
-                    if field_skip.is_covered() {
+                    // Field is null/missing AND in the skip tree → emit here.
+                    if field_skip.is_present() {
                         let mut field_path = current_path.clone();
                         field_path.push(PathElement::Key(response_key.to_string(), None));
                         output.push(
@@ -1126,6 +1332,7 @@ fn collect_unsatisfied_fetch_errors(
                     field_path.push(PathElement::Key(response_key.to_string(), None));
                     descend_into_value(
                         sub_sel,
+                        field_type.inner_named_type().as_str(),
                         fragments,
                         schema,
                         variables,
@@ -1140,16 +1347,16 @@ fn collect_unsatisfied_fetch_errors(
                 type_condition,
                 selection_set: sub,
                 include_skip,
-                known_type,
                 ..
             } => {
                 if include_skip.should_skip(variables) {
                     continue;
                 }
-                let effective_type = known_type.as_deref().or(current_type);
-                if type_condition_matches(schema, effective_type, type_condition) {
+                if static_type_condition_match(schema, current_type, type_condition) == Some(true) {
+                    let refined = walker_refine_type(schema, current_type, type_condition.as_str());
                     collect_unsatisfied_fetch_errors(
                         sub,
+                        refined,
                         fragments,
                         schema,
                         variables,
@@ -1161,10 +1368,7 @@ fn collect_unsatisfied_fetch_errors(
                 }
             }
             Selection::FragmentSpread {
-                name,
-                known_type,
-                include_skip,
-                ..
+                name, include_skip, ..
             } => {
                 if include_skip.should_skip(variables) {
                     continue;
@@ -1172,10 +1376,14 @@ fn collect_unsatisfied_fetch_errors(
                 let Some(fragment) = fragments.get(name) else {
                     continue;
                 };
-                let effective_type = known_type.as_deref().or(current_type);
-                if type_condition_matches(schema, effective_type, &fragment.type_condition) {
+                if static_type_condition_match(schema, current_type, &fragment.type_condition)
+                    == Some(true)
+                {
+                    let refined =
+                        walker_refine_type(schema, current_type, &fragment.type_condition);
                     collect_unsatisfied_fetch_errors(
                         &fragment.selection_set,
+                        refined,
                         fragments,
                         schema,
                         variables,
@@ -1190,9 +1398,13 @@ fn collect_unsatisfied_fetch_errors(
     }
 }
 
+/// Step into a response value carrying a composite selection set: iterate
+/// array elements one at a time (advancing the skip-tree index cursor), or
+/// dispatch the non-array case to `collect_unsatisfied_fetch_errors`.
 #[allow(clippy::too_many_arguments)]
 fn descend_into_value(
     selection_set: &[Selection],
+    parent_type: &str,
     fragments: &Fragments,
     schema: &Schema,
     variables: &Object,
@@ -1207,6 +1419,7 @@ fn descend_into_value(
             item_path.push(PathElement::Index(i));
             descend_into_value(
                 selection_set,
+                parent_type,
                 fragments,
                 schema,
                 variables,
@@ -1219,6 +1432,7 @@ fn descend_into_value(
     } else {
         collect_unsatisfied_fetch_errors(
             selection_set,
+            parent_type,
             fragments,
             schema,
             variables,

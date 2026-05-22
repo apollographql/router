@@ -307,6 +307,12 @@ impl FieldType {
     pub(crate) fn is_non_null(&self) -> bool {
         self.0.is_non_null()
     }
+
+    /// The name of the underlying named type, unwrapping any list/non-null
+    /// modifiers. For example, both `Foo!` and `[Foo]!` return `"Foo"`.
+    pub(crate) fn inner_named_type(&self) -> &schema::NamedType {
+        self.0.inner_named_type()
+    }
 }
 
 impl From<&'_ schema::Type> for FieldType {
