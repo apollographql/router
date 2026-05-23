@@ -189,7 +189,7 @@ fn get_field_definition(
     field_name: &Name,
 ) -> Result<Node<ast::FieldDefinition>, FederationError> {
     let parent_type_pos: CompositeTypeDefinitionPosition =
-        schema.get_type(parent_type.clone())?.try_into()?;
+        schema.get_type(parent_type)?.try_into()?;
     let field_def_pos = parent_type_pos.field(field_name.clone())?;
     field_def_pos
         .get(schema.schema())
@@ -313,7 +313,7 @@ fn check_require(
     entity_require: &requires_selection::Selection,
 ) -> Result<(), AnalysisError> {
     let subgraph_entity_type_name = entity_response_shape.default_type_condition();
-    let subgraph_entity_type_pos = subgraph_schema.get_type(subgraph_entity_type_name.clone())?;
+    let subgraph_entity_type_pos = subgraph_schema.get_type(subgraph_entity_type_name)?;
     let directives = match &subgraph_entity_type_pos {
         TypeDefinitionPosition::Object(type_pos) => {
             let type_def = type_pos

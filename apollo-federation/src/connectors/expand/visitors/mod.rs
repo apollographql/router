@@ -34,7 +34,7 @@ where
 /// visited multiple times during shape-driven expansion.
 macro_rules! try_pre_insert {
     ($schema:expr, $pos:expr) => {{
-        if let Some(old_pos) = $schema.try_get_type($pos.type_name.clone()) {
+        if let Some(old_pos) = $schema.try_get_type(&$pos.type_name) {
             // Verify that the types match
             let pos = $crate::schema::position::TypeDefinitionPosition::from($pos.clone());
             if old_pos != pos {
@@ -58,7 +58,7 @@ macro_rules! try_pre_insert {
 /// and matches the existing type
 macro_rules! try_insert {
     ($schema:expr, $pos:expr, $def:expr) => {{
-        if let Some(old_pos) = $schema.try_get_type($pos.type_name.clone()) {
+        if let Some(old_pos) = $schema.try_get_type(&$pos.type_name) {
             // Verify that the types match
             let pos = $crate::schema::position::TypeDefinitionPosition::from($pos.clone());
             if old_pos != pos {

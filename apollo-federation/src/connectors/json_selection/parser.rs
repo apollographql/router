@@ -1040,7 +1040,14 @@ impl PathSelection {
         match self.path.as_ref() {
             PathList::Var(var, tail) => match var.as_ref() {
                 KnownVariable::External(namespace) => {
-                    let selection = tail.compute_selection_trie();
+                    // Build the variable's consumption trie via the fused
+                    // shape-computation machinery so we correctly traverse
+                    // through `->method(...)` arrow chains, `?` operators,
+                    // and nested subselections like
+                    // `$this.items->filter(@.product) { id name }`. The legacy
+                    // walker (`tail.compute_selection_trie()`) treats those as
+                    // opaque leaves; this one keeps walking. (RH-1345 / CNN-1093)
+                    let selection = tail.compute_consumption_trie(namespace);
                     let full_range = merge_ranges(var.range(), tail.range());
                     Some(VariableReference {
                         namespace: VariableNamespace {
@@ -4206,6 +4213,39 @@ mod tests {
         assert_eq!(y_trie.key_ranges("z").collect::<Vec<_>>(), vec![19..20]);
         let z_trie = y_trie.get("z").unwrap();
         assert_eq!(z_trie.key_ranges("d").collect::<Vec<_>>(), vec![23..24]);
+    }
+
+    /// Regression test for RH-1345 / CNN-1093 —
+    /// `CONNECTORS_CANNOT_RESOLVE_KEY` composition error from `->filter()` in
+    /// a `@connect(http: { body: })` mapping. The legacy walker treated
+    /// `PathList::Method` as an opaque leaf and stopped at it, so the
+    /// trailing subselection `{ id name }` was dropped from the variable's
+    /// consumption trie — and the synthesized `@key(fields: "items")` failed
+    /// validation because `items` looks scalar but isn't.
+    ///
+    /// With the fused-trie implementation of `variable_reference`, the
+    /// recursion continues through the `->filter(...)` *and* records the
+    /// predicate's input consumption — `@.product` inside the filter reads
+    /// `product` from each item of `$this.items`, so `product` joins
+    /// `id` / `name` in the trie. The legacy walker captured none of this.
+    #[test]
+    fn test_variable_reference_through_filter_subselection() {
+        let selection = JSONSelection::parse_with_spec(
+            "$this.items->filter(@.product) { id name }",
+            ConnectSpec::V0_4,
+        )
+        .unwrap();
+        let var_paths = selection.external_var_paths();
+        assert_eq!(var_paths.len(), 1);
+
+        let var_ref = var_paths[0]
+            .variable_reference::<crate::connectors::Namespace>()
+            .unwrap();
+        assert_eq!(
+            var_ref.namespace.namespace,
+            crate::connectors::Namespace::This
+        );
+        assert_eq!(var_ref.selection.to_string(), "items { id name product }");
     }
 
     #[test]
