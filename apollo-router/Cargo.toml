@@ -256,7 +256,7 @@ tokio-tungstenite = { version = "0.28.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.25.0"
+hickory-resolver = "0.26.1"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
@@ -288,7 +288,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.1" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
