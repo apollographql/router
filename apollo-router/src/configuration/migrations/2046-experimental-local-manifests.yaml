@@ -1,0 +1,5 @@
+description: "`persisted_queries.experimental_local_manifests` is deprecated; use `persisted_queries.local_manifests` instead."
+actions:
+  - type: move
+    from: persisted_queries.experimental_local_manifests
+    to: persisted_queries.local_manifests
