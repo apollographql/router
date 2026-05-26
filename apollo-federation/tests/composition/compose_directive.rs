@@ -1151,7 +1151,6 @@ mod validation {
 }
 
 mod composition {
-    use insta::assert_snapshot;
     use test_log::test;
 
     use super::*;
@@ -1415,9 +1414,9 @@ mod composition {
         let shared_field = coord!(Query.shared)
             .lookup_field(schema)
             .expect("field exists");
-        assert_snapshot!(
+        assert_eq!(
             shared_field.to_string(),
-            r#"shared_field: shared: String @foo(name: "test")"#
+            r#"shared: String @foo(name: "test")"#
         );
 
         let has_inconsistent_hint = result
