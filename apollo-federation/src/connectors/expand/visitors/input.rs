@@ -92,7 +92,18 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
             .original_schema
             .get_type(field_type.ty.inner_named_type())?;
         match inner_type {
-            TypeDefinitionPosition::InputObject(input) => Ok(Some(input)),
+            TypeDefinitionPosition::InputObject(input) => {
+                // Break recursion on self-referential input types: once we've
+                // entered an input group during this walk, refuse to descend
+                // into it again. `enter_group` has already pre-inserted and
+                // populated this type's fields, so re-descending would just
+                // loop forever.
+                if self.visited_input_types.contains(&input.type_name) {
+                    Ok(None)
+                } else {
+                    Ok(Some(input))
+                }
+            }
             TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => Ok(None),
 
             other => Err(FederationError::internal(format!(
@@ -107,16 +118,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
         group: &InputObjectTypeDefinitionPosition,
     ) -> Result<Vec<InputObjectFieldDefinitionPosition>, FederationError> {
         try_pre_insert!(self.to_schema, group)?;
-
-        // Break recursion on self-referential input types: if we've already
-        // entered this group during this walk, push a skip marker and return
-        // no fields so the queue drains instead of looping forever. The
-        // matching exit_group will pop the marker without inserting.
-        if !self.visited_input_types.insert(group.type_name.clone()) {
-            self.input_skip_stack.push(true);
-            return Ok(Vec::new());
-        }
-        self.input_skip_stack.push(false);
+        self.visited_input_types.insert(group.type_name.clone());
 
         let group_def = group.get(self.original_schema.schema())?;
         let output_type = InputObjectType {
@@ -132,14 +134,6 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
     }
 
     fn exit_group(&mut self) -> Result<(), FederationError> {
-        let skipped = self
-            .input_skip_stack
-            .pop()
-            .ok_or_else(|| FederationError::internal("tried to exit a group not yet visited"))?;
-        if skipped {
-            return Ok(());
-        }
-
         let (definition, r#type) = self
             .type_stack
             .pop()

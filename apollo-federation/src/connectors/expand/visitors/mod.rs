@@ -178,14 +178,10 @@ pub(crate) struct SchemaVisitor<'a, Group, GroupType> {
     type_stack: Vec<(Group, GroupType)>,
 
     /// Input type names whose group has already been entered during this walk.
-    /// Used by the input visitor to break recursion on self-referential input types.
+    /// Used by the input visitor to break recursion on self-referential input
+    /// types: `try_get_group_for_field` returns `None` for any input type
+    /// already in this set, so we never descend into the same group twice.
     visited_input_types: HashSet<Name>,
-
-    /// Parallels the input visitor's enter/exit pairs. `true` marks an enter
-    /// that was short-circuited (recursive input type already in
-    /// `visited_input_types`); the matching `exit_group` must be a no-op.
-    /// Only used by the input visitor.
-    input_skip_stack: Vec<bool>,
 }
 
 impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
@@ -200,7 +196,6 @@ impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
             to_schema,
             type_stack: Vec::new(),
             visited_input_types: HashSet::default(),
-            input_skip_stack: Vec::new(),
         }
     }
 }
