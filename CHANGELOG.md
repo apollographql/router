@@ -2,6 +2,283 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.14.0] - 2026-04-28
+
+## 🚀 Features
+
+### Add `expand_json_string_values` option to JSON log formatter ([PR #9156](https://github.com/apollographql/router/pull/9156))
+
+When `expand_json_string_values: true` is set on a stdout or file JSON log formatter, string attribute values that contain valid JSON objects or arrays are emitted as native JSON instead of quoted strings. This enables log aggregators like Splunk to index sub-fields such as `errors{}.extensions.code`.
+
+This is useful when telemetry selectors like `response_errors: "$[*]"` produce structured data: OpenTelemetry's attribute model serializes objects to JSON strings, but log formatters can now expand those strings back to native JSON at emit time. OTLP exporters are unaffected.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9156
+
+### Normalize `supergraph.path` to support queries with and without trailing slashes (`/`) ([PR #8860](https://github.com/apollographql/router/pull/8860))
+
+Normalize trailing `/` for `supergraph.path` to support `/graphql` and `/graphql/`. This works by stripping trailing `/` from both the configured path and the incoming query path to ensure they match, regardless of whether the config or query includes a trailing slash.
+
+By [@Jephuff](https://github.com/Jephuff) in https://github.com/apollographql/router/pull/8860
+
+### Accept JWTs without `exp` on a per-JWKS basis while still rejecting expired tokens ([Issue #8910](https://github.com/apollographql/router/issues/8910), [PR #8911](https://github.com/apollographql/router/pull/8911))
+
+Adds a per-JWKS `allow_missing_exp` configuration option to Router JWT authentication. When enabled for a JWKS entry, tokens without an `exp` claim are accepted for that JWKS. Tokens that include an `exp` claim continue to be validated and rejected if expired.
+
+This is useful for deployments that rely on long-lived machine-to-machine or service tokens that omit `exp`, without relaxing expiry validation globally.
+
+By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/8911
+
+### Add selective body field filtering for coprocessor responses ([Issue #5020](https://github.com/apollographql/router/issues/5020))
+
+Adds the ability to selectively send only specific parts of GraphQL response bodies (data, errors, or extensions) to the coprocessor, instead of the entire response body. This reduces serialization/deserialization overhead and network payload size when the coprocessor only needs to inspect certain fields.
+
+Previously, the `body` configuration was a boolean that sent either the entire response body or nothing. Now it supports selective field filtering:
+
+```yaml
+coprocessor:
+  url: http://127.0.0.1:8081
+
+  # Supergraph responses
+  supergraph:
+    response:
+      body:
+        data: false
+        errors: true        # Only send errors
+        extensions: true    # and extensions
+
+  # Execution responses
+  execution:
+    response:
+      body:
+        data: true
+        errors: false
+        extensions: false   # Only send data
+
+  # Subgraph responses
+  subgraph:
+    all:
+      response:
+        body:
+          data: false
+          errors: true      # Only send errors
+          extensions: false
+```
+
+The boolean syntax (`body: true` or `body: false`) continues to work for backward compatibility. When using selective filtering, the coprocessor can only modify the fields that were sent to it. Other fields are preserved from the original response.
+
+This feature is available for the supergraph, execution, and subgraph response stages.
+
+By [@zachfettersmoore](https://github.com/zachfettersmoore) in https://github.com/apollographql/router/pull/9019
+
+### Emit `apollo.router.operations.rhai.duration` histogram metric for Rhai script callbacks ([PR #9072](https://github.com/apollographql/router/pull/9072))
+
+A new `apollo.router.operations.rhai.duration` histogram metric (unit: `s`, value type: `f64`) is now emitted for every Rhai script callback execution across all pipeline stages. This mirrors the existing `apollo.router.operations.coprocessor.duration` metric.
+
+Attributes on each datapoint:
+- `rhai.stage` — the pipeline stage (e.g. `RouterRequest`, `SubgraphResponse`)
+- `rhai.succeeded` — `true` if the callback returned without throwing an error
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/9072
+
+### Add `intern_strings` configuration option for the Rhai plugin ([PR #9070](https://github.com/apollographql/router/pull/9070))
+
+The Rhai plugin now exposes an `intern_strings` option that controls Rhai's internal string interning. Under high concurrency, threads encountering new strings must acquire a write lock, which can serialize Rhai execution across concurrent requests.
+
+Setting `intern_strings: false` disables interning, eliminating the lock:
+
+```yaml
+rhai:
+  scripts: ./rhai
+  main: main.rhai
+  intern_strings: false
+```
+
+String interning can alleviate memory allocation and make string equality checks a little faster. For deployments serving many concurrent requests, the cost likely outweighs the benefit, so we recommend experimenting with `intern_strings: false` and observing if it improves performance.
+
+The default (`true`) preserves the existing behavior.
+
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/9070
+
+### Add `request_duration` router selector ([PR #9187](https://github.com/apollographql/router/pull/9187))
+
+Adds a new `request_duration` selector for the router service that returns the total elapsed time from when the router received the request. The unit is configurable:
+
+- `seconds` (float)
+- `milliseconds` (integer)
+- `nanoseconds` (integer)
+
+The selector can be used as a custom instrument attribute or combined with conditions to filter based on request duration. For example, to count requests that complete in under 10 seconds:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        my.short.requests:
+          type: counter
+          value: unit
+          unit: reqs
+          description: "Requests completing in under 10 seconds"
+          condition:
+            lt:
+              - request_duration: seconds
+              - 10
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9187
+
+### Add subscription and defer observability: end reason span attributes and termination metrics ([PR #8858](https://github.com/apollographql/router/pull/8858))
+
+Adds new span attributes and metrics to improve observability of streaming responses.
+
+**Span attributes:**
+
+- **`apollo.subscription.end_reason`**: Records the reason a subscription was terminated. Possible values are `server_close`, `subgraph_error`, `heartbeat_delivery_failed`, `client_disconnect`, `schema_reload`, and `config_reload`.
+- **`apollo.defer.end_reason`**: Records the reason a deferred query ended. Possible values are `completed` (all deferred chunks were delivered successfully) and `client_disconnect` (the client disconnected before all deferred data was delivered).
+
+Both attributes are added dynamically to router spans only when relevant (i.e., only on requests that actually use subscriptions or `@defer`), instead of being present on every router span.
+
+**Metrics:**
+
+A single counter is emitted when a subscription terminates:
+
+- **`apollo.router.operations.subscriptions.terminated.client`** (default attributes: `reason`, `subgraph.name`): Incremented once per client connection when a subscription stream ends. The `reason` attribute indicates why (possible values: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`). The `subgraph.name` attribute is populated if available. When deduplication is enabled, a single subgraph WebSocket closure produces one `terminated` event per deduplicated client sharing that connection (each with `reason=server_close`).
+
+  Attributes for this metric are configurable. By default, `reason` and `subgraph.name` are enabled. You can also enable `client.name` via configuration:
+
+  ```yaml
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          apollo.router.operations.subscriptions.terminated.client:
+            attributes:
+              reason: true
+              subgraph.name: true
+              client.name: true
+  ```
+
+The following counter is emitted when a subscription request is rejected:
+
+- **`apollo.router.operations.subscriptions.rejected`** (attributes: `reason`, `subgraph.name`): A subscription request was rejected. The `reason` attribute indicates why: `max_opened_subscriptions_limit_reached` (the router has reached its `max_opened_subscriptions` limit) or `subgraph` (the subgraph WebSocket connection failed, e.g. connection refused, protocol error, or failed subscription handshake). The `subgraph.name` attribute is populated when available, and defaults to an empty string otherwise.
+
+The following counter is emitted when a subgraph ends a subscription:
+
+- **`apollo.router.operations.subscriptions.terminated.subgraph`** (attributes: `subgraph.name`): Incremented once per subgraph WebSocket closure. Each deduplicated client sharing that connection will also emit a corresponding `apollo.router.operations.subscriptions.terminated.client` event with `reason=server_close`.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8858
+
+## 🐛 Fixes
+
+### Recognize 204 (No Content) responses without `Content-Length` header in connectors ([PR #9141](https://github.com/apollographql/router/pull/9141))
+
+Connectors now correctly handle HTTP 204 (No Content) responses from spec-compliant servers that don't include a `Content-Length` header.
+
+Previously, empty body detection relied on the presence of a `Content-Length: 0` header. Because the HTTP spec explicitly forbids including this header in 204 responses, connectors would fail to recognize empty bodies from compliant servers. The fix checks `body.is_empty()` directly, with `Content-Length: 0` kept as a fallback for non-compliant servers.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9141
+
+### Retry JWKS candidates on issuer/audience mismatch ([PR #9214](https://github.com/apollographql/router/pull/9214))
+
+When multiple JWKS entries share identical key material (e.g., Azure AD B2C multi-policy tenants where different policies use the same RSA key), the router now correctly retries validation against all matching candidates. Previously, issuer and audience validation happened after the candidate loop, so a token that passed signature verification against the first JWKS entry would be rejected if that entry's configured issuer or audience didn't match — with no attempt to try the remaining entries.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9214
+
+### Support non-ASCII (UTF-8) WebSocket header values ([Issue #1485](https://github.com/apollographql/router/issues/1485), [PR #9051](https://github.com/apollographql/router/pull/9051))
+
+The router can now handle WebSocket connections with UTF-8 encoded header values, including non-ASCII characters like "Montréal". Previously, such connections failed because of serialization issues in the underlying `tungstenite` library.
+
+The fix comes from updating `tokio-tungstenite` from v0.28.0 to v0.29.0.
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9051
+
+### Accept `pool_idle_timeout: null` in `traffic_shaping` configuration ([PR #9165](https://github.com/apollographql/router/pull/9165))
+
+Setting `pool_idle_timeout: null` in `traffic_shaping` configuration caused a startup failure with a schema validation error, despite `null` being a documented valid value that disables idle connection eviction. The JSON schema incorrectly only allowed strings. It now correctly accepts both strings and `null`.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9165
+
+### Honor zero values for `minAvailable` and `maxUnavailable` in the Helm PDB template ([Issue #8350](https://github.com/apollographql/router/issues/8350))
+
+Setting `minAvailable: 0` or `maxUnavailable: 0` in the `podDisruptionBudget` Helm values was silently ignored, producing a PDB with no disruption rules. This happened because Go templates treat `0` as falsy in a simple `if` check.
+
+The template now uses `kindIs "invalid"` to correctly detect whether a value was explicitly set, and an `else if` to prevent both fields from being rendered simultaneously — which Kubernetes rejects. If both `maxUnavailable` and `minAvailable` are set, `maxUnavailable` takes precedence.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9028
+
+### Ensure `client.name`, `client.version`, `http.route`, and `http.request.method` can be aliased on router spans ([PR #9048](https://github.com/apollographql/router/pull/9048))
+
+
+`client.name` and `client.version` have now been added to `RouterAttributes`, `http.route` has been added to `HttpServerAttributes`, and `http.request.method` has been added to `HttpCommonAttributes`. The default behavior should remain the same. Example configuration using aliases:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          http.route:
+            alias: http_route
+          http.request.method:
+            alias: http_request_method
+```
+
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9048
+
+### Preserve null propagation when multiple fragments select the same non-null field ([PR #9032](https://github.com/apollographql/router/pull/9032))
+
+When a query uses multiple fragment spreads on the same parent type and a subgraph response is missing a required non-null field on a union member, the router now correctly returns `null` for the affected field instead of a partial object like `{"__typename": "A"}`.
+
+The GraphQL specification requires that a non-null violation propagates `null` upward to the nearest nullable parent. Previously, if one fragment nullified a field, a subsequent fragment on the same parent could overwrite that `null` with a partial result — producing a spec-incorrect response.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9032
+
+## 🛠 Maintenance
+
+### Reduce flaky CI in federation validation and Redis cache metrics tests ([PR #9102](https://github.com/apollographql/router/pull/9102))
+
+Removes a wall-clock performance assertion from connector validation snapshot tests (timing is unreliable under CI load) and replaces a fixed sleep in Redis cache metrics tests with polling until `command_queue_length` reports zero before asserting gauges.
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/9102
+
+## 📚 Documentation
+
+### Document list-type argument support for `slicingArguments` in demand control ([PR #9196](https://github.com/apollographql/router/pull/9196))
+
+The router supports using the length of list-type arguments as the cost multiplier in `@listSize(slicingArguments: [...])`, but this was not documented. Adds a new "List-type arguments in `slicingArguments`" subsection to the demand control docs with schema examples, query examples (both inline arrays and variables), and cost calculation breakdowns.
+
+By [@shanemyrick](https://github.com/shanemyrick) in https://github.com/apollographql/router/pull/9196
+
+### Document HTTP proxy support for GraphOS OTLP exporters ([PR #9055](https://github.com/apollographql/router/pull/9055))
+
+Documents that the router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables when using the HTTP transport. Includes a note that TLS-inspecting proxies also require the proxy's root certificate to be added to the router's trust store.
+
+Also corrects the minimum version badge for `experimental_otlp_tracing_protocol` / `experimental_otlp_metrics_protocol` to Router v1.49.0, which is when HTTP transport support was first introduced.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9152
+
+### Deprecate `apollo.router.session.count.active` in favor of `http.server.active_requests` ([PR #9069](https://github.com/apollographql/router/pull/9069))
+
+The Standard Instruments reference now marks `apollo.router.session.count.active` as deprecated and directs users to [`http.server.active_requests`](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions. The metric remains in the router for backward compatibility but might be removed in a future release.
+
+By [@mabuyo](https://github.com/mabuyo) in https://github.com/apollographql/router/pull/9069
+
+## 🧪 Experimental
+
+### Add experimental HTTP transport for Apollo OTLP metrics and traces ([PR #9055](https://github.com/apollographql/router/pull/9055))
+
+The router can now send Apollo OTLP metrics and traces over HTTP (experimental). Enable it with these config values:
+
+- `telemetry.apollo.experimental_otlp_tracing_protocol`
+- `telemetry.apollo.experimental_otlp_metrics_protocol`
+
+gRPC remains the preferred transport for Apollo OTLP, but HTTP is available for deployments that can't use gRPC.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/9055
+
+
+
 # [2.13.1] - 2026-04-03
 
 ## 🐛 Fixes

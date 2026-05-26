@@ -188,14 +188,18 @@ impl Verifier for OtlpTraceSpec<'_> {
         if let Some(expected_operation_name) = &self.operation_name {
             let binding =
                 trace.select_path("$..[?(@.name == 'supergraph')]..[?(@.key == 'graphql.operation.name')].value.stringValue")?;
-            let operation_name = binding.first();
-            assert_eq!(
-                operation_name
-                    .expect("graphql.operation.name expected")
-                    .as_str()
-                    .expect("graphql.operation.name must be a string"),
-                expected_operation_name
-            );
+            let operation_name = binding
+                .first()
+                .ok_or_else(|| {
+                    BoxError::from("graphql.operation.name not yet present on supergraph span")
+                })?
+                .as_str()
+                .ok_or_else(|| BoxError::from("graphql.operation.name must be a string"))?;
+            if operation_name != expected_operation_name {
+                return Err(BoxError::from(format!(
+                    "graphql.operation.name mismatch: expected {expected_operation_name}, got {operation_name}"
+                )));
+            }
         }
         Ok(())
     }

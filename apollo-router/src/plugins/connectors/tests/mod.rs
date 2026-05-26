@@ -558,9 +558,7 @@ async fn basic_connection_errors() {
     // Different OSes have different codes at the end of the message so we have to assert on the parts separately
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
-        msg.starts_with(
-            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error"
-        ),
+        msg.starts_with("Connector error: HTTP fetch failed: tcp connect error"),
         "got message: {msg}"
     );
     assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));

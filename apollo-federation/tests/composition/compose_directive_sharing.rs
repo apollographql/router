@@ -486,7 +486,7 @@ fn interface_object_field_requires_shareable() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "Entity.sku" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA", "subgraphB (through @interfaceObject field "Node.sku")" and "subgraphC" and defined as non-shareable in subgraph "subgraphB (through @interfaceObject field "Node.sku")""#,
+            r#"Non-shareable field "Entity.sku" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA", "subgraphB" (through @interfaceObject field "Node.sku") and "subgraphC" and defined as non-shareable in subgraph "subgraphB" (through @interfaceObject field "Node.sku")"#,
         )],
     );
 }

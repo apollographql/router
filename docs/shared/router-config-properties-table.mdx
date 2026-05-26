@@ -639,6 +639,21 @@ progressive_override: {}
 
 ---
 
+### `reload`
+
+Configuration for router reload retry behavior. See [Configuring reload retries](/router/configuration/hot-reload-schema#configuring-reload-retries) for details.
+
+- **Type:** `object`
+
+```yaml title="reload"
+reload:
+  max_retries: 5
+  retry_delay: 10s
+```
+
+
+---
+
 ### `rhai`
 
 Configuration for the Rhai Plugin

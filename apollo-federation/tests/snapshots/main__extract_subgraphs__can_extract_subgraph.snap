@@ -79,7 +79,7 @@ type S {
   x: Int
 }
 
-type T @key(fields: "k", resolvable: true) {
+type T @key(fields: "k") {
   k: ID @shareable
 }
 
@@ -165,7 +165,7 @@ enum E {
   V2
 }
 
-type T @key(fields: "k", resolvable: true) {
+type T @key(fields: "k") {
   k: ID @shareable
   a: Int
   b: String

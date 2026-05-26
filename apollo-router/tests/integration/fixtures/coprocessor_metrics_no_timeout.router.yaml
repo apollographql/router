@@ -1,0 +1,14 @@
+# This coprocessor url will be updated to a test-scoped mock server
+coprocessor:
+  url: "<replace>"
+  router:
+    request:
+      body: true
+# export recorded metrics
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        listen: "127.0.0.1:0"
+        path: "/metrics"

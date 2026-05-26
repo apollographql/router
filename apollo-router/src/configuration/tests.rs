@@ -1238,6 +1238,17 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
 }
 
 #[test]
+fn it_processes_batching_mode_defaults_correctly() {
+    let json_config = json!({
+        "enabled": true,
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(matches!(config.mode, BatchingMode::BatchHttpLink));
+}
+
+#[test]
 fn it_processes_unspecified_maximum_batch_limit_correctly() {
     let json_config = json!({
         "enabled": true,
@@ -1483,4 +1494,47 @@ fn hoist_orphan_errors_all_with_subgraph_override() {
             .get("noisy_one")
             .enabled
     );
+}
+
+mod reload {
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn defaults() {
+        // An empty config should produce the documented defaults.
+        let config = Configuration::from_str("").expect("empty config must be valid");
+        assert_eq!(config.reload.max_retries, Some(5));
+        assert_eq!(config.reload.retry_delay, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn max_retries_null_means_unlimited() {
+        // `null` must deserialize as `None` (unlimited retries), not as Some(0).
+        // This has bitten us before — Option<u32> with a serde default sometimes
+        // ignores an explicit `null` in YAML if the default function is not wired up
+        // correctly.
+        let config = Configuration::from_str("reload:\n  max_retries: null\n")
+            .expect("config with null max_retries must be valid");
+        assert_eq!(
+            config.reload.max_retries, None,
+            "max_retries: null should deserialize to None (unlimited retries)"
+        );
+    }
+
+    #[test]
+    fn max_retries_zero_disables_retries() {
+        let config = Configuration::from_str("reload:\n  max_retries: 0\n")
+            .expect("config with max_retries: 0 must be valid");
+        assert_eq!(config.reload.max_retries, Some(0));
+    }
+
+    #[test]
+    fn custom_retry_delay() {
+        let config = Configuration::from_str("reload:\n  retry_delay: 30s\n")
+            .expect("config with custom retry_delay must be valid");
+        assert_eq!(config.reload.retry_delay, Duration::from_secs(30));
+    }
 }

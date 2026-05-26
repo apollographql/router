@@ -323,7 +323,13 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
     Afterward, callbacks for `execution_service`, `supergraph_service` and then `router_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
     
+<Note>
 
+**About Currying and performance**: Rhai language supports [currying](https://rhai.rs/book/language/fn-curry.html), a technique that binds values into a function to produce a closure, and this has a direct performance impact in the router: curried (closure-based) callbacks are invoked **without acquiring the global `scope` mutex**, whereas non-curried callbacks lock the `scope` on every call, serializing execution across all concurrent requests. For this reason, closure-based callbacks are the recommended default.
+
+See [Curried vs. non-curried callback functions](https://www.apollographql.com/docs/graphos/routing/customization/rhai#curried-vs-non-curried-callback-functions) for examples.
+
+</Note>
 
 ## Example scripts
 
@@ -345,6 +351,28 @@ fn supergraph_service(service) {
 fn process_request(request) {
     log_info("this is info level log message");
 }
+```
+
+### Curried vs. non-curried callback functions
+
+Non-curried (function pointer), locks `scope` on every call:
+
+```rhai
+fn process_request(request) {
+    // accesses scope on every invocation
+}
+
+router.add_request_handler(process_request);
+```
+
+Curried (closure), no `scope` lock:
+
+```rhai
+let handler = |request| {
+    // bound values are captured; scope is not locked
+};
+
+router.add_request_handler(handler);
 ```
 
 ### Manipulating headers and the request context

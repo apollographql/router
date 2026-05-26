@@ -328,7 +328,7 @@ fn referenced_inaccessible_merge_error_includes_subgraph_locations() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let errors = result.expect_err("Expected composition to fail");
+    let errors = result.expect_err("Expected composition to fail").errors;
 
     let merge_errors: Vec<_> = errors
         .iter()

@@ -121,6 +121,8 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
+- `apollo.router.cache.redis.reconnection` - Number of Redis client reconnections
+- `apollo.router.cache.redis.unresponsive` - Number of times a Redis server became unresponsive
 - `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
 - `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
@@ -129,6 +131,10 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 All Redis metrics, except for `apollo.router.cache.redis.clients`, include the following attribute:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
+
+The `apollo.router.cache.redis.reconnection` and `apollo.router.cache.redis.unresponsive` metrics also include:
+
+- `server`: the Redis server that raised the event
 
 The `apollo.router.cache.redis.errors` metric also includes an `error_type` attribute with possible values:
 - `config` - Configuration errors (invalid Redis settings)
@@ -244,6 +250,14 @@ Similar to the initial call to Uplink, the router does not record metrics for ca
 
 </Note>
 
+## Connections
+
+- `apollo.router.connection.acquire.duration` - Time in seconds to establish a new TCP or Unix socket connection to a downstream service. Recorded only when the connection pool opens a new connection — pool hits are not recorded. Attributes:
+  - `network.transport`: `tcp` for HTTP connections, `unix` for Unix socket connections
+  - `subgraph.name`: name of the subgraph (subgraph connections only)
+  - `connector.source.name`: name of the connector source (connector connections only)
+  - `coprocessor`: `true` (coprocessor connections only)
+
 ## Subscriptions
 
 <Tip>
@@ -284,6 +298,14 @@ telemetry:
 
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
+## Limits
+
+- `apollo.router.limits.subgraph_response_size.exceeded`: A counter of subgraph responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.subgraph`.
+  - `subgraph.name`: The name of the subgraph whose response was aborted.
+
+- `apollo.router.limits.connector_response_size.exceeded` - A counter of connector responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.connector`.
+  - `connector.source`: The source key (`subgraph_name.source_name`) whose response was aborted.
 
 ## GraphOS Studio
 

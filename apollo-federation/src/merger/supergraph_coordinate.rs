@@ -406,7 +406,7 @@ fn subgraph_locations_for_single_inaccessible_error(
             continue;
         };
         for (idx, subgraph) in subgraphs.iter().enumerate() {
-            let Ok(Some(inaccessible_name)) = subgraph.inaccessible_directive_name() else {
+            let Some(inaccessible_name) = subgraph.inaccessible_directive_name() else {
                 continue;
             };
             if !parsed.exists_in(subgraph.schema()) {
