@@ -30,4 +30,4 @@ connectors:
       max_requests_per_operation: 50
 ```
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9520
