@@ -1,4 +1,4 @@
-### Router instances no longer get permanently stuck on stale schema after a transient reload failure ([PR #9391](https://github.com/apollographql/router/pull/9391))
+### Retry reloads automatically after transient failures instead of staying on a stale schema ([PR #9391](https://github.com/apollographql/router/pull/9391))
 
 Previously, if a schema reload failed — for example, because a persisted query manifest fetch from Uplink encountered a transient network error — the router would log "error while reloading, continuing with previous configuration" and then stop retrying. All subsequent background polls from Uplink would return `Unchanged` (because `last_id` had already advanced to the new schema ID), leaving the router permanently serving the old schema until manually restarted.
 

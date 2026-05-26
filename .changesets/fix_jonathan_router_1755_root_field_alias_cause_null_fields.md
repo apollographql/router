@@ -1,4 +1,4 @@
-### fix: connector fields returning null when root query alias is combined with field-level aliases ([Issue #9347](https://github.com/apollographql/router/issues/9347))
+### Resolve `@connect` field values when a root query alias is combined with field-level aliases ([Issue #9347](https://github.com/apollographql/router/issues/9347))
 
 Queries that aliased both the root query field and one or more of its subfields on a `@connect`-backed type returned null for every aliased subfield, which could cascade into null propagation for non-nullable types. Either alias in isolation worked correctly — only the combination of both triggered the bug.
 

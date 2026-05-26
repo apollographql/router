@@ -1,4 +1,4 @@
-### Fix `on_graphql_error` coprocessor and telemetry conditions for `@defer` responses ([PR #9365](https://github.com/apollographql/router/pull/9365))
+### Evaluate `on_graphql_error` per response part in coprocessors and telemetry for `@defer` responses ([PR #9365](https://github.com/apollographql/router/pull/9365))
 
 Previously, the `on_graphql_error` condition used in coprocessor and telemetry configurations did not work correctly for deferred (`@defer`) multipart responses:
 

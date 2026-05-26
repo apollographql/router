@@ -1,4 +1,4 @@
-### Refactor batching configuration struct to follow YAML design guidance
+### Make `batching.mode` optional and reject unknown subgraph batching fields ([PR #9315](https://github.com/apollographql/router/pull/9315))
 
 The `batching` configuration struct now uses a struct-level `#[serde(default)]` with an explicit `impl Default`, rather than per-field `#[serde(default)]` annotations. This aligns with the project's [YAML design guidance](https://github.com/apollographql/router/blob/dev/dev-docs/yaml-design-guidance.md#use-serdedefault-on-struct-instead-of-fields-when-possible), which requires that the serde deserialization path and the `Default` implementation use the same mechanism.
 
