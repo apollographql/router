@@ -259,29 +259,22 @@ fn is_success(
         ProblemLocation::IsSuccess,
     ));
 
-    let success = match res.as_ref() {
-        Some(Value::Bool(b)) => *b,
-        Some(other) => {
-            let type_name = match other {
-                Value::Null => "null",
-                Value::Bool(_) => unreachable!(),
-                Value::Number(_) => "number",
-                Value::String(_) => "string",
-                Value::Array(_) => "array",
-                Value::Object(_) => "object",
-            };
-            warnings.push(Problem {
-                message: format!("`isSuccess` must evaluate to a boolean, got {type_name}"),
-                path: String::new(),
-                count: 1,
-                location: ProblemLocation::IsSuccess,
-            });
-            false
-        }
-        None => false,
+    let type_name = match res.as_ref() {
+        Some(Value::Bool(b)) => return (*b, warnings),
+        None => return (false, warnings),
+        Some(Value::Null) => "null",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
     };
-
-    (success, warnings)
+    warnings.push(Problem {
+        message: format!("`isSuccess` must evaluate to a boolean, got {type_name}"),
+        path: String::new(),
+        count: 1,
+        location: ProblemLocation::IsSuccess,
+    });
+    (false, warnings)
 }
 
 /// Returns a response for a mapping-only connector by applying the selection against `{}`.
