@@ -3242,19 +3242,22 @@ mod tests {
         .await;
     }
 
-    /// Smoke test: a router config with `cardinality_limit` set both globally
-    /// and per-view parses, activates, and the Prometheus exporter still emits
-    /// the expected series. Enforcement of the limit itself is covered in
-    /// `reload::metrics::view_selection_tests`.
+    /// End-to-end: a per-view `cardinality_limit: 2` is wired through the
+    /// Prometheus exporter. Recording three distinct attribute sets on the
+    /// instrument should overflow on the third, producing an
+    /// `otel_metric_overflow="true"` series in the scraped output.
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_cardinality_limit.router.yaml"
             ))
             .await;
             plugin.activate();
-            u64_histogram!("apollo.test.histo", "it's a test", 1u64);
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
             make_supergraph_request(plugin.as_ref()).await;
             assert_prometheus_metrics!(plugin);

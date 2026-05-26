@@ -373,6 +373,32 @@ mod view_selection_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn counter_with_global_cardinality_limit_no_user_view_overflows() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], NonZeroU32::new(2));
+
+        let counter = provider.meter("t").u64_counter("global.limited").build();
+        counter.add(1, &[KeyValue::new("k", "a")]);
+        counter.add(1, &[KeyValue::new("k", "b")]);
+        counter.add(1, &[KeyValue::new("k", "c")]);
+        provider.force_flush().unwrap();
+
+        with_metric(&exporter, "global.limited", |data| {
+            let AggregatedMetrics::U64(MetricData::Sum(sum)) = data else {
+                panic!("expected Sum aggregation (native counter), got {data:?}")
+            };
+            let has_overflow = sum.data_points().any(|dp| {
+                dp.attributes()
+                    .any(|kv| kv.key.as_str() == "otel.metric.overflow")
+            });
+            assert!(
+                has_overflow,
+                "global limit of 2 with no per-view should overflow on the third attribute set",
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn counter_with_user_view_cardinality_limit_wins_over_global() {
         let exporter = InMemoryMetricExporter::default();
         let mut view = empty_view("limited.counter");

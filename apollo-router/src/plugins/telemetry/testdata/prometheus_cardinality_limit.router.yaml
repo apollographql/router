@@ -1,7 +1,4 @@
 telemetry:
-  apollo:
-    client_name_header: name_header
-    client_version_header: version_header
   exporters:
     metrics:
       common:
@@ -9,8 +6,9 @@ telemetry:
         cardinality_limit: 5000
         views:
           - name: apollo.test.histo
-            cardinality_limit: 10000
+            cardinality_limit: 2
             allowed_attribute_keys:
               - otel_scope_name
+              - k
       prometheus:
         enabled: true

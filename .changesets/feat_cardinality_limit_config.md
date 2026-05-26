@@ -2,7 +2,7 @@
 
 Users can now set a `cardinality_limit` in their router config to override the OpenTelemetry SDK's default limit of 2000 distinct attribute combinations per metric. Once the limit is reached, additional attribute combinations are dropped and replaced with a single overflow series tagged `otel_metric_overflow="true"`, losing their per-attribute breakdown.
 
-Note that raising the cardinality limit increases memory usage proportionally, since each allowed attribute combination consumes memory.
+Note that raising the cardinality limit increases memory usage proportionally, since each allowed attribute combination consumes memory. Monitor `apollo.router.telemetry.metrics.cardinality_overflow` to detect when a metric is hitting its limit.
 
 The limit can be set globally under `telemetry.exporters.metrics.common.cardinality_limit` and per-metric under individual `views[].cardinality_limit`. The per-metric setting takes precedence over the global one.
 
