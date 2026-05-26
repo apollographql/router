@@ -1,4 +1,4 @@
-### Deprecate `persisted_queries.experimental_local_manifests` ([Issue #ROUTER-1760](https://apollographql.atlassian.net/browse/ROUTER-1760))
+### Deprecate `persisted_queries.experimental_local_manifests`
 
 The `persisted_queries.experimental_local_manifests` configuration key is now deprecated. Operators using this key will see a deprecation warning at router startup directing them to the GA `persisted_queries.local_manifests` key, which has the same behavior. The deprecated key continues to work in 2.x via the existing config migration, but will be removed in 3.x.
 
