@@ -420,7 +420,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = self.state.schema.into();
         let field_set_scalar_name =
             schema.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
-        if let Some(field_set_scalar) = schema.try_get_type(field_set_scalar_name) {
+        if let Some(field_set_scalar) = schema.try_get_type(&field_set_scalar_name) {
             // rename _FieldSet scalar to federation__FieldSet
             field_set_scalar.rename(
                 &mut schema,
@@ -470,7 +470,7 @@ impl Subgraph<Expanded> {
             let default_name = default_operation_name(&op_type);
             if op_name.name != default_name {
                 operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                if self.schema().try_get_type(default_name.clone()).is_some() {
+                if self.schema().try_get_type(&default_name).is_some() {
                     return Err(SingleFederationError::root_already_used(
                         op_type,
                         default_name,
@@ -496,7 +496,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = schema.into();
         for (current_name, new_name) in &operation_types_to_rename {
             schema
-                .get_type(current_name.clone())?
+                .get_type(current_name)?
                 .rename(&mut schema, new_name.clone())?;
         }
         let schema = validate_subgraph_schema(schema)?;
@@ -574,7 +574,7 @@ fn normalize_root_types_in_subgraph_schema(
         let default_name = default_operation_name(&op_type);
         if op_name.name != default_name {
             operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-            if schema.try_get_type(default_name.clone()).is_some() {
+            if schema.try_get_type(&default_name).is_some() {
                 return Err(SingleFederationError::root_already_used(
                     op_type,
                     default_name,
@@ -587,7 +587,7 @@ fn normalize_root_types_in_subgraph_schema(
     let changed = !operation_types_to_rename.is_empty();
     for (current_name, new_name) in &operation_types_to_rename {
         schema
-            .get_type(current_name.clone())?
+            .get_type(current_name)?
             .rename(schema, new_name.clone())?;
         // Update metadata to reflect the type rename
         metadata.update_type_references(current_name, new_name);

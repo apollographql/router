@@ -19,7 +19,7 @@ use crate::schema::position::TypeDefinitionPosition;
 impl Merger {
     #[instrument(skip(self))]
     pub(in crate::merger) fn merge_type(&mut self, type_def: &Name) -> Result<(), FederationError> {
-        let Ok(dest) = self.merged.get_type(type_def.clone()) else {
+        let Ok(dest) = self.merged.get_type(type_def) else {
             bail!(
                 "Type \"{}\" is missing, but it should have been shallow-copied to the supergraph schema",
                 type_def
@@ -28,7 +28,7 @@ impl Merger {
         let mut sources =
             IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let source = subgraph.schema().get_type(type_def.clone()).ok();
+            let source = subgraph.schema().try_get_type(type_def);
             sources.insert(idx, source);
         }
 

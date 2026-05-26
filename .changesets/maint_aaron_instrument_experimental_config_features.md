@@ -1,7 +1,0 @@
-### Instrument experimental config features with OTLP gauges ([PR #9330](https://github.com/apollographql/router/pull/9330))
-
-Adds `apollo.router.config.experimental_*` OTLP gauge metrics for all customer-facing experimental config flags, using the existing `populate_config_instrument!` pattern in `configuration/metrics.rs`. This enables usage tracking in the data warehouse so that adoption data can inform decisions about which experimental features to promote or remove in future releases.
-
-The following features are now instrumented: `experimental_chaos`, `experimental_type_conditioned_fetching`, `experimental_hoist_orphan_errors`, `experimental_log_on_broken_pipe`, `experimental_plans_limit`, `experimental_paths_limit`, `experimental_reuse_query_plans`, `experimental_cooperative_cancellation`, `experimental_prewarm_query_plan_cache`, `experimental_local_field_metrics`, `experimental_response_trace_id`, `experimental_otlp_endpoint`, `experimental_otlp_tracing_protocol`, `experimental_otlp_metrics_protocol`, `experimental_http2`, `experimental_http2_keep_alive_interval`, `experimental_http2_keep_alive_timeout`, `experimental_mock_subgraphs`, and `experimental.expose_query_plan` (recorded as `apollo.router.config.experimental_expose_query_plan`). The mandatory `experimental_diagnostics` plugin is intentionally excluded because it is loaded on every router and would always report adoption as 100%.
-
-By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9330

@@ -728,7 +728,7 @@ fn normalize_type_condition(
     let obj_types: Result<Vec<_>, _> = type_condition
         .iter()
         .map(|name| {
-            let ty: ObjectTypeDefinitionPosition = schema.get_type(name.clone())?.try_into()?;
+            let ty: ObjectTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
             Ok(ty)
         })
         .collect();
