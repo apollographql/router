@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: config
+---
+{
+  "connectors": {
+    "sources": {
+      "sub_a.src_1": {
+        "override_url": "http://one",
+        "$config": {
+          "api_key": "secret"
+        }
+      },
+      "sub_a.src_2": {
+        "override_url": "http://two",
+        "max_requests_per_operation": 5,
+        "$config": {
+          "api_key": "secret"
+        }
+      }
+    }
+  }
+}

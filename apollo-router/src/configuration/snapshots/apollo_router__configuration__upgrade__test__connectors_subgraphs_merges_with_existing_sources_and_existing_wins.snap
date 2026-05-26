@@ -1,0 +1,16 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: config
+---
+{
+  "connectors": {
+    "sources": {
+      "sub_a.src_1": {
+        "override_url": "http://new"
+      },
+      "sub_a.src_2": {
+        "override_url": "http://two"
+      }
+    }
+  }
+}

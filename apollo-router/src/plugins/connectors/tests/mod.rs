@@ -185,13 +185,9 @@ async fn source_max_requests() {
         Default::default(),
         Some(json!({
           "connectors": {
-            "subgraphs": {
-              "connectors": {
-                "sources": {
-                  "json": {
-                    "max_requests_per_operation": 2,
-                  }
-                }
+            "sources": {
+              "connectors.json": {
+                "max_requests_per_operation": 2,
               }
             }
           }
@@ -592,8 +588,8 @@ async fn test_headers() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -679,8 +675,8 @@ async fn test_override_headers_with_config() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -772,8 +768,8 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -853,8 +849,8 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -939,8 +935,8 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -1913,8 +1909,8 @@ async fn test_variables() {
         Default::default(),
         Some(json!({
           "connectors": {
-            "subgraphs": {
-              "connectors": {
+            "sources": {
+              "connectors.v1": {
                 "$config": {
                   "value": "C"
                 }
