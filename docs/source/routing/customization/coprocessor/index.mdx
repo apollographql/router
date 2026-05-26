@@ -179,7 +179,7 @@ coprocessor:
 ### Context configuration
 
 The router request context is used to share data across stages of the request pipeline. The coprocessor can also use this context.
-By default, the context is not sent to the coprocessor (omit the `context` field).
+By default, the context is not sent to the coprocessor — either omit the `context` field or explicitly set `context: none`.
 You can send _all_ context keys to your coprocessor using `context: all`.
 You can also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
 
@@ -191,7 +191,8 @@ Example:
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   router:
-    request: {} # Omit `context` to skip sending any context entries
+    request:
+      context: none # Do not send any context entries (also the default if `context` is omitted)
   supergraph:
     request:
       headers: true

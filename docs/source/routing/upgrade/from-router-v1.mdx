@@ -422,7 +422,8 @@ Example:
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   router:
-    request: {} # Omit `context` to skip sending any context entries
+    request:
+      context: none # Do not send any context entries
   supergraph:
     request:
       headers: true

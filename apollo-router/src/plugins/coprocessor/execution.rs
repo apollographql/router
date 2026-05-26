@@ -285,7 +285,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::Deprecated = &request_config.context {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     execution_response
@@ -311,7 +311,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request

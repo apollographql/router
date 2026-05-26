@@ -439,6 +439,10 @@ pub(super) enum ContextConf {
 }
 
 impl ContextConf {
+    pub(crate) fn is_deprecated(&self) -> bool {
+        matches!(self, Self::Deprecated)
+    }
+
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
         match self {
             Self::None => None,
@@ -522,7 +526,7 @@ pub(crate) fn update_context_from_coprocessor(
     // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
-    let is_deprecated = matches!(context_config, ContextConf::Deprecated);
+    let is_deprecated = context_config.is_deprecated();
 
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
@@ -962,7 +966,7 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::Deprecated = &request_config.context {
+                if request_config.context.is_deprecated() {
                     key = context_key_from_deprecated(key);
                 }
                 res.context.upsert_json_value(key, move |_current| value);
@@ -985,7 +989,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1340,7 +1344,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::Deprecated = &request_config.context {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     subgraph_response
@@ -1366,7 +1370,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
