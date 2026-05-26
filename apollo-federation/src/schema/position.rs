@@ -1824,6 +1824,7 @@ impl FieldDefinitionPosition {
             FieldDefinitionPosition::Union(_) => (),
         }
     }
+
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1831,7 +1832,7 @@ impl FieldDefinitionPosition {
         match self {
             FieldDefinitionPosition::Object(field) => field.try_get(schema),
             FieldDefinitionPosition::Interface(field) => field.try_get(schema),
-            FieldDefinitionPosition::Union(field) => field.get(schema).ok(),
+            FieldDefinitionPosition::Union(field) => field.try_get(schema),
         }
     }
 
@@ -5820,6 +5821,14 @@ impl UnionTypenameFieldDefinitionPosition {
         UnionTypeDefinitionPosition {
             type_name: self.type_name.clone(),
         }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.parent().try_get(schema)?;
+        schema.type_field(&self.type_name, self.field_name()).ok()
     }
 
     pub(crate) fn get<'schema>(
