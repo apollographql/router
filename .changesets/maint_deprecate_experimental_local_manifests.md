@@ -16,4 +16,4 @@ persisted_queries:
     - ./manifest.json
 ```
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/0
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9523
