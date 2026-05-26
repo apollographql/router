@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::collections::HashSet;
 use indexmap::IndexSet;
 
 use crate::schema::FederationSchema;
@@ -175,6 +176,16 @@ pub(crate) struct SchemaVisitor<'a, Group, GroupType> {
     ///
     /// Each entry corresponds to a nested subselect in the JSONSelection.
     type_stack: Vec<(Group, GroupType)>,
+
+    /// Input type names whose group has already been entered during this walk.
+    /// Used by the input visitor to break recursion on self-referential input types.
+    visited_input_types: HashSet<Name>,
+
+    /// Parallels the input visitor's enter/exit pairs. `true` marks an enter
+    /// that was short-circuited (recursive input type already in
+    /// `visited_input_types`); the matching `exit_group` must be a no-op.
+    /// Only used by the input visitor.
+    input_skip_stack: Vec<bool>,
 }
 
 impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
@@ -188,6 +199,8 @@ impl<'a, Group, GroupType> SchemaVisitor<'a, Group, GroupType> {
             original_schema,
             to_schema,
             type_stack: Vec::new(),
+            visited_input_types: HashSet::default(),
+            input_skip_stack: Vec::new(),
         }
     }
 }
