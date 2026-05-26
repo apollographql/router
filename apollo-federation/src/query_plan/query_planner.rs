@@ -605,7 +605,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
         supergraph_schema
             .schema()
             .root_operation(operation.root_kind.into())
-            .and_then(|name| supergraph_schema.get_type(name).ok())
+            .and_then(|name| supergraph_schema.try_get_type(name))
             .and_then(|ty| ty.try_into().ok())
     } else {
         None

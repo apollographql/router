@@ -195,7 +195,7 @@ impl Field {
         let Some(field_definition) = parent_type
             .field(data.field_position.field_name().clone())
             .ok()
-            .and_then(|field_pos| field_pos.get(schema.schema()).ok())
+            .and_then(|field_pos| field_pos.try_get(schema.schema()))
         else {
             return Ok(None);
         };
