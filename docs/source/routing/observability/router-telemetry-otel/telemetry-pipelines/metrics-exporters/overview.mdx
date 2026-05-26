@@ -148,7 +148,7 @@ OpenTelemetry views enable you to customize metrics behavior, including renaming
 
 <Note>
 
-A `views[]` entry without an explicit `aggregation` preserves the instrument's native kind (counters stay counters, gauges stay gauges). If you have dashboards or alerts that depend on `_bucket`/`_sum`/`_count` series for a counter or gauge, add an explicit `aggregation: histogram` block with the buckets you want.
+A `views[]` entry without an explicit `aggregation` preserves the instrument's native kind. Before router v2.15.0, such entries silently converted counters and gauges into histograms; if your dashboards depend on those `_bucket`/`_sum`/`_count` series, add `aggregation: histogram` with your buckets.
 
 </Note>
 
