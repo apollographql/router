@@ -536,10 +536,9 @@ fn resolve_shape(
             }
             // Track this schema-defined name while we expand it, so any
             // re-entry through it (directly or transitively) short-circuits.
-            // Variables ($args, $this, ...) and $root aren't tracked because
+            // Variables ($args, $this, $root, ...) aren't tracked because
             // they can't self-recurse the same way.
-            let is_schema_name =
-                !base_shape_name.starts_with('$') && base_shape_name != "$root";
+            let is_schema_name = !base_shape_name.starts_with('$');
             let added = is_schema_name && resolving.insert(base_shape_name.to_string());
             let result = resolve_shape(&resolved, context, expression, resolving);
             if added {
@@ -736,6 +735,7 @@ mod tests {
             array: [InputObject]
             multiLevel: MultiLevelInput
             recursive: RecursiveInput
+            mutualA: MutualA
           ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
           something: String
         }
@@ -761,6 +761,16 @@ mod tests {
         input RecursiveInput {
             name: String
             child: RecursiveInput
+        }
+
+        input MutualA {
+            name: String
+            b: MutualB
+        }
+
+        input MutualB {
+            name: String
+            a: MutualA
         }
     "#;
 
@@ -864,6 +874,7 @@ mod tests {
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
     #[case::recursive_input_field("$args.recursive.name")]
     #[case::recursive_input_traversal("$args.recursive.child.child.name")]
+    #[case::mutual_recursive_input("$args.mutualA.b.a.b.name")]
     #[case::entries_when_type_unknown("$config.something->entries->first.value")]
     #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
