@@ -1078,12 +1078,13 @@ impl CacheService {
                 if let Some(Value::Array(cache_tags)) =
                     response.get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
-                    invalidation_keys.extend(
-                        cache_tags
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| s.to_owned()),
-                    );
+                    let extension_tags: Vec<String> = cache_tags
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+                    record_external_cache_tags(&response.context, extension_tags.iter().cloned());
+                    invalidation_keys.extend(extension_tags);
                 }
                 save_original_cache_control(
                     response.id.clone(),
@@ -1338,6 +1339,11 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    // Surface schema-resolved @cacheTag values (and the auto-generated subgraph/type tags)
+    // on the supergraph response aggregator. These apply to the request regardless of whether
+    // the lookup hits or misses.
+    record_external_cache_tags(&request.context, invalidation_keys.iter().cloned());
+
     Span::current().record("cache.key", key.clone());
 
     if cache_control.is_some_and(|c| c.is_no_cache()) {
@@ -1376,6 +1382,7 @@ async fn cache_lookup_root(
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys: value
                             .cache_tags
+                            .clone()
                             .map(external_invalidation_keys)
                             .unwrap_or_default(),
                         kind: CacheEntryKind::RootFields {
@@ -1397,6 +1404,14 @@ async fn cache_lookup_root(
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("hit".into()),
                 );
+
+                // Surface the cache tags persisted with the entry so the supergraph response
+                // aggregator can reflect this hit. Done before the response builder consumes
+                // the request context.
+                if let Some(tags) = value.cache_tags.clone() {
+                    record_external_cache_tags(&request.context, tags);
+                }
+
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
@@ -1623,6 +1638,15 @@ async fn cache_lookup_entities(
             }
         }
     };
+
+    // Surface cache tags from every usable hit on the supergraph response aggregator. This
+    // covers both the full-hit short-circuit below and the partial-hit path where the error
+    // branch may rebuild a response from only cached entities.
+    for entry in cache_result.iter().flatten() {
+        if let Some(tags) = entry.cache_tags.clone() {
+            record_external_cache_tags(&request.context, tags);
+        }
+    }
     let body = request.subgraph_request.body_mut();
 
     let representations = body
@@ -2012,6 +2036,12 @@ fn extract_cache_keys(
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
         invalidation_keys.extend(invalidation_cache_keys);
+
+        // Surface this entity's schema-resolved @cacheTag values (and the auto-generated
+        // subgraph/type tags) on the supergraph response aggregator. These apply to the
+        // request regardless of whether the per-entity lookup hits or misses.
+        record_external_cache_tags(context, invalidation_keys.iter().cloned());
+
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             invalidation_keys,
@@ -2590,8 +2620,13 @@ async fn insert_entities_in_result(
                 // apply per-entity cache tags from the subgraph's apolloEntityCacheTags extension; these tags
                 // enable targeted cache invalidation for this specific entity
                 if let Some(Value::Array(keys)) = specific_surrogate_keys {
-                    invalidation_keys
-                        .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
+                    let entity_tags: Vec<String> = keys
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+                    record_external_cache_tags(&context, entity_tags.iter().cloned());
+                    invalidation_keys.extend(entity_tags);
                 }
 
                 // Only in debug mode
