@@ -287,9 +287,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     supergraph_response
@@ -315,8 +313,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -652,7 +649,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -795,7 +792,7 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ]),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -933,7 +930,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1070,7 +1067,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1188,7 +1185,7 @@ mod tests {
                     SelectorOrValue::Value(true.into()),
                 ]),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1302,7 +1299,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1332,7 +1329,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,

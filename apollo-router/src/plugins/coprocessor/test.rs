@@ -168,7 +168,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: false,
                 path: false,
@@ -254,7 +254,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -318,7 +318,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -382,7 +382,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -645,9 +645,9 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 ..Default::default()
             },
             response: Default::default(),
@@ -806,7 +806,7 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                context: ContextConf::Deprecated,
                 ..Default::default()
             },
             response: Default::default(),
@@ -1406,9 +1406,9 @@ mod tests {
                 condition: Default::default(),
                 body: BodyConf::All(true),
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 ..Default::default()
             },
         };
@@ -1556,7 +1556,7 @@ mod tests {
                 condition: Default::default(),
                 body: BodyConf::All(true),
                 subgraph_request_id: true,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                context: ContextConf::Deprecated,
                 ..Default::default()
             },
         };
@@ -1831,7 +1831,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
@@ -1895,9 +1895,9 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
@@ -2003,7 +2003,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                context: ContextConf::Deprecated,
                 body: BodyConf::All(true),
                 status_code: false,
                 sdl: false,
@@ -2105,7 +2105,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2229,9 +2229,9 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                context: ContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                ))),
+                )),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2400,7 +2400,7 @@ mod tests {
                 ])
                 .into(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2511,7 +2511,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2645,7 +2645,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2741,7 +2741,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -2828,7 +2828,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3194,7 +3194,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Some(Condition::False),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -3212,7 +3212,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3341,7 +3341,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -3625,7 +3625,7 @@ mod tests {
             response: SubgraphResponseConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
@@ -3659,7 +3659,7 @@ mod tests {
             request: SubgraphRequestConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 uri: true,
                 method: true,
@@ -3677,7 +3677,7 @@ mod tests {
             request: SubgraphRequestConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 uri: true,
                 method: true,
@@ -3696,7 +3696,7 @@ mod tests {
             response: SubgraphResponseConf {
                 condition: Condition::False,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 service_name: false,
                 status_code: false,
@@ -5125,12 +5125,8 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
+            .unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5163,12 +5159,8 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
+            .unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5202,8 +5194,7 @@ mod tests {
 
         // Use Selective config to only send "k1", not "key_not_sent"
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
-        let context_config =
-            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+        let context_config = ContextConf::Selective(Arc::new(selective_keys));
 
         // Update context
         update_context_from_coprocessor(&target_context, returned_context, &context_config)
@@ -5221,11 +5212,6 @@ mod tests {
     #[rstest::rstest]
     fn test_update_context_from_coprocessor_handles_deprecated_key_names(
         #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
-        #[values(
-            ContextConf::Deprecated(true),
-            ContextConf::NewContextConf(NewContextConf::Deprecated)
-        )]
-        context_conf: ContextConf,
     ) {
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -5235,7 +5221,12 @@ mod tests {
         let returned_context =
             Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
 
-        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &ContextConf::Deprecated,
+        )
+        .unwrap();
 
         assert_eq!(
             target_context.get_json_value(CLIENT_NAME),
@@ -5956,7 +5947,7 @@ mod tests {
                     "url": "http://127.0.0.1:3001/webhook",
                     "router": {
                         "request": {
-                            "context": true,
+                            "context": "all",
                             "headers": true
                         }
                     }
@@ -6259,7 +6250,6 @@ mod tests {
         use crate::metrics::FutureMetricsExt;
         use crate::plugin::test::MockInternalHttpClientService;
         use crate::plugins::coprocessor::ContextConf;
-        use crate::plugins::coprocessor::NewContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
         use crate::plugins::coprocessor::connector::ConnectorResponseConf;
         use crate::plugins::coprocessor::connector::ConnectorStage;
@@ -6670,7 +6660,7 @@ mod tests {
         async fn should_update_context_when_coprocessor_returns_context_entries() {
             let connector_stage = ConnectorStage {
                 request: ConnectorRequestConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },
@@ -7084,7 +7074,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },
@@ -7134,7 +7124,7 @@ mod tests {
             let connector_stage = ConnectorStage {
                 request: Default::default(),
                 response: ConnectorResponseConf {
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: true,
                     ..Default::default()
                 },

@@ -1842,7 +1842,7 @@ async fn test_sources_in_context() {
             "url": format!("{}/coprocessor", mock_server.uri()),
             "execution": {
               "request": {
-                "context": true
+                "context": "all"
               }
             }
           }
@@ -1923,7 +1923,7 @@ async fn test_variables() {
             "url": format!("{}/coprocessor", mock_server.uri()),
             "supergraph": {
               "request": {
-                "context": true
+                "context": "all"
               }
             }
           }

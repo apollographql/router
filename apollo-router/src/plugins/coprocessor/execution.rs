@@ -285,9 +285,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     execution_response
@@ -313,8 +311,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -637,7 +634,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -773,7 +770,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -847,7 +844,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -984,7 +981,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1096,7 +1093,7 @@ mod tests {
             request: Default::default(),
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1127,7 +1124,7 @@ mod tests {
         ExecutionStage {
             request: ExecutionRequestConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,
