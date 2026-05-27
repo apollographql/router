@@ -35,7 +35,6 @@ pub(super) struct Document {
     pub(super) control: CacheControl,
     pub(super) cache_tags: Vec<CacheTag>,
     pub(super) expire: Duration,
-    pub(super) debug: bool,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -45,7 +44,10 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    // Only set in debug mode
+    /// Document-supplied invalidation keys (pre-permutation), persisted so cache hits can
+    /// surface them via the cache debugger and the supergraph response cache-tag header.
+    /// `None` indicates a legacy entry written before router#9481; such entries contribute
+    /// zero tags until they age out via TTL.
     pub(super) cache_tags: Option<HashSet<String>>,
 }
 

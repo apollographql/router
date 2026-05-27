@@ -296,20 +296,17 @@ impl CacheStorage for Storage {
 
         let now = now();
 
-        // For the cache debugger: snapshot the user-facing tag values (CacheTag::Tag) per
-        // document. Internal tags (Subgraph and Type) are not surfaced to operators.
+        // For the cache debugger and the supergraph response cache-tag propagation
+        // (router#9481): snapshot the user-facing tag values (CacheTag::Tag) per document.
+        // Internal tags (Subgraph and Type) are not surfaced to operators.
         let debug_user_tags: Vec<Vec<String>> = batch_docs
             .iter()
             .map(|document| {
-                if document.debug {
-                    document
-                        .cache_tags
-                        .iter()
-                        .filter_map(|t| t.user_value().map(String::from))
-                        .collect()
-                } else {
-                    Vec::new()
-                }
+                document
+                    .cache_tags
+                    .iter()
+                    .filter_map(|t| t.user_value().map(String::from))
+                    .collect()
             })
             .collect();
 
@@ -401,7 +398,7 @@ impl CacheStorage for Storage {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: document.debug.then(|| debug_tags.into_iter().collect()),
+                cache_tags: Some(debug_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -679,7 +676,6 @@ mod tests {
             control: Default::default(),
             cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
             expire: Duration::from_secs(60),
-            debug: true,
         }
     }
 

@@ -1174,7 +1174,6 @@ impl CacheService {
                         cache_control,
                         root_cache_key,
                         cache_tags,
-                        self.debug,
                     )
                     .await?;
                 }
@@ -1798,7 +1797,6 @@ async fn cache_store_root_from_response(
     cache_control: CacheControl,
     cache_key: String,
     cache_tags: Vec<CacheTag>,
-    debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1813,7 +1811,6 @@ async fn cache_store_root_from_response(
                 control: cache_control,
                 cache_tags,
                 expire: ttl,
-                debug,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -2580,7 +2577,6 @@ async fn insert_entities_in_result(
     subgraph_request: Option<graphql::Request>,
     indexes: Arc<InvalidationIndexes>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
-    let debug = subgraph_request.is_some();
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2703,7 +2699,6 @@ async fn insert_entities_in_result(
                         key,
                         cache_tags,
                         expire: ttl,
-                        debug,
                     });
                 }
 
