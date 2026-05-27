@@ -2473,14 +2473,22 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match &inner.increment {
+        let increment = match &mut inner.increment {
             Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
             Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
             Increment::Custom(val) => val.clone(),
+            Increment::StreamDuration(instant, _) => {
+                // stream_duration is conceptually "response ready → stream close".
+                // The Instant captured at instrument construction sits at request
+                // start; reset it here so on_stream_end measures only the stream
+                // tail, not the full request-to-stream-close span. The histogram
+                // sample is recorded later in on_stream_end.
+                *instant = Instant::now();
+                return;
+            }
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
-            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events, fields, or stream end
