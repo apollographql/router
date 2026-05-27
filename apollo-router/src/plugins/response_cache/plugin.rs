@@ -15,6 +15,7 @@ use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -120,6 +121,7 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     debug: bool,
     include_cache_control_header_on_router_response: bool,
+    propagate_cache_tags: PropagateCacheTagsConfig,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -443,6 +445,7 @@ impl PluginPrivate for ResponseCache {
             include_cache_control_header_on_router_response: init
                 .config
                 .include_cache_control_header_on_router_response,
+            propagate_cache_tags: init.config.propagate_cache_tags.clone(),
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -464,6 +467,7 @@ impl PluginPrivate for ResponseCache {
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
+        let propagate_cache_tags = self.propagate_cache_tags.clone();
         ServiceBuilder::new()
             .map_response(move |mut response: supergraph::Response| {
                 if include_cache_control_header_on_router_response
@@ -484,6 +488,19 @@ impl PluginPrivate for ResponseCache {
                     }
 
                     let _ = cache_control.update_response_headers(response.response.headers_mut());
+                }
+
+                if propagate_cache_tags.enabled {
+                    let aggregated = response.context.extensions().with_lock(|lock| {
+                        lock.get::<CacheTagsAggregator>()
+                            .map(|a| a.snapshot())
+                            .unwrap_or_default()
+                    });
+                    emit_cache_tag_header(
+                        response.response.headers_mut(),
+                        aggregated,
+                        &propagate_cache_tags,
+                    );
                 }
 
                 if debug
@@ -669,6 +686,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response,
+            propagate_cache_tags: PropagateCacheTagsConfig::default(),
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -714,6 +732,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response: true,
+            propagate_cache_tags: PropagateCacheTagsConfig::default(),
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -2899,6 +2918,290 @@ fn record_external_cache_tags(context: &Context, tags: impl IntoIterator<Item = 
         lock.get_or_default_mut::<CacheTagsAggregator>()
             .add_many(external);
     });
+}
+
+/// Plan for how the aggregated cache tags should be emitted on the supergraph response.
+///
+/// Returned by [`build_cache_tag_header`] and consumed by [`emit_cache_tag_header`]. The split
+/// keeps the planning step pure so it can be unit tested without an HTTP response in hand.
+#[derive(Debug, PartialEq, Eq)]
+enum CacheTagHeaderPlan {
+    /// Do not emit a header. Either the aggregated set was empty, or `OverflowPolicy::Drop`
+    /// fired, or no individual tag fit within `max_bytes` under truncation.
+    Suppress,
+    /// Emit one header whose value is the joined tag list.
+    Single(String),
+    /// Emit one header per tag, preserving the deterministic sort order.
+    Multiple(Vec<String>),
+}
+
+/// Build the [`CacheTagHeaderPlan`] for an aggregated tag set under the given config. Pure
+/// function: no I/O, no context access.
+fn build_cache_tag_header(
+    tags: HashSet<String>,
+    config: &PropagateCacheTagsConfig,
+) -> CacheTagHeaderPlan {
+    if tags.is_empty() {
+        return CacheTagHeaderPlan::Suppress;
+    }
+
+    let mut sorted: Vec<String> = tags.into_iter().collect();
+    sorted.sort();
+
+    if matches!(config.on_overflow, OverflowPolicy::HeaderPerTag) {
+        return CacheTagHeaderPlan::Multiple(sorted);
+    }
+
+    let joined = sorted.join(&config.separator);
+    if joined.len() <= config.max_bytes {
+        return CacheTagHeaderPlan::Single(joined);
+    }
+
+    match config.on_overflow {
+        OverflowPolicy::Drop => {
+            tracing::warn!(
+                max_bytes = %config.max_bytes,
+                actual_bytes = %joined.len(),
+                dropped_count = %sorted.len(),
+                "response_cache cache-tag header exceeds max_bytes; dropping header per on_overflow=drop"
+            );
+            CacheTagHeaderPlan::Suppress
+        }
+        OverflowPolicy::Truncate => {
+            let mut included: Vec<&str> = Vec::new();
+            let mut current_len = 0usize;
+            for tag in &sorted {
+                let next_len = if included.is_empty() {
+                    tag.len()
+                } else {
+                    current_len + config.separator.len() + tag.len()
+                };
+                if next_len > config.max_bytes {
+                    break;
+                }
+                included.push(tag.as_str());
+                current_len = next_len;
+            }
+            let dropped = sorted.len() - included.len();
+            tracing::warn!(
+                max_bytes = %config.max_bytes,
+                actual_bytes = %joined.len(),
+                dropped_count = %dropped,
+                "response_cache cache-tag header exceeds max_bytes; truncated per on_overflow=truncate"
+            );
+            if included.is_empty() {
+                CacheTagHeaderPlan::Suppress
+            } else {
+                CacheTagHeaderPlan::Single(included.join(&config.separator))
+            }
+        }
+        OverflowPolicy::HeaderPerTag => unreachable!("handled above"),
+    }
+}
+
+/// Emit the planned cache-tag header(s) on the supergraph response. Logs at warn level if the
+/// configured header name is not a valid HTTP header.
+fn emit_cache_tag_header(
+    headers: &mut http::HeaderMap,
+    tags: HashSet<String>,
+    config: &PropagateCacheTagsConfig,
+) {
+    let plan = build_cache_tag_header(tags, config);
+    if matches!(plan, CacheTagHeaderPlan::Suppress) {
+        return;
+    }
+
+    let header_name = match HeaderName::from_bytes(config.header.as_bytes()) {
+        Ok(name) => name,
+        Err(err) => {
+            tracing::warn!(
+                header = %config.header,
+                error = %err,
+                "response_cache propagate_cache_tags.header is not a valid HTTP header name; skipping emission"
+            );
+            return;
+        }
+    };
+
+    match plan {
+        CacheTagHeaderPlan::Suppress => {}
+        CacheTagHeaderPlan::Single(value) => match HeaderValue::from_str(&value) {
+            Ok(val) => {
+                headers.insert(header_name, val);
+                tracing::debug!("response_cache emitted aggregated cache-tag header");
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "response_cache aggregated cache-tag header value is not a valid HTTP header value; skipping emission"
+                );
+            }
+        },
+        CacheTagHeaderPlan::Multiple(values) => {
+            let mut first = true;
+            for tag in values {
+                match HeaderValue::from_str(&tag) {
+                    Ok(val) => {
+                        if first {
+                            headers.insert(header_name.clone(), val);
+                            first = false;
+                        } else {
+                            headers.append(header_name.clone(), val);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            tag = %tag,
+                            "response_cache cache-tag value is not a valid HTTP header value; skipping this tag"
+                        );
+                    }
+                }
+            }
+            if !first {
+                tracing::debug!("response_cache emitted aggregated cache-tag headers (one per tag)");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod propagate_cache_tags_tests {
+    use http::HeaderMap;
+
+    use super::*;
+
+    fn tags(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn empty_set_suppresses_header() {
+        let plan = build_cache_tag_header(HashSet::new(), &PropagateCacheTagsConfig::default());
+        assert_eq!(plan, CacheTagHeaderPlan::Suppress);
+    }
+
+    #[test]
+    fn small_set_joins_with_separator() {
+        let plan =
+            build_cache_tag_header(tags(&["b", "a", "c"]), &PropagateCacheTagsConfig::default());
+        assert_eq!(plan, CacheTagHeaderPlan::Single("a,b,c".to_string()));
+    }
+
+    #[test]
+    fn custom_separator_is_used() {
+        let config = PropagateCacheTagsConfig {
+            separator: " ".to_string(),
+            ..PropagateCacheTagsConfig::default()
+        };
+        let plan = build_cache_tag_header(tags(&["a", "b"]), &config);
+        assert_eq!(plan, CacheTagHeaderPlan::Single("a b".to_string()));
+    }
+
+    #[test]
+    fn truncate_drops_tags_that_do_not_fit() {
+        let config = PropagateCacheTagsConfig {
+            max_bytes: 5,
+            on_overflow: OverflowPolicy::Truncate,
+            ..PropagateCacheTagsConfig::default()
+        };
+        let plan = build_cache_tag_header(tags(&["aa", "bb", "cc"]), &config);
+        assert_eq!(plan, CacheTagHeaderPlan::Single("aa,bb".to_string()));
+    }
+
+    #[test]
+    fn truncate_suppresses_when_no_tag_fits() {
+        let config = PropagateCacheTagsConfig {
+            max_bytes: 1,
+            on_overflow: OverflowPolicy::Truncate,
+            ..PropagateCacheTagsConfig::default()
+        };
+        let plan = build_cache_tag_header(tags(&["abcd", "efgh"]), &config);
+        assert_eq!(plan, CacheTagHeaderPlan::Suppress);
+    }
+
+    #[test]
+    fn drop_policy_suppresses_on_overflow() {
+        let config = PropagateCacheTagsConfig {
+            max_bytes: 3,
+            on_overflow: OverflowPolicy::Drop,
+            ..PropagateCacheTagsConfig::default()
+        };
+        let plan = build_cache_tag_header(tags(&["aa", "bb", "cc"]), &config);
+        assert_eq!(plan, CacheTagHeaderPlan::Suppress);
+    }
+
+    #[test]
+    fn header_per_tag_returns_sorted_multiple() {
+        let config = PropagateCacheTagsConfig {
+            on_overflow: OverflowPolicy::HeaderPerTag,
+            ..PropagateCacheTagsConfig::default()
+        };
+        let plan = build_cache_tag_header(tags(&["beta", "alpha", "gamma"]), &config);
+        assert_eq!(
+            plan,
+            CacheTagHeaderPlan::Multiple(vec![
+                "alpha".to_string(),
+                "beta".to_string(),
+                "gamma".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn sort_is_deterministic_across_runs() {
+        let first =
+            build_cache_tag_header(tags(&["c", "a", "b"]), &PropagateCacheTagsConfig::default());
+        let second =
+            build_cache_tag_header(tags(&["b", "c", "a"]), &PropagateCacheTagsConfig::default());
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn emit_sets_header_for_single_plan() {
+        let mut headers = HeaderMap::new();
+        emit_cache_tag_header(
+            &mut headers,
+            tags(&["alpha", "beta"]),
+            &PropagateCacheTagsConfig::default(),
+        );
+        let value = headers.get("Cache-Tag").expect("header should be set");
+        assert_eq!(value.to_str().unwrap(), "alpha,beta");
+    }
+
+    #[test]
+    fn emit_omits_header_when_empty() {
+        let mut headers = HeaderMap::new();
+        emit_cache_tag_header(&mut headers, HashSet::new(), &PropagateCacheTagsConfig::default());
+        assert!(headers.get("Cache-Tag").is_none());
+    }
+
+    #[test]
+    fn emit_writes_one_header_per_tag_for_header_per_tag_policy() {
+        let config = PropagateCacheTagsConfig {
+            on_overflow: OverflowPolicy::HeaderPerTag,
+            ..PropagateCacheTagsConfig::default()
+        };
+        let mut headers = HeaderMap::new();
+        emit_cache_tag_header(&mut headers, tags(&["a", "b", "c"]), &config);
+        let values: Vec<_> = headers
+            .get_all("Cache-Tag")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(values, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn emit_skips_invalid_header_name() {
+        let config = PropagateCacheTagsConfig {
+            header: "not a valid header name".to_string(),
+            ..PropagateCacheTagsConfig::default()
+        };
+        let mut headers = HeaderMap::new();
+        emit_cache_tag_header(&mut headers, tags(&["alpha"]), &config);
+        assert!(headers.is_empty());
+    }
 }
 
 #[cfg(test)]
