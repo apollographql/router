@@ -26,6 +26,8 @@ use rhai::EvalAltResult;
 use rhai::FnPtr;
 use rhai::Instant;
 use rhai::Map;
+use rhai::ImmutableString;
+use rhai::NativeCallContext;
 use rhai::Scope;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
