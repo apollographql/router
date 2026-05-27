@@ -342,19 +342,24 @@ By [@andywgarcia](https://github.com/andywgarcia) in https://github.com/apollogr
 
 ### Surface Redis TLS configuration on every Redis-using feature page ([PR #9172](https://github.com/apollographql/router/pull/9172))
 
-The Redis TLS configuration blurb is now imported as a shared component on every docs page that exposes a Redis configuration section — APQ distributed caching, query plan distributed caching, response cache customization, and the TLS overview — instead of living only on the central TLS overview page.  Duplicate inline TLS content has been replaced by a single source of truth at `docs/shared/redis-tls.mdx`.
+Redis TLS configuration is now documented inline on every feature page that exposes a Redis configuration section — [APQ distributed caching](https://www.apollographql.com/docs/graphos/routing/operations/apq#distributed-caching-with-redis), [query plan distributed caching](https://www.apollographql.com/docs/graphos/routing/query-planning/caching), and [response cache customization](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization) — instead of being mentioned only on the central [TLS overview](https://www.apollographql.com/docs/graphos/routing/security/tls#redis-tls-configuration) page.  Operators configuring Redis for any specific feature can now find the TLS guidance directly on the page they're already reading.
 
 By [@bignimbus](https://github.com/bignimbus) in https://github.com/apollographql/router/pull/9172
 
-### Document `http2_max_headers_list_bytes` and fix the shared `limits` partial ([PR #9388](https://github.com/apollographql/router/pull/9388))
+### Document `http2_max_headers_list_bytes` and correct the `limits` config example ([PR #9388](https://github.com/apollographql/router/pull/9388))
 
-The [Request Limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) page now documents `limits.router.http2_max_headers_list_bytes` (default `16KiB`; the router returns a `431 Request Header Fields Too Large` on overflow).  The shared `limits` YAML partial has also been corrected to use the nested `limits.router.*`, `limits.subgraph.*`, and `limits.connector.*` schema that landed in v2.15.0 — the prior flat layout no longer validates against the live router schema.
+The [Request Limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) page now documents the `limits.router.http2_max_headers_list_bytes` option, including its default (`16KiB`) and what the router returns on overflow (`431 Request Header Fields Too Large`).  The combined `limits` YAML example on the same page has also been updated to match the nested `limits.router.*` / `limits.subgraph.*` / `limits.connector.*` shape that v2.15.0 introduced — so copy-pasting the example into a router config now produces a configuration the router will accept.
 
 By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9388
 
 ### Document `apollo.router.cache.redis.reconnection` and `apollo.router.cache.redis.unresponsive` metrics ([PR #9306](https://github.com/apollographql/router/pull/9306))
 
-The Redis client event counters introduced in [PR #8185](https://github.com/apollographql/router/pull/8185) are now listed on the [standard instruments reference page](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments) and the [response cache observability page](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability).  `reconnection` fires when a server requires the client to reconnect; `unresponsive` fires when a server stops responding.  Both carry `kind` and `server` attributes.
+Two Redis-health counters that the router already emits are now documented on the [standard instruments reference page](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments) and the [response cache observability page](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability):
+
+- `apollo.router.cache.redis.reconnection` — increments when a Redis server signals the client to reconnect.
+- `apollo.router.cache.redis.unresponsive` — increments when a Redis server stops responding.
+
+Both carry `kind` (which Redis-backed cache — APQ, query plan, entity cache, response cache) and `server` (the specific Redis endpoint) attributes, making it possible to track Redis health per cache and per endpoint.
 
 By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9306
 
