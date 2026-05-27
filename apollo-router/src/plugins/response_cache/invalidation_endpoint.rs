@@ -30,30 +30,74 @@ use crate::services::router;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
-/// Which invalidation index modes to maintain for cached entries.
-///
-/// Each mode corresponds to one of the kinds of invalidation requests documented at
-/// <https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation>.
-/// Disabling a mode skips writing the corresponding Redis ZSET index entries on cache inserts,
-/// at the cost of being unable to invalidate cached entries by that mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// Identifies one of the three invalidation index modes maintained by `response_cache`. Used
+/// internally to gate which Redis ZSET writes the plugin performs and to map an incoming
+/// `/invalidation` request kind to the index that backs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum IndexMode {
-    /// Maintain the `subgraph-{name}` ZSET. Enables `By subgraph` invalidation requests.
+    /// The `subgraph-{name}` ZSET. Backs `By subgraph` invalidation requests.
     Subgraph,
-    /// Maintain the by-type ZSET keyed by `subgraph:{name}:type:{type}`. Enables `By type`
-    /// invalidation requests.
+    /// The by-type ZSET keyed by `subgraph:{name}:type:{type}`. Backs `By type` invalidation requests.
     Type,
-    /// Maintain ZSETs for user-supplied cache tags from `apolloCacheTags`,
-    /// `apolloEntityCacheTags`, and resolved `@cacheTag` directive values. Enables
-    /// `By cache tag` invalidation requests.
+    /// The ZSETs for user-supplied cache tags from `apolloCacheTags`, `apolloEntityCacheTags`,
+    /// and resolved `@cacheTag` directive values. Backs `By cache tag` invalidation requests.
     CacheTag,
 }
 
-/// Default invalidation index modes: all three, for backward compatibility with
-/// deployments predating the `index_modes` setting.
-pub(crate) fn default_index_modes() -> Vec<IndexMode> {
-    vec![IndexMode::Subgraph, IndexMode::Type, IndexMode::CacheTag]
+/// Which invalidation indexes a subgraph maintains for its cached entries. Each field controls
+/// whether the corresponding ZSET is written on cache inserts and whether the corresponding
+/// invalidation request kind is honored at the `/invalidation` endpoint.
+///
+/// All three indexes are enabled by default. Operators with workloads that only ever invalidate
+/// by a subset of modes can opt out of the unused indexes to reduce per-insert Redis work.
+///
+/// Note: `indexes` is **additive only**. Enabling a previously-disabled index does NOT
+/// retroactively index existing cache entries. If a deployment changes from
+/// `{cache_tag: true}` to `{cache_tag: true, subgraph: true}`, the `subgraph-{name}` ZSET will
+/// be populated only for entries written after the config change. Pre-change entries are
+/// invisible to `By subgraph` invalidation requests until they age out via TTL. To bring the
+/// new index online over the full cache set, flush Redis before enabling the additional index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+pub(crate) struct InvalidationIndexes {
+    /// Maintain the `subgraph-{name}` index. Required for `By subgraph` invalidation requests.
+    pub(crate) subgraph: bool,
+    /// Maintain the by-type index. Required for `By type` invalidation requests.
+    #[serde(rename = "type")]
+    pub(crate) r#type: bool,
+    /// Maintain the per-tag indexes for `apolloCacheTags`, `apolloEntityCacheTags`, and resolved
+    /// `@cacheTag` directive values. Required for `By cache tag` invalidation requests.
+    pub(crate) cache_tag: bool,
+}
+
+impl Default for InvalidationIndexes {
+    fn default() -> Self {
+        // Defaults to all three indexes enabled for backward compatibility with deployments
+        // predating the `indexes` setting. Operators opt out by setting individual fields to
+        // `false`.
+        Self {
+            subgraph: true,
+            r#type: true,
+            cache_tag: true,
+        }
+    }
+}
+
+impl InvalidationIndexes {
+    /// True if the index corresponding to `mode` is enabled.
+    pub(crate) fn is_enabled(&self, mode: IndexMode) -> bool {
+        match mode {
+            IndexMode::Subgraph => self.subgraph,
+            IndexMode::Type => self.r#type,
+            IndexMode::CacheTag => self.cache_tag,
+        }
+    }
+
+    /// True when at least one index is enabled. Equivalent to "this subgraph supports at least
+    /// one invalidation kind."
+    pub(crate) fn any_enabled(&self) -> bool {
+        self.subgraph || self.r#type || self.cache_tag
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -63,15 +107,16 @@ pub(crate) struct SubgraphInvalidationConfig {
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
     pub(crate) shared_key: String,
-    /// Which invalidation index modes to maintain for this subgraph's cached entries.
-    /// Defaults to all three (`subgraph`, `type`, `cache_tag`) for backward compatibility.
+    /// Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to
+    /// all three (`subgraph`, `type`, `cache_tag`) enabled, matching the original
+    /// `response_cache` behavior. Operators with workloads that only invalidate by a subset of
+    /// modes can opt out of the unused indexes to reduce per-insert Redis work.
     ///
-    /// Customers who only invalidate by cache tag can set this to `["cache_tag"]` to avoid
-    /// Redis CPU and memory cost from maintaining the `by subgraph` and `by type` indexes.
-    /// Setting this to `[]` disables all invalidation indexing; the `/invalidation` endpoint
-    /// will return HTTP 400 for any request against the affected subgraph.
-    #[serde(default = "default_index_modes")]
-    pub(crate) index_modes: Vec<IndexMode>,
+    /// Setting all three to `false` disables invalidation indexing entirely; the `/invalidation`
+    /// endpoint then returns HTTP 400 for any request against this subgraph. This shape is
+    /// useful for pure TTL-based caching without an invalidation API.
+    #[serde(default)]
+    pub(crate) indexes: InvalidationIndexes,
 }
 
 impl Default for SubgraphInvalidationConfig {
@@ -79,15 +124,8 @@ impl Default for SubgraphInvalidationConfig {
         Self {
             enabled: false,
             shared_key: String::default(),
-            index_modes: default_index_modes(),
+            indexes: InvalidationIndexes::default(),
         }
-    }
-}
-
-impl SubgraphInvalidationConfig {
-    /// Resolved set of active index modes, for fast membership checks on the hot path.
-    pub(crate) fn index_mode_set(&self) -> std::collections::HashSet<IndexMode> {
-        self.index_modes.iter().copied().collect()
     }
 }
 
@@ -349,30 +387,34 @@ fn invalidation_kind_to_index_mode(kind: &str) -> Option<IndexMode> {
     }
 }
 
-/// Resolve the effective `index_modes` set for `subgraph_name` from the per-subgraph configuration.
-/// Falls back to the `all` block when no per-subgraph entry exists, and finally to the documented
-/// default (all three modes) when neither defines an `invalidation` block.
-fn effective_index_modes(
+/// Resolve the effective `InvalidationIndexes` for `subgraph_name`. Prefers the per-subgraph
+/// `invalidation` block, falls back to the `all` block, and finally to `InvalidationIndexes::default()`
+/// when neither is configured. This is the single source of truth for invalidation-index resolution
+/// across both the cache write path and the `/invalidation` endpoint handler, so the two stay in lockstep.
+pub(crate) fn effective_invalidation_indexes(
     config: &SubgraphConfiguration<Subgraph>,
     subgraph_name: &str,
-) -> std::collections::HashSet<IndexMode> {
+) -> InvalidationIndexes {
     if let Some(subgraph_invalidation) = config
         .subgraphs
         .get(subgraph_name)
         .and_then(|s| s.invalidation.as_ref())
     {
-        return subgraph_invalidation.index_mode_set();
+        return subgraph_invalidation.indexes;
     }
     if let Some(all_invalidation) = config.all.invalidation.as_ref() {
-        return all_invalidation.index_mode_set();
+        return all_invalidation.indexes;
     }
-    default_index_modes().into_iter().collect()
+    InvalidationIndexes::default()
 }
 
-/// Scan the parsed invalidation request batch for any item whose `kind` is not present in the
-/// effective `index_modes` of its target subgraph(s). Returns `Some((subgraph_name, kind))` for
-/// the first offending pair so the caller can render a precise 400 response, or `None` when every
-/// request is permitted.
+/// Scan the parsed invalidation request batch for any item whose `kind` is not enabled for its
+/// target subgraph. Returns `Some((subgraph_name, kind))` for the first offending pair so the
+/// caller can render a precise 400 response, or `None` when every request is permitted.
+///
+/// Subgraph names are visited in sorted order so the error message is deterministic across
+/// repeated calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
+/// `HashSet<String>`.
 fn find_disabled_mode_rejection(
     config: &SubgraphConfiguration<Subgraph>,
     body: &[InvalidationRequest],
@@ -382,9 +424,11 @@ fn find_disabled_mode_rejection(
         let Some(mode) = invalidation_kind_to_index_mode(kind_str) else {
             continue;
         };
-        for subgraph in request.subgraph_names() {
-            let modes = effective_index_modes(config, &subgraph);
-            if !modes.contains(&mode) {
+        let mut subgraphs = request.subgraph_names();
+        subgraphs.sort();
+        for subgraph in subgraphs {
+            let indexes = effective_invalidation_indexes(config, &subgraph);
+            if !indexes.is_enabled(mode) {
                 return Some((subgraph, kind_str));
             }
         }
@@ -393,28 +437,38 @@ fn find_disabled_mode_rejection(
 }
 
 #[cfg(test)]
-mod index_modes_tests {
+mod indexes_tests {
     use std::collections::HashMap;
 
     use super::*;
     use crate::plugins::response_cache::plugin::Subgraph;
 
+    /// Test helper: build an `InvalidationIndexes` from a list of modes that should be enabled.
+    /// Any mode not in the list is set to `false`.
+    fn indexes_with(enabled: &[IndexMode]) -> InvalidationIndexes {
+        InvalidationIndexes {
+            subgraph: enabled.contains(&IndexMode::Subgraph),
+            r#type: enabled.contains(&IndexMode::Type),
+            cache_tag: enabled.contains(&IndexMode::CacheTag),
+        }
+    }
+
     fn subgraph_config(
-        all_modes: Option<Vec<IndexMode>>,
-        per_subgraph: Option<(&str, Vec<IndexMode>)>,
+        all_indexes: Option<InvalidationIndexes>,
+        per_subgraph: Option<(&str, InvalidationIndexes)>,
     ) -> SubgraphConfiguration<Subgraph> {
         let all = Subgraph {
             ttl: None,
             enabled: Some(true),
             redis: None,
             private_id: None,
-            invalidation: all_modes.map(|modes| SubgraphInvalidationConfig {
+            invalidation: all_indexes.map(|indexes| SubgraphInvalidationConfig {
                 enabled: true,
                 shared_key: String::from("k"),
-                index_modes: modes,
+                indexes,
             }),
         };
-        let subgraphs = if let Some((name, modes)) = per_subgraph {
+        let subgraphs = if let Some((name, indexes)) = per_subgraph {
             let mut map = HashMap::new();
             map.insert(
                 name.to_string(),
@@ -426,7 +480,7 @@ mod index_modes_tests {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
                         shared_key: String::from("k"),
-                        index_modes: modes,
+                        indexes,
                     }),
                 },
             );
@@ -438,52 +492,81 @@ mod index_modes_tests {
     }
 
     #[test]
-    fn default_index_modes_contains_all_three() {
-        let modes = default_index_modes();
-        assert_eq!(modes.len(), 3);
-        assert!(modes.contains(&IndexMode::Subgraph));
-        assert!(modes.contains(&IndexMode::Type));
-        assert!(modes.contains(&IndexMode::CacheTag));
+    fn invalidation_indexes_default_enables_all_three() {
+        let indexes = InvalidationIndexes::default();
+        assert!(indexes.subgraph);
+        assert!(indexes.r#type);
+        assert!(indexes.cache_tag);
     }
 
     #[test]
-    fn subgraph_invalidation_config_default_has_all_three_modes() {
+    fn invalidation_indexes_is_enabled_dispatches_per_mode() {
+        let indexes = InvalidationIndexes {
+            subgraph: true,
+            r#type: false,
+            cache_tag: true,
+        };
+        assert!(indexes.is_enabled(IndexMode::Subgraph));
+        assert!(!indexes.is_enabled(IndexMode::Type));
+        assert!(indexes.is_enabled(IndexMode::CacheTag));
+    }
+
+    #[test]
+    fn invalidation_indexes_any_enabled_is_false_when_all_off() {
+        let none_on = InvalidationIndexes {
+            subgraph: false,
+            r#type: false,
+            cache_tag: false,
+        };
+        assert!(!none_on.any_enabled());
+    }
+
+    #[test]
+    fn subgraph_invalidation_config_default_has_all_three_indexes_enabled() {
         let cfg = SubgraphInvalidationConfig::default();
-        let set = cfg.index_mode_set();
-        assert_eq!(set.len(), 3);
-        assert!(set.contains(&IndexMode::Subgraph));
-        assert!(set.contains(&IndexMode::Type));
-        assert!(set.contains(&IndexMode::CacheTag));
+        assert!(cfg.indexes.subgraph);
+        assert!(cfg.indexes.r#type);
+        assert!(cfg.indexes.cache_tag);
     }
 
     #[test]
     fn subgraph_invalidation_config_yaml_default_round_trip() {
-        // Omitting index_modes from YAML should default to all three modes.
+        // Omitting the `indexes` block from YAML should default to all three indexes enabled.
         let yaml = "enabled: true\nshared_key: secret\n";
         let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
-        let set = cfg.index_mode_set();
-        assert_eq!(set.len(), 3);
-        assert!(set.contains(&IndexMode::Subgraph));
-        assert!(set.contains(&IndexMode::Type));
-        assert!(set.contains(&IndexMode::CacheTag));
+        assert!(cfg.indexes.subgraph);
+        assert!(cfg.indexes.r#type);
+        assert!(cfg.indexes.cache_tag);
     }
 
     #[test]
-    fn subgraph_invalidation_config_yaml_explicit_cache_tag_only() {
-        let yaml = "enabled: true\nshared_key: secret\nindex_modes:\n  - cache_tag\n";
+    fn subgraph_invalidation_config_yaml_partial_indexes_field_inherits_defaults() {
+        // Operators only have to write what they're disabling; omitted sub-fields stay `true`.
+        let yaml = "\
+enabled: true
+shared_key: secret
+indexes:
+  subgraph: false
+  type: false
+";
         let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
-        let set = cfg.index_mode_set();
-        assert_eq!(set.len(), 1);
-        assert!(set.contains(&IndexMode::CacheTag));
-        assert!(!set.contains(&IndexMode::Subgraph));
-        assert!(!set.contains(&IndexMode::Type));
+        assert!(!cfg.indexes.subgraph);
+        assert!(!cfg.indexes.r#type);
+        assert!(cfg.indexes.cache_tag, "cache_tag should default to true");
     }
 
     #[test]
-    fn subgraph_invalidation_config_yaml_empty_modes() {
-        let yaml = "enabled: true\nshared_key: secret\nindex_modes: []\n";
+    fn subgraph_invalidation_config_yaml_all_indexes_off() {
+        let yaml = "\
+enabled: true
+shared_key: secret
+indexes:
+  subgraph: false
+  type: false
+  cache_tag: false
+";
         let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
-        assert!(cfg.index_mode_set().is_empty());
+        assert!(!cfg.indexes.any_enabled());
     }
 
     #[test]
@@ -504,34 +587,38 @@ mod index_modes_tests {
     }
 
     #[test]
-    fn effective_index_modes_prefers_per_subgraph_over_all() {
+    fn effective_invalidation_indexes_prefers_per_subgraph_over_all() {
         let cfg = subgraph_config(
-            Some(default_index_modes()),
-            Some(("payments", vec![IndexMode::CacheTag])),
+            Some(InvalidationIndexes::default()),
+            Some(("payments", indexes_with(&[IndexMode::CacheTag]))),
         );
-        let modes = effective_index_modes(&cfg, "payments");
-        assert_eq!(modes.len(), 1);
-        assert!(modes.contains(&IndexMode::CacheTag));
+        let indexes = effective_invalidation_indexes(&cfg, "payments");
+        assert!(!indexes.subgraph);
+        assert!(!indexes.r#type);
+        assert!(indexes.cache_tag);
     }
 
     #[test]
-    fn effective_index_modes_falls_back_to_all_when_no_per_subgraph_entry() {
-        let cfg = subgraph_config(Some(vec![IndexMode::Type]), None);
-        let modes = effective_index_modes(&cfg, "anything");
-        assert_eq!(modes.len(), 1);
-        assert!(modes.contains(&IndexMode::Type));
+    fn effective_invalidation_indexes_falls_back_to_all_when_no_per_subgraph_entry() {
+        let cfg = subgraph_config(Some(indexes_with(&[IndexMode::Type])), None);
+        let indexes = effective_invalidation_indexes(&cfg, "anything");
+        assert!(!indexes.subgraph);
+        assert!(indexes.r#type);
+        assert!(!indexes.cache_tag);
     }
 
     #[test]
-    fn effective_index_modes_falls_back_to_default_when_no_config() {
+    fn effective_invalidation_indexes_falls_back_to_default_when_no_config() {
         let cfg = subgraph_config(None, None);
-        let modes = effective_index_modes(&cfg, "anything");
-        assert_eq!(modes.len(), 3);
+        let indexes = effective_invalidation_indexes(&cfg, "anything");
+        assert!(indexes.subgraph);
+        assert!(indexes.r#type);
+        assert!(indexes.cache_tag);
     }
 
     #[test]
     fn find_disabled_mode_rejection_returns_none_when_all_kinds_allowed() {
-        let cfg = subgraph_config(Some(default_index_modes()), None);
+        let cfg = subgraph_config(Some(InvalidationIndexes::default()), None);
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "users".to_string(),
         }];
@@ -540,7 +627,7 @@ mod index_modes_tests {
 
     #[test]
     fn find_disabled_mode_rejection_flags_subgraph_kind_when_disabled() {
-        let cfg = subgraph_config(Some(vec![IndexMode::CacheTag]), None);
+        let cfg = subgraph_config(Some(indexes_with(&[IndexMode::CacheTag])), None);
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "users".to_string(),
         }];
@@ -552,7 +639,7 @@ mod index_modes_tests {
 
     #[test]
     fn find_disabled_mode_rejection_flags_type_kind_when_disabled() {
-        let cfg = subgraph_config(Some(vec![IndexMode::CacheTag]), None);
+        let cfg = subgraph_config(Some(indexes_with(&[IndexMode::CacheTag])), None);
         let body = vec![InvalidationRequest::Type {
             subgraph: "users".to_string(),
             r#type: "User".to_string(),
@@ -566,7 +653,7 @@ mod index_modes_tests {
     #[test]
     fn find_disabled_mode_rejection_flags_cache_tag_when_disabled() {
         let cfg = subgraph_config(
-            Some(vec![IndexMode::Subgraph, IndexMode::Type]),
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
             None,
         );
         let mut subgraphs = std::collections::HashSet::new();
@@ -576,19 +663,16 @@ mod index_modes_tests {
             cache_tag: "homepage".to_string(),
         }];
         let rejection = find_disabled_mode_rejection(&cfg, &body);
-        assert_eq!(
-            rejection,
-            Some(("users".to_string(), "cache_tag"))
-        );
+        assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 
     #[test]
     fn find_disabled_mode_rejection_respects_per_subgraph_override() {
-        // `all` has all three; `payments` only allows cache_tag. A subgraph-kind request
+        // `all` has all three indexes; `payments` only allows cache_tag. A subgraph-kind request
         // against `payments` should be rejected even though `all` allows it.
         let cfg = subgraph_config(
-            Some(default_index_modes()),
-            Some(("payments", vec![IndexMode::CacheTag])),
+            Some(InvalidationIndexes::default()),
+            Some(("payments", indexes_with(&[IndexMode::CacheTag]))),
         );
         let body = vec![InvalidationRequest::Subgraph {
             subgraph: "payments".to_string(),
@@ -597,6 +681,27 @@ mod index_modes_tests {
             find_disabled_mode_rejection(&cfg, &body),
             Some(("payments".to_string(), "subgraph"))
         );
+    }
+
+    #[test]
+    fn find_disabled_mode_rejection_picks_deterministic_subgraph_for_multi_subgraph_cache_tag() {
+        // CacheTag requests carry a `HashSet<String>` of subgraph names; the rejection should
+        // surface the lexicographically first subgraph so repeated calls return the same error.
+        // `users` is disabled (subgraph index off); `orders` is fully enabled.
+        let cfg = subgraph_config(
+            Some(InvalidationIndexes::default()),
+            Some(("users", indexes_with(&[IndexMode::Subgraph, IndexMode::Type]))),
+        );
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("users".to_string());
+        subgraphs.insert("orders".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            subgraphs,
+            cache_tag: "homepage".to_string(),
+        }];
+        // The disabled subgraph is "users"; should be returned reliably.
+        let rejection = find_disabled_mode_rejection(&cfg, &body);
+        assert_eq!(rejection, Some(("users".to_string(), "cache_tag")));
     }
 }
 
