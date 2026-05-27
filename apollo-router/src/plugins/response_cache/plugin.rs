@@ -42,9 +42,11 @@ use tracing::Span;
 
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
+use super::invalidation_endpoint::IndexMode;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
+use super::invalidation_endpoint::default_index_modes;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::record_fetch_error;
 use crate::Context;
@@ -448,6 +450,14 @@ impl PluginPrivate for ResponseCache {
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
         let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
+        let index_modes = Arc::new(
+            self.subgraphs
+                .get(name)
+                .invalidation
+                .as_ref()
+                .map(|i| i.index_mode_set())
+                .unwrap_or_else(|| default_index_modes().into_iter().collect()),
+        );
 
         let name = name.to_string();
 
@@ -479,6 +489,7 @@ impl PluginPrivate for ResponseCache {
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
                     lru_size_instrument: self.lru_size_instrument.clone(),
+                    index_modes,
                 });
             tower::util::BoxService::new(inner)
         } else {
@@ -743,6 +754,9 @@ struct CacheService {
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: Arc<HashMap<String, String>>,
     lru_size_instrument: LruSizeInstrument,
+    /// Active invalidation index modes for this subgraph, resolved from configuration.
+    /// Gates which Redis ZSET indexes are maintained on cache inserts.
+    index_modes: Arc<HashSet<IndexMode>>,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -970,6 +984,7 @@ impl CacheService {
             self.supergraph_schema.clone(),
             &self.subgraph_enums,
             request_cache_control.as_ref(),
+            &self.index_modes,
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1012,9 +1027,12 @@ impl CacheService {
                 let mut cache_control =
                     response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
-                // Support cache tags coming from subgraph response extensions
-                if let Some(Value::Array(cache_tags)) =
-                    response.get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                // Support cache tags coming from subgraph response extensions. Gated on the
+                // CacheTag index mode being active for this subgraph; if disabled, the extension
+                // values are ignored on the cache write path.
+                if self.index_modes.contains(&IndexMode::CacheTag)
+                    && let Some(Value::Array(cache_tags)) =
+                        response.get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
                     invalidation_keys.extend(
                         cache_tags
@@ -1084,6 +1102,7 @@ impl CacheService {
                         root_cache_key,
                         invalidation_keys,
                         self.debug,
+                        self.index_modes.clone(),
                     )
                     .await?;
                 }
@@ -1112,6 +1131,7 @@ impl CacheService {
             request,
             self.debug,
             request_cache_control.as_ref(),
+            &self.index_modes,
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1228,6 +1248,7 @@ impl CacheService {
                     is_known_private,
                     private_id,
                     debug_subgraph_request,
+                    self.index_modes.clone(),
                 )
                 .await?;
 
@@ -1249,6 +1270,7 @@ impl CacheService {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
@@ -1260,6 +1282,7 @@ async fn cache_lookup_root(
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
     cache_control: Option<&CacheControl>,
+    index_modes: &HashSet<IndexMode>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<String>)>, BoxError> {
     let invalidation_cache_keys =
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?;
@@ -1275,8 +1298,12 @@ async fn cache_lookup_root(
         &request.authorization,
         is_known_private,
         private_id,
+        index_modes,
     );
-    invalidation_keys.extend(invalidation_cache_keys);
+    // Gate the schema-resolved `@cacheTag` directive values on the CacheTag index mode.
+    if index_modes.contains(&IndexMode::CacheTag) {
+        invalidation_keys.extend(invalidation_cache_keys);
+    }
 
     Span::current().record("cache.key", key.clone());
 
@@ -1512,6 +1539,7 @@ async fn cache_lookup_entities(
     mut request: subgraph::Request,
     debug: bool,
     cache_control: Option<&CacheControl>,
+    index_modes: &HashSet<IndexMode>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
     let is_no_cache = cache_control.is_some_and(|c| c.no_cache());
 
@@ -1523,6 +1551,7 @@ async fn cache_lookup_entities(
         is_known_private,
         private_id,
         debug,
+        index_modes,
     )?;
     let keys_len = cache_metadata.len();
 
@@ -1685,6 +1714,7 @@ fn save_original_cache_control(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
@@ -1693,6 +1723,7 @@ async fn cache_store_root_from_response(
     cache_key: String,
     invalidation_keys: Vec<String>,
     debug: bool,
+    index_modes: Arc<HashSet<IndexMode>>,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1708,6 +1739,7 @@ async fn cache_store_root_from_response(
                 invalidation_keys,
                 expire: ttl,
                 debug,
+                index_modes,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -1727,6 +1759,7 @@ async fn cache_store_root_from_response(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
@@ -1737,6 +1770,7 @@ async fn cache_store_entities_from_response(
     private_id: Option<String>,
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
+    index_modes: Arc<HashSet<IndexMode>>,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
 
@@ -1797,6 +1831,7 @@ async fn cache_store_entities_from_response(
             per_entity_surrogate_keys,
             response.context.clone(),
             subgraph_request,
+            index_modes,
         )
         .await?;
 
@@ -1830,6 +1865,7 @@ fn extract_cache_key_root(
     cache_key: &CacheKeyMetadata,
     is_known_private: bool,
     private_id: Option<&str>,
+    index_modes: &HashSet<IndexMode>,
 ) -> (String, Vec<String>) {
     let entity_type = entity_type_opt.unwrap_or("Query");
 
@@ -1843,9 +1879,16 @@ fn extract_cache_key_root(
         private_id: if is_known_private { private_id } else { None },
     }
     .hash();
-    let invalidation_keys = vec![format!(
-        "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
-    )];
+    // The auto-generated by-type invalidation key is only emitted when the Type index mode is
+    // active for this subgraph. Customers who only invalidate by cache tag opt out of this index
+    // by setting `index_modes: ["cache_tag"]`.
+    let invalidation_keys = if index_modes.contains(&IndexMode::Type) {
+        vec![format!(
+            "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}"
+        )]
+    } else {
+        Vec::new()
+    };
 
     (key, invalidation_keys)
 }
@@ -1867,6 +1910,7 @@ fn extract_cache_keys(
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
+    index_modes: &HashSet<IndexMode>,
 ) -> Result<Vec<CacheMetadata>, BoxError> {
     let context = &request.context;
     let authorization = &request.authorization;
@@ -1939,10 +1983,15 @@ fn extract_cache_keys(
         }
         .hash();
 
-        // Used as a surrogate cache key
-        let mut invalidation_keys = vec![format!(
-            "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"
-        )];
+        // Used as a surrogate cache key. The by-type entry is only emitted when the Type index
+        // mode is active for this subgraph.
+        let mut invalidation_keys: Vec<String> = if index_modes.contains(&IndexMode::Type) {
+            vec![format!(
+                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}"
+            )]
+        } else {
+            Vec::new()
+        };
 
         // get cache keys from directive
         let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
@@ -1955,7 +2004,10 @@ fn extract_cache_keys(
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        invalidation_keys.extend(invalidation_cache_keys);
+        // Schema-resolved `@cacheTag` directive values are gated on the CacheTag index mode.
+        if index_modes.contains(&IndexMode::CacheTag) {
+            invalidation_keys.extend(invalidation_cache_keys);
+        }
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             invalidation_keys,
@@ -2444,6 +2496,7 @@ fn filter_representations(
 
 // fill in the entities for the response
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
@@ -2460,6 +2513,7 @@ async fn insert_entities_in_result(
     context: Context,
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
+    index_modes: Arc<HashSet<IndexMode>>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let debug = subgraph_request.is_some();
     let ttl = cache_control
@@ -2533,8 +2587,11 @@ async fn insert_entities_in_result(
                 }
 
                 // apply per-entity cache tags from the subgraph's apolloEntityCacheTags extension; these tags
-                // enable targeted cache invalidation for this specific entity
-                if let Some(Value::Array(keys)) = specific_surrogate_keys {
+                // enable targeted cache invalidation for this specific entity. Gated on the CacheTag
+                // index mode being active for this subgraph.
+                if index_modes.contains(&IndexMode::CacheTag)
+                    && let Some(Value::Array(keys)) = specific_surrogate_keys
+                {
                     invalidation_keys
                         .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                 }
@@ -2571,6 +2628,7 @@ async fn insert_entities_in_result(
                         invalidation_keys,
                         expire: ttl,
                         debug,
+                        index_modes: index_modes.clone(),
                     });
                 }
 

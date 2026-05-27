@@ -4,6 +4,7 @@ pub(super) mod redis;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -12,6 +13,8 @@ use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
+use crate::plugins::response_cache::invalidation_endpoint::IndexMode;
+use crate::plugins::response_cache::invalidation_endpoint::default_index_modes;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -30,6 +33,25 @@ pub(super) struct Document {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) expire: Duration,
     pub(super) debug: bool,
+    /// Which invalidation index modes are active for this document's subgraph.
+    /// Drives whether `cache_tag_permutations` writes the `subgraph-{name}` index entry.
+    /// Defaults to all three modes for backward compatibility with documents constructed
+    /// outside the configured cache write path (e.g., tests).
+    pub(super) index_modes: Arc<HashSet<IndexMode>>,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            key: String::default(),
+            data: serde_json_bytes::Value::default(),
+            control: CacheControl::default(),
+            invalidation_keys: Vec::new(),
+            expire: Duration::default(),
+            debug: false,
+            index_modes: Arc::new(default_index_modes().into_iter().collect()),
+        }
+    }
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
