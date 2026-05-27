@@ -422,7 +422,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     // scheduling pressure (the failure surface previously observed
     // on `test-amd_linux_test`).
     let router_url = format!("http://{}/", router.bind_address());
-    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(30)).await;
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(60)).await;
 
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
 
@@ -533,6 +533,16 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
 
     router.start().await;
     router.assert_started().await;
+
+    // See `wait_for_router_ready` doc — `assert_started` only matches
+    // the `GraphQL endpoint exposed` log line, emitted before the
+    // axum server task is actually polling connections. Without this
+    // probe, the first `execute_query` POST can race the kernel's
+    // RST-on-overflow path under heavy CI scheduling pressure (the
+    // surface that crashed this test on CircleCI build 378842,
+    // `test-amd_linux_test`).
+    let router_url = format!("http://{}/", router.bind_address());
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(60)).await;
 
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
 
