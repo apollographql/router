@@ -304,7 +304,6 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
@@ -316,7 +315,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(
@@ -442,7 +441,6 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
@@ -455,7 +453,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(
