@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -6813,6 +6812,7 @@ expression: "&schema"
       "type": "object"
     },
     "Lifecycle": {
+      "description": "Lifecycle-anchored instrument values: emit once per request at a specific point in\nthe response-stream lifecycle (currently only stream end). Sibling to `Standard`\n(request-level) and `Event` (per-chunk) value-shapes; future variants would cover\nother stream-anchored emissions (e.g. first-byte, item-count).",
       "oneOf": [
         {
           "const": "stream_duration",
