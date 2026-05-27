@@ -481,8 +481,7 @@ mod test {
             }
         });
 
-        let mut spans: RouterSpans =
-            serde_json::from_value(json).expect("should deserialize");
+        let mut spans: RouterSpans = serde_json::from_value(json).expect("should deserialize");
 
         assert!(spans.attributes.attributes.client_name.is_none());
         assert!(spans.attributes.custom.contains_key("client.name"));
