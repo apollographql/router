@@ -829,7 +829,7 @@ impl Merger {
             .subgraphs
             .iter()
             .enumerate()
-            .map(|(idx, sg)| (idx, sg.schema().get_type(mismatched_type.type_name()).ok()))
+            .map(|(idx, sg)| (idx, sg.schema().try_get_type(mismatched_type.type_name())))
             .collect();
         let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
             let type_kind_description =
