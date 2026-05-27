@@ -1097,12 +1097,16 @@ impl CacheService {
                     && let Some(Value::Array(extension_tags)) = response
                         .get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
-                    cache_tags.extend(
-                        extension_tags
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| CacheTag::Tag(s.to_string())),
+                    let extension_tag_strings: Vec<String> = extension_tags
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+                    record_external_cache_tags(
+                        &response.context,
+                        extension_tag_strings.iter().cloned(),
                     );
+                    cache_tags.extend(extension_tag_strings.into_iter().map(CacheTag::Tag));
                 }
                 save_original_cache_control(
                     response.id.clone(),
@@ -1379,6 +1383,14 @@ async fn cache_lookup_root(
     );
     cache_tags.extend(invalidation_cache_keys.into_iter().map(CacheTag::Tag));
 
+    // Surface schema-resolved @cacheTag values on the supergraph response aggregator. These
+    // apply to the request regardless of whether the lookup hits or misses. Type/Subgraph
+    // entries are internal-only and filtered out by `user_value()`.
+    record_external_cache_tags(
+        &request.context,
+        cache_tags.iter().filter_map(|t| t.user_value().map(String::from)),
+    );
+
     Span::current().record("cache.key", key.clone());
 
     if cache_control.is_some_and(|c| c.no_cache()) {
@@ -1417,6 +1429,7 @@ async fn cache_lookup_root(
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys: value
                             .cache_tags
+                            .clone()
                             .map(external_invalidation_keys)
                             .unwrap_or_default(),
                         kind: CacheEntryKind::RootFields {
@@ -1439,6 +1452,14 @@ async fn cache_lookup_root(
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("hit".into()),
                 );
+
+                // Surface the cache tags persisted with the entry so the supergraph response
+                // aggregator can reflect this hit. Done before the response builder consumes
+                // the request context.
+                if let Some(tags) = value.cache_tags.clone() {
+                    record_external_cache_tags(&request.context, tags);
+                }
+
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
@@ -1669,6 +1690,15 @@ async fn cache_lookup_entities(
             }
         }
     };
+
+    // Surface cache tags from every usable hit on the supergraph response aggregator. This
+    // covers both the full-hit short-circuit below and the partial-hit path where the error
+    // branch may rebuild a response from only cached entities.
+    for entry in cache_result.iter().flatten() {
+        if let Some(tags) = entry.cache_tags.clone() {
+            record_external_cache_tags(&request.context, tags);
+        }
+    }
     let body = request.subgraph_request.body_mut();
 
     let representations = body
@@ -2066,6 +2096,7 @@ fn extract_cache_keys(
                 typename,
                 representation,
             )?;
+            record_external_cache_tags(context, invalidation_cache_keys.iter().cloned());
             cache_tags.extend(invalidation_cache_keys.into_iter().map(CacheTag::Tag));
         }
 
@@ -2652,11 +2683,13 @@ async fn insert_entities_in_result(
                 if indexes.is_enabled(IndexMode::CacheTag)
                     && let Some(Value::Array(keys)) = specific_surrogate_keys
                 {
-                    cache_tags.extend(
-                        keys.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| CacheTag::Tag(s.to_string())),
-                    );
+                    let entity_tags: Vec<String> = keys
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+                    record_external_cache_tags(&context, entity_tags.iter().cloned());
+                    cache_tags.extend(entity_tags.into_iter().map(CacheTag::Tag));
                 }
 
                 // Prepend the whole-subgraph index entry when active. The by-type and per-tag
