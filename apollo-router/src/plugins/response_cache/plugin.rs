@@ -218,6 +218,68 @@ pub(crate) struct Config {
     /// Buffer size for known private queries (default: 2048)
     #[serde(default = "default_lru_private_queries_size")]
     private_queries_buffer_size: NonZeroUsize,
+
+    /// Propagation of aggregated response_cache cache tags to the supergraph response.
+    /// Off by default; opt in to surface cache tags to a CDN for tag-based purging.
+    #[serde(default)]
+    pub(crate) propagate_cache_tags: PropagateCacheTagsConfig,
+}
+
+/// Configuration for surfacing aggregated response_cache cache tags on the supergraph response.
+///
+/// When enabled, the router collects the union of cache tags contributed by each subgraph
+/// (from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)
+/// and emits them as a single configurable header on the supergraph response. The tags are
+/// always available on the request context for coprocessor or rhai consumption regardless of
+/// whether the header is emitted.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+pub(crate) struct PropagateCacheTagsConfig {
+    /// Whether to emit the configured header on the supergraph response. Defaults to false.
+    pub(crate) enabled: bool,
+
+    /// Name of the response header used to surface aggregated cache tags.
+    pub(crate) header: String,
+
+    /// Separator used to join multiple tags into a single header value.
+    pub(crate) separator: String,
+
+    /// Maximum number of bytes for the joined header value. When the joined value would exceed
+    /// this size, `on_overflow` decides what to do.
+    pub(crate) max_bytes: usize,
+
+    /// Policy applied when the joined header value would exceed `max_bytes`.
+    pub(crate) on_overflow: OverflowPolicy,
+
+    /// Whether to deduplicate tags before joining. Tags are stored in a `HashSet` so duplicates
+    /// are already collapsed; this flag is reserved for future header emission strategies.
+    pub(crate) deduplicate: bool,
+}
+
+impl Default for PropagateCacheTagsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            header: "Cache-Tag".to_string(),
+            separator: ",".to_string(),
+            max_bytes: 16384,
+            on_overflow: OverflowPolicy::Truncate,
+            deduplicate: true,
+        }
+    }
+}
+
+/// Behavior when a joined cache-tag header value exceeds `max_bytes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OverflowPolicy {
+    /// Emit the header with as many tags as fit, in deterministic (lexicographic) order. Drop
+    /// the rest and log a `tracing::warn!` with `max_bytes`, `actual_bytes`, and `dropped_count`.
+    Truncate,
+    /// Omit the header entirely when the joined value would overflow.
+    Drop,
+    /// Emit one header per tag instead of joining. Each header value carries a single tag.
+    HeaderPerTag,
 }
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {
