@@ -481,6 +481,12 @@ impl Request {
         // `[("x","yxy")]` would otherwise both feed the hasher "xyxy"), and
         // raw `as_bytes()` is used so non-ASCII header values are not
         // collapsed via lossy `to_str()`.
+        // Each section below is preceded by a distinct two-byte tag so that an
+        // empty section followed by a populated one cannot produce the same byte
+        // stream as the populated section followed by an empty one. Without these
+        // tags `{variables: {"k": "1"}, extensions: {}}` and
+        // `{variables: {}, extensions: {"k": "1"}}` hash identically, causing
+        // subgraph dedup-cache collisions.
         let mut headers: Vec<(&[u8], &[u8])> = Vec::with_capacity(http_req.headers().len());
         headers.extend(
             http_req
@@ -489,6 +495,7 @@ impl Request {
                 .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
                 .map(|(name, value)| (name.as_str().as_bytes(), value.as_bytes())),
         );
+        hasher.update(b"\0H");
         sort_and_hash(&mut hasher, headers);
 
         if !ignore_auth_context
@@ -496,13 +503,16 @@ impl Request {
                 .context
                 .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         {
+            hasher.update(b"\0C");
             hasher.update(format!("{claim:?}").as_bytes());
         }
         let body = http_req.body();
         if let Some(operation_name) = &body.operation_name {
+            hasher.update(b"\0O");
             hasher.update(operation_name.as_bytes());
         }
         if let Some(query) = &body.query {
+            hasher.update(b"\0Q");
             hasher.update(query.as_bytes());
         }
         // Apply the same sort + NUL-delimiter pattern as the headers above so
@@ -510,12 +520,14 @@ impl Request {
         // and concatenated (name, value) pairs cannot collide across distinct logical
         // inputs.
 
+        hasher.update(b"\0V");
         sort_and_hash(
             &mut hasher,
             body.variables
                 .iter()
                 .map(|(k, v)| (k.inner(), v.to_bytes())),
         );
+        hasher.update(b"\0E");
         sort_and_hash(
             &mut hasher,
             body.extensions
@@ -812,6 +824,81 @@ mod tests {
             req_two.to_sha256(&ignored_headers, false),
             req_one.to_sha256(&ignored_headers, false),
             "variable pairs must be delimited so concatenations cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_no_cross_section_collision_variables_vs_extensions() {
+        use serde_json_bytes::json;
+
+        // Without per-section tags, these two requests would feed the hasher
+        // the same byte stream (`"k\01\0"`), because `sort_and_hash` emits no
+        // bytes for an empty iterator and no terminator for the section as a
+        // whole. A swap between variables and extensions would then produce
+        // identical hashes — letting the subgraph dedup cache return request
+        // A's response to request B.
+        let mut vars = JsonMap::new();
+        vars.insert("k", json!(1));
+        let mut exts = JsonMap::new();
+        exts.insert("k", json!(1));
+
+        let req_vars_only = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars).build())
+                    .unwrap(),
+            )
+            .build();
+        let req_exts_only = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().extensions(exts).build())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_vars_only.to_sha256(&ignored_headers, false),
+            req_exts_only.to_sha256(&ignored_headers, false),
+            "the variables and extensions sections must be domain-separated so identical \
+             entries in different sections cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_no_cross_section_collision_query_vs_operation_name() {
+        // Without per-section tags, `operation_name + query` is just concatenated
+        // bytes, so `operation_name: "AB", query: "CD"` and
+        // `operation_name: "ABC", query: "D"` would hash identically.
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        graphql::Request::builder()
+                            .operation_name("AB")
+                            .query("CD")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        graphql::Request::builder()
+                            .operation_name("ABC")
+                            .query("D")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "operation_name and query must be domain-separated so concatenations cannot collide"
         );
     }
 
