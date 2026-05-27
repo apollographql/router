@@ -789,7 +789,7 @@ async fn test_metrics_with_client_name_http_header() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
+    let report = get_metrics_report_with_subgraph_mock(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
