@@ -2830,6 +2830,104 @@ async fn reattempt_connection(
 
 pub(crate) type CacheControls = HashMap<SubgraphRequestId, CacheControl>;
 
+/// Per-request aggregator of cache tags surfaced by response_cache.
+///
+/// Populated as the router walks the resolution tree: each subgraph response — cache hit,
+/// cache miss, or partial entity hit — contributes its tag set. The supergraph_service
+/// `map_response` consumes the union to emit the configured cache-tag header when
+/// `propagate_cache_tags.enabled` is true.
+///
+/// Stored as a typed `Context` extension; the type itself is the key. Tags pushed through
+/// `add_many` are expected to be filtered through `external_invalidation_keys` first so
+/// internal `__apollo_internal::` prefixed tags do not leak.
+#[derive(Default)]
+pub(crate) struct CacheTagsAggregator {
+    tags: HashSet<String>,
+}
+
+impl CacheTagsAggregator {
+    pub(crate) fn add_many(&mut self, tags: impl IntoIterator<Item = String>) {
+        self.tags.extend(tags);
+    }
+
+    pub(crate) fn snapshot(&self) -> HashSet<String> {
+        self.tags.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take(&mut self) -> HashSet<String> {
+        std::mem::take(&mut self.tags)
+    }
+}
+
+/// Push a set of cache tags into the per-request aggregator, filtering out tags that begin
+/// with the internal-cache-tag prefix so they cannot leak to the client.
+fn record_external_cache_tags(context: &Context, tags: impl IntoIterator<Item = String>) {
+    let external: Vec<String> = external_invalidation_keys(tags);
+    if external.is_empty() {
+        return;
+    }
+    context.extensions().with_lock(|lock| {
+        lock.get_or_default_mut::<CacheTagsAggregator>()
+            .add_many(external);
+    });
+}
+
+#[cfg(test)]
+mod cache_tags_aggregator_tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_is_empty_by_default() {
+        let aggregator = CacheTagsAggregator::default();
+        assert!(aggregator.snapshot().is_empty());
+    }
+
+    #[test]
+    fn add_many_inserts_tags() {
+        let mut aggregator = CacheTagsAggregator::default();
+        aggregator.add_many(["alpha".to_string(), "beta".to_string()]);
+        let snapshot = aggregator.snapshot();
+        assert!(snapshot.contains("alpha"));
+        assert!(snapshot.contains("beta"));
+        assert_eq!(snapshot.len(), 2);
+    }
+
+    #[test]
+    fn add_many_deduplicates_across_calls() {
+        let mut aggregator = CacheTagsAggregator::default();
+        aggregator.add_many(["alpha".to_string()]);
+        aggregator.add_many(["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(aggregator.snapshot().len(), 2);
+    }
+
+    #[test]
+    fn take_leaves_aggregator_empty() {
+        let mut aggregator = CacheTagsAggregator::default();
+        aggregator.add_many(["alpha".to_string()]);
+        let taken = aggregator.take();
+        assert_eq!(taken.len(), 1);
+        assert!(aggregator.snapshot().is_empty());
+    }
+
+    #[test]
+    fn record_external_cache_tags_filters_internal_prefix() {
+        let context = Context::new();
+        let internal = format!("{INTERNAL_CACHE_TAG_PREFIX}only");
+        record_external_cache_tags(
+            &context,
+            vec![internal.clone(), "public-tag".to_string()],
+        );
+        let snapshot = context.extensions().with_lock(|lock| {
+            lock.get::<CacheTagsAggregator>()
+                .map(|a| a.snapshot())
+                .unwrap_or_default()
+        });
+        assert!(snapshot.contains("public-tag"));
+        assert!(!snapshot.contains(&internal));
+    }
+}
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
