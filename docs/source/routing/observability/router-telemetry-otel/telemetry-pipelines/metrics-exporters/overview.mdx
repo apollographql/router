@@ -148,7 +148,7 @@ OpenTelemetry views enable you to customize metrics behavior, including renaming
 
 <Note>
 
-A `views[]` entry without an explicit `aggregation` preserves the instrument's native kind. Before router v2.15.0, such entries silently converted counters and gauges into histograms; if your dashboards depend on those `_bucket`/`_sum`/`_count` series, add `aggregation: histogram` with your buckets.
+A `views[]` entry without an explicit `aggregation` preserves the instrument's native kind. Before router v2.15.0, such entries converted counters and gauges into histograms; if your dashboards depend on those `_bucket`/`_sum`/`_count` series, add `aggregation: histogram` with your buckets.
 
 </Note>
 
@@ -246,9 +246,9 @@ telemetry:
 
 ### `cardinality_limit`
 
-By default, OpenTelemetry caps each metric at 2000 distinct attribute combinations. When the limit is reached, additional attribute combinations are dropped and replaced with a single overflow series tagged `otel_metric_overflow="true"`, losing their per-attribute breakdown.
+OpenTelemetry metrics support up to 2000 distinct attribute combinations by default. When this limit is reached, additional attribute combinations are grouped into a single overflow series tagged `otel_metric_overflow="true"` to maintain system stability.
 
-Set `cardinality_limit` to raise (or lower) this cap globally, or override it for a specific metric:
+Use `cardinality_limit` to adjust this cap globally, or override it for a specific metric:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -271,7 +271,7 @@ Raising the limit increases memory usage proportionally, since each allowed attr
 | `service_namespace` |                          | The OpenTelemetry namespace.                                                                                                     |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.                                                                                 |
 | `views`             |                          | Customizes metrics using OpenTelemetry views: rename metrics, override default buckets and attributes, or drop metrics entirely. |
-| `cardinality_limit` | `2000`                   | Maximum number of distinct attribute combinations per metric. Per-metric overrides available via `views[].cardinality_limit`. See [Metric cardinality limit](#cardinality_limit). |
+| `cardinality_limit` | `2000`                   | Maximum number of distinct attribute combinations per metric. Per-metric overrides available via `views[].cardinality_limit`. For details, see [Metric cardinality limit](#cardinality_limit). |
 
 
 ## Related topics
