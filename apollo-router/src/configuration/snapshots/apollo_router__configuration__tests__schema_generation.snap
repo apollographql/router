@@ -6316,6 +6316,26 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "IndexMode": {
+      "description": "Which invalidation index modes to maintain for cached entries.\n\nEach mode corresponds to one of the kinds of invalidation requests documented at\n<https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation>.\nDisabling a mode skips writing the corresponding Redis ZSET index entries on cache inserts,\nat the cost of being unable to invalidate cached entries by that mode.",
+      "oneOf": [
+        {
+          "const": "subgraph",
+          "description": "Maintain the `subgraph-{name}` ZSET. Enables `By subgraph` invalidation requests.",
+          "type": "string"
+        },
+        {
+          "const": "type",
+          "description": "Maintain the by-type ZSET keyed by `subgraph:{name}:type:{type}`. Enables `By type`\ninvalidation requests.",
+          "type": "string"
+        },
+        {
+          "const": "cache_tag",
+          "description": "Maintain ZSETs for user-supplied cache tags from `apolloCacheTags`,\n`apolloEntityCacheTags`, and resolved `@cacheTag` directive values. Enables\n`By cache tag` invalidation requests.",
+          "type": "string"
+        }
+      ]
+    },
     "Insert": {
       "anyOf": [
         {
@@ -10525,6 +10545,18 @@ expression: "&schema"
           "default": false,
           "description": "Enable the invalidation",
           "type": "boolean"
+        },
+        "index_modes": {
+          "default": [
+            "subgraph",
+            "type",
+            "cache_tag"
+          ],
+          "description": "Which invalidation index modes to maintain for this subgraph's cached entries.\nDefaults to all three (`subgraph`, `type`, `cache_tag`) for backward compatibility.\n\nCustomers who only invalidate by cache tag can set this to `[\"cache_tag\"]` to avoid\nRedis CPU and memory cost from maintaining the `by subgraph` and `by type` indexes.\nSetting this to `[]` disables all invalidation indexing; the `/invalidation` endpoint\nwill return HTTP 400 for any request against the affected subgraph.",
+          "items": {
+            "$ref": "#/definitions/IndexMode"
+          },
+          "type": "array"
         },
         "shared_key": {
           "default": "",
