@@ -1,0 +1,87 @@
+description: |
+  `coprocessor.<stage>.context: true` / `context: false` has been removed. The structured form
+  (`context: none` / `context: all` / `context: deprecated` / `context: selective: [...]`) is the
+  replacement. `true` is migrated to `deprecated` (which preserves the prior behavior of sending
+  context keys using their pre-2.x deprecated names) and `false` is migrated to `none` (context
+  is no longer sent, which is the default). See https://go.apollo.dev/o/coprocessor-context
+actions:
+  - type: change
+    path: coprocessor.router.request.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.router.request.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.router.response.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.router.response.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.supergraph.request.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.supergraph.request.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.supergraph.response.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.supergraph.response.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.execution.request.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.execution.request.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.execution.response.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.execution.response.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.subgraph.all.request.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.subgraph.all.request.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.subgraph.all.response.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.subgraph.all.response.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.connector.all.request.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.connector.all.request.context
+    from: false
+    to: none
+  - type: change
+    path: coprocessor.connector.all.response.context
+    from: true
+    to: deprecated
+  - type: change
+    path: coprocessor.connector.all.response.context
+    from: false
+    to: none

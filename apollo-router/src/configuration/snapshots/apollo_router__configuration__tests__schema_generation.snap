@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -2944,16 +2943,41 @@ expression: "&schema"
       "type": "object"
     },
     "ContextConf": {
-      "anyOf": [
+      "description": "Configures the context",
+      "oneOf": [
         {
-          "description": "Deprecated configuration using a boolean",
-          "type": "boolean"
+          "const": "none",
+          "description": "Do not send context to the coprocessor (the default)",
+          "type": "string"
         },
         {
-          "$ref": "#/definitions/NewContextConf"
+          "const": "all",
+          "description": "Send all context keys to coprocessor",
+          "type": "string"
+        },
+        {
+          "const": "deprecated",
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
         }
-      ],
-      "description": "Configures the context"
+      ]
     },
     "CooperativeCancellation": {
       "additionalProperties": false,
@@ -7278,38 +7302,6 @@ expression: "&schema"
     "MyTestPluginConfig": {
       "description": "Config for the test plugin",
       "type": "object"
-    },
-    "NewContextConf": {
-      "description": "Configures the context",
-      "oneOf": [
-        {
-          "const": "all",
-          "description": "Send all context keys to coprocessor",
-          "type": "string"
-        },
-        {
-          "const": "deprecated",
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Only send the list of context keys to coprocessor",
-          "properties": {
-            "selective": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array",
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "selective"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "OTLPConfig": {
       "additionalProperties": false,

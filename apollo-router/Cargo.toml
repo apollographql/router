@@ -146,7 +146,7 @@ mediatype = "0.21.0"
 mockall = "0.14.0"
 mime = "0.3.17"
 multer = "3.1.0"
-multimap = "0.9.1" # Warning: part of the public API
+multimap = "0.10.0" # Warning: part of the public API
 # To avoid tokio issues
 notify = { version = "8.0.0", default-features = false, features = [
     "macos_kqueue",
@@ -294,7 +294,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.1" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]

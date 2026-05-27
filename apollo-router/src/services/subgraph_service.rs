@@ -2144,7 +2144,7 @@ mod tests {
         assert!(!response.response.body().errors.is_empty());
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': HTTP fetch failed from 'test': connection closed before message completed"
+            "HTTP fetch failed: HTTP fetch failed: connection closed before message completed"
         );
     }
 
@@ -2179,7 +2179,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "service 'test' response was malformed: expected value at line 1 column 1"
+            "response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -2306,11 +2306,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "service 'test' response was malformed: invalid"
+            "response was malformed: invalid"
         );
     }
 
@@ -2347,11 +2347,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "service 'test' response was malformed: expected value at line 1 column 1"
+            "response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -2449,7 +2449,7 @@ mod tests {
                 .unwrap_err();
 
             let err_str = err.to_string();
-            assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
+            assert!(err_str.starts_with("Websocket fetch failed: cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
 
             assert_counter!(
                 "apollo.router.operations.subscriptions.rejected",
@@ -2565,7 +2565,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 400: Bad Request"
+            "HTTP fetch failed: 400: Bad Request"
         );
         assert_eq!(
             response.response.body().errors[1].message,
@@ -2605,7 +2605,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2641,7 +2641,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2677,7 +2677,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response contains unsupported content-type: text/html; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed: subgraph response contains unsupported content-type: text/html; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
@@ -2712,7 +2712,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "HTTP fetch failed: 401: Unauthorized"
         );
     }
 

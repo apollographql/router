@@ -11,13 +11,13 @@ include_subgraph_errors:
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   supergraph:
-    response: 
-      context: true
+    response:
+      context: all
   subgraph:
     all:
-      response: 
+      response:
         subgraph_request_id: true
-        context: true
+        context: all
 preview_entity_cache:
   enabled: true
   expose_keys_in_context: true
