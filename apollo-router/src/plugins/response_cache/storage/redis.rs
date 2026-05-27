@@ -285,15 +285,13 @@ impl CacheStorage for Storage {
 
         let now = now();
 
-        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
+        // Capture the document-supplied invalidation keys so they can be persisted on the
+        // CacheEntry. They are surfaced on cache hits to power the cache debugger and the
+        // supergraph response cache-tag propagation introduced in router#9481.
         let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
         // phase 1
         for document in &mut batch_docs {
-            if document.debug {
-                original_cache_tags.push(document.invalidation_keys.clone());
-            } else {
-                original_cache_tags.push(Vec::new());
-            }
+            original_cache_tags.push(document.invalidation_keys.clone());
             document.invalidation_keys =
                 self.cache_tag_permutations(&document.invalidation_keys, subgraph_name);
         }
@@ -375,7 +373,7 @@ impl CacheStorage for Storage {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
+                cache_tags: Some(cache_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -633,7 +631,6 @@ mod tests {
             control: Default::default(),
             invalidation_keys: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
-            debug: true,
         }
     }
 
