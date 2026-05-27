@@ -13,8 +13,7 @@ use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
-use crate::plugins::response_cache::invalidation_endpoint::IndexMode;
-use crate::plugins::response_cache::invalidation_endpoint::default_index_modes;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -33,11 +32,11 @@ pub(super) struct Document {
     pub(super) invalidation_keys: Vec<String>,
     pub(super) expire: Duration,
     pub(super) debug: bool,
-    /// Which invalidation index modes are active for this document's subgraph.
-    /// Drives whether `cache_tag_permutations` writes the `subgraph-{name}` index entry.
-    /// Defaults to all three modes for backward compatibility with documents constructed
-    /// outside the configured cache write path (e.g., tests).
-    pub(super) index_modes: Arc<HashSet<IndexMode>>,
+    /// Which invalidation indexes are active for this document's subgraph. Drives which
+    /// Redis ZSET entries are written by the storage layer on cache inserts. Resolved once
+    /// per subgraph at `CacheService` construction time via `effective_invalidation_indexes`
+    /// and shared cheaply via `Arc` across all documents from that subgraph.
+    pub(super) indexes: Arc<InvalidationIndexes>,
 }
 
 impl Default for Document {
@@ -49,7 +48,7 @@ impl Default for Document {
             invalidation_keys: Vec::new(),
             expire: Duration::default(),
             debug: false,
-            index_modes: Arc::new(default_index_modes().into_iter().collect()),
+            indexes: Arc::new(InvalidationIndexes::default()),
         }
     }
 }

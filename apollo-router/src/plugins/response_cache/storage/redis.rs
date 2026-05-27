@@ -31,7 +31,7 @@ use crate::cache::redis::RedisValue;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
-use crate::plugins::response_cache::invalidation_endpoint::IndexMode;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
@@ -236,9 +236,9 @@ impl Storage {
         &self,
         document_invalidation_keys: &[String],
         subgraph_name: &str,
-        index_modes: &HashSet<IndexMode>,
+        indexes: &InvalidationIndexes,
     ) -> Vec<String> {
-        let include_subgraph = index_modes.contains(&IndexMode::Subgraph);
+        let include_subgraph = indexes.subgraph;
         let mut cache_tags =
             Vec::with_capacity(usize::from(include_subgraph) + document_invalidation_keys.len());
         // The `subgraph-{name}` cache tag underwrites `By subgraph` invalidation. Skip when the
@@ -305,7 +305,7 @@ impl CacheStorage for Storage {
             document.invalidation_keys = self.cache_tag_permutations(
                 &document.invalidation_keys,
                 subgraph_name,
-                document.index_modes.as_ref(),
+                document.indexes.as_ref(),
             );
         }
 
@@ -624,17 +624,15 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
-    use crate::plugins::response_cache::invalidation_endpoint::IndexMode;
+    use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
     use crate::plugins::response_cache::storage::Document;
     use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
 
-    /// Test helper: returns a set containing all three index modes, matching the production default.
-    fn all_index_modes() -> std::collections::HashSet<IndexMode> {
-        [IndexMode::Subgraph, IndexMode::Type, IndexMode::CacheTag]
-            .into_iter()
-            .collect()
+    /// Test helper: returns `InvalidationIndexes` with all three indexes enabled, matching the production default.
+    fn all_indexes() -> InvalidationIndexes {
+        InvalidationIndexes::default()
     }
 
     fn redis_config(clustered: bool) -> Config {
@@ -688,7 +686,7 @@ mod tests {
             .map(ToString::to_string)
             .collect();
 
-        let mut cache_tags = storage.cache_tag_permutations(&invalidation_keys, "products", &all_index_modes());
+        let mut cache_tags = storage.cache_tag_permutations(&invalidation_keys, "products", &all_indexes());
         cache_tags.sort();
         assert_debug_snapshot!(cache_tags);
     }
@@ -726,7 +724,7 @@ mod tests {
 
             let document_key = document.key.clone();
             let expected_cache_tag_keys =
-                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.index_modes.as_ref());
+                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
             let keys = storage.all_keys_in_namespace().await?;
@@ -806,7 +804,7 @@ mod tests {
             for document in &documents {
                 expected_document_keys.push(document.key.clone());
                 expected_cache_tag_keys.push(
-                    storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.index_modes.as_ref()),
+                    storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref()),
                 );
             }
 
@@ -945,7 +943,7 @@ mod tests {
             let stored_data = storage.fetch(&document_key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.index_modes.as_ref());
+            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
 
             // save current scores
             let mut scores: HashMap<String, i64> = HashMap::default();
@@ -1013,7 +1011,7 @@ mod tests {
             let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.index_modes.as_ref());
+            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
 
             // update the document with new data and a longer TTL
             let old_ttl = document.expire;
@@ -1083,7 +1081,7 @@ mod tests {
             let document = common_document();
             let document_key = document.key.clone();
             let cache_tag_keys =
-                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.index_modes.as_ref());
+                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
 
             let insert_invalid_cache_tag = |key: String| async {
                 let namespaced_key = storage.make_key(key);
@@ -1128,7 +1126,7 @@ mod tests {
             ];
 
             let cache_tag_keys =
-                storage.cache_tag_permutations(&documents[1].invalidation_keys, SUBGRAPH_NAME, documents[1].index_modes.as_ref());
+                storage.cache_tag_permutations(&documents[1].invalidation_keys, SUBGRAPH_NAME, documents[1].indexes.as_ref());
             for key in cache_tag_keys {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
@@ -1225,7 +1223,7 @@ mod tests {
             .await?;
 
         // ensure that we have three elements in the 'whole-subgraph' invalidation key
-        let invalidation_key = storage.cache_tag_permutations(&[], SUBGRAPH_NAME, &all_index_modes()).remove(0);
+        let invalidation_key = storage.cache_tag_permutations(&[], SUBGRAPH_NAME, &all_indexes()).remove(0);
         assert_eq!(storage.zcard(&invalidation_key).await?, 3);
 
         let doc_key1 = "key1";
