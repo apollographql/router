@@ -802,7 +802,7 @@ async fn test_metrics_with_client_version_http_header() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
+    let report = get_metrics_report_with_subgraph_mock(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
@@ -836,7 +836,7 @@ async fn test_metrics_with_library_version_http_header() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
+    let report = get_metrics_report_with_subgraph_mock(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
@@ -854,7 +854,7 @@ async fn test_metrics_with_library_name_request_extension() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
+    let report = get_metrics_report_with_subgraph_mock(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
@@ -872,7 +872,7 @@ async fn test_metrics_with_library_version_request_extension() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false, None).await;
+    let report = get_metrics_report_with_subgraph_mock(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
