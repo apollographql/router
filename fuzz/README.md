@@ -33,3 +33,19 @@ successfully handles requests to a running router instance with the fuzzed schem
 ```
 cargo +nightly fuzz run connectors
 ```
+
+### Query planner
+
+This target fuzzes the `apollo-federation` query planner in-process. It generates an arbitrary
+valid operation against the API schema, then asks a `QueryPlanner` built from
+`fuzz/subgraph/supergraph.graphql` to plan it. The invariant is that the planner must not panic on
+any operation that successfully parses and validates against the API schema — planning errors are
+expected for adversarial inputs and are ignored. No running router or subgraph is required.
+
+```
+cargo +nightly fuzz run query_planner -- -max_len=4096
+```
+
+`-max_len=4096` is recommended: apollo-smith consumes a lot of bytes per operation, and at libFuzzer's
+default starting size the generated operations rarely contain `@defer` or other interesting directives.
+With 4096-byte inputs roughly half the generated operations carry `@defer`.

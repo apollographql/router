@@ -6202,6 +6202,7 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "apollo-compiler",
  "apollo-federation",
  "apollo-parser",
  "apollo-router",
