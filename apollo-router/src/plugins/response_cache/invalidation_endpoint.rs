@@ -30,13 +30,65 @@ use crate::services::router;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+/// Which invalidation index modes to maintain for cached entries.
+///
+/// Each mode corresponds to one of the kinds of invalidation requests documented at
+/// <https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation>.
+/// Disabling a mode skips writing the corresponding Redis ZSET index entries on cache inserts,
+/// at the cost of being unable to invalidate cached entries by that mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum IndexMode {
+    /// Maintain the `subgraph-{name}` ZSET. Enables `By subgraph` invalidation requests.
+    Subgraph,
+    /// Maintain the by-type ZSET keyed by `subgraph:{name}:type:{type}`. Enables `By type`
+    /// invalidation requests.
+    Type,
+    /// Maintain ZSETs for user-supplied cache tags from `apolloCacheTags`,
+    /// `apolloEntityCacheTags`, and resolved `@cacheTag` directive values. Enables
+    /// `By cache tag` invalidation requests.
+    CacheTag,
+}
+
+/// Default invalidation index modes: all three, for backward compatibility with
+/// deployments predating the `index_modes` setting.
+pub(crate) fn default_index_modes() -> Vec<IndexMode> {
+    vec![IndexMode::Subgraph, IndexMode::Type, IndexMode::CacheTag]
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct SubgraphInvalidationConfig {
     /// Enable the invalidation
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
     pub(crate) shared_key: String,
+    /// Which invalidation index modes to maintain for this subgraph's cached entries.
+    /// Defaults to all three (`subgraph`, `type`, `cache_tag`) for backward compatibility.
+    ///
+    /// Customers who only invalidate by cache tag can set this to `["cache_tag"]` to avoid
+    /// Redis CPU and memory cost from maintaining the `by subgraph` and `by type` indexes.
+    /// Setting this to `[]` disables all invalidation indexing; the `/invalidation` endpoint
+    /// will return HTTP 400 for any request against the affected subgraph.
+    #[serde(default = "default_index_modes")]
+    pub(crate) index_modes: Vec<IndexMode>,
+}
+
+impl Default for SubgraphInvalidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            shared_key: String::default(),
+            index_modes: default_index_modes(),
+        }
+    }
+}
+
+impl SubgraphInvalidationConfig {
+    /// Resolved set of active index modes, for fast membership checks on the hot path.
+    pub(crate) fn index_mode_set(&self) -> std::collections::HashSet<IndexMode> {
+        self.index_modes.iter().copied().collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -290,6 +342,7 @@ mod tests {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
+                    ..Default::default()
                 }),
             },
             subgraphs: HashMap::new(),
@@ -341,6 +394,7 @@ mod tests {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
+                    ..Default::default()
                 }),
             },
             subgraphs: [(
@@ -353,6 +407,7 @@ mod tests {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
                         shared_key: String::from("test_test"),
+                        ..Default::default()
                     }),
                 },
             )]
@@ -401,6 +456,7 @@ mod tests {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
+                    ..Default::default()
                 }),
             },
             subgraphs: [
@@ -414,6 +470,7 @@ mod tests {
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
                             shared_key: String::from("test_test"),
+                            ..Default::default()
                         }),
                     },
                 ),
@@ -427,6 +484,7 @@ mod tests {
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
                             shared_key: String::from("test_test_bis"),
+                            ..Default::default()
                         }),
                     },
                 ),
@@ -481,6 +539,7 @@ mod tests {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
+                    ..Default::default()
                 }),
             },
             subgraphs: [
@@ -494,6 +553,7 @@ mod tests {
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
                             shared_key: String::from("test_test"),
+                            ..Default::default()
                         }),
                     },
                 ),
@@ -507,6 +567,7 @@ mod tests {
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
                             shared_key: String::from("test_test_bis"),
+                            ..Default::default()
                         }),
                     },
                 ),
@@ -561,6 +622,7 @@ mod tests {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
                     shared_key: String::from("test"),
+                    ..Default::default()
                 }),
             },
             subgraphs: HashMap::new(),
