@@ -2075,6 +2075,22 @@ expression: "&schema"
           "minimum": 1,
           "type": "integer"
         },
+        "propagate_cache_tags": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/PropagateCacheTagsConfig"
+            }
+          ],
+          "default": {
+            "deduplicate": true,
+            "enabled": false,
+            "header": "Cache-Tag",
+            "max_bytes": 16384,
+            "on_overflow": "truncate",
+            "separator": ","
+          },
+          "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging."
+        },
         "subgraph": {
           "allOf": [
             {
@@ -7733,6 +7749,26 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "OverflowPolicy": {
+      "description": "Behavior when a joined cache-tag header value exceeds `max_bytes`.",
+      "oneOf": [
+        {
+          "const": "truncate",
+          "description": "Emit the header with as many tags as fit, in deterministic (lexicographic) order. Drop\nthe rest and log a `tracing::warn!` with `max_bytes`, `actual_bytes`, and `dropped_count`.",
+          "type": "string"
+        },
+        {
+          "const": "drop",
+          "description": "Omit the header entirely when the joined value would overflow.",
+          "type": "string"
+        },
+        {
+          "const": "header_per_tag",
+          "description": "Emit one header per tag instead of joining. Each header value carries a single tag.",
+          "type": "string"
+        }
+      ]
+    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -8032,6 +8068,49 @@ expression: "&schema"
         }
       ],
       "description": "Propagate header"
+    },
+    "PropagateCacheTagsConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for surfacing aggregated response_cache cache tags on the supergraph response.\n\nWhen enabled, the router collects the union of cache tags contributed by each subgraph\n(from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)\nand emits them as a single configurable header on the supergraph response. The tags are\nalways available on the request context for coprocessor or rhai consumption regardless of\nwhether the header is emitted.",
+      "properties": {
+        "deduplicate": {
+          "default": true,
+          "description": "Whether to deduplicate tags before joining. Tags are stored in a `HashSet` so duplicates\nare already collapsed; this flag is reserved for future header emission strategies.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether to emit the configured header on the supergraph response. Defaults to false.",
+          "type": "boolean"
+        },
+        "header": {
+          "default": "Cache-Tag",
+          "description": "Name of the response header used to surface aggregated cache tags.",
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 16384,
+          "description": "Maximum number of bytes for the joined header value. When the joined value would exceed\nthis size, `on_overflow` decides what to do.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "on_overflow": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OverflowPolicy"
+            }
+          ],
+          "default": "truncate",
+          "description": "Policy applied when the joined header value would exceed `max_bytes`."
+        },
+        "separator": {
+          "default": ",",
+          "description": "Separator used to join multiple tags into a single header value.",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "Propagation": {
       "additionalProperties": false,
