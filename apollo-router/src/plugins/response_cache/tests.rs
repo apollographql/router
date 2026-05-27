@@ -22,6 +22,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
@@ -2783,10 +2784,16 @@ async fn no_data() {
         .extra_private_plugin(response_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
-                tower::service_fn(|_req: subgraph::Request| async {
-                    Err::<subgraph::Response, _>("orga not found".into())
-                })
-                .boxed_clone()
+                fn mock_orga_service() -> MockSubgraphService {
+                    let mut subgraph = MockSubgraphService::new();
+                    subgraph.expect_clone().returning(mock_orga_service);
+                    subgraph
+                        .expect_call()
+                        .times(0..=1)
+                        .returning(move |_req: subgraph::Request| Err("orga not found".into()));
+                    subgraph
+                }
+                mock_orga_service().boxed_clone()
             } else {
                 service
             }
