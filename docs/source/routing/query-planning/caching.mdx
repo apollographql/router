@@ -30,6 +30,12 @@ supergraph:
         limit: 512 # This is the default value.
 ```
 
+<Note>
+
+The `supergraph.query_planning` namespace also exposes knobs that bound the planner's work itself (separate from caching), such as `experimental_plans_limit` and `experimental_paths_limit`. See [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits) in the best-practices guide.
+
+</Note>
+
 ### Cache warm-up
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused.
