@@ -1484,6 +1484,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         assert_cache_key_exists!(&namespace, review_key, &client);
     }
 
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
+
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
         .configuration_json(json!({
