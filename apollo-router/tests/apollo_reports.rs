@@ -742,17 +742,6 @@ async fn non_defer() {
     }
 }
 
-// NOTE: `test_condition_if` is intentionally NOT migrated to
-// `get_trace_report_with_subgraph_mock`. The wiremock's canned FTV1 blob
-// for the products subgraph emits the `Product` selection set as
-// `upc`, `name` (matching what every other trace-family snapshot in this
-// file expects: `non_defer`, `trace_id`, etc.), but the committed
-// `apollo_reports__condition_if.snap` records the opposite order
-// (`name`, `upc`). That's a pre-existing snapshot inconsistency from the
-// live demo subgraph having flaky field ordering at capture time.
-// Migrating this test would require re-blessing the snapshot to match
-// the now-deterministic ordering; flagged for follow-up rather than
-// silently accepted here. See PR #9497 discussion.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
     for use_legacy_request_span in [true, false] {
