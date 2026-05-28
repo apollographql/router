@@ -31,7 +31,6 @@ use crate::cache::redis::RedisValue;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
-use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
@@ -224,38 +223,6 @@ impl Storage {
 
     /// Create a list of the cache tags that describe this document, without namespaces.
     ///
-    /// For a given subgraph `s` and invalidation keys `i1`, `i2`, ..., we need to store the
-    /// following subgraph-invalidation-key permutations:
-    /// * `subgraph-{s}` (whole subgraph)
-    /// * `subgraph-{s}:key-{i1}`, `subgraph-{s}:key-{i2}`, ... (invalidation key per subgraph)
-    ///
-    /// These are then turned into redis keys by adding the namespace, version, and `cache-tag:` prefix, ie:
-    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}`
-    /// * `{namespace}:version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{s}:key-{i1}`, ...
-    fn cache_tag_permutations(
-        &self,
-        document_invalidation_keys: &[String],
-        subgraph_name: &str,
-        indexes: &InvalidationIndexes,
-    ) -> Vec<String> {
-        let include_subgraph = indexes.subgraph;
-        let mut cache_tags =
-            Vec::with_capacity(usize::from(include_subgraph) + document_invalidation_keys.len());
-        // The `subgraph-{name}` cache tag underwrites `By subgraph` invalidation. Skip when the
-        // Subgraph index mode is disabled for this subgraph.
-        if include_subgraph {
-            cache_tags.push(format!("subgraph-{subgraph_name}"));
-        }
-        for invalidation_key in document_invalidation_keys {
-            cache_tags.push(format!("subgraph-{subgraph_name}:key-{invalidation_key}"));
-        }
-
-        for cache_tag in cache_tags.iter_mut() {
-            *cache_tag = format!("version:{RESPONSE_CACHE_VERSION}:cache-tag:{cache_tag}");
-        }
-
-        cache_tags
-    }
 
     fn maintenance_timeout(&self) -> Duration {
         self.maintenance_timeout
@@ -282,48 +249,60 @@ impl CacheStorage for Storage {
 
     async fn internal_insert_in_batch(
         &self,
-        mut batch_docs: Vec<Document>,
+        batch_docs: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
         // three phases:
-        //   1 - update keys, cache tags to include namespace so that we don't have to do it in each phase
-        //   2 - update each cache tag with new keys
-        //   3 - update each key
+        //   1 - render each document's cache-tag entries into Redis ZSET keys
+        //   2 - ZADD each cache-tag ZSET with (expiry, document_key) memberships
+        //   3 - insert each document's data and snapshot tags for the debugger
         // a failure in any phase will cause the function to return, which prevents invalid states
 
         let now = now();
 
-        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
-        let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
-        // phase 1
-        for document in &mut batch_docs {
-            if document.debug {
-                original_cache_tags.push(document.invalidation_keys.clone());
-            } else {
-                original_cache_tags.push(Vec::new());
-            }
-            document.invalidation_keys = self.cache_tag_permutations(
-                &document.invalidation_keys,
-                subgraph_name,
-                document.indexes.as_ref(),
-            );
-        }
+        // For the cache debugger: snapshot the user-facing tag values (CacheTag::Tag) per
+        // document. Internal tags (Subgraph and Type) are not surfaced to operators.
+        let debug_user_tags: Vec<Vec<String>> = batch_docs
+            .iter()
+            .map(|document| {
+                if document.debug {
+                    document
+                        .cache_tags
+                        .iter()
+                        .filter_map(|t| t.user_value().map(String::from))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
 
-        // phase 2
+        // phase 1: render every document's tag list to its Redis ZSET keys.
+        let redis_keys_per_doc: Vec<Vec<String>> = batch_docs
+            .iter()
+            .map(|document| {
+                document
+                    .cache_tags
+                    .iter()
+                    .map(|tag| tag.to_redis_key(subgraph_name))
+                    .collect()
+            })
+            .collect();
+
+        // phase 2: build the per-ZSET membership list and ZADD each one.
         let num_cache_tags_estimate = 2 * batch_docs.len();
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> =
             HashMap::with_capacity(num_cache_tags_estimate);
-        for document in &mut batch_docs {
-            for cache_tag_key in document.invalidation_keys.drain(..) {
-                let cache_tag_value = (
-                    (now + document.expire.as_secs()) as f64,
-                    document.key.clone(),
-                );
-                // NB: performance concerns with `entry` API
-                if let Some(entry) = cache_tags_to_pcks.get_mut(&cache_tag_key) {
-                    entry.push(cache_tag_value);
+        for (document, redis_keys) in batch_docs.iter().zip(redis_keys_per_doc.iter()) {
+            let cache_tag_value = (
+                (now + document.expire.as_secs()) as f64,
+                document.key.clone(),
+            );
+            for redis_key in redis_keys {
+                if let Some(entry) = cache_tags_to_pcks.get_mut(redis_key) {
+                    entry.push(cache_tag_value.clone());
                 } else {
-                    cache_tags_to_pcks.insert(cache_tag_key, vec![cache_tag_value]);
+                    cache_tags_to_pcks.insert(redis_key.clone(), vec![cache_tag_value.clone()]);
                 }
             }
         }
@@ -382,11 +361,11 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.pipeline().await?.with_options(&options);
-        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags) {
+        for (document, debug_tags) in batch_docs.into_iter().zip(debug_user_tags) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
+                cache_tags: document.debug.then(|| debug_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -624,16 +603,12 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
     use crate::plugins::response_cache::storage::CacheStorage;
-    use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
+    use crate::plugins::response_cache::cache_tag::CacheTag;
     use crate::plugins::response_cache::storage::Document;
     use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
 
-    /// Test helper: returns `InvalidationIndexes` with all three indexes enabled, matching the production default.
-    fn all_indexes() -> InvalidationIndexes {
-        InvalidationIndexes::default()
-    }
 
     fn redis_config(clustered: bool) -> Config {
         Config::test(clustered, &random_namespace())
@@ -643,15 +618,32 @@ mod tests {
         Uuid::new_v4().to_string()
     }
 
+    /// Test helper: render the Redis ZSET keys a document indexes under. Mirrors the storage
+    /// layer's per-document rendering for assertion convenience in tests.
+    fn render_doc_keys(document: &Document, subgraph_name: &str) -> Vec<String> {
+        document
+            .cache_tags
+            .iter()
+            .map(|t| t.to_redis_key(subgraph_name))
+            .collect()
+    }
+
+    /// Test helper: render the Redis ZSET keys an explicit cache-tag list indexes under.
+    fn render_tag_keys(tags: &[CacheTag], subgraph_name: &str) -> Vec<String> {
+        tags.iter().map(|t| t.to_redis_key(subgraph_name)).collect()
+    }
+
     fn common_document() -> Document {
         Document {
             key: "key".to_string(),
             data: Default::default(),
             control: Default::default(),
-            invalidation_keys: vec!["invalidate".to_string()],
+            cache_tags: vec![
+                CacheTag::Subgraph,
+                CacheTag::Tag("invalidate".to_string()),
+            ],
             expire: Duration::from_secs(60),
             debug: true,
-            ..Default::default()
         }
     }
 
@@ -677,7 +669,7 @@ mod tests {
             ..redis_config(false)
         };
         let (_drop_tx, drop_rx) = broadcast::channel(2);
-        let storage = Storage::mocked(&config, false, mock_storage, drop_rx)
+        let _storage = Storage::mocked(&config, false, mock_storage, drop_rx)
             .await
             .expect("could not build storage");
 
@@ -686,7 +678,11 @@ mod tests {
             .map(ToString::to_string)
             .collect();
 
-        let mut cache_tags = storage.cache_tag_permutations(&invalidation_keys, "products", &all_indexes());
+        let mut cache_tags = render_tag_keys(&{
+            let mut tags = vec![CacheTag::Subgraph];
+            tags.extend(invalidation_keys.iter().cloned().map(CacheTag::Tag));
+            tags
+        }, "products");
         cache_tags.sort();
         assert_debug_snapshot!(cache_tags);
     }
@@ -696,6 +692,7 @@ mod tests {
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
     /// * only expired keys will be removed via the cache maintenance
     mod ttl_guarantees {
+        use super::*;
         use std::collections::HashMap;
         use std::time::Duration;
 
@@ -724,7 +721,7 @@ mod tests {
 
             let document_key = document.key.clone();
             let expected_cache_tag_keys =
-                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
+                render_doc_keys(&document, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
             let keys = storage.all_keys_in_namespace().await?;
@@ -771,19 +768,21 @@ mod tests {
             let documents = vec![
                 Document {
                     key: "key1".to_string(),
-                    invalidation_keys: vec![
-                        "invalidation".to_string(),
-                        "invalidation1".to_string(),
-                    ],
+                    cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("invalidation".to_string()),
+                    CacheTag::Tag("invalidation1".to_string()),
+                ],
                     expire: Duration::from_secs(30),
                     ..common_document()
                 },
                 Document {
                     key: "key2".to_string(),
-                    invalidation_keys: vec![
-                        "invalidation".to_string(),
-                        "invalidation2".to_string(),
-                    ],
+                    cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("invalidation".to_string()),
+                    CacheTag::Tag("invalidation2".to_string()),
+                ],
                     expire: Duration::from_secs(60),
                     ..common_document()
                 },
@@ -804,7 +803,7 @@ mod tests {
             for document in &documents {
                 expected_document_keys.push(document.key.clone());
                 expected_cache_tag_keys.push(
-                    storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref()),
+                    render_doc_keys(&document, SUBGRAPH_NAME),
                 );
             }
 
@@ -943,7 +942,7 @@ mod tests {
             let stored_data = storage.fetch(&document_key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
+            let keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // save current scores
             let mut scores: HashMap<String, i64> = HashMap::default();
@@ -1011,7 +1010,7 @@ mod tests {
             let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
+            let keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // update the document with new data and a longer TTL
             let old_ttl = document.expire;
@@ -1048,6 +1047,7 @@ mod tests {
 
     /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
     mod cache_tag_insert_failure_should_abort_key_insertion {
+        use super::*;
         use std::sync::Arc;
 
         use fred::error::Error;
@@ -1081,7 +1081,7 @@ mod tests {
             let document = common_document();
             let document_key = document.key.clone();
             let cache_tag_keys =
-                storage.cache_tag_permutations(&document.invalidation_keys, SUBGRAPH_NAME, document.indexes.as_ref());
+                render_doc_keys(&document, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
                 let namespaced_key = storage.make_key(key);
@@ -1115,18 +1115,21 @@ mod tests {
             let documents = vec![
                 Document {
                     key: "key1".to_string(),
-                    invalidation_keys: vec![],
+                    cache_tags: vec![CacheTag::Subgraph],
                     ..common_document()
                 },
                 Document {
                     key: "key2".to_string(),
-                    invalidation_keys: vec!["invalidate".to_string()],
+                    cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("invalidate".to_string()),
+                ],
                     ..common_document()
                 },
             ];
 
             let cache_tag_keys =
-                storage.cache_tag_permutations(&documents[1].invalidation_keys, SUBGRAPH_NAME, documents[1].indexes.as_ref());
+                render_doc_keys(&documents[1], SUBGRAPH_NAME);
             for key in cache_tag_keys {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
@@ -1223,7 +1226,7 @@ mod tests {
             .await?;
 
         // ensure that we have three elements in the 'whole-subgraph' invalidation key
-        let invalidation_key = storage.cache_tag_permutations(&[], SUBGRAPH_NAME, &all_indexes()).remove(0);
+        let invalidation_key = render_tag_keys(&[CacheTag::Subgraph], SUBGRAPH_NAME).remove(0);
         assert_eq!(storage.zcard(&invalidation_key).await?, 3);
 
         let doc_key1 = "key1";
@@ -1265,6 +1268,7 @@ mod tests {
     }
 
     mod invalidation {
+        use super::*;
         use tokio::sync::broadcast;
         use tower::BoxError;
 
@@ -1330,19 +1334,28 @@ mod tests {
 
             let document1 = Document {
                 key: "key1".to_string(),
-                invalidation_keys: vec!["A".to_string()],
+                cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("A".to_string()),
+                ],
                 ..common_document()
             };
 
             let document2 = Document {
                 key: "key2".to_string(),
-                invalidation_keys: vec!["A".to_string()],
+                cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("A".to_string()),
+                ],
                 ..common_document()
             };
 
             let document3 = Document {
                 key: "key3".to_string(),
-                invalidation_keys: vec!["B".to_string()],
+                cache_tags: vec![
+                    CacheTag::Subgraph,
+                    CacheTag::Tag("B".to_string()),
+                ],
                 ..common_document()
             };
 
