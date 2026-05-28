@@ -183,7 +183,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
-- `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. See [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
+- `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits) explains how to bound them.
 - `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `query_planning`)

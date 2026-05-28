@@ -293,33 +293,33 @@ supergraph:
     experimental_paths_limit: null  # default — no limit
 ```
 
-These options behave very differently under stress, and choosing one over the other has real production consequences. Combine them with the [`apollo.router.query_planning.plan.evaluated_plans` and `apollo.router.query_planning.plan.evaluated_paths`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-planning) histograms to decide which to tune.
+These options behave differently under stress, and your choice between them affects production behavior. Use the [`apollo.router.query_planning.plan.evaluated_plans` and `apollo.router.query_planning.plan.evaluated_paths`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-planning) histograms to choose between them.
 
 ### `experimental_plans_limit`
 
-Limits the number of query plans the planner generates while exploring the graph.
+Limits the number of query plans the planner generates while exploring your graph.
 
-- **Default:** `10000`.
-- **When exceeded:** the planner silently prunes branches and continues. It still returns a valid plan, but it might not be the optimal one.
+- **Default:** 10,000
+- **When exceeded:** The planner silently prunes branches and continues. It still returns a valid plan, but it might not be the optimal one.
 - **Use case:** Reduce this value to bound planning time and memory at the cost of plan optimality.
 
 ### `experimental_paths_limit`
 
 Limits the number of subgraph options the planner considers for any single field path during planning. Field paths can produce many options because fields might be provided by multiple subgraphs, and abstract types (unions and interfaces) require the planner to traverse each constituent object type. On complex schemas or queries, the per-path option count can grow large and dominate planning time.
 
-- **Default:** `None` — no limit.
-- **When exceeded:** planning aborts and the operation fails with `QueryPlanComplexityExceeded`.
-- **Use case:** Set this value to abort planning quickly on pathological queries rather than allowing them to dominate the planner.
+- **Default:** `None` — no limit
+- **When exceeded:** Planning aborts and the operation fails with `QueryPlanComplexityExceeded`.
+- **Use case:** Set this value to abort planning quickly on complex queries instead of allowing them to dominate the planner.
 
-### Choosing a configuration option based on symptoms
+### Choose a configuration option based on symptoms
 
 | Symptom | What to look at | Configuration option |
 | --- | --- | --- |
 | Planner takes too long but produces a plan | High `evaluated_paths`, high `evaluated_plans` | Reduce `experimental_plans_limit` to bound exploration |
-| Planner OOMs or memory spikes during planning | `evaluated_plans` near the limit, high `apollo.router.query_planner.memory` peaks | Reduce `experimental_plans_limit` (e.g., `1000`) |
+| Planner OOMs or memory spikes during planning | `evaluated_plans` near the limit, high `apollo.router.query_planner.memory` peaks | Reduce `experimental_plans_limit` (e.g., 1,000) |
 | Specific queries fail with `QueryPlanComplexityExceeded` | `evaluated_paths` hitting `experimental_paths_limit` | Review the offending query, or raise `experimental_paths_limit` if intentional |
 
-To track the limits each router instance applies, the router emits `apollo.router.config.experimental_plans_limit` and `apollo.router.config.experimental_paths_limit` gauges (added in v2.14.1).
+To track the limits each router instance applies, your router emits `apollo.router.config.experimental_plans_limit` and `apollo.router.config.experimental_paths_limit` gauges (added in v2.14.1).
 
 ## Use recommended features
 
