@@ -1496,8 +1496,10 @@ where
         // be found).
         type BestPathInfo<TTrigger, TEdge> =
             Option<(Arc<GraphPath<TTrigger, TEdge>>, QueryPlanCost)>;
-        let mut best_path_by_source: IndexMap<Arc<str>, BestPathInfo<TTrigger, TEdge>> =
-            IndexMap::default();
+        let mut best_path_by_source: IndexMap<
+            (Arc<str>, NodeIndex),
+            BestPathInfo<TTrigger, TEdge>,
+        > = IndexMap::default();
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
         // Note that through `excluded` we avoid taking the same edge from multiple options. But
         // that means it's important we try the smallest paths first. That is, if we could in theory
@@ -1565,7 +1567,8 @@ where
                     continue;
                 }
 
-                let prev_for_source = best_path_by_source.get(&edge_tail_weight.source);
+                let best_path_key = (edge_tail_weight.source.clone(), edge_tail);
+                let prev_for_source = best_path_by_source.get(&best_path_key);
                 let prev_for_source = match prev_for_source {
                     Some(Some(prev_for_source)) => Some(prev_for_source),
                     Some(None) => {
@@ -1856,7 +1859,7 @@ where
                                 // is possible directly, then we don't want this method to later add
                                 //   ... -> A -> B -> <some fields in B> -> C -> A
                                 // as that is equally not useful.
-                                best_path_by_source.insert(edge_tail_weight.source.clone(), None);
+                                best_path_by_source.insert(best_path_key.clone(), None);
                                 // We also record a dead-end because this optimization might make us
                                 // return no path at all, and having recorded no-dead ends would
                                 // break an assertion in `advance_with_transition()` that assumes
@@ -1905,10 +1908,8 @@ where
                     },
                     None,
                 )?);
-                best_path_by_source.insert(
-                    edge_tail_weight.source.clone(),
-                    Some((updated_path.clone(), cost)),
-                );
+                best_path_by_source
+                    .insert(best_path_key.clone(), Some((updated_path.clone(), cost)));
                 // It can be necessary to "chain" keys, because different subgraphs may have
                 // different keys exposed, and so we when we took a key, we want to check if there
                 // is a new key we can now use that takes us to other subgraphs. For other

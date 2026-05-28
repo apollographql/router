@@ -628,6 +628,50 @@ fn satisfiability_validation_handles_indirectly_reachable_keys() {
 }
 
 #[test]
+fn satisfiability_with_multiple_interface_object_types_in_same_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query { t: T }
+            interface I1 { id: ID! }
+            interface I2 { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type I1 @key(fields: "id") @interfaceObject {
+              id: ID!
+              a: String!
+            }
+            type I2 @key(fields: "id") @interfaceObject {
+              id: ID!
+              b: String!
+            }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+            interface I1 @key(fields: "id") { id: ID! }
+            interface I2 @key(fields: "id") { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") { id: ID!, t: String }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    result.expect(
+        "Expected composition to succeed - fields on @interfaceObject should be satisfiable \
+         when multiple @interfaceObject types exist in the same subgraph",
+    );
+}
+
+#[test]
 fn interface_field_no_implem_error_includes_source_locations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
