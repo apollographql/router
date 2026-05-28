@@ -4,7 +4,6 @@ pub(super) mod redis;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -12,8 +11,8 @@ pub(super) use error::Error;
 use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
-use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -22,35 +21,21 @@ use crate::plugins::response_cache::metrics::record_invalidation_duration;
 
 type StorageResult<T> = Result<T, Error>;
 
-/// A `Document` is a unit of data to be stored in the cache, including any invalidation keys, its
-/// TTL, cache control information, etc.
+/// A `Document` is a unit of data to be stored in the cache, including any cache-tag entries
+/// it indexes under, its TTL, cache-control information, etc.
+///
+/// The cache-tag entries on a Document are pre-filtered by the plugin layer based on the
+/// subgraph's configured invalidation indexes; the storage layer's job is purely to render
+/// each entry into its Redis ZSET key via [`CacheTag::to_redis_key`] and persist the document
+/// data and tag memberships. No invalidation policy lives here.
 #[derive(Debug, Clone)]
 pub(super) struct Document {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    pub(super) invalidation_keys: Vec<String>,
+    pub(super) cache_tags: Vec<CacheTag>,
     pub(super) expire: Duration,
     pub(super) debug: bool,
-    /// Which invalidation indexes are active for this document's subgraph. Drives which
-    /// Redis ZSET entries are written by the storage layer on cache inserts. Resolved once
-    /// per subgraph at `CacheService` construction time via `effective_invalidation_indexes`
-    /// and shared cheaply via `Arc` across all documents from that subgraph.
-    pub(super) indexes: Arc<InvalidationIndexes>,
-}
-
-impl Default for Document {
-    fn default() -> Self {
-        Self {
-            key: String::default(),
-            data: serde_json_bytes::Value::default(),
-            control: CacheControl::default(),
-            invalidation_keys: Vec::new(),
-            expire: Duration::default(),
-            debug: false,
-            indexes: Arc::new(InvalidationIndexes::default()),
-        }
-    }
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and

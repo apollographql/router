@@ -93,11 +93,6 @@ impl InvalidationIndexes {
         }
     }
 
-    /// True when at least one index is enabled. Equivalent to "this subgraph supports at least
-    /// one invalidation kind."
-    pub(crate) fn any_enabled(&self) -> bool {
-        self.subgraph || self.r#type || self.cache_tag
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -511,15 +506,6 @@ mod indexes_tests {
         assert!(indexes.is_enabled(IndexMode::CacheTag));
     }
 
-    #[test]
-    fn invalidation_indexes_any_enabled_is_false_when_all_off() {
-        let none_on = InvalidationIndexes {
-            subgraph: false,
-            r#type: false,
-            cache_tag: false,
-        };
-        assert!(!none_on.any_enabled());
-    }
 
     #[test]
     fn subgraph_invalidation_config_default_has_all_three_indexes_enabled() {
@@ -566,7 +552,9 @@ indexes:
   cache_tag: false
 ";
         let cfg: SubgraphInvalidationConfig = serde_yaml::from_str(yaml).unwrap();
-        assert!(!cfg.indexes.any_enabled());
+        assert!(!cfg.indexes.subgraph);
+        assert!(!cfg.indexes.r#type);
+        assert!(!cfg.indexes.cache_tag);
     }
 
     #[test]
