@@ -1640,6 +1640,8 @@ impl Merger {
             if !field_is_defined
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
+                && !matches!(dest, ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    if self.is_field_provided_by_an_interface_object(field.field_name(), dest.type_name()))
             {
                 self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
