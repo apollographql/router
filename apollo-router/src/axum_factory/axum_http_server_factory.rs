@@ -498,7 +498,7 @@ async fn handle_graphql<RF: RouterFactory>(
 ) -> impl IntoResponse {
     let _guard = i64_up_down_counter_with_unit!(
         "apollo.router.session.count.active",
-        "Amount of in-flight sessions",
+        "Amount of in-flight sessions (deprecated, use `http.server.active_requests` instead)",
         "{session}",
         1
     );
