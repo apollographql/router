@@ -286,6 +286,17 @@ impl Merger {
                 .minimum_federation_version()
                 .gt(linked_federation_version)
         {
+            let locations = subgraph
+                .schema()
+                .metadata()
+                .and_then(|links| {
+                    links
+                        .all_links()
+                        .iter()
+                        .find(|link| link.url.identity == *spec.identity())
+                })
+                .map(|link| link.locations(subgraph))
+                .unwrap_or_default();
             error_reporter.add_hint(CompositionHint {
                 definition: HintCode::ImplicitlyUpgradedFederationVersion.definition(),
                 message: format!(
@@ -294,7 +305,7 @@ impl Merger {
                     linked_federation_version,
                     spec.minimum_federation_version()
                 ),
-                locations: Default::default(), // TODO: need @link directive application AST node
+                locations,
             });
             return spec.minimum_federation_version();
         }
