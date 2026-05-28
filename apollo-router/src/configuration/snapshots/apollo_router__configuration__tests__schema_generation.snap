@@ -6316,26 +6316,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "IndexMode": {
-      "description": "Which invalidation index modes to maintain for cached entries.\n\nEach mode corresponds to one of the kinds of invalidation requests documented at\n<https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation>.\nDisabling a mode skips writing the corresponding Redis ZSET index entries on cache inserts,\nat the cost of being unable to invalidate cached entries by that mode.",
-      "oneOf": [
-        {
-          "const": "subgraph",
-          "description": "Maintain the `subgraph-{name}` ZSET. Enables `By subgraph` invalidation requests.",
-          "type": "string"
-        },
-        {
-          "const": "type",
-          "description": "Maintain the by-type ZSET keyed by `subgraph:{name}:type:{type}`. Enables `By type`\ninvalidation requests.",
-          "type": "string"
-        },
-        {
-          "const": "cache_tag",
-          "description": "Maintain ZSETs for user-supplied cache tags from `apolloCacheTags`,\n`apolloEntityCacheTags`, and resolved `@cacheTag` directive values. Enables\n`By cache tag` invalidation requests.",
-          "type": "string"
-        }
-      ]
-    },
     "Insert": {
       "anyOf": [
         {
@@ -6904,6 +6884,28 @@ expression: "&schema"
         "path",
         "listen"
       ],
+      "type": "object"
+    },
+    "InvalidationIndexes": {
+      "additionalProperties": false,
+      "description": "Which invalidation indexes a subgraph maintains for its cached entries. Each field controls\nwhether the corresponding ZSET is written on cache inserts and whether the corresponding\ninvalidation request kind is honored at the `/invalidation` endpoint.\n\nAll three indexes are enabled by default. Operators with workloads that only ever invalidate\nby a subset of modes can opt out of the unused indexes to reduce per-insert Redis work.\n\nNote: `indexes` is **additive only**. Enabling a previously-disabled index does NOT\nretroactively index existing cache entries. If a deployment changes from\n`{cache_tag: true}` to `{cache_tag: true, subgraph: true}`, the `subgraph-{name}` ZSET will\nbe populated only for entries written after the config change. Pre-change entries are\ninvisible to `By subgraph` invalidation requests until they age out via TTL. To bring the\nnew index online over the full cache set, flush Redis before enabling the additional index.",
+      "properties": {
+        "cache_tag": {
+          "default": true,
+          "description": "Maintain the per-tag indexes for `apolloCacheTags`, `apolloEntityCacheTags`, and resolved\n`@cacheTag` directive values. Required for `By cache tag` invalidation requests.",
+          "type": "boolean"
+        },
+        "subgraph": {
+          "default": true,
+          "description": "Maintain the `subgraph-{name}` index. Required for `By subgraph` invalidation requests.",
+          "type": "boolean"
+        },
+        "type": {
+          "default": true,
+          "description": "Maintain the by-type index. Required for `By type` invalidation requests.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "JWTConf": {
@@ -10546,17 +10548,18 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
-        "index_modes": {
-          "default": [
-            "subgraph",
-            "type",
-            "cache_tag"
+        "indexes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InvalidationIndexes"
+            }
           ],
-          "description": "Which invalidation index modes to maintain for this subgraph's cached entries.\nDefaults to all three (`subgraph`, `type`, `cache_tag`) for backward compatibility.\n\nCustomers who only invalidate by cache tag can set this to `[\"cache_tag\"]` to avoid\nRedis CPU and memory cost from maintaining the `by subgraph` and `by type` indexes.\nSetting this to `[]` disables all invalidation indexing; the `/invalidation` endpoint\nwill return HTTP 400 for any request against the affected subgraph.",
-          "items": {
-            "$ref": "#/definitions/IndexMode"
+          "default": {
+            "cache_tag": true,
+            "subgraph": true,
+            "type": true
           },
-          "type": "array"
+          "description": "Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to\nall three (`subgraph`, `type`, `cache_tag`) enabled, matching the original\n`response_cache` behavior. Operators with workloads that only invalidate by a subset of\nmodes can opt out of the unused indexes to reduce per-insert Redis work.\n\nSetting all three to `false` disables invalidation indexing entirely; the `/invalidation`\nendpoint then returns HTTP 400 for any request against this subgraph. This shape is\nuseful for pure TTL-based caching without an invalidation API."
         },
         "shared_key": {
           "default": "",
