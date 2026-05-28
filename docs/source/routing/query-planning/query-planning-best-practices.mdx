@@ -316,7 +316,7 @@ Limits the number of subgraph options the planner considers for any single field
 | Symptom | What to look at | Configuration option |
 | --- | --- | --- |
 | Planner takes too long but produces a plan | High `evaluated_paths`, high `evaluated_plans` | Reduce `experimental_plans_limit` to bound exploration |
-| Planner OOMs or memory spikes during planning | `evaluated_plans` near the limit, high `apollo.router.query_planner.memory` peaks | Reduce `experimental_plans_limit` (e.g., `1000`) |
+| Planner runs out of memory or memory usage spikes during planning | `evaluated_plans` near the limit, high `apollo.router.query_planner.memory` peaks | Reduce `experimental_plans_limit` (e.g., `1000`) |
 | Specific queries fail with `QueryPlanComplexityExceeded` | `evaluated_paths` hitting `experimental_paths_limit` | Review the offending query, or raise `experimental_paths_limit` if intentional |
 
 To track the limits each router instance applies, the router emits `apollo.router.config.experimental_plans_limit` and `apollo.router.config.experimental_paths_limit` gauges (added in v2.14.1).
