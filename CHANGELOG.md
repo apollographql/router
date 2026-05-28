@@ -138,24 +138,6 @@ When the timeout fires, the router returns a `504 Gateway Timeout` response with
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9243
 
-### Add support for `@connect` directives without an `http` block ([PR #9124](https://github.com/apollographql/router/pull/9124))
-
-The `@connect` directive can now omit the `http` block, producing a "requestless" connector that applies its `selection` mapping without making an outbound HTTP request.  This is useful for shaping data that's already available — on the parent resolver, in `$args`, or as literal values — without standing up an additional subgraph or coprocessor for the transform.
-
-By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/9124
-
-### JSONSelection: `->split`, `->trim`/`->trimStart`/`->trimEnd`, and unified `connect/v0.4` literal/subselection syntax ([PR #9199](https://github.com/apollographql/router/pull/9199), [PR #9211](https://github.com/apollographql/router/pull/9211), [PR #9261](https://github.com/apollographql/router/pull/9261))
-
-Several improvements to the Connectors mapping language:
-
-- `->split(separator, [limit])` splits a string into an array of substrings — analogous to JavaScript's `String.prototype.split`.
-- `->trim`, `->trimStart`, `->trimEnd` strip Unicode whitespace from a string.
-- Under `connect/v0.4`, top-level `JSONSelection` unifies the previously separate `SubSelection` (whitespace-separated) and `LitObject` (comma-separated) grammars into a single rule — copy-and-paste any JSON value and it's already a valid `JSONSelection`.  This also eliminates the bare `Eof` parse error that occurred when an inner subselection used a different separator style from its outer container — for example, inside a `->match` branch.
-
-See the [JSONSelection method reference](https://www.apollographql.com/docs/graphos/connectors/mapping/methods) for details on the new arrow methods.
-
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9199, https://github.com/apollographql/router/pull/9211, and https://github.com/apollographql/router/pull/9261
-
 ## 🐛 Fixes
 
 ### Resolve `@connect` field values when a root query alias is combined with field-level aliases ([Issue #9347](https://github.com/apollographql/router/issues/9347))
@@ -284,14 +266,6 @@ When many filesystem events arrived in quick succession, the Rhai script watcher
 The watcher now drops duplicate notifications when the channel is already full, matching the behavior introduced for the configuration file watcher in [PR #8336](https://github.com/apollographql/router/pull/8336). Reloads always re-read the current file from disk, so a single pending notification in the channel is sufficient to guarantee the latest contents will be picked up.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9391
-
-### Resolve spurious `CONNECTORS_CANNOT_RESOLVE_KEY` when `@connect(body:)` uses `->filter` with a subselection ([PR #9375](https://github.com/apollographql/router/pull/9375))
-
-Connector key-resolution validation produced a spurious `CONNECTORS_CANNOT_RESOLVE_KEY` error for `@connect` bodies that used an arrow method like `->filter()` followed by a `{ … }` subselection on an entity field with `@requires`.  The selection parsed correctly; only the post-parse validator failed.
-
-The validator now consults each method's `shape()` to determine whether the post-method tail consumes from the input shape or from a transformed shape, fixing the false positive for shape-preserving methods like `->filter` and `->slice` while continuing to correctly bound traversal at shape-transforming boundaries like `->size` and `->jsonStringify`.
-
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9375
 
 ### Resolve entity fields when `cache-control: no-cache` is set with `response_cache` enabled ([PR #9197](https://github.com/apollographql/router/pull/9197))
 
