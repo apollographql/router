@@ -1,3 +1,4 @@
+mod delimitted_formatter;
 mod request;
 mod response;
 
@@ -19,6 +20,83 @@ fn now_epoch_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("we should not run before EPOCH")
         .as_secs()
+}
+
+/// TODO needs docstring
+fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
+    let mut directive_kv = directive.trim().split('=');
+    let (key, value) = (directive_kv.next(), directive_kv.next());
+
+    if key.is_none() || directive_kv.next().is_some() {
+        return Err("invalid Cache-Control header value".into());
+    }
+
+    let key = key.expect("key was checked above");
+    Ok((key, value))
+}
+
+fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
+    ttl.saturating_sub(elapsed)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CacheControl {
+    created: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    max_age: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    age: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    s_max_age: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    stale_while_revalidate: Option<u64>,
+    #[serde(skip_serializing_if = "is_false", default)]
+    no_cache: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    must_revalidate: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    proxy_revalidate: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    pub(super) no_store: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    private: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    public: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    must_understand: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    no_transform: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    immutable: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
+    stale_if_error: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
+}
+
+impl Default for CacheControl {
+    fn default() -> Self {
+        Self {
+            created: now_epoch_seconds(),
+            max_age: None,
+            age: None,
+            s_max_age: None,
+            stale_while_revalidate: None,
+            no_cache: false,
+            must_revalidate: false,
+            proxy_revalidate: false,
+            no_store: false,
+            private: false,
+            public: false,
+            must_understand: false,
+            no_transform: false,
+            immutable: false,
+            stale_if_error: false,
+        }
+    }
 }
 
 impl CacheControl {
