@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8834,6 +8833,34 @@ expression: "&schema"
           },
           "required": [
             "response_errors"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Count of response errors matching a JSONPath filter",
+          "properties": {
+            "response_errors_count": {
+              "description": "JSONPath filter for response errors. Use \"$[*]\" to count all errors.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Extract a specific field from each error in the response",
+          "properties": {
+            "response_errors_field": {
+              "description": "JSONPath to extract from each error. E.g., \"$.message\" or \"$.extensions.code\"",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_field"
           ],
           "type": "object"
         },

@@ -533,31 +533,41 @@ pub(super) enum NewContextConf {
 }
 
 impl ContextConf {
-    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::NewContextConf(NewContextConf::All) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
+                    (elt.key().clone(), elt.value().clone())
+                }));
+                new_ctx.id = ctx.id.clone();
+                Some((new_ctx, keys_sent))
+            }
+            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+                let mut keys_sent = HashSet::new();
+                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
                     (
                         context_key_to_deprecated(elt.key().clone()),
                         elt.value().clone(),
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
+                        keys_sent.insert(elt.key().clone());
                         Some((elt.key().clone(), elt.value().clone()))
                     } else {
                         None
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::Deprecated(false) => None,
         }
@@ -614,12 +624,11 @@ pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
     context_config: &ContextConf,
+    keys_sent: &HashSet<String>,
 ) -> Result<(), BoxError> {
-    // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
     for (mut key, value) in context_returned.try_into_iter()? {
-        // Handle deprecated key names - convert back to actual key names
         if context_config.is_deprecated() {
             key = context_key_from_deprecated(key);
         }
@@ -628,21 +637,9 @@ pub(crate) fn update_context_from_coprocessor(
         target_context.insert_json_value(key, value);
     }
 
-    // Delete keys that were sent but are missing from the returned context
-    // If the context config is selective, only delete keys that are in the selective list
-    match context_config {
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
-            target_context.retain(|key, _v| {
-                if keys_returned.contains(key) {
-                    return true;
-                } else if context_keys.contains(key) {
-                    return false;
-                }
-                true
-            });
-        }
-        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
-    }
+    // Only delete keys that were SENT to the coprocessor but NOT returned.
+    // Keys never sent (e.g. added concurrently by parallel subgraph stages) are preserved.
+    target_context.retain(|key, _v| keys_returned.contains(key) || !keys_sent.contains(key));
 
     Ok(())
 }
@@ -969,7 +966,10 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1166,7 +1166,10 @@ where
             .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
             .transpose()?;
         let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-        let context_to_send = response_config.context.get_context(&context);
+        let (context_to_send, keys_sent) = match response_config.context.get_context(&context) {
+            Some((ctx, keys)) => (Some(ctx), keys),
+            None => (None, HashSet::new()),
+        };
 
         let payload = Externalizable::router_builder()
             .stage(PipelineStep::RouterResponse)
@@ -1207,7 +1210,7 @@ where
             parts.status = control.get_http_status()?;
         }
         if let Some(ctx) = co_processor_output.context {
-            update_context_from_coprocessor(&context, ctx, &response_config.context)?;
+            update_context_from_coprocessor(&context, ctx, &response_config.context, &keys_sent)?;
         }
         if let Some(headers) = co_processor_output.headers {
             parts.headers = internalize_header_map(headers)?;
@@ -1249,7 +1252,11 @@ where
                 let body_to_send = stream_body
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
-                let context_to_send = context_conf.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match context_conf.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1293,6 +1300,7 @@ where
                             &generator_map_context,
                             ctx,
                             &context_conf,
+                            &keys_sent,
                         )?;
                     }
 
@@ -1358,7 +1366,10 @@ where
         .body
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1529,7 +1540,11 @@ where
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
-    let context_to_send = response_config.context.get_context(&response.context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1593,7 +1608,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {

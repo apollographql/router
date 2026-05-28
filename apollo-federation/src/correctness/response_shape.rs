@@ -148,7 +148,7 @@ impl DisplayTypeCondition {
         name: Name,
         schema: &ValidFederationSchema,
     ) -> Result<Self, FederationError> {
-        let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
+        let ty: CompositeTypeDefinitionPosition = schema.get_type(&name)?.try_into()?;
         if self
             .0
             .iter()
@@ -203,7 +203,7 @@ impl NormalizedTypeCondition {
         name: Name,
         schema: &ValidFederationSchema,
     ) -> Result<Option<Self>, FederationError> {
-        let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
+        let ty: CompositeTypeDefinitionPosition = schema.get_type(&name)?.try_into()?;
         let ground_set = get_ground_types(&ty, schema)?;
         if ground_set.is_empty() {
             return Ok(None);
@@ -279,8 +279,7 @@ impl NormalizedTypeCondition {
         name: Name,
         schema: &ValidFederationSchema,
     ) -> Result<Option<Self>, FederationError> {
-        let other_ty: CompositeTypeDefinitionPosition =
-            schema.get_type(name.clone())?.try_into()?;
+        let other_ty: CompositeTypeDefinitionPosition = schema.get_type(&name)?.try_into()?;
         let other_types = get_ground_types(&other_ty, schema)?;
         let ground_set: Vec<ObjectTypeDefinitionPosition> = self
             .ground_set
@@ -335,7 +334,7 @@ impl NormalizedTypeCondition {
         // Grind the type names into object types.
         let mut ground_types = IndexSet::default();
         for ty in &types {
-            let pos = schema.get_type(ty.clone())?.try_into()?;
+            let pos = schema.get_type(ty)?.try_into()?;
             let pos_types = schema.possible_runtime_types(pos)?;
             ground_types.extend(pos_types);
         }

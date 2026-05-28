@@ -1042,7 +1042,7 @@ impl OpGraphPath {
                     return Ok(true);
                 }
                 let node_field_base_type_pos =
-                    node_fed_schema.get_type(node_field_base_type_name.clone())?;
+                    node_fed_schema.get_type(node_field_base_type_name)?;
                 let Some(node_field_base_type_pos): Option<
                     ObjectOrInterfaceTypeDefinitionPosition,
                 > = node_field_base_type_pos.try_into().ok() else {
@@ -1265,9 +1265,7 @@ impl OpGraphPath {
                                 .ty
                                 .inner_named_type();
                             let is_operation_field_type_leaf = matches!(
-                                operation_field
-                                    .schema
-                                    .get_type(operation_field_type_name.clone())?,
+                                operation_field.schema.get_type(operation_field_type_name)?,
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
@@ -1546,7 +1544,7 @@ impl OpGraphPath {
                         let from_types = self.runtime_types_of_tail.clone();
                         let to_types = supergraph_schema.possible_runtime_types(
                             supergraph_schema
-                                .get_type(type_condition_name.clone())?
+                                .get_type(&type_condition_name)?
                                 .try_into()?,
                         )?;
                         let intersection = from_types.intersection(&to_types);
@@ -1631,7 +1629,8 @@ impl OpGraphPath {
                         //   super-type of the tail type (since GraphQL allows a fragment as long as
                         //   there is an intersection). In that case, the whole operation element
                         //   simply cannot ever return anything.
-                        let type_condition_pos = supergraph_schema.get_type(type_condition_name)?;
+                        let type_condition_pos =
+                            supergraph_schema.get_type(&type_condition_name)?;
                         let abstract_type_condition_pos: Option<AbstractTypeDefinitionPosition> =
                             type_condition_pos.clone().try_into().ok();
                         if let Some(type_condition_pos) = abstract_type_condition_pos
@@ -2398,7 +2397,7 @@ impl OpPath {
             match element.as_ref() {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition) = &fragment.type_condition_position {
-                        if schema.get_type(type_condition.type_name().clone()).is_err() {
+                        if schema.get_type(type_condition.type_name()).is_err() {
                             if element.directives().is_empty() {
                                 continue; // skip this element
                             } else {
