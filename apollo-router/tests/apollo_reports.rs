@@ -392,6 +392,10 @@ async fn report(
     Ok(Json(()))
 }
 
+/// Live-subgraph variant of `get_trace_report_with_subgraph_mock`. Only
+/// `test_condition_if` still uses this; every other trace caller is
+/// sandboxed through the wiremock. See the note on `test_condition_if`
+/// for why that one test was deferred.
 async fn get_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
@@ -526,6 +530,41 @@ async fn get_metrics_report_with_subgraph_mock(
         demand_control,
         experimental_local_field_metrics,
         has_metrics,
+        config_str,
+    )
+    .await
+}
+
+/// Trace-report counterpart of `get_metrics_report_with_subgraph_mock`.
+/// Swaps the real `https://*.demo.starstuff.dev/` subgraph egress for a
+/// localhost wiremock so the trace-family tests don't take a `ECONNRESET`
+/// / `502` from the public demo subgraphs on CI. See
+/// `start_demo_subgraphs_mock_server` and the sibling ROUTER-1823 /
+/// ROUTER-1827 fixes for the underlying flake.
+async fn get_trace_report_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
+    config_str: Option<&'static str>,
+) -> Report {
+    get_report(
+        get_router_service_with_subgraph_mock,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        demand_control,
+        experimental_local_field_metrics,
+        |r| {
+            !r.traces_per_query
+                .values()
+                .next()
+                .expect("traces and stats required")
+                .trace
+                .is_empty()
+        },
         config_str,
     )
     .await
@@ -667,12 +706,30 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
 
+// NOTE: `test_condition_if` is intentionally NOT migrated to
+// `get_trace_report_with_subgraph_mock`. The wiremock's canned FTV1 blob
+// for the products subgraph emits the `Product` selection set as
+// `upc`, `name` (matching what every other trace-family snapshot in this
+// file expects: `non_defer`, `trace_id`, etc.), but the committed
+// `apollo_reports__condition_if.snap` records the opposite order
+// (`name`, `upc`). That's a pre-existing snapshot inconsistency from the
+// live demo subgraph having flaky field ordering at capture time.
+// Migrating this test would require re-blessing the snapshot to match
+// the now-deterministic ordering; flagged for follow-up rather than
+// silently accepted here. See PR #9497 discussion.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
     for use_legacy_request_span in [true, false] {
@@ -701,8 +758,15 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -716,8 +780,15 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -758,8 +829,15 @@ async fn test_trace_with_client_name_http_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -774,8 +852,15 @@ async fn test_trace_with_client_version_http_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -887,8 +972,15 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -932,8 +1024,15 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -1021,8 +1120,15 @@ async fn test_demand_control_trace() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            true,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
