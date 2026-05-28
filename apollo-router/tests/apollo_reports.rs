@@ -326,6 +326,59 @@ async fn get_batch_router_service(
     )
 }
 
+/// Batch counterpart of `get_router_service_with_subgraph_mock`. Swaps
+/// the real `https://*.demo.starstuff.dev/` subgraph egress for a
+/// localhost wiremock. See `start_demo_subgraphs_mock_server` /
+/// ROUTER-1814 for the underlying flake.
+async fn get_batch_router_service_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<Report>>>,
+    use_legacy_request_span: bool,
+    _mocked: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
+    config_str: Option<&str>,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, mut config) = config(
+        use_legacy_request_span,
+        reports,
+        demand_control,
+        experimental_local_field_metrics,
+        config_str.unwrap_or(include_str!(
+            "fixtures/reports/apollo_reports_batch.router.yaml"
+        )),
+    )
+    .await;
+
+    let subgraph_mock = start_demo_subgraphs_mock_server().await;
+    let mock_url = subgraph_mock.uri();
+    let _ = Box::leak(Box::new(subgraph_mock));
+
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "override_subgraph_url".to_string(),
+            serde_json::json!({
+                "accounts": format!("{mock_url}/accounts"),
+                "products": format!("{mock_url}/products"),
+                "reviews": format!("{mock_url}/reviews"),
+            }),
+        );
+    }
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .with_subgraph_network_requests();
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
 macro_rules! assert_report {
         ($report: expr)=> {
             insta::with_settings!({sort_maps => true}, {
@@ -390,68 +443,6 @@ async fn report(
 
     state.lock().await.push(report);
     Ok(Json(()))
-}
-
-/// Live-subgraph variant of `get_trace_report_with_subgraph_mock`. Only
-/// `test_condition_if` still uses this; every other trace caller is
-/// sandboxed through the wiremock. See the note on `test_condition_if`
-/// for why that one test was deferred.
-async fn get_trace_report(
-    reports: Arc<Mutex<Vec<Report>>>,
-    request: router::Request,
-    use_legacy_request_span: bool,
-    demand_control: bool,
-    experimental_local_field_metrics: bool,
-    config_str: Option<&'static str>,
-) -> Report {
-    get_report(
-        get_router_service,
-        reports,
-        use_legacy_request_span,
-        false,
-        request,
-        demand_control,
-        experimental_local_field_metrics,
-        |r| {
-            !r.traces_per_query
-                .values()
-                .next()
-                .expect("traces and stats required")
-                .trace
-                .is_empty()
-        },
-        config_str,
-    )
-    .await
-}
-
-async fn get_batch_trace_report(
-    reports: Arc<Mutex<Vec<Report>>>,
-    request: router::Request,
-    use_legacy_request_span: bool,
-    demand_control: bool,
-    experimental_local_field_metrics: bool,
-    config_str: Option<&'static str>,
-) -> Report {
-    get_report(
-        get_batch_router_service,
-        reports,
-        use_legacy_request_span,
-        false,
-        request,
-        demand_control,
-        experimental_local_field_metrics,
-        |r| {
-            !r.traces_per_query
-                .values()
-                .next()
-                .expect("traces and stats required")
-                .trace
-                .is_empty()
-        },
-        config_str,
-    )
-    .await
 }
 
 fn has_metrics(r: &&Report) -> bool {
@@ -551,6 +542,38 @@ async fn get_trace_report_with_subgraph_mock(
 ) -> Report {
     get_report(
         get_router_service_with_subgraph_mock,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        demand_control,
+        experimental_local_field_metrics,
+        |r| {
+            !r.traces_per_query
+                .values()
+                .next()
+                .expect("traces and stats required")
+                .trace
+                .is_empty()
+        },
+        config_str,
+    )
+    .await
+}
+
+/// Batch-trace-report counterpart of `get_trace_report_with_subgraph_mock`.
+/// See `start_demo_subgraphs_mock_server` and the sibling ROUTER-1823
+/// / ROUTER-1827 fixes for the underlying flake.
+async fn get_batch_trace_report_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+    demand_control: bool,
+    experimental_local_field_metrics: bool,
+    config_str: Option<&'static str>,
+) -> Report {
+    get_report(
+        get_batch_router_service_with_subgraph_mock,
         reports,
         use_legacy_request_span,
         false,
@@ -741,8 +764,15 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
+        let report = get_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            false,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -806,7 +836,7 @@ async fn test_batch_trace_id() {
             Some(("one", "two")),
         );
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(
+        let report = get_batch_trace_report_with_subgraph_mock(
             reports,
             request.into(),
             use_legacy_request_span,
@@ -1000,7 +1030,7 @@ async fn test_batch_send_header() {
             Some(("one", "two")),
         );
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(
+        let report = get_batch_trace_report_with_subgraph_mock(
             reports,
             request.into(),
             use_legacy_request_span,
@@ -1147,8 +1177,15 @@ async fn test_demand_control_trace_batched() {
         );
         let req: router::Request = request.into();
         let reports = Arc::new(Mutex::new(vec![]));
-        let report =
-            get_batch_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
+        let report = get_batch_trace_report_with_subgraph_mock(
+            reports,
+            req,
+            use_legacy_request_span,
+            true,
+            false,
+            None,
+        )
+        .await;
         assert_report!(report);
     }
 }
@@ -1209,7 +1246,7 @@ async fn test_persisted_query_by_id_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(
+    let report = get_metrics_report_with_subgraph_mock(
         reports,
         req,
         false,
