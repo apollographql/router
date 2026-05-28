@@ -44,8 +44,7 @@ use crate::services::FetchRequest;
 use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -55,7 +54,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<FetchServiceFactory>,
+        service: &'a FetchService,
         // The original supergraph request is used to populate variable values and for plugin
         // features like propagating headers or subgraph telemetry based on supergraph request
         // values.
@@ -79,7 +78,7 @@ impl QueryPlan {
             .execute_recursively(
                 &ExecutionParameters {
                     context,
-                    service_factory,
+                    service,
                     schema,
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
@@ -117,7 +116,7 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
+    pub(crate) service: &'a FetchService,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -239,7 +238,7 @@ impl PlanNode {
                             &None,
                         ) {
                             Some(variables) => {
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service.clone();
                                 let request = fetch::Request::Subscription(
                                     SubscriptionRequest::builder()
                                         .context(parameters.context.clone())
@@ -295,7 +294,7 @@ impl PlanNode {
                         ) {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
-                                let service = parameters.service_factory.create();
+                                let service = parameters.service.clone();
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
                                         .context(parameters.context.clone())
@@ -394,7 +393,7 @@ impl PlanNode {
                                 .execute_recursively(
                                     &ExecutionParameters {
                                         context: parameters.context,
-                                        service_factory: parameters.service_factory,
+                                        service: parameters.service,
                                         schema: parameters.schema,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
@@ -544,7 +543,7 @@ impl DeferredNode {
         let sc = parameters.schema.clone();
         let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
-        let sf = parameters.service_factory.clone();
+        let service = parameters.service.clone();
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
@@ -581,7 +580,7 @@ impl DeferredNode {
                     .execute_recursively(
                         &ExecutionParameters {
                             context: &ctx,
-                            service_factory: &sf,
+                            service: &service,
                             schema: &sc,
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,

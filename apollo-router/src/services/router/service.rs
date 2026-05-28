@@ -42,7 +42,6 @@ use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -80,7 +79,6 @@ use crate::services::layers::persisted_queries::ExpandIdsLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::batching::BatchingLayer;
 use crate::services::router::pipeline_handle::PipelineHandle;
@@ -123,7 +121,6 @@ impl RouterService {
             .layer(APQCachingLayer::new(apq_layer))
             .layer(ParseQueryLayer::new(query_analysis_layer))
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
-            .buffered() // Makes the supergraph service cloneable
             .service(supergraph_service)
             .boxed_clone();
 
@@ -184,7 +181,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     )
     .await
     .unwrap()
-    .make()
+    .create()
 }
 
 #[cfg(test)]
@@ -235,7 +232,7 @@ pub(crate) async fn empty() -> impl Service<
     )
     .await
     .unwrap()
-    .make()
+    .create()
 }
 
 /// If the `DisplayRouterRequest(true)` marker value is in context,
@@ -664,25 +661,16 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    service: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
 }
 
-impl ServiceFactory<router::Request> for RouterCreator {
-    type Service = router::BoxCloneService;
-    fn create(&self) -> Self::Service {
-        self.make().boxed_clone()
-    }
-}
-
 impl RouterFactory for RouterCreator {
-    type RouterService = router::BoxCloneService;
-
-    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
-        router::Request,
-    >>::Future;
+    fn create(&self) -> router::BoxCloneService {
+        self.service.clone().boxed_clone()
+    }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
@@ -735,15 +723,20 @@ impl RouterCreator {
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.create(),
+            supergraph_creator.make(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
         ));
 
-        // NOTE: This is the start of the router pipeline (router_service)
-        let sb = UnconstrainedBuffer::new(
+        // NOTE: This is the start of the router pipeline (router_service).
+        // The buffer provides backpressure for the full router pipeline and is required
+        // for correct LoadShed / ConcurrencyLimit / RateLimit behaviour: without a buffer
+        // before those layers (potentially introduced by traffic-shaping or license-
+        // enforcement plugins), Tokio's cooperative scheduling would cause poll_ready to
+        // return Pending spuriously and trigger Overloaded responses.
+        let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(static_page.clone())
                 .service(
@@ -761,14 +754,10 @@ impl RouterCreator {
 
         Ok(Self {
             supergraph_creator,
-            sb,
+            service,
             pipeline_handle: Arc::new(pipeline_handle),
             configuration,
         })
-    }
-
-    pub(crate) fn make(&self) -> router::BoxCloneService {
-        self.sb.clone().boxed_clone()
     }
 }
 

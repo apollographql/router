@@ -2784,12 +2784,16 @@ async fn no_data() {
         .extra_private_plugin(response_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
-                let mut subgraph = MockSubgraphService::new();
-                subgraph
-                    .expect_call()
-                    .times(1)
-                    .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed_clone()
+                fn mock_orga_service() -> MockSubgraphService {
+                    let mut subgraph = MockSubgraphService::new();
+                    subgraph.expect_clone().returning(mock_orga_service);
+                    subgraph
+                        .expect_call()
+                        .times(0..=1)
+                        .returning(move |_req: subgraph::Request| Err("orga not found".into()));
+                    subgraph
+                }
+                mock_orga_service().boxed_clone()
             } else {
                 service
             }

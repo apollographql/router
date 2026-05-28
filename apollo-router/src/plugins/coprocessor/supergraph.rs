@@ -175,7 +175,6 @@ impl SupergraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed_clone()
     }
@@ -662,6 +661,10 @@ mod tests {
         let mut mock_supergraph_service = MockSupergraphService::new();
 
         mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
+        mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
                 // Let's assert that the subgraph request has been transformed as it should have.
@@ -802,7 +805,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_supergraph_service = MockSupergraphService::new();
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -866,6 +873,11 @@ mod tests {
         );
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
         mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
@@ -940,6 +952,10 @@ mod tests {
         };
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -1079,6 +1095,10 @@ mod tests {
         let mut mock_supergraph_service = MockSupergraphService::new();
 
         mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
+        mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
                 Ok(supergraph::Response::fake_stream_builder()
@@ -1197,6 +1217,10 @@ mod tests {
         let mut mock_supergraph_service = MockSupergraphService::new();
 
         mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
+        mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
                 Ok(supergraph::Response::fake_stream_builder()
@@ -1311,6 +1335,11 @@ mod tests {
     // Helper function to create mock supergraph service
     fn create_mock_supergraph_service() -> MockSupergraphService {
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
         mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {

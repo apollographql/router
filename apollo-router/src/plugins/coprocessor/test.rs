@@ -265,7 +265,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_router_service = MockRouterService::new();
+        let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -329,7 +333,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_router_service = MockRouterService::new();
+        let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -393,7 +401,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_router_service = MockRouterService::new();
+        let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -451,7 +463,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_subgraph_service = MockSubgraphService::new();
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -513,6 +529,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -655,6 +675,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -814,6 +838,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -988,6 +1016,10 @@ mod tests {
         let mut mock_subgraph_service = MockSubgraphService::new();
 
         mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
+        mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
                 assert_eq!("/", req.subgraph_request.uri().to_string());
@@ -1057,7 +1089,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_subgraph_service = MockSubgraphService::new();
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1124,7 +1160,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_subgraph_service = MockSubgraphService::new();
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1187,6 +1227,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -1312,6 +1356,10 @@ mod tests {
         let mut mock_subgraph_service = MockSubgraphService::new();
 
         mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
+        mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
                 assert_eq!(&*req.id, "5678");
@@ -1415,6 +1463,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -1563,6 +1615,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         mock_subgraph_service
             .expect_call()
@@ -1725,6 +1781,10 @@ mod tests {
         let mut mock_subgraph_service = MockSubgraphService::new();
 
         mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
+        mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
                 req.context
@@ -1841,6 +1901,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -2655,7 +2719,11 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = MockRouterService::new();
+        let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -2751,7 +2819,11 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = MockRouterService::new();
+        let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -3236,6 +3308,11 @@ mod tests {
     // Helper function to create working router service mock
     fn create_mock_router_service() -> MockRouterService {
         let mut mock_router_service = MockRouterService::new();
+
+        mock_router_service
+            .expect_clone()
+            .returning(MockRouterService::new);
+
         mock_router_service
             .expect_call()
             .returning(|req: router::Request| {
@@ -3638,6 +3715,11 @@ mod tests {
     // Helper function to create mock subgraph service
     fn create_mock_subgraph_service() -> MockSubgraphService {
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
@@ -4114,6 +4196,11 @@ mod tests {
         };
 
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
@@ -4199,6 +4286,11 @@ mod tests {
         };
 
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
@@ -4290,6 +4382,10 @@ mod tests {
 
         let mut mock_subgraph_service = MockSubgraphService::new();
         mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
+        mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
                 Ok(subgraph::Response::builder()
@@ -4356,6 +4452,10 @@ mod tests {
         };
 
         let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
@@ -4444,6 +4544,11 @@ mod tests {
         };
 
         let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
+
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
