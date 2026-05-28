@@ -36,6 +36,7 @@ use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
 use crate::operation::DirectiveList;
 use crate::operation::Field;
+use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Operation;
@@ -286,6 +287,17 @@ pub(crate) struct FetchDependencyGraph {
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
     /// removing empty/useless fetches, merging fetches with the same subgraph/path).
     is_optimized: bool,
+    /// Edges that were removed during transitive reduction but crossed a defer boundary
+    /// (source.defer_ref != target.defer_ref). These are tracked so that
+    /// `extract_children_and_deferred_dependencies` can still register the correct defer
+    /// dependencies even after the direct edge has been removed from the graph.
+    ///
+    /// These `NodeIndex` values are live only until subsequent optimization passes
+    /// (`remove_useless_nodes`, `merge_*`) run. Those passes must keep this list in sync:
+    /// a node truly removed has no data, so the entry can be dropped; a node merged
+    /// into another keeps its data under the surviving index, so the entry is remapped.
+    #[serde(skip)]
+    reduced_defer_edges: Vec<(NodeIndex, NodeIndex)>,
 }
 
 // TODO: Write docstrings
@@ -700,6 +712,7 @@ impl FetchDependencyGraph {
             fetch_id_generation,
             is_reduced: false,
             is_optimized: false,
+            reduced_defer_edges: Vec::new(),
         }
     }
 
@@ -1102,6 +1115,11 @@ impl FetchDependencyGraph {
         let mut redundant_edges = IndexSet::default();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
+        // Same defer-boundary preservation as `reduce()`: post-merge re-reduction
+        // can create newly-redundant edges that cross a defer boundary, and those
+        // dependencies must also be restored at extract time.
+        self.record_reduced_defer_edges(&redundant_edges);
+
         if !redundant_edges.is_empty() {
             self.on_modification();
         }
@@ -1112,7 +1130,31 @@ impl FetchDependencyGraph {
 
     fn remove_node(&mut self, node_index: NodeIndex) {
         self.on_modification();
+        // Drop any reduced-defer-edge entries that reference a node we're removing.
+        // A removed node (empty/useless) has no data, so the recovered defer dependency
+        // on/from it is vacuous. For merges the caller must call `remap_reduced_defer_edges`
+        // first so that references are redirected to the surviving node.
+        self.reduced_defer_edges
+            .retain(|&(s, t)| s != node_index && t != node_index);
         self.graph.remove_node(node_index);
+    }
+
+    /// Redirect any `reduced_defer_edges` entries referencing `from` so that they
+    /// reference `to` instead. Called when `from` is being merged into `to`: the
+    /// merged node's data now lives under `to`, so the recovered defer dependency
+    /// must follow.
+    fn remap_reduced_defer_edges(&mut self, from: NodeIndex, to: NodeIndex) {
+        if from == to {
+            return;
+        }
+        for entry in &mut self.reduced_defer_edges {
+            if entry.0 == from {
+                entry.0 = to;
+            }
+            if entry.1 == from {
+                entry.1 = to;
+            }
+        }
     }
 
     /// Retain nodes that satisfy the given predicate and remove the rest.
@@ -1124,6 +1166,10 @@ impl FetchDependencyGraph {
         self.graph
             .retain_nodes(|_, node_index| predicate(&node_index));
         if self.graph.node_count() < node_count_before {
+            // Drop reduced-defer-edge entries that touch a removed node so that
+            // `collect_reduced_defer_dependencies` never tries to look one up.
+            self.reduced_defer_edges
+                .retain(|&(s, t)| predicate(&s) && predicate(&t));
             // PORT_NOTE: There are several different places that call `onModification` in JS. Here we
             //            call it just once, but it should be ok, since the function is idempotent.
             self.on_modification();
@@ -1163,6 +1209,10 @@ impl FetchDependencyGraph {
             self.collect_redundant_edges(node_index, &mut redundant_edges);
         }
 
+        // Remember defer-crossing edges before they're removed, so we can
+        // restore them as defer dependencies later.
+        self.record_reduced_defer_edges(&redundant_edges);
+
         // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
         if !redundant_edges.is_empty() {
             self.on_modification();
@@ -1172,6 +1222,20 @@ impl FetchDependencyGraph {
         }
 
         self.is_reduced = true;
+    }
+
+    /// Record edges from `redundant_edges` that cross a defer boundary
+    /// (`source.defer_ref != target.defer_ref`) into `reduced_defer_edges`,
+    /// where `collect_reduced_defer_dependencies` will later restore them.
+    fn record_reduced_defer_edges(&mut self, redundant_edges: &IndexSet<EdgeIndex>) {
+        for &edge in redundant_edges {
+            let Some((source, target)) = self.graph.edge_endpoints(edge) else {
+                continue;
+            };
+            if self.graph[source].defer_ref != self.graph[target].defer_ref {
+                self.reduced_defer_edges.push((source, target));
+            }
+        }
     }
 
     /// Reduce the graph (see `reduce`) and then do a some additional traversals to optimize for:
@@ -1313,6 +1377,10 @@ impl FetchDependencyGraph {
         self.on_modification();
         // Removing the child means attaching all of its children to its parent.
         self.relocate_children_on_merged_in(node_id, child_id, child_path);
+        // A "useless" child is one whose fetched fields are already present in its
+        // inputs (the parent). Redirect any recorded defer edges from the child to
+        // the parent, which actually holds that data.
+        self.remap_reduced_defer_edges(child_id, node_id);
         self.remove_node(child_id);
     }
 
@@ -1709,11 +1777,194 @@ impl FetchDependencyGraph {
             }
         }
 
+        self.collect_reduced_defer_dependencies(node_index, &mut defer_dependencies)?;
+
         for (defer_ref, dependency) in defer_dependencies {
             self.defer_tracking.add_dependency(&defer_ref, dependency);
         }
 
         Ok((children, deferred_nodes))
+    }
+
+    /// Collect defer dependencies from edges that were removed during transitive reduction
+    /// but crossed a defer boundary.
+    ///
+    /// Without this, an ancestor fetch whose direct edge to a deferred node was reduced
+    /// away (because a transitive path exists through an intermediate fetch) would not be
+    /// registered as a dependency, causing the deferred node to miss data at runtime.
+    ///
+    /// At runtime, each registered dependency broadcasts only its own fetch result to the
+    /// deferred node. If an ancestor's edge is reduced away, its result is never broadcast,
+    /// and the deferred node loses access to fields only that ancestor provides (e.g.
+    /// `__typename`, entity keys, or other required fields at the ancestor's response path).
+    ///
+    /// To avoid adding unnecessary dependencies, we only restore the edge when the source
+    /// node's selection has a field-name intersection with the deferred target's required
+    /// inputs. If the source doesn't provide any fields the target needs, the dependency
+    /// is purely transitive and can remain reduced.
+    fn collect_reduced_defer_dependencies(
+        &self,
+        node_index: NodeIndex,
+        defer_dependencies: &mut Vec<(DeferRef, String)>,
+    ) -> Result<(), FederationError> {
+        let node = self.node_weight(node_index)?;
+        if node.selection_set.selection_set.selections.is_empty() {
+            return Ok(());
+        }
+        for &(source, target) in &self.reduced_defer_edges {
+            if source != node_index {
+                continue;
+            }
+            // The target may have been removed between recording and now (e.g.
+            // emptied by `remove_empty_nodes` and dropped by `retain_nodes`).
+            let Some(child) = self.graph.node_weight(target) else {
+                continue;
+            };
+            if node.defer_ref == child.defer_ref {
+                continue;
+            }
+            let Some(child_defer_ref) = &child.defer_ref else {
+                continue;
+            };
+
+            // Check if the source's selection provides any fields that the deferred
+            // target's inputs require (excluding __typename which is ubiquitous).
+            let Some(inputs) = &child.inputs else {
+                continue;
+            };
+
+            // Navigate the source's selection down to the target's merge_at level,
+            // so we compare fields at the same nesting depth. When both nodes have
+            // merge_at paths, skip the common prefix and navigate only the remaining
+            // suffix (e.g., child merge_at=["start","q"] and node merge_at=["start"]
+            // means we navigate the source by just ["q"]).
+            let source_selection = match (&child.merge_at, &node.merge_at) {
+                (Some(child_path), None) => {
+                    match Self::selection_set_at_path(&node.selection_set.selection_set, child_path)
+                    {
+                        Some(ss) => ss,
+                        None => continue,
+                    }
+                }
+                (Some(child_path), Some(node_path)) => {
+                    let common_len = child_path
+                        .iter()
+                        .zip(node_path.iter())
+                        .take_while(|(a, b)| a == b)
+                        .count();
+                    let suffix = &child_path[common_len..];
+                    if suffix.is_empty() {
+                        &node.selection_set.selection_set
+                    } else {
+                        match Self::selection_set_at_path(&node.selection_set.selection_set, suffix)
+                        {
+                            Some(ss) => ss,
+                            None => continue,
+                        }
+                    }
+                }
+                _ => &node.selection_set.selection_set,
+            };
+
+            let has_intersection = inputs
+                .selection_sets_per_parent_type
+                .values()
+                .any(|input_ss| Self::has_field_intersection(source_selection, input_ss));
+
+            if has_intersection {
+                let id = *node.id.get_or_init(|| self.fetch_id_generation.next_id());
+                defer_dependencies.push((child_defer_ref.clone(), format!("{id}")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Navigate a selection set down a `merge_at` path, returning the sub-selection
+    /// at that path, or `None` if the path doesn't exist in the selection.
+    /// Note: This is an over-approximation, since it does not check if fragment's type condition
+    ///       is satisfied by the path's type conditions.
+    fn selection_set_at_path<'a>(
+        selection_set: &'a SelectionSet,
+        path: &[FetchDataPathElement],
+    ) -> Option<&'a SelectionSet> {
+        let mut current = selection_set;
+        for element in path {
+            match element {
+                FetchDataPathElement::Key(name, _) => {
+                    current = Self::find_field_in_selection_set(current, name)?;
+                }
+                FetchDataPathElement::AnyIndex(_) => {
+                    // Array indices don't change the selection structure.
+                    continue;
+                }
+                _ => return None,
+            }
+        }
+        Some(current)
+    }
+
+    /// Find a field by response name in a selection set, searching through any layers of
+    /// nested inline fragments. Returns the field's sub-selection set.
+    fn find_field_in_selection_set<'a>(
+        selection_set: &'a SelectionSet,
+        name: &Name,
+    ) -> Option<&'a SelectionSet> {
+        for sel in selection_set.iter() {
+            match sel {
+                Selection::Field(fs) if fs.field.response_name() == name => {
+                    return fs.selection_set.as_ref();
+                }
+                Selection::InlineFragment(inf) => {
+                    if let Some(ss) = Self::find_field_in_selection_set(&inf.selection_set, name) {
+                        return Some(ss);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Check whether two selection sets share any field selections (excluding `__typename`).
+    /// When an inline fragment (type condition) is found in `b`, it is matched against
+    /// the same type condition in `a` via `SelectionMap::get()`, so that fields are only
+    /// compared under the same type context.
+    /// NOTE: This intersection check is not meant be complete. It's meant to identify matching
+    ///       defer node dependencies. We are assuming that the selection sets `a` and `b` have
+    ///       a similar structure in the first place.
+    fn has_field_intersection(a: &SelectionSet, b: &SelectionSet) -> bool {
+        for sel in b.iter() {
+            match sel {
+                Selection::Field(fs) => {
+                    if *fs.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
+                    if a.selections.get(sel.key()).is_some() {
+                        return true;
+                    }
+                    // Here, `a` may have inline fragments without a type condition that contain
+                    // `fs` theoretically. But, our query plan won't generate such inline fragments
+                    // unnecessarily.
+                }
+                Selection::InlineFragment(b_inf) => {
+                    // Try to find a matching type condition in `a` first.
+                    if let Some(Selection::InlineFragment(a_inf)) = a.selections.get(sel.key())
+                        && Self::has_field_intersection(&a_inf.selection_set, &b_inf.selection_set)
+                    {
+                        return true;
+                    }
+
+                    if b_inf.inline_fragment.casted_type() == a.type_position {
+                        // No matching inline fragment in `a`, but `a` is already
+                        // at the same type as `b`'s type condition. Compare directly.
+                        if Self::has_field_intersection(a, &b_inf.selection_set) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn create_state_for_children_of_processed_node(
@@ -2220,6 +2471,7 @@ impl FetchDependencyGraph {
             self.relocate_parents_on_merged_in(node_id, merged_id);
         }
 
+        self.remap_reduced_defer_edges(merged_id, node_id);
         self.remove_node(merged_id);
         Ok(())
     }
@@ -5305,5 +5557,167 @@ mod tests {
             return format!("|[{}]", conditions.iter().map(|n| n.to_string()).join(","));
         }
         Default::default()
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression tests for `reduced_defer_edges` sync.
+    //
+    // These build a `FetchDependencyGraph` directly from a small composed
+    // supergraph and exercise the storage paths (record, retain, lookup) in
+    // isolation. They surface the bugs the corresponding fixes target without
+    // needing the planner to happen to produce the exact scenario.
+    // -----------------------------------------------------------------------
+
+    use crate::Supergraph;
+    use crate::query_graph::build_federated_query_graph;
+
+    /// Minimum supergraph that lets us build a `FetchDependencyGraph` and
+    /// allocate nodes via `new_node` for two distinct subgraphs.
+    const TEST_SUPERGRAPH_SDL: &str = include_str!(
+        "../../tests/query_plan/supergraphs/\
+         defer_test_handles_simple_defer_with_defer_enabled.graphql"
+    );
+
+    fn make_test_dep_graph() -> FetchDependencyGraph {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH_SDL).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let federated_query_graph = Arc::new(
+            build_federated_query_graph(supergraph.schema.clone(), api_schema, None, None).unwrap(),
+        );
+        FetchDependencyGraph::new(
+            supergraph.schema.clone(),
+            federated_query_graph,
+            None,
+            Arc::new(FetchIdGenerator::new()),
+        )
+    }
+
+    fn add_test_node(
+        graph: &mut FetchDependencyGraph,
+        subgraph_name: &str,
+        defer_ref: Option<&str>,
+    ) -> NodeIndex {
+        let sg: Arc<str> = Arc::from(subgraph_name);
+        let subgraph_schema = graph
+            .federated_query_graph
+            .schema_by_source(&sg)
+            .unwrap()
+            .clone();
+        let parent_type: CompositeTypeDefinitionPosition = subgraph_schema
+            .get_type(&name!("T"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        graph
+            .new_node(
+                sg,
+                parent_type,
+                false,
+                SchemaRootDefinitionKind::Query,
+                None,
+                defer_ref.map(String::from),
+            )
+            .unwrap()
+    }
+
+    fn add_test_edge(graph: &mut FetchDependencyGraph, from: NodeIndex, to: NodeIndex) {
+        graph
+            .graph
+            .add_edge(from, to, Arc::new(FetchDependencyGraphEdge { path: None }));
+    }
+
+    /// Regression for the gap in `remove_redundant_edges`: when a post-merge
+    /// transitive reduction strips an edge that crosses a defer boundary, the
+    /// edge must be recorded so the deferred block's dependency survives.
+    /// Without `record_reduced_defer_edges` wired into `remove_redundant_edges`
+    /// the recording silently doesn't happen, and `reduced_defer_edges` stays
+    /// empty.
+    #[test]
+    fn remove_redundant_edges_records_defer_crossing_edges() {
+        let mut graph = make_test_dep_graph();
+        let a = add_test_node(&mut graph, "Subgraph1", None);
+        let b = add_test_node(&mut graph, "Subgraph2", None);
+        let c = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        add_test_edge(&mut graph, a, b);
+        add_test_edge(&mut graph, b, c);
+        // A → C is transitively reachable via A → B → C and crosses a defer
+        // boundary (A is primary, C is deferred).
+        add_test_edge(&mut graph, a, c);
+
+        assert!(graph.reduced_defer_edges.is_empty());
+
+        graph.remove_redundant_edges(a);
+
+        assert_eq!(
+            graph.reduced_defer_edges,
+            vec![(a, c)],
+            "expected the defer-crossing redundant edge to be recorded"
+        );
+    }
+
+    /// Regression for the latent `node_weight(target)?` crash in
+    /// `collect_reduced_defer_dependencies`: if a recorded target was removed
+    /// from the graph between recording and use, the lookup must skip the
+    /// entry rather than bubble `Node unexpectedly missing`.
+    #[test]
+    fn collect_reduced_defer_dependencies_skips_removed_target() {
+        let mut graph = make_test_dep_graph();
+        let s = add_test_node(&mut graph, "Subgraph1", None);
+        let t = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        graph.reduced_defer_edges.push((s, t));
+
+        // Bypass the sync wrappers (`remove_node`, `retain_nodes`) so the
+        // stale entry survives — simulating a path that doesn't go through
+        // them. The lookup must still be safe.
+        graph.graph.remove_node(t);
+
+        let mut deps = Vec::new();
+        let result = graph.collect_reduced_defer_dependencies(s, &mut deps);
+        assert!(
+            result.is_ok(),
+            "lookup must not crash on a stale target; got {result:?}"
+        );
+        assert!(deps.is_empty());
+    }
+
+    /// Regression for the missing lockstep cleanup in `retain_nodes`: when a
+    /// node referenced by a recorded edge is dropped via the bulk retain API
+    /// (used by `remove_empty_nodes`), the entry must be pruned in lockstep.
+    /// Without the fix, the stale entry would survive in `reduced_defer_edges`
+    /// (and, on the unguarded lookup path, surface as the
+    /// `Node unexpectedly missing` internal error).
+    ///
+    /// Exercise both endpoints so each clause of the
+    /// `predicate(&s) && predicate(&t)` filter is covered.
+    #[test]
+    fn retain_nodes_prunes_reduced_defer_edges_when_target_removed() {
+        let mut graph = make_test_dep_graph();
+        let s = add_test_node(&mut graph, "Subgraph1", None);
+        let t = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        graph.reduced_defer_edges.push((s, t));
+
+        graph.retain_nodes(|&n| n != t);
+
+        assert!(
+            graph.reduced_defer_edges.is_empty(),
+            "expected the entry referencing the dropped target to be pruned, got {:?}",
+            graph.reduced_defer_edges
+        );
+    }
+
+    #[test]
+    fn retain_nodes_prunes_reduced_defer_edges_when_source_removed() {
+        let mut graph = make_test_dep_graph();
+        let s = add_test_node(&mut graph, "Subgraph1", None);
+        let t = add_test_node(&mut graph, "Subgraph2", Some("defer1"));
+        graph.reduced_defer_edges.push((s, t));
+
+        graph.retain_nodes(|&n| n != s);
+
+        assert!(
+            graph.reduced_defer_edges.is_empty(),
+            "expected the entry referencing the dropped source to be pruned, got {:?}",
+            graph.reduced_defer_edges
+        );
     }
 }
