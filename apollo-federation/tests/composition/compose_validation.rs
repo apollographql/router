@@ -678,6 +678,58 @@ fn duplicate_link_spec_application_is_rejected() {
 }
 
 #[test]
+fn executable_directive_removed_when_no_executable_locations_intersection() {
+    // Subgraph names are sorted alphabetically during composition. The subgraph WITHOUT
+    // executable locations must sort first to trigger the bug where an empty initial
+    // locations vec was treated as "not yet initialized" instead of "empty intersection".
+    // A third subgraph that doesn't define the directive at all verifies that the hint
+    // is NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION (empty intersection detected first),
+    // not INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE (missing from some subgraphs).
+    let subgraph_a = ServiceDefinition {
+        name: "a-no-exec-locations",
+        type_defs: r#"
+            directive @cacheControl(maxAge: Int) on FIELD_DEFINITION | OBJECT
+            type Query { a: String }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "b-with-exec-locations",
+        type_defs: r#"
+            directive @cacheControl(maxAge: Int!) on QUERY
+            type Query { b: String @shareable }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "c-no-directive",
+        type_defs: r#"
+            type Query { c: String @shareable }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c])
+        .expect("Composition should succeed");
+    assert!(
+        !result
+            .schema()
+            .schema()
+            .directive_definitions
+            .contains_key("cacheControl"),
+        "Supergraph should not contain @cacheControl when executable locations don't intersect"
+    );
+    assert_eq!(result.hints().len(), 1);
+    assert_eq!(
+        result.hints()[0].definition.code(),
+        "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
+    );
+    assert_eq!(
+        result.hints()[0].message,
+        r#"Executable directive "@cacheControl" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "b-with-exec-locations"."#,
+    );
+}
+
+#[test]
 fn interface_field_no_implem_error_includes_source_locations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",

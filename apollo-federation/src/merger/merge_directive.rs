@@ -502,7 +502,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         let mut repeatable: Option<bool> = None;
         let mut inconsistent_repeatable = false;
-        let mut locations: Vec<DirectiveLocation> = Vec::new();
+        let mut locations: Option<Vec<DirectiveLocation>> = None;
         let mut inconsistent_locations = false;
 
         for (idx, source) in sources {
@@ -543,19 +543,17 @@ impl Merger {
                 "Source locations for executable directive \"@{name}\" in subgraph {}: {:?}",
                 self.subgraphs[*idx].name, source_locations
             );
-            if locations.is_empty() {
-                locations = source_locations;
-            } else {
-                if locations != source_locations {
+            if let Some(ref mut current) = locations {
+                if *current != source_locations {
                     inconsistent_locations = true;
                 }
-                locations.retain(|loc| source_locations.contains(loc));
+                current.retain(|loc| source_locations.contains(loc));
 
                 trace!(
                     "After processing subgraph {}, executable directive \"@{name}\" has locations: {:?}",
-                    self.subgraphs[*idx].name, locations
+                    self.subgraphs[*idx].name, current
                 );
-                if locations.is_empty() {
+                if current.is_empty() {
                     dest.remove(&mut self.merged)?;
                     self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
@@ -573,10 +571,12 @@ impl Merger {
                     );
                     return Ok(());
                 }
+            } else {
+                locations = Some(source_locations);
             }
         }
-        dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
-        dest.set_locations(&mut self.merged, locations)?;
+        dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?;
+        dest.set_locations(&mut self.merged, locations.unwrap_or_default())?;
 
         self.merge_description(sources, dest)?;
         let supergraph_dest = dest.get(self.merged.schema())?;
