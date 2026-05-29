@@ -164,62 +164,43 @@ impl TryFrom<&HeaderMap> for CacheControl {
             for directive in header_value.to_str()?.split(',') {
                 let (key, value) = parse_directive(directive)?;
 
-                match (key, value) {
-                    ("max-age", Some(value)) => {
-                        cache_control.max_age = Some(value.parse()?);
+                let parse_value = |value: Option<&str>| -> Result<u64, BoxError> {
+                    let value = value.ok_or_else(Err(format!(
+                        "invalid Cache-Control header value: {directive}"
+                    )
+                    .into()))?;
+                    value.parse()?
+                };
+
+                match key {
+                    "immutable" => cache_control.immutable = true,
+                    "must-revalidate" => cache_control.must_revalidate = true,
+                    "must-understand" => cache_control.must_understand = true,
+                    "no-cache" => cache_control.no_cache = true,
+                    "no-store" => cache_control.no_store = true,
+                    "no-transform" => cache_control.no_transform = true,
+                    "only-if-cached" => cache_control.only_if_cached = true,
+                    "private" => cache_control.private = true,
+                    "proxy-revalidate" => cache_control.proxy_revalidate = true,
+                    "public" => cache_control.public = true,
+
+                    "max-age" => cache_control.max_age = Some(parse_value(value)?),
+                    "s-maxage" => cache_control.s_max_age = Some(parse_value(value)?),
+                    "stale-if-error" => cache_control.stale_if_error = Some(parse_value(value)?),
+                    "stale-while-revalidate" => {
+                        cache_control.stale_while_revalidate = Some(parse_value(value)?)
                     }
-                    ("s-maxage", Some(value)) => {
-                        cache_control.s_max_age = Some(value.parse()?);
+                    "min-fresh" => cache_control.min_fresh = Some(parse_value(value)?),
+
+                    "max-stale" => {
+                        // max-stale without a value means to accept any age, so use u64::MAX if no
+                        // value is provided (works out to 584 billion years)
+                        let value = value.map_or(Ok(u64::MAX), |v| v.parse())?;
+                        cache_control.max_stale = Some(value);
                     }
-                    ("no-cache", None) => {
-                        cache_control.no_cache = true;
-                    }
-                    ("no-store", None) => {
-                        cache_control.no_store = true;
-                    }
-                    ("no-transform", None) => {
-                        cache_control.no_transform = true;
-                    }
-                    ("must-revalidate", None) => {
-                        cache_control.must_revalidate = true;
-                    }
-                    ("proxy-revalidate", None) => {
-                        cache_control.proxy_revalidate = true;
-                    }
-                    ("must-understand", None) => {
-                        cache_control.must_understand = true;
-                    }
-                    ("private", None) => {
-                        cache_control.private = true;
-                    }
-                    ("public", None) => {
-                        cache_control.public = true;
-                    }
-                    ("immutable", None) => {
-                        cache_control.immutable = true;
-                    }
-                    ("stale-while-revalidate", Some(value)) => {
-                        cache_control.stale_while_revalidate = Some(value.parse()?);
-                    }
-                    // TODO: handle ("stale-while-revalidate", None)?
-                    ("stale-if-error", Some(value)) => {
-                        cache_control.stale_if_error = Some(value.parse()?);
-                    }
-                    // TODO: handle ("stale-if-error", None)?
-                    ("max-stale", Some(value)) => {
-                        cache_control.max_stale = Some(value.parse()?);
-                    }
-                    ("min-fresh", Some(value)) => {
-                        cache_control.min_fresh = Some(value.parse()?);
-                    }
-                    ("only-if-cached", None) => {
-                        cache_control.only_if_cached = true;
-                    }
-                    _ => {
-                        return Err(
-                            format!("invalid Cache-Control header value: {directive}").into()
-                        );
-                    }
+
+                    // RFC 9111 §5.2 allows extension directives, so don't error on unrecognized keys
+                    _ => {}
                 }
             }
         }
@@ -545,7 +526,7 @@ fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
 impl CacheControl {
     /// TODO doc (used below)
     fn remaining_ttl(&self, now: u64) -> Option<u64> {
-        self.remaining_duration(self.ttl(), Some(now))
+        self.remaining_duration(self.max_age(), Some(now))
     }
 
     /// TODO doc - used to standardize snapshots
