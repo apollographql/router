@@ -116,7 +116,13 @@ pub fn handle_raw_response(
         .response(&connector.response_headers, Some(parts))
         .merge();
     let warnings = Vec::new();
-    let (success, warnings) = is_success(connector, data, parts, &inputs, warnings);
+    let (success, warnings) = is_success(
+        connector.error_settings.connect_is_success.as_ref(),
+        data,
+        parts,
+        &inputs,
+        warnings,
+    );
     if success {
         map_response(data, key, inputs, warnings)
     } else {
@@ -238,13 +244,13 @@ impl<'a> GraphQLDataMapper<'a> {
 // If the user has set a custom success condition selector, resolve that expression,
 // otherwise default to checking status code is 2XX
 fn is_success(
-    connector: &Connector,
+    is_success_selection: Option<&JSONSelection>,
     data: &Value,
     parts: &Parts,
     inputs: &IndexMap<String, Value>,
     mut warnings: Vec<Problem>,
 ) -> (bool, Vec<Problem>) {
-    let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
+    let Some(is_success_selection) = is_success_selection else {
         return (parts.status.is_success(), warnings);
     };
     let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
@@ -253,10 +259,22 @@ fn is_success(
         ProblemLocation::IsSuccess,
     ));
 
-    (
-        res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
-        warnings,
-    )
+    let type_name = match res.as_ref() {
+        Some(Value::Bool(b)) => return (*b, warnings),
+        None => return (false, warnings),
+        Some(Value::Null) => "null",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
+    };
+    warnings.push(Problem {
+        message: format!("`isSuccess` must evaluate to a boolean, got {type_name}"),
+        path: String::new(),
+        count: 1,
+        location: ProblemLocation::IsSuccess,
+    });
+    (false, warnings)
 }
 
 /// Returns a response for a mapping-only connector by applying the selection against `{}`.
@@ -590,7 +608,8 @@ impl MappedResponse {
                         ResponseKey::RootField { name, .. } => {
                             for field in op.selection_set.selections.iter() {
                                 if let Selection::Field(field) = field
-                                    && field.name.as_str() == name.as_str()
+                                    && field.alias.as_deref().unwrap_or(field.name.as_str())
+                                        == name.as_str()
                                 {
                                     // Use the field's selection set type so that
                                     // __typename resolves to the return type (e.g.
@@ -738,11 +757,52 @@ impl MappedResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::StatusCode;
+    use http::response::Parts;
     use serde_json_bytes::Value;
+    use serde_json_bytes::json;
 
+    use super::MappedResponse;
     use super::deserialize_response;
+    use super::is_success;
+    use crate::connectors::JSONSelection;
+    use crate::connectors::runtime::inputs::RequestInputs;
+    use crate::connectors::runtime::key::ResponseKey;
+
+    fn make_parts(status: u16) -> Parts {
+        http::Response::builder()
+            .status(StatusCode::from_u16(status).unwrap())
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0
+    }
+
+    // Regression test for CNN-1022: when isSuccess evaluates to a non-boolean,
+    // a problem must be surfaced so the debugger can explain the failure.
+    #[test]
+    fn is_success_non_boolean_emits_warning() {
+        let selection = JSONSelection::parse("$.status").unwrap();
+        let data = json!({"status": "ok"});
+        let parts = make_parts(200);
+
+        let (success, problems) =
+            is_success(Some(&selection), &data, &parts, &Default::default(), vec![]);
+
+        assert!(!success, "non-boolean isSuccess should fail the request");
+        assert_eq!(problems.len(), 1, "expected one problem, got: {problems:?}");
+        assert!(
+            problems[0].message.contains("string"),
+            "problem message should mention the actual type, got: {:?}",
+            problems[0].message
+        );
+    }
 
     fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut map = HeaderMap::new();
@@ -769,5 +829,91 @@ mod tests {
         let headers = headers_with(&[("content-length", "0")]);
         let result = deserialize_response(b"", &headers).unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_apply_operation_with_root_and_field_aliases() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            type Query {
+                search_items(query: String): SearchResponse
+            }
+            type SearchResponse {
+                results: [Item!]!
+                metadata: Metadata!
+            }
+            type Item {
+                id: ID!
+                title: String!
+                viewUri: String!
+            }
+            type Metadata {
+                total: Int!
+            }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let query = r#"
+            {
+                items:search_items(query: "test") {
+                    results {
+                        id
+                        title
+                        link:viewUri
+                    }
+                    metadata {
+                        total
+                    }
+                }
+            }
+            "#;
+
+        let operation =
+            ExecutableDocument::parse_and_validate(&schema, query, "op.graphql").unwrap();
+
+        let mapped_data = json!({
+            "results": [
+                { "id": "1", "title": "First", "viewUri": "https://example.com/1" },
+                { "id": "2", "title": "Second", "viewUri": "https://example.com/2" }
+            ],
+            "metadata": { "total": 2 }
+        });
+
+        let response = MappedResponse::Data {
+            key: ResponseKey::RootField {
+                name: "items".to_string(),
+                inputs: RequestInputs::default(),
+                selection: Arc::new(JSONSelection::parse("$").unwrap()),
+            },
+            data: mapped_data,
+            problems: vec![],
+        };
+
+        let result = response.apply_operation(Some(&*operation), &Default::default());
+
+        let MappedResponse::Data { data, .. } = result else {
+            panic!("expected Data variant");
+        };
+
+        let items = data["results"].as_array().expect("results should be array");
+        assert_eq!(items.len(), 2);
+
+        // `link` (alias for viewUri) must be present; `viewUri` must not appear under the alias name.
+        assert_eq!(
+            items[0]["link"].as_str(),
+            Some("https://example.com/1"),
+            "field alias 'link' should resolve to viewUri value"
+        );
+        assert_eq!(
+            items[1]["link"].as_str(),
+            Some("https://example.com/2"),
+            "field alias 'link' should resolve to viewUri value"
+        );
+        assert!(
+            items[0].get("viewUri").is_none(),
+            "original field name should not appear in output when aliased"
+        );
     }
 }

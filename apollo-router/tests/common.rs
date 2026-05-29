@@ -198,10 +198,6 @@ fn mint_test_license_jwt() -> String {
 /// bootstrap a missing baseline. If a future test needs Registry-source
 /// schema, the mock has to return a real `supergraphSdl` body (mirror
 /// the License JWT pattern above).
-///
-/// Lifted into the harness from a per-test helper that originally
-/// lived in `tests/integration/telemetry/metrics.rs::test_metrics_reloading`
-/// (`b3a0986e0`).
 async fn mock_license_uplink() -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
 
@@ -429,7 +425,7 @@ pub struct IntegrationTest {
 }
 
 impl IntegrationTest {
-    pub(crate) fn bind_address(&self) -> SocketAddr {
+    pub fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
@@ -1636,7 +1632,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Windows runners spawn subprocesses and dispatch filesystem-watch
+        // events noticeably slower than Unix, so reload-driven waits run
+        // close to the 30 s ceiling. Give Windows extra headroom.
+        let deadline = Instant::now()
+            + if cfg!(windows) {
+                Duration::from_secs(60)
+            } else {
+                Duration::from_secs(30)
+            };
         loop {
             while let Ok(line) = self.stdio_rx.try_recv() {
                 self.logs.push(line.clone());
@@ -1654,6 +1658,12 @@ impl IntegrationTest {
             "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
             logs = self.logs.join("\n")
         );
+    }
+
+    #[allow(dead_code)]
+    pub fn logs(&mut self) -> Vec<String> {
+        self.read_logs();
+        self.logs.clone()
     }
 
     /// Sync fn using a loop to println!() each log
@@ -1993,6 +2003,33 @@ impl IntegrationTest {
         panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
 
+    /// Read the current value of a Prometheus counter or gauge identified by the exact metric
+    /// name + label-set prefix `text` (e.g. `my_counter{label="value"}`). Returns `0` if the
+    /// metric line is not yet present in the scrape output.
+    ///
+    /// This is intentionally a snapshot (no waiting). It's useful for taking a "before" sample
+    /// of a cumulative counter, executing some work, and then taking an "after" sample to
+    /// assert the delta — which is robust against unrelated increments that happen during
+    /// router startup (e.g. transient Redis IO errors emitted by fred's event listener while
+    /// connections are still stabilising).
+    #[allow(dead_code)]
+    pub async fn read_metric_counter_value(&self, text: &str) -> u64 {
+        let metrics = match self.get_metrics_response().await {
+            Ok(resp) => match resp.text().await {
+                Ok(body) => body,
+                Err(_) => return 0,
+            },
+            Err(_) => return 0,
+        };
+
+        let pattern = regex::escape(text);
+        let re = Regex::new(&format!(r"(?m)^{pattern}\s+(\d+)(?:\s|$)")).expect("Invalid regex");
+        re.captures(&metrics)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         // Budget must cover:
@@ -2300,11 +2337,10 @@ fn merge_overrides(
     // "unable to shutdown router, this probably means a hang".
     //
     // This race is latent in any test that makes an HTTP request and then
-    // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
-    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6).
-    // Rather than patch each vulnerable fixture individually, inject a 5 s
-    // default at the harness layer, paired with a widened `assert_shutdown`
-    // budget (see that helper for the matching constant).
+    // calls `graceful_shutdown()`. Rather than patch each vulnerable fixture
+    // individually, inject a 5 s default at the harness layer, paired with a
+    // widened `assert_shutdown` budget (see that helper for the matching
+    // constant).
     //
     // The 5 s value is a trade-off:
     // - Must be long enough that intentionally-in-flight requests finish

@@ -22,110 +22,117 @@ JSONSelection {
                             ),
                         },
                     ),
-                    path: PathSelection {
-                        path: WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "a",
-                                    ),
-                                    range: Some(
-                                        5..6,
-                                    ),
-                                },
-                                WithRange {
-                                    node: Method(
+                    path: WithRange {
+                        node: Path(
+                            PathSelection {
+                                path: WithRange {
+                                    node: Key(
                                         WithRange {
-                                            node: "add",
+                                            node: Field(
+                                                "a",
+                                            ),
                                             range: Some(
-                                                8..11,
+                                                5..6,
                                             ),
                                         },
-                                        Some(
-                                            MethodArgs {
-                                                args: [
-                                                    WithRange {
-                                                        node: Path(
-                                                            PathSelection {
-                                                                path: WithRange {
-                                                                    node: Key(
-                                                                        WithRange {
-                                                                            node: Field(
-                                                                                "b",
+                                        WithRange {
+                                            node: Method(
+                                                WithRange {
+                                                    node: "add",
+                                                    range: Some(
+                                                        8..11,
+                                                    ),
+                                                },
+                                                Some(
+                                                    MethodArgs {
+                                                        args: [
+                                                            WithRange {
+                                                                node: Path(
+                                                                    PathSelection {
+                                                                        path: WithRange {
+                                                                            node: Key(
+                                                                                WithRange {
+                                                                                    node: Field(
+                                                                                        "b",
+                                                                                    ),
+                                                                                    range: Some(
+                                                                                        12..13,
+                                                                                    ),
+                                                                                },
+                                                                                WithRange {
+                                                                                    node: Empty,
+                                                                                    range: Some(
+                                                                                        13..13,
+                                                                                    ),
+                                                                                },
                                                                             ),
                                                                             range: Some(
                                                                                 12..13,
                                                                             ),
                                                                         },
-                                                                        WithRange {
-                                                                            node: Empty,
-                                                                            range: Some(
-                                                                                13..13,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                    range: Some(
-                                                                        12..13,
-                                                                    ),
-                                                                },
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    12..13,
+                                                                ),
                                                             },
-                                                        ),
-                                                        range: Some(
-                                                            12..13,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Path(
-                                                            PathSelection {
-                                                                path: WithRange {
-                                                                    node: Key(
-                                                                        WithRange {
-                                                                            node: Field(
-                                                                                "c",
+                                                            WithRange {
+                                                                node: Path(
+                                                                    PathSelection {
+                                                                        path: WithRange {
+                                                                            node: Key(
+                                                                                WithRange {
+                                                                                    node: Field(
+                                                                                        "c",
+                                                                                    ),
+                                                                                    range: Some(
+                                                                                        15..16,
+                                                                                    ),
+                                                                                },
+                                                                                WithRange {
+                                                                                    node: Empty,
+                                                                                    range: Some(
+                                                                                        16..16,
+                                                                                    ),
+                                                                                },
                                                                             ),
                                                                             range: Some(
                                                                                 15..16,
                                                                             ),
                                                                         },
-                                                                        WithRange {
-                                                                            node: Empty,
-                                                                            range: Some(
-                                                                                16..16,
-                                                                            ),
-                                                                        },
-                                                                    ),
-                                                                    range: Some(
-                                                                        15..16,
-                                                                    ),
-                                                                },
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    15..16,
+                                                                ),
                                                             },
-                                                        ),
+                                                        ],
                                                         range: Some(
-                                                            15..16,
+                                                            11..17,
                                                         ),
                                                     },
-                                                ],
-                                                range: Some(
-                                                    11..17,
                                                 ),
-                                            },
-                                        ),
-                                        WithRange {
-                                            node: Empty,
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        17..17,
+                                                    ),
+                                                },
+                                            ),
                                             range: Some(
-                                                17..17,
+                                                6..17,
                                             ),
                                         },
                                     ),
                                     range: Some(
-                                        6..17,
+                                        5..17,
                                     ),
                                 },
-                            ),
-                            range: Some(
-                                5..17,
-                            ),
-                        },
+                            },
+                        ),
+                        range: Some(
+                            5..17,
+                        ),
                     },
                 },
             ],

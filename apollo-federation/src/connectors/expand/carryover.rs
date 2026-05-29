@@ -295,7 +295,7 @@ pub(super) fn carryover_directives(
                 .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
         )
         .filter_map(|pos| {
-            let field_def = pos.get(from.schema()).ok()?;
+            let field_def = pos.try_get(from.schema())?;
             let applications = field_def
                 .directives
                 .iter()

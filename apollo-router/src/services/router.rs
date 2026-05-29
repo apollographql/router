@@ -30,6 +30,7 @@ use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
+use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
@@ -368,6 +369,7 @@ impl Response {
 
     fn add_errors_to_context(errors: &[graphql::Error], context: &Context) {
         context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        context.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
         // This is ONLY guaranteed to capture errors if any were added during router service
         // processing. We will sometimes avoid this path if no router service errors exist, even
         // if errors were passed from the supergraph service, because that path builds the

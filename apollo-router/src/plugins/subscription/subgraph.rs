@@ -230,9 +230,9 @@ async fn call_websocket(
     // Clone for use in reconnect attempts
     let retry_connection_params = connection_params.clone();
 
-    let signing_params = context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
+    // Extract before passing parts to the helper, which consumes them. Headers
+    // are forwarded to the WebSocket upgrade request, extensions are not.
+    let signing_params = parts.extensions.get::<Arc<SigningParamsConfig>>().cloned();
     // Clone for use in reconnect attempts
     let retry_signing_params = signing_params.clone();
 

@@ -1824,6 +1824,18 @@ impl FieldDefinitionPosition {
             FieldDefinitionPosition::Union(_) => (),
         }
     }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.try_get(schema),
+            FieldDefinitionPosition::Interface(field) => field.try_get(schema),
+            FieldDefinitionPosition::Union(field) => field.try_get(schema),
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1833,13 +1845,6 @@ impl FieldDefinitionPosition {
             FieldDefinitionPosition::Interface(field) => field.get(schema),
             FieldDefinitionPosition::Union(field) => field.get(schema),
         }
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
-        self.get(schema).ok()
     }
 
     pub(crate) fn is_interface(&self) -> bool {
@@ -1904,6 +1909,16 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.try_get(schema),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.try_get(schema),
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1912,13 +1927,6 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
         }
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
-        self.get(schema).ok()
     }
 
     pub(crate) fn insert_directive(
@@ -2339,43 +2347,28 @@ impl SchemaRootDefinitionPosition {
         SchemaDefinitionPosition
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema ComponentName, FederationError> {
-        let schema_definition = self.parent().get(schema);
-
-        match self.root_kind {
-            SchemaRootDefinitionKind::Query => schema_definition.query.as_ref().ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema definition has no root {self} type"),
-                }
-                .into()
-            }),
-            SchemaRootDefinitionKind::Mutation => {
-                schema_definition.mutation.as_ref().ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {self} type"),
-                    }
-                    .into()
-                })
-            }
-            SchemaRootDefinitionKind::Subscription => {
-                schema_definition.subscription.as_ref().ok_or_else(|| {
-                    SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {self} type"),
-                    }
-                    .into()
-                })
-            }
-        }
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema ComponentName> {
-        self.get(schema).ok()
+        let schema_definition = self.parent().get(schema);
+        match self.root_kind {
+            SchemaRootDefinitionKind::Query => schema_definition.query.as_ref(),
+            SchemaRootDefinitionKind::Mutation => schema_definition.mutation.as_ref(),
+            SchemaRootDefinitionKind::Subscription => schema_definition.subscription.as_ref(),
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema ComponentName, FederationError> {
+        self.try_get(schema).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: format!("Schema definition has no root {self} type"),
+            }
+            .into()
+        })
     }
 
     pub(crate) fn insert(
@@ -2516,31 +2509,29 @@ pub(crate) struct ScalarTypeDefinitionPosition {
 impl ScalarTypeDefinitionPosition {
     const EXPECTED: &'static str = "a scalar type";
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<ScalarType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::Scalar(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<ScalarType>> {
-        self.get(schema).ok()
+        if let ExtendedType::Scalar(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<ScalarType>, PositionLookupError> {
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::Scalar(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     fn make_mut<'schema>(
@@ -2875,31 +2866,29 @@ impl ObjectTypeDefinitionPosition {
             .map(|name| self.field(name.clone())))
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<ObjectType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::Object(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<ObjectType>> {
-        self.get(schema).ok()
+        if let ExtendedType::Object(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<ObjectType>, PositionLookupError> {
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::Object(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     pub(crate) fn make_mut<'schema>(
@@ -3473,6 +3462,14 @@ impl ObjectFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.parent().try_get(schema)?;
+        schema.type_field(&self.type_name, &self.field_name).ok()
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -3489,13 +3486,6 @@ impl ObjectFieldDefinitionPosition {
                     self.field_name.clone(),
                 )
             })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
-        self.get(schema).ok()
     }
 
     pub(crate) fn make_mut<'schema>(
@@ -3872,6 +3862,14 @@ impl ObjectFieldArgumentDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        let field = self.parent().try_get(schema)?;
+        field.argument_by_name(&self.argument_name)
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -3886,13 +3884,6 @@ impl ObjectFieldArgumentDefinitionPosition {
                 self.argument_name.clone(),
             )
         })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Node<InputValueDefinition>> {
-        self.get(schema).ok()
     }
 
     fn make_mut<'schema>(
@@ -4248,31 +4239,29 @@ impl InterfaceTypeDefinitionPosition {
             .map(|name| self.field(name.clone())))
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<InterfaceType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::Interface(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<InterfaceType>> {
-        self.get(schema).ok()
+        if let ExtendedType::Interface(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<InterfaceType>, PositionLookupError> {
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::Interface(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     fn make_mut<'schema>(
@@ -4729,6 +4718,14 @@ impl InterfaceFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.parent().try_get(schema)?;
+        schema.type_field(&self.type_name, &self.field_name).ok()
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -4745,13 +4742,6 @@ impl InterfaceFieldDefinitionPosition {
                     self.field_name.clone(),
                 )
             })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
-        self.get(schema).ok()
     }
 
     pub(crate) fn make_mut<'schema>(
@@ -5128,6 +5118,14 @@ impl InterfaceFieldArgumentDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        let field = self.parent().try_get(schema)?;
+        field.argument_by_name(&self.argument_name)
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -5142,13 +5140,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 self.argument_name.clone(),
             )
         })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Node<InputValueDefinition>> {
-        self.get(schema).ok()
     }
 
     fn make_mut<'schema>(
@@ -5429,31 +5420,29 @@ impl UnionTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<UnionType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::Union(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<UnionType>> {
-        self.get(schema).ok()
+        if let ExtendedType::Union(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<UnionType>, PositionLookupError> {
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::Union(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     fn make_mut<'schema>(
@@ -5834,6 +5823,14 @@ impl UnionTypenameFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.parent().try_get(schema)?;
+        schema.type_field(&self.type_name, self.field_name()).ok()
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -5906,31 +5903,29 @@ impl EnumTypeDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<EnumType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::Enum(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<EnumType>> {
-        self.get(schema).ok()
+        if let ExtendedType::Enum(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<EnumType>, PositionLookupError> {
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::Enum(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     fn make_mut<'schema>(
@@ -6248,6 +6243,14 @@ impl EnumValueDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<EnumValueDefinition>> {
+        let type_ = self.parent().try_get(schema)?;
+        type_.values.get(&self.value_name)
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -6259,13 +6262,6 @@ impl EnumValueDefinitionPosition {
             .values
             .get(&self.value_name)
             .ok_or_else(|| PositionLookupError::MissingValue(self.clone()))
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<EnumValueDefinition>> {
-        self.get(schema).ok()
     }
 
     fn make_mut<'schema>(
@@ -6448,27 +6444,25 @@ impl InputObjectTypeDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InputObjectType>, PositionLookupError> {
-        schema
-            .types
-            .get(&self.type_name)
-            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
-            .and_then(|type_| {
-                if let ExtendedType::InputObject(type_) = type_ {
-                    Ok(type_)
-                } else {
-                    Err(PositionLookupError::TypeWrongKind(
-                        self.type_name.clone(),
-                        Self::EXPECTED,
-                    ))
-                }
-            })
+        match schema.types.get(&self.type_name) {
+            Some(ExtendedType::InputObject(type_)) => Ok(type_),
+            Some(_) => Err(PositionLookupError::TypeWrongKind(
+                self.type_name.clone(),
+                Self::EXPECTED,
+            )),
+            None => Err(PositionLookupError::TypeMissing(self.type_name.clone())),
+        }
     }
 
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<InputObjectType>> {
-        self.get(schema).ok()
+        if let ExtendedType::InputObject(type_) = schema.types.get(&self.type_name)? {
+            Some(type_)
+        } else {
+            None
+        }
     }
 
     fn make_mut<'schema>(
@@ -6810,6 +6804,14 @@ impl InputObjectFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<InputValueDefinition>> {
+        let type_ = self.parent().try_get(schema)?;
+        type_.fields.get(&self.field_name)
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -6824,13 +6826,6 @@ impl InputObjectFieldDefinitionPosition {
                 self.field_name.clone(),
             )
         })
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Component<InputValueDefinition>> {
-        self.get(schema).ok()
     }
 
     pub(crate) fn make_mut<'schema>(
@@ -7124,21 +7119,19 @@ impl DirectiveDefinitionPosition {
         }
     }
 
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Node<DirectiveDefinition>, PositionLookupError> {
-        schema
-            .directive_definitions
-            .get(&self.directive_name)
-            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
-    }
-
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Node<DirectiveDefinition>> {
-        self.get(schema).ok()
+        schema.directive_definitions.get(&self.directive_name)
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, PositionLookupError> {
+        self.try_get(schema)
+            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
     }
 
     fn make_mut<'schema>(
@@ -7376,6 +7369,17 @@ impl DirectiveArgumentDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        let type_ = self.parent().try_get(schema)?;
+        type_
+            .arguments
+            .iter()
+            .find(|a| a.name == self.argument_name)
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -7388,13 +7392,6 @@ impl DirectiveArgumentDefinitionPosition {
             .iter()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| PositionLookupError::MissingDirectiveArgument(self.clone()))
-    }
-
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema Node<InputValueDefinition>> {
-        self.get(schema).ok()
     }
 
     fn make_mut<'schema>(

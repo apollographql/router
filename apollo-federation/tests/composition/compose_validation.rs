@@ -628,6 +628,56 @@ fn satisfiability_validation_handles_indirectly_reachable_keys() {
 }
 
 #[test]
+fn link_spec_purpose_import_uses_imported_name() {
+    use apollo_federation::subgraph::typestate::Subgraph;
+    use insta::assert_snapshot;
+
+    let a = Subgraph::parse(
+        "subgraphA",
+        "http://a",
+        r#"
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@shareable"])
+          @link(url: "https://specs.apollo.dev/link/v1.0", import: ["@link", "Purpose"])
+        type Query { a: A }
+        type A @key(fields: "id") @shareable { id: ID!, name: String }
+    "#,
+    )
+    .unwrap();
+
+    let validated = a.expand_links().unwrap().assume_validated();
+    assert_snapshot!(validated.schema_string());
+}
+
+#[test]
+fn duplicate_link_spec_application_is_rejected() {
+    use apollo_federation::subgraph::typestate::Subgraph;
+
+    let subgraph = Subgraph::parse(
+        "subgraphA",
+        "http://a",
+        r#"
+            extend schema
+              @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+              @link(url: "https://specs.apollo.dev/link/v1.0", import: ["@link", "Purpose"])
+              @link(url: "https://specs.apollo.dev/link/v1.0", import: ["@link", "Import"])
+            type Query { a: String }
+        "#,
+    )
+    .unwrap();
+    let err = subgraph
+        .expand_links()
+        .expect_err("Duplicate @link to the same spec should be rejected");
+    assert_eq!(
+        err.format_errors(),
+        vec![(
+            "INVALID_LINK_DIRECTIVE_USAGE".to_string(),
+            r#"[subgraphA] Invalid use of @link in schema: the @link specification itself ("https://specs.apollo.dev/link/v1.0") is applied multiple times"#.to_string(),
+        )],
+    );
+}
+
+#[test]
 fn interface_field_no_implem_error_includes_source_locations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
