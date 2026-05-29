@@ -789,17 +789,9 @@ impl Query {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
                         }
+                        // Emit error for missing field
+                        emit_missing_field(parameters, field_type, field_name.as_str(), path);
                         if field_type.is_non_null() {
-                            parameters.errors.push(
-                                Error::builder()
-                                    .message(format!(
-                                        "Null value found for non-nullable type {}",
-                                        field_type.0.inner_named_type()
-                                    ))
-                                    .path(Path::from_response_slice(path))
-                                    .build(),
-                            );
-
                             return Err(InvalidValue);
                         }
                     }
@@ -1240,6 +1232,58 @@ impl Query {
 
     pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
+    }
+}
+
+/// Emit a error for a user-asked field that is missing from the merged response. The caller
+/// handles null-bubbling on non-nullable fields; this helper only emits.
+///
+/// Two sinks, asymmetric coverage:
+///
+/// - `parameters.errors` → `extensions.valueCompletion`, at the **parent path** (the path on
+///   entry, without the field name pushed — the formatter never recursed into the missing field,
+///   so the leaf doesn't exist in any meaningful sense for valueCompletion). **Only fires for
+///   non-null fields**, preserving the legacy "valueCompletion is for non-null-coerced positions"
+///   convention.
+/// - `parameters.insert_coercion_error` → `response.errors`, at the **leaf path** `[...,
+///   field_name]` with code `RESPONSE_VALIDATION_FAILED`. Fires for both nullable and non-null
+///   missing fields — gated only by `enable_result_coercion_errors` (i.e.
+///   `coercion_errors.is_some()`).
+///
+/// Net effect: nullable missing surfaces only in `response.errors` when coercion is on (no new
+/// valueCompletion noise); non-null missing behaves as before plus also lands in
+/// `response.errors`.
+fn emit_missing_field<'b>(
+    parameters: &mut FormatParameters,
+    field_type: &crate::spec::FieldType,
+    field_name: &'b str,
+    path: &mut Vec<ResponsePathElement<'b>>,
+) {
+    // valueCompletion: non-null only (legacy behavior)
+    if field_type.is_non_null() {
+        // Legacy message
+        let message = format!(
+            "Null value found for non-nullable type {}",
+            field_type.0.inner_named_type()
+        );
+        let parent_path = Path::from_response_slice(path);
+        parameters
+            .errors
+            .push(Error::builder().message(message).path(parent_path).build());
+    }
+
+    // response.errors: nullable and non-null both, gated by coercion config.
+    if parameters.coercion_errors.is_some() {
+        path.push(ResponsePathElement::Key(field_name));
+        let leaf_path = Path::from_response_slice(path);
+        path.pop();
+        parameters.insert_coercion_error(
+            Error::builder()
+                .message("Missing field")
+                .path(leaf_path)
+                .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                .build(),
+        );
     }
 }
 

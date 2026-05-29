@@ -3513,6 +3513,14 @@ fn filter_nested_object_errors() {
                 "reviews1": [ null ],
             },
         }})
+        // `emit_missing_field` writes to BOTH sinks for non-null missing:
+        .expected_errors(json! {[
+            {
+                "message": "Missing field",
+                "path": ["me", "reviews1", 0, "text2"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]})
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
@@ -7277,8 +7285,14 @@ fn reformat_response_data_nested_fragment_spread_with_unions() {
                 "collection": null
             }
         }))
-        // The missing-field error must be reported; path stops at "collection"
-        // because the absent "id" field is never pushed onto the response path.
+        // `emit_missing_field` writes to BOTH sinks for non-null missing:
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "collection", "id"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
         .expected_extensions(json!({
             "valueCompletion": [
                 {

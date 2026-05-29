@@ -16,6 +16,17 @@ expression: response
       }
     },
     {
+      "message": "Missing field",
+      "path": [
+        "t",
+        "u",
+        "field"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
+      }
+    },
+    {
       "message": "Null value found for non-nullable type U",
       "path": [
         "t",
