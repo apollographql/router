@@ -255,6 +255,10 @@ impl Merger {
             }
         }
 
+        if directive_counts.is_empty() {
+            return Ok(());
+        }
+
         if definition.repeatable {
             trace!(
                 "Directive @{name} is repeatable, merging all {} applications at {dest}",

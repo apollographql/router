@@ -829,3 +829,49 @@ fn requires_error_locations_include_requires_directive_and_incompatible_fields()
     assert_eq!(locations[0].subgraph, "subgraphA");
     assert_eq!(locations[1].subgraph, "subgraphB");
 }
+
+#[test]
+fn no_empty_policy_on_interface_object_field_propagation() {
+    // When an @interfaceObject adds fields to implementation types, the code previously
+    // called merge_applied_directive for ALL access control directives with empty sources.
+    // The DNF conjunction merger would then produce @policy(policies: []) from zero
+    // applications. This verifies the fix: only merge when additional sources exist.
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query { product(id: ID!): Product }
+
+            interface Product @key(fields: "id") {
+              id: ID!
+              name: String!
+            }
+
+            type Book implements Product @key(fields: "id") {
+              id: ID!
+              name: String!
+              isbn: String! @policy(policies: [["read"]])
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type Product @key(fields: "id") @interfaceObject {
+              id: ID!
+              reviews: [String!]!
+            }
+        "#,
+    };
+
+    use insta::assert_snapshot;
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).unwrap();
+    let book = result
+        .schema()
+        .schema()
+        .types
+        .get("Book")
+        .expect("Book should exist in supergraph");
+    assert_snapshot!(book.to_string());
+}
