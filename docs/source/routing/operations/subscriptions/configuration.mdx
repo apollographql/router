@@ -307,23 +307,23 @@ For more information on this multipart HTTP subscription protocol, see [this art
 
 ## Network path considerations for client connections
 
-Configure every proxy, CDN, gateway, and firewall between the client and the router to enable long-lived streaming responses. Subscription replies aren't one-time HTTP responses. The router holds the connection open and pushes events back as a multipart stream over the same HTTP request the client opened. Any hop that buffers responses, enforces a short idle or response timeout, or silently breaks the response path closes the connection before the client receives subscription events.
+Configure every proxy, CDN, gateway, and firewall between the client and Router to enable long-lived streaming responses. Subscription replies aren't one-time HTTP responses. Router holds the connection open and pushes events back as a multipart stream over the same HTTP request the client opened. Any hop that buffers responses, enforces a short idle or response timeout, or silently breaks the response path closes the connection before the client receives subscription events.
 
 Every hop in that path needs three things:
 
 - Streaming, unbuffered responses
 - Idle, read, or response timeouts long enough to cover the longest subscription you support
-- A symmetric path between the router and the client
+- A symmetric path between Router and the client
 
-A reverse proxy that buffers the full response before forwarding it (the default for many proxies) holds subscription events until the connection is forcibly closed. The client then sees a 504 with no payload. Configure each proxy in the path to forward chunked responses without buffering. To verify, run the [`curl` walkthrough](#trying-subscriptions-with-curl) against the router through the same network path and confirm that response chunks arrive incrementally rather than in one batch when the connection closes.
+A reverse proxy that buffers the full response before forwarding it (the default for many proxies) holds subscription events instead of streaming them. When the proxy's response timeout fires, the proxy closes the connection and the client sees a 504 with no payload. Configure each proxy in the path to forward chunked responses without buffering. To verify, run the [`curl` walkthrough](#trying-subscriptions-with-curl) against Router through the same network path and confirm that response chunks arrive incrementally rather than in one batch when the connection closes.
 
-The most common timeout offender is the idle timeout, but any equivalent read, response, or connection-drain timeout on each hop has the same effect. Defaults vary widely by provider (often a minute or less, but some platforms default higher), so check each hop's documentation rather than relying on a global rule. Set every relevant timeout to be longer than the longest subscription you support. If you've set [`max_lifetime`](#limit-subscription-lifetime), use that value as the floor.
+A common timeout offender is the idle timeout, but any equivalent read, response, or connection-drain timeout on each hop has the same effect. Defaults vary widely by provider (often a minute or less, but some platforms default higher), so check each hop's documentation rather than relying on a global rule. Set every relevant timeout to be longer than the longest subscription you support. If you've set [`max_lifetime`](#limit-subscription-lifetime), use that value as the floor.
 
-When a corporate firewall, VPC security group, or asymmetric routing policy breaks the path between the router and the client, the router accepts the subscription request but the response stream may not return to the client. The diagnostic looks identical to a buffering or timeout failure (504 at the client with no router-side metric event). Include path-asymmetry checks in your investigation when the simpler causes don't pan out.
+When a corporate firewall, VPC security group, or asymmetric routing policy breaks the path between Router and the client, Router accepts the subscription request, but the response stream might not return to the client. The diagnostic looks identical to a buffering or timeout failure (504 at the client with no router-side metric event). Include path-asymmetry checks in your investigation when you can't identify more common causes.
 
-Use the [`apollo.router.operations.subscriptions.terminated.client`](#tracking-subgraph-connection-failures-and-closures) metric as the primary diagnostic split. When the metric fires for the failing subscription (with `reason=heartbeat_delivery_failed` or `client_disconnect`), the router observed the disconnect itself. The failure is at the router-to-client boundary or on the client. When the metric does not fire and the client still saw a 504, an intermediary closed the connection without the router seeing it. Check the proxy, gateway, and firewall logs first.
+Use the [`apollo.router.operations.subscriptions.terminated.client`](#tracking-subgraph-connection-failures-and-closures) metric as the primary diagnostic split. When the metric fires for the failing subscription (with `reason=heartbeat_delivery_failed` or `client_disconnect`), Router has observed the disconnect itself. The failure is at the router-to-client boundary or on the client. When the metric doesn't fire and the client still sees a 504, an intermediary might have closed the connection without Router seeing it. Check the proxy, gateway, and firewall logs first.
 
-If 504s persist after every hop is configured for streaming and timeouts cover the expected lifetime, the metric tells you which side of the router boundary to investigate next.
+If 504s persist after you have configured every hop for streaming and made sure the timeouts cover the expected lifetime, the metric tells you which side of the router boundary to investigate next.
 
 ## Subscription deduplication
 
