@@ -51,20 +51,6 @@ expression: body.extensions
             "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
           },
           {
-            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
-            "links": [
-              {
-                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
-                "title": "Configure default TTL in the Router"
-              },
-              {
-                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
-                "title": "Cache-Control header documentation"
-              }
-            ],
-            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
-          },
-          {
             "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
             "links": [
               {
@@ -132,20 +118,6 @@ expression: body.extensions
               }
             ],
             "message": "Either the request or the subgraph response contained a Cache-Control header with no-store, so the data was not cached"
-          },
-          {
-            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
-            "links": [
-              {
-                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
-                "title": "Configure default TTL in the Router"
-              },
-              {
-                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
-                "title": "Cache-Control header documentation"
-              }
-            ],
-            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
           }
         ]
       }
