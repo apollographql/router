@@ -1,4 +1,4 @@
-mod delimitted_formatter;
+mod delimited_formatter;
 
 use std::fmt::Display;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::delimitted_formatter::DelimitedFormatter;
+use self::delimited_formatter::DelimitedFormatter;
 
 /// REQUEST Cache control header either:
 /// * Sent from client to router to control response cache
