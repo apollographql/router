@@ -413,5 +413,45 @@ mod tests {
                 version: Version { major: 0, minor: 1 }
             }
         );
+
+        // Non-default port is preserved in the identity domain.
+        assert_eq!(
+            "http://localhost:8080/foo/v1.0".parse::<Url>().unwrap(),
+            Url {
+                identity: Identity {
+                    domain: "http://localhost:8080".to_string(),
+                    name: name!("foo")
+                },
+                version: Version { major: 1, minor: 0 }
+            }
+        );
+
+        // Non-default port is preserved alongside a path remainder.
+        assert_eq!(
+            "http://localhost:8080/extra/foo/v1.0"
+                .parse::<Url>()
+                .unwrap(),
+            Url {
+                identity: Identity {
+                    domain: "http://localhost:8080/extra".to_string(),
+                    name: name!("foo")
+                },
+                version: Version { major: 1, minor: 0 }
+            }
+        );
+
+        // Default https port is omitted, so existing identities are unaffected.
+        assert_eq!(
+            "https://specs.apollo.dev:443/federation/v2.3"
+                .parse::<Url>()
+                .unwrap(),
+            Url {
+                identity: Identity {
+                    domain: "https://specs.apollo.dev".to_string(),
+                    name: name!("federation")
+                },
+                version: Version { major: 2, minor: 3 }
+            }
+        );
     }
 }
