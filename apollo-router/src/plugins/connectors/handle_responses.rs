@@ -58,10 +58,11 @@ impl From<RuntimeError> for graphql::Error {
             .path(path)
             .build();
 
-        // `process_response` emits a span event for every `MappedResponse::Error` it builds.
-        // Mark the resulting `graphql::Error` so the catch-all in `count_operation_errors`
-        // doesn't fire a duplicate.
-        err.set_span_event_emitted(true);
+        // Carry over whether a span event was already emitted for this error at its source site
+        // (set by `process_response`). Errors that reach this conversion without emitting — e.g.
+        // coprocessor `Break` or traffic-shaping timeout/rate-limit — keep the flag `false` so the
+        // catch-all in `count_operation_errors` still emits exactly one event for them.
+        err.set_span_event_emitted(error.span_event_emitted());
 
         if let Some(subgraph_name) = &error.subgraph_name {
             err.with_subgraph_name(subgraph_name)
@@ -88,7 +89,7 @@ where
     T: HttpBody,
     T::Error: Into<tower::BoxError>,
 {
-    let (mapped_response, result) = match result {
+    let (mut mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -244,11 +245,13 @@ where
         }
     };
 
-    if let MappedResponse::Error { ref error, .. } = mapped_response {
+    if let MappedResponse::Error { ref mut error, .. } = mapped_response {
         // Emit here so the event picks up the connector request-service span's attributes
-        // (coordinate, source, etc.). `From<RuntimeError>` marks the resulting error so the
-        // centralized emit won't fire a duplicate.
+        // (coordinate, source, etc.). Mark the error as emitted so `From<RuntimeError>` carries
+        // the flag through and the centralized catch-all in `count_operation_errors` won't fire a
+        // duplicate.
         emit_error_event(error.code(), &error.message, Some((*error.path).into()));
+        error.set_span_event_emitted(true);
     }
 
     connector::request_service::Response {
@@ -396,6 +399,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
+    use apollo_federation::connectors::runtime::errors::RuntimeError;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
@@ -407,6 +411,35 @@ mod tests {
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
+
+    #[test]
+    fn from_runtime_error_transfers_span_event_emitted_flag() {
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        // An error that never had a span event emitted at its source (e.g. coprocessor `Break`
+        // or traffic-shaping timeout/rate-limit) must keep the flag `false` so the catch-all in
+        // `count_operation_errors` still emits exactly one event for it.
+        let not_emitted = RuntimeError::new("boom", &response_key);
+        let converted: graphql::Error = not_emitted.into();
+        assert!(
+            !converted.span_event_emitted(),
+            "errors that never emitted a span event must not be marked as emitted"
+        );
+
+        // An error whose source site already emitted (process_response sets this) must carry the
+        // flag through so the catch-all doesn't fire a duplicate.
+        let mut emitted = RuntimeError::new("boom", &response_key);
+        emitted.set_span_event_emitted(true);
+        let converted: graphql::Error = emitted.into();
+        assert!(
+            converted.span_event_emitted(),
+            "errors whose source already emitted must stay marked as emitted"
+        );
+    }
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
