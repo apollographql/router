@@ -334,15 +334,15 @@ impl CacheControl {
         self.no_store |= other.no_store;
     }
 
-    pub(crate) fn merge_and_update_ttl(&self, other: &Self) -> Self {
-        self.merge(other, Some(now_epoch_seconds()))
+    pub(crate) fn merge(&self, other: &Self) -> Self {
+        self.merge_inner(other, true)
     }
 
     pub(crate) fn merge_without_ttl_update(&self, other: &Self) -> Self {
-        self.merge(other, None)
+        self.merge_inner(other, false)
     }
 
-    fn merge(&self, other: &Self, now: Option<u64>) -> Self {
+    fn merge_inner(&self, other: &Self, update_ttl: bool) -> Self {
         // If no-store, write just that and return early. This prevents potentially conflicting
         // directives (https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing).
         // TODO: is this really what we want? what if it's not no-cache?
@@ -353,8 +353,11 @@ impl CacheControl {
             };
         }
 
+        let now_epoch = now_epoch_seconds();
+        let now = update_ttl.then_some(now_epoch);
+
         Self {
-            created: now.unwrap_or(0),
+            created: now_epoch,
             age: None,
             max_age: minimum_optional_value(
                 self.remaining_max_age(now),

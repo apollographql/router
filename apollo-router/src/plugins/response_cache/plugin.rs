@@ -1203,7 +1203,7 @@ impl CacheService {
                 );
 
                 if let Some(control_from_cached) = cache_result.1 {
-                    cache_control = cache_control.merge_and_update_ttl(&control_from_cached);
+                    cache_control = cache_control.merge(&control_from_cached);
                 }
 
                 // if the request had no_store on it, propagate that to this cache control
@@ -1661,12 +1661,12 @@ async fn cache_lookup_entities(
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
-            *c = c.merge_and_update_ttl(cache_control);
+            *c = c.merge(cache_control);
         } else {
             // Go through the "merge" algorithm even with a single value
             // in order to keep single-fetch queries consistent between cache hit and miss,
             // and with multi-fetch queries.
-            let new_cache_control = cache_control.merge_and_update_ttl(cache_control);
+            let new_cache_control = cache_control.merge(cache_control);
             lock.insert(new_cache_control);
         }
     })
@@ -2409,7 +2409,7 @@ fn filter_representations(
                 cache_hit.entry(typename.clone()).or_default().hit += 1;
                 match cache_control.as_mut() {
                     None => cache_control = Some(entry.control.clone()),
-                    Some(c) => *c = c.merge_and_update_ttl(&entry.control),
+                    Some(c) => *c = c.merge(&entry.control),
                 }
                 match non_updated_cache_control.as_mut() {
                     None => non_updated_cache_control = Some(entry.control.clone()),
