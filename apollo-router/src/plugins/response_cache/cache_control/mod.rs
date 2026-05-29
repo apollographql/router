@@ -165,11 +165,10 @@ impl TryFrom<&HeaderMap> for CacheControl {
                 let (key, value) = parse_directive(directive)?;
 
                 let parse_value = |value: Option<&str>| -> Result<u64, BoxError> {
-                    let value = value.ok_or_else(Err(format!(
-                        "invalid Cache-Control header value: {directive}"
-                    )
-                    .into()))?;
-                    value.parse()?
+                    let value = value.ok_or_else(|| {
+                        format!("invalid Cache-Control header value: {directive}")
+                    })?;
+                    Ok(value.parse()?)
                 };
 
                 match key {
