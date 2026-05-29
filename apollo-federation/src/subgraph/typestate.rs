@@ -8,9 +8,11 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
 use tracing::trace;
 
@@ -28,6 +30,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -419,7 +422,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = self.state.schema.into();
         let field_set_scalar_name =
             schema.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
-        if let Some(field_set_scalar) = schema.try_get_type(field_set_scalar_name) {
+        if let Some(field_set_scalar) = schema.try_get_type(&field_set_scalar_name) {
             // rename _FieldSet scalar to federation__FieldSet
             field_set_scalar.rename(
                 &mut schema,
@@ -469,7 +472,7 @@ impl Subgraph<Expanded> {
             let default_name = default_operation_name(&op_type);
             if op_name.name != default_name {
                 operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                if self.schema().try_get_type(default_name.clone()).is_some() {
+                if self.schema().try_get_type(&default_name).is_some() {
                     return Err(SingleFederationError::root_already_used(
                         op_type,
                         default_name,
@@ -495,7 +498,7 @@ impl Subgraph<Expanded> {
         let mut schema: FederationSchema = schema.into();
         for (current_name, new_name) in &operation_types_to_rename {
             schema
-                .get_type(current_name.clone())?
+                .get_type(current_name)?
                 .rename(&mut schema, new_name.clone())?;
         }
         let schema = validate_subgraph_schema(schema)?;
@@ -573,7 +576,7 @@ fn normalize_root_types_in_subgraph_schema(
         let default_name = default_operation_name(&op_type);
         if op_name.name != default_name {
             operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-            if schema.try_get_type(default_name.clone()).is_some() {
+            if schema.try_get_type(&default_name).is_some() {
                 return Err(SingleFederationError::root_already_used(
                     op_type,
                     default_name,
@@ -586,7 +589,7 @@ fn normalize_root_types_in_subgraph_schema(
     let changed = !operation_types_to_rename.is_empty();
     for (current_name, new_name) in &operation_types_to_rename {
         schema
-            .get_type(current_name.clone())?
+            .get_type(current_name)?
             .rename(schema, new_name.clone())?;
         // Update metadata to reflect the type rename
         metadata.update_type_references(current_name, new_name);
@@ -724,24 +727,6 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
     }
 
-    pub(crate) fn interface_objects(&self) -> Vec<ObjectTypeDefinitionPosition> {
-        let Ok(Some(interface_object_def)) = self
-            .metadata()
-            .federation_spec_definition()
-            .interface_object_directive_definition(self.schema())
-        else {
-            return vec![];
-        };
-
-        self.schema()
-            .referencers()
-            .get_directive(&interface_object_def.name)
-            .object_types
-            .iter()
-            .cloned()
-            .collect()
-    }
-
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {
         if let TypeDefinitionPosition::Object(obj) = type_ {
             return self.metadata().is_interface_object_type(&obj.type_name);
@@ -750,13 +735,24 @@ impl<S: HasMetadata> Subgraph<S> {
     }
 
     pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
-        self.schema()
+        let locations: Locations = self
+            .schema()
             .node_locations(node)
             .map(|range| SubgraphLocation {
                 subgraph: self.name.clone(),
                 range,
             })
-            .collect()
+            .collect();
+        if locations.is_empty() {
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
+            vec![SubgraphLocation {
+                subgraph: self.name.clone(),
+                range: default_range,
+            }]
+        } else {
+            locations
+        }
     }
 }
 
@@ -894,6 +890,36 @@ pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchem
     Ok(schema)
 }
 
+/// Coerce unquoted `fields` argument on `@key` from enum to string value.
+/// `FieldSet` is a custom scalar, and fed1 schemas were allowed to use `@key(fields: id)`
+/// (unquoted) which is parsed as an enum value. We keep this for backward compatibility.
+fn coerce_key_fieldset_enum_values(schema: &mut Schema) {
+    if !schema
+        .directive_definitions
+        .contains_key(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    {
+        return;
+    }
+
+    schema
+        .types
+        .values_mut()
+        .filter_map(|ty| match ty {
+            ExtendedType::Object(obj) => Some(&mut obj.make_mut().directives),
+            ExtendedType::Interface(itf) => Some(&mut itf.make_mut().directives),
+            _ => None,
+        })
+        .flat_map(|directives| directives.iter_mut())
+        .filter(|d| d.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+        .flat_map(|d| &mut d.make_mut().arguments)
+        .filter(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
+        .for_each(|arg| {
+            if let Value::Enum(name) = arg.make_mut().value.make_mut() {
+                *arg.make_mut().value.make_mut() = Value::String(name.to_string());
+            }
+        });
+}
+
 /// Expands schema with all imported federation definitions.
 pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, FederationError> {
     let mut schema: FederationSchema = new_federation_subgraph_schema(schema)?;
@@ -921,6 +947,12 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     // Now we fill in the missing definitions
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
+
+    // `FieldSet` is a custom scalar, and fed1 allowed `@key(fields: id)` (unquoted).
+    // Coerce these enum values to strings for backward compatibility.
+    if !schema.is_fed_2() {
+        coerce_key_fieldset_enum_values(schema.schema_mut());
+    }
 
     // Since we backfilled definitions, we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be

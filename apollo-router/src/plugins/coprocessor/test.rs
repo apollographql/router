@@ -5107,6 +5107,8 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_deletes_missing_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5115,6 +5117,8 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
         target_context.insert("k3", "v3".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2", "k3"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context without k2 (deleted)
         let returned_context = Context::new();
@@ -5129,6 +5133,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5148,12 +5153,16 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_adds_new_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
         // Create a context with some keys
         let target_context = Context::new();
         target_context.insert("k1", "v1".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context with a new key
         let returned_context = Context::new();
@@ -5167,6 +5176,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5204,10 +5214,16 @@ mod tests {
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
         let context_config =
             ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &context_config)
-            .unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_config,
+            &keys_sent,
+        )
+        .unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5227,6 +5243,8 @@ mod tests {
         )]
         context_conf: ContextConf,
     ) {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5234,8 +5252,18 @@ mod tests {
             Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
         let returned_context =
             Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+        let keys_sent: HashSet<String> = [target_context_key_name]
+            .into_iter()
+            .map(String::from)
+            .collect();
 
-        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_conf,
+            &keys_sent,
+        )
+        .unwrap();
 
         assert_eq!(
             target_context.get_json_value(CLIENT_NAME),
@@ -5246,6 +5274,100 @@ mod tests {
             !target_context.contains_key(DEPRECATED_CLIENT_NAME),
             "DEPRECATED_CLIENT_NAME should not be present"
         );
+    }
+
+    #[test]
+    fn test_update_context_from_coprocessor_preserves_concurrently_added_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate: keys_sent = {k1, k2} (snapshot at time T1), then k3 is added
+        // to target concurrently (at time T2), coprocessor returns {k1} (deleted k2).
+        // Result: k1 kept, k2 deleted, k3 preserved (was never sent).
+        let target_context = Context::new();
+        target_context.insert("k1", "v1".to_string()).unwrap();
+        target_context.insert("k2", "v2".to_string()).unwrap();
+        // k3 simulates a key added by a concurrent parallel subgraph stage after the
+        // snapshot was taken but before the retain runs
+        target_context
+            .insert("k3", "concurrent_value".to_string())
+            .unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2"].into_iter().map(String::from).collect();
+        let returned_context = Context::new();
+        returned_context.insert("k1", "v1".to_string()).unwrap();
+        // k2 intentionally removed by coprocessor
+        // k3 was never sent, must survive
+
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        assert!(target_context.contains_key("k1"));
+        assert!(!target_context.contains_key("k2")); // deleted by coprocessor
+        assert!(target_context.contains_key("k3")); // preserved (never sent)
+    }
+
+    #[test]
+    fn test_sibling_subgraph_response_does_not_delete_other_subgraphs_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate the parallel fanout scenario:
+        // - accounts SubgraphRequest added accounts_request_start to shared context
+        // - book SubgraphResponse fires, its snapshot didn't include accounts_request_start
+        // - book's coprocessor returns without accounts_request_start
+        // - accounts_request_start must survive in the shared context
+        let shared_context = Context::new();
+        shared_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        shared_context
+            .insert("accounts_request_start", 1234i64)
+            .unwrap();
+        shared_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+
+        // book's snapshot only had base_key and book_request_start at the time
+        let keys_sent: HashSet<String> = ["base_key", "book_request_start"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let returned_context = Context::new();
+        returned_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        returned_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+        returned_context
+            .insert("book_request_end", 5700i64)
+            .unwrap();
+
+        update_context_from_coprocessor(
+            &shared_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        // accounts_request_start was never sent to book's coprocessor, so it must survive
+        assert!(shared_context.contains_key("accounts_request_start"));
+        assert!(shared_context.contains_key("book_request_start"));
+        // new key added by coprocessor
+        assert!(shared_context.contains_key("book_request_end"));
+        assert!(shared_context.contains_key("base_key"));
     }
 
     // Subgraph stage metrics test
@@ -5734,6 +5856,134 @@ mod tests {
                 4,
                 Some(false),
             )]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn router_response_deferred_chunk_metric_incremented_when_on_graphql_error_matches() {
+        // Tests that apollo.router.operations.coprocessor is recorded when a deferred chunk
+        // matches the on_graphql_error condition, even when the first chunk did not match.
+        //
+        // Bug: `executed` was only set based on first-chunk processing.  If the first chunk
+        // had no errors (condition false) but a later deferred chunk did (condition true), the
+        // metric was never recorded because the lazy mapped_stream runs after `executed` is
+        // checked by the caller.
+        //
+        // The mock uses supergraph::Response::new_from_response (which calls check_for_errors
+        // internally) to drive CHUNK_CONTAINS_GRAPHQL_ERROR from the actual response content —
+        // the same mechanism used in the real pipeline.
+        async {
+            use futures::StreamExt as _;
+
+            use crate::graphql::Error as GraphQLError;
+            use crate::plugins::telemetry::config::AttributeValue;
+
+            // RouterStage with condition: on_graphql_error: true
+            let router_stage = RouterStage {
+                request: Default::default(),
+                response: RouterResponseConf {
+                    condition: Condition::Eq([
+                        SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
+                            on_graphql_error: true,
+                        }),
+                        SelectorOrValue::Value(AttributeValue::Bool(true)),
+                    ]),
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            // HTTP client mock: returns a simple "continue" response for coprocessor calls
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = json!({
+                        "version": 1,
+                        "stage": "RouterResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Mock router service returning a 2-chunk response. The response is built using
+            // supergraph::Response::new_from_response, which calls check_for_errors internally.
+            // check_for_errors wraps the graphql::Response stream so that CHUNK_CONTAINS_GRAPHQL_ERROR
+            // is set in context as each chunk is polled — identical to how the real pipeline works.
+            //
+            //   Chunk 1: no errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = false
+            //   Chunk 2: has errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = true
+            let mut mock_router_service = MockRouterService::new();
+            mock_router_service
+                .expect_call()
+                .returning(move |req: router::Request| {
+                    let ctx = req.context.clone();
+
+                    let graphql_chunks = vec![
+                        // Chunk 1: successful response — condition will not fire
+                        Response::builder()
+                            .data(serde_json_bytes::json!({"hello": "world"}))
+                            .build(),
+                        // Chunk 2: response with errors — condition will fire
+                        Response::builder()
+                            .errors(vec![
+                                GraphQLError::builder().message("deferred error").build(),
+                            ])
+                            .build(),
+                    ];
+
+                    // new_from_response applies check_for_errors, which lazily sets
+                    // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
+                    let sg_response = supergraph::Response::new_from_response(
+                        http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
+                        ctx.clone(),
+                    );
+
+                    // Serialize the graphql stream to bytes. CHUNK_CONTAINS_GRAPHQL_ERROR is
+                    // set by check_for_errors before each chunk is yielded, so downstream
+                    // condition evaluation in process_router_response_stage reads accurate values.
+                    let bytes_stream = sg_response.response.into_body().map(|graphql_resp| {
+                        Ok::<bytes::Bytes, tower::BoxError>(
+                            serde_json::to_vec(&graphql_resp)
+                                .expect("graphql::Response serializes without error")
+                                .into(),
+                        )
+                    });
+
+                    let body = router::body::from_result_stream(bytes_stream);
+                    Ok(router::Response::http_response_builder()
+                        .response(http::Response::new(body))
+                        .context(ctx)
+                        .build()
+                        .unwrap())
+                });
+
+            let service_stack = router_stage
+                .as_service(
+                    mock_http_client,
+                    mock_router_service.boxed(),
+                    "http://test".to_string(),
+                    Arc::new("".to_string()),
+                    false,
+                )
+                .boxed();
+
+            let request = router::Request::fake_builder().build().unwrap();
+            let response = service_stack.oneshot(request).await.unwrap();
+            // Drain the response body — this forces the lazy mapped_stream to run,
+            // which calls the coprocessor for the deferred error chunk.
+            let _ = router::body::into_bytes(response.response.into_body()).await;
+
+            // The coprocessor should have been called exactly once — for the deferred
+            // chunk that contained GraphQL errors. Before the fix, the metric was silently
+            // dropped because `executed` was already checked (as false) before the stream ran.
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
         }
         .with_metrics()
         .await;
@@ -6314,11 +6564,11 @@ mod tests {
                     None,
                     0,
                 ),
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -6351,10 +6601,10 @@ mod tests {
                 .body(r#"{"query":"test"}"#.to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             request_service::Request {
                 context: crate::Context::default(),
@@ -6520,10 +6770,10 @@ mod tests {
                 .body("plain text body".to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             let request = request_service::Request {
                 context: crate::Context::default(),
@@ -6603,7 +6853,9 @@ mod tests {
                 let captured_uri = captured_uri_clone.clone();
                 let captured_headers = captured_headers_clone.clone();
                 async move {
-                    let TransportRequest::Http(ref http_req) = req.transport_request;
+                    let TransportRequest::Http(ref http_req) = req.transport_request else {
+                        panic!("expected Http transport request");
+                    };
                     *captured_uri.lock().unwrap() = http_req.inner.uri().to_string();
                     *captured_headers.lock().unwrap() = http_req
                         .inner

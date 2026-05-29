@@ -92,10 +92,17 @@ fn invalid_fields_error_from_diagnostics(
 ) -> FederationError {
     let mut errors = MultipleFederationErrors::new();
     for diagnostic in diagnostics.iter() {
+        let mut message = normalize_diagnostic_message(diagnostic);
+        if message.starts_with("Cannot query field") {
+            let base = message.trim_end_matches('.');
+            message = format!(
+                "{base} (the field should either be added to this subgraph or, if it should not be resolved by this subgraph, you need to add it to this subgraph with @external)."
+            );
+        }
         errors.errors.push(SingleFederationError::KeyInvalidFields {
             target_type: key.target.type_name().clone(),
             application: key.schema_directive.to_string(),
-            message: normalize_diagnostic_message(diagnostic),
+            message,
         })
     }
     errors.into()

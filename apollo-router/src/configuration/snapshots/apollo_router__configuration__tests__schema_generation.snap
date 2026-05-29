@@ -733,6 +733,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +745,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +996,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {
@@ -4370,10 +4368,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4381,10 +4386,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
@@ -4651,10 +4663,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4662,10 +4681,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
@@ -8278,6 +8304,31 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Reload": {
+      "additionalProperties": false,
+      "description": "Configuration for router reload behavior.",
+      "properties": {
+        "max_retries": {
+          "default": 5,
+          "description": "Maximum number of automatic retry attempts when a reload fails.\n`0` disables automatic retries entirely.\n`null` allows unlimited retries.\nDefaults to 5 — an arbitrary but conservative limit to prevent a\nbad publish from causing endless reload attempts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Base delay between retry attempts. A random jitter of up to 25% is\nadded automatically to spread retries across router instances.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Remove": {
       "description": "Remove header",
       "oneOf": [
@@ -8810,6 +8861,34 @@ expression: "&schema"
           },
           "required": [
             "response_errors"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Count of response errors matching a JSONPath filter",
+          "properties": {
+            "response_errors_count": {
+              "description": "JSONPath filter for response errors. Use \"$[*]\" to count all errors.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Extract a specific field from each error in the response",
+          "properties": {
+            "response_errors_field": {
+              "description": "JSONPath to extract from each error. E.g., \"$.message\" or \"$.extensions.code\"",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_field"
           ],
           "type": "object"
         },
@@ -13043,6 +13122,21 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/definitions/Config7"
+    },
+    "reload": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Reload"
+        }
+      ],
+      "default": {
+        "max_retries": 5,
+        "retry_delay": {
+          "nanos": 0,
+          "secs": 10
+        }
+      },
+      "description": "Reload configuration"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

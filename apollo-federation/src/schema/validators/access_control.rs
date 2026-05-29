@@ -121,7 +121,7 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
         for field in &requires_referencers.object_fields {
             fields_with_requires.insert(
                 ObjectOrInterfaceTypeDefinitionPosition::try_from(
-                    supergraph_schema.get_type(field.type_name.clone())?,
+                    supergraph_schema.get_type(&field.type_name)?,
                 )?
                 .field(field.field_name.clone()),
             );
@@ -143,7 +143,7 @@ pub(crate) fn validate_transitive_access_control_requirements_in_the_supergraph(
             for argument in &from_context_referencers.object_field_arguments {
                 fields_with_from_context.insert(
                     ObjectOrInterfaceTypeDefinitionPosition::try_from(
-                        supergraph_schema.get_type(argument.type_name.clone())?,
+                        supergraph_schema.get_type(&argument.type_name)?,
                     )?
                     .field(argument.field_name.clone()),
                 );
@@ -326,8 +326,7 @@ impl<'validator> AccessControlValidator<'validator> {
                     if let Some(target_type_names) = self.contexts.get(context_arg.context) {
                         // we need to verify against all possible contexts
                         for target_type_name in target_type_names {
-                            let target_type =
-                                self.valid_schema.get_type(target_type_name.clone())?;
+                            let target_type = self.valid_schema.get_type(target_type_name)?;
                             let target_type_auth_requirements =
                                 self.read_auth_requirements_from_element(&target_type)?;
                             if !auth_requirements_on_context
@@ -499,7 +498,7 @@ impl<'validator> AccessControlValidator<'validator> {
             Err(FederationError::SingleFederationError(
                 SingleFederationError::MissingTransitiveAuthRequirements {
                     message: format!(
-                        "Field \"{}\" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive field \"{condition_position}\" data from @{} selection set.",
+                        "Field \"{}\" does not specify necessary @authenticated, @requiresScopes and/or @policy auth requirements to access the transitive data in inline fragment type condition \"{condition_position}\" from @{} selection set.",
                         auth_requirements.field_coordinate, auth_requirements.directive
                     ),
                 },

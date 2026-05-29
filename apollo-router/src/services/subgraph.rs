@@ -34,6 +34,7 @@ use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
@@ -176,7 +177,6 @@ impl Request {
 impl Clone for Request {
     fn clone(&self) -> Self {
         // http::Request is not clonable so we have to rebuild a new one
-        // we don't use the extensions field for now
         let mut builder = http::Request::builder()
             .method(self.subgraph_request.method())
             .version(self.subgraph_request.version())
@@ -191,7 +191,22 @@ impl Clone for Request {
                     .map(|(name, value)| (name.clone(), value.clone())),
             );
         }
-        let subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
+        let mut subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
+        // Copy only Arc<SigningParamsConfig> so APQ probe requests can be signed.
+        //
+        // We deliberately avoid copying all extensions: some types (e.g. MultipartFormData
+        // in the file-uploads plugin) hold shared stream state that must not be shared with
+        // the APQ probe clone — draining the probe would exhaust the original on retry.
+        //
+        // If a new extension type needs to survive SubgraphRequest clones, add it here.
+        if let Some(signing_params) = self
+            .subgraph_request
+            .extensions()
+            .get::<Arc<SigningParamsConfig>>()
+            .cloned()
+        {
+            subgraph_request.extensions_mut().insert(signing_params);
+        }
 
         Self {
             supergraph_request: self.supergraph_request.clone(),
@@ -590,6 +605,38 @@ mod tests {
             req_with_claims_a.to_sha256(&ignored_headers, true),
             req_with_claims_b.to_sha256(&ignored_headers, true),
             "requests with different JWT claims must hash identically when ignore_auth_context is true"
+        );
+    }
+
+    #[test]
+    fn test_clone_does_not_copy_arbitrary_subgraph_request_extensions() {
+        // The Clone impl copies only specific extension types needed for APQ retries
+        // (Arc<SigningParamsConfig> for SigV4 — see authentication/subgraph.rs for the
+        // positive test). Arbitrary types must NOT be copied: some extensions
+        // (e.g. MultipartFormData in file uploads) hold shared stream state, and copying
+        // them would cause the APQ probe clone to exhaust the stream before the retry.
+        #[derive(Clone, PartialEq, Debug)]
+        struct ShouldNotSurviveClone(u32);
+
+        let mut req = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        req.subgraph_request
+            .extensions_mut()
+            .insert(ShouldNotSurviveClone(42));
+
+        let cloned = req.clone();
+        assert!(
+            cloned
+                .subgraph_request
+                .extensions()
+                .get::<ShouldNotSurviveClone>()
+                .is_none(),
+            "arbitrary extension types must not be copied when SubgraphRequest is cloned"
         );
     }
 }

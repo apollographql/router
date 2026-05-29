@@ -161,36 +161,54 @@ impl Merger {
                 };
 
                 let subgraph = &self.subgraphs[*idx];
+                let Some(subgraph_definition) =
+                    subgraph.schema().schema().directive_definitions.get(name)
+                else {
+                    return vec![];
+                };
+
                 let mut applications = source
                     .get_applied_directives(subgraph.schema(), name)
                     .into_iter()
-                    .map(|d| (**d).clone())
+                    .map(|d| ((**d).clone(), subgraph_definition))
                     .collect_vec();
+                // PORT NOTE: JS applies transforms for repeatable directives only
+                // this might have been a miss as it is currently only used for @context
                 if let Some(transform) =
                     &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
                 {
-                    for application in &mut applications {
+                    for (application, _) in &mut applications {
                         self.transform_arguments(application, subgraph, transform.as_ref());
                     }
                 }
                 applications
             })
-            .fold(Default::default(), |mut acc, directive| {
-                // Note that when comparing arguments, we include default values. This means that we
-                // consider it the same thing (as far as merging application goes) to rely on a default
-                // value or to pass that very exact value explicitly.
-                let args = self.directive_arguments_with_defaults(&directive, &definition);
-                if let Some((_, count)) = acc.iter_mut().find(|(existing, _)| {
-                    let existing_args =
-                        self.directive_arguments_with_defaults(existing, &definition);
-                    existing_args == args
-                }) {
-                    *count += 1;
-                } else {
-                    acc.insert(directive, 1);
-                }
-                acc
-            });
+            .fold(
+                Default::default(),
+                |mut acc: IndexMap<(Directive, &Node<DirectiveDefinition>), usize>,
+                 (directive, subgraph_definition)| {
+                    // Note that when comparing arguments, we include default values. This means that we
+                    // consider it the same thing (as far as merging application goes) to rely on a default
+                    // value or to pass that very exact value explicitly.
+                    let args =
+                        self.directive_arguments_with_defaults(&directive, subgraph_definition);
+                    if let Some((_, count)) =
+                        acc.iter_mut().find(|((existing, existing_def), _)| {
+                            let existing_args =
+                                self.directive_arguments_with_defaults(existing, existing_def);
+                            existing_args == args
+                        })
+                    {
+                        *count += 1;
+                    } else {
+                        acc.insert((directive, subgraph_definition), 1);
+                    }
+                    acc
+                },
+            )
+            .into_iter()
+            .map(|((directive, _), count)| (directive, count))
+            .collect();
 
         // PORT NOTE: in JS version we were populating additional sources for access control in record_applied_directives_to_merge
         // without any changes in the merge_applied_directive_logic.
@@ -217,7 +235,9 @@ impl Merger {
                         .iter()
                         .flat_map(|(index, sources)| {
                             let subgraph = &self.subgraphs[*index];
-                            let mut applications = sources
+                            // access control directives do not specify static argument transforms
+                            // we'll need to update the logic below if this changes in the future
+                            sources
                                 .iter()
                                 .flat_map(|source| {
                                     source
@@ -225,19 +245,7 @@ impl Merger {
                                         .into_iter()
                                         .map(|d| (**d).clone())
                                 })
-                                .collect_vec();
-                            if let Some(transform) = &directive_in_supergraph
-                                .and_then(|d| d.static_argument_transform.as_ref())
-                            {
-                                for application in &mut applications {
-                                    self.transform_arguments(
-                                        application,
-                                        subgraph,
-                                        transform.as_ref(),
-                                    );
-                                }
-                            }
-                            applications
+                                .collect_vec()
                         })
                         .for_each(|d| {
                             // access control directives don't have default args so we don't need to transform them
@@ -272,10 +280,12 @@ impl Merger {
                 let values = directive_counts
                     .keys()
                     .filter_map(|d| {
-                        d.specified_argument_by_name(&arg_def.name)
-                            .map(|v| v.as_ref())
+                        self.directive_arguments_with_defaults(d, &definition)
+                            .get(&arg_def.name)
+                            .copied()
+                            .flatten()
+                            .map(|v| v.as_ref().clone())
                     })
-                    .cloned()
                     .collect_vec();
                 if let Some(merged_value) = (merger.merge)(&arg_def.name, &values)? {
                     let merged_arg = Argument {
@@ -546,6 +556,7 @@ impl Merger {
                     self.subgraphs[*idx].name, locations
                 );
                 if locations.is_empty() {
+                    dest.remove(&mut self.merged)?;
                     self.error_reporter.report_mismatch_hint(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
@@ -560,6 +571,7 @@ impl Merger {
                         false,
                         false,
                     );
+                    return Ok(());
                 }
             }
         }

@@ -1,0 +1,91 @@
+---
+source: apollo-router/src/axum_factory/tests.rs
+assertion_line: 2387
+expression: parts
+---
+[
+  {
+    "data": {
+      "topProducts": [
+        {
+          "upc": "1",
+          "name": "Table",
+          "reviews": [
+            {
+              "id": "1",
+              "product": {
+                "name": "Table"
+              }
+            },
+            {
+              "id": "4",
+              "product": {
+                "name": "Table"
+              }
+            }
+          ]
+        },
+        {
+          "upc": "2",
+          "name": "Couch",
+          "reviews": [
+            {
+              "id": "2",
+              "product": {
+                "name": "Couch"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "hasNext": true
+  },
+  {
+    "hasNext": false,
+    "incremental": [
+      {
+        "data": {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          }
+        },
+        "path": [
+          "topProducts",
+          0,
+          "reviews",
+          0
+        ]
+      },
+      {
+        "data": {
+          "author": {
+            "id": "2",
+            "name": "Alan Turing"
+          }
+        },
+        "path": [
+          "topProducts",
+          0,
+          "reviews",
+          1
+        ]
+      },
+      {
+        "data": {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          }
+        },
+        "path": [
+          "topProducts",
+          1,
+          "reviews",
+          0
+        ]
+      }
+    ]
+  }
+]
