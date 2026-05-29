@@ -55,16 +55,33 @@ impl FederationBlueprint {
         schema: &mut FederationSchema,
         directive: &Component<Directive>,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
-        if directive.name == DEFAULT_LINK_NAME {
-            let (alias, imports) =
-                LinkSpecDefinition::extract_alias_and_imports_on_missing_link_directive_definition(
-                    directive,
-                )?;
-            LinkSpecDefinition::latest().add_definitions_to_schema(schema, alias, imports)?;
-            Ok(schema.get_directive_definition(&directive.name))
-        } else {
-            Ok(None)
+        if directive.name != DEFAULT_LINK_NAME {
+            return Ok(None);
         }
+
+        // Scan all @link directives on the schema definition to find one targeting the link
+        // spec and extract its alias/imports. This ensures that when a subgraph has e.g.
+        // `@link(url: "link/v1.0", import: ["Purpose"])`, the imported name is used instead
+        // of the namespaced `link__Purpose`.
+        let (alias, imports) = schema
+            .schema()
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|d| d.name == directive.name)
+            .find_map(|d| {
+                let (alias, imports) =
+                    LinkSpecDefinition::extract_alias_and_imports_on_missing_link_directive_definition(d).ok()?;
+                if alias.is_some() || !imports.is_empty() {
+                    Some((alias, imports))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        LinkSpecDefinition::latest().add_definitions_to_schema(schema, alias, imports)?;
+        Ok(schema.get_directive_definition(&directive.name))
     }
 
     pub(crate) fn on_directive_definition_and_schema_parsed(
