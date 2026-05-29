@@ -335,25 +335,25 @@ impl CacheControl {
     }
 
     pub(crate) fn merge(&self, other: &Self) -> Self {
-        self.merge_inner(other, true)
+        self.merge_inner(other, now_epoch_seconds(), true)
     }
 
     pub(crate) fn merge_without_ttl_update(&self, other: &Self) -> Self {
-        self.merge_inner(other, false)
+        self.merge_inner(other, now_epoch_seconds(), false)
     }
 
-    fn merge_inner(&self, other: &Self, update_ttl: bool) -> Self {
+    fn merge_inner(&self, other: &Self, now_epoch: u64, update_ttl: bool) -> Self {
         // If no-store, write just that and return early. This prevents potentially conflicting
         // directives (https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing).
         // TODO: is this really what we want? what if it's not no-cache?
         if self.no_store || other.no_store {
             return Self {
+                created: now_epoch,
                 no_store: true,
                 ..Self::default()
             };
         }
 
-        let now_epoch = now_epoch_seconds();
         let now = update_ttl.then_some(now_epoch);
 
         Self {
@@ -560,8 +560,7 @@ mod tests {
         assert_eq!(first.remaining_ttl(now), Some(30));
         assert_eq!(second.remaining_ttl(now), Some(40));
 
-        let merged = first.merge(&second, now.into());
-        assert_eq!(merged.created, now);
+        let merged = first.merge_inner(&second, now, true);
 
         assert_eq!(merged.ttl(), Some(30));
         assert_eq!(merged.remaining_ttl(now), Some(30));
@@ -587,7 +586,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge(&second, now.into());
+        let merged = first.merge_inner(&second, now, true);
         assert!(merged.no_store);
         assert!(!merged.public);
         assert!(merged.can_use());
@@ -607,7 +606,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge(&second, now.into());
+        let merged = first.merge_inner(&second, now, true);
         assert!(merged.no_cache);
         assert!(!merged.can_use());
     }
@@ -649,7 +648,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge(&second, now.into());
+        let merged = first.merge_inner(&second, now, true);
         assert!(!merged.public());
         assert!(merged.private());
         assert!(merged.can_use());
