@@ -30,6 +30,11 @@ on:
         required: false
         default: true
         type: boolean
+      pre_release:
+        description: "Pre-release prep — skip CHANGELOG generation; push the version-bump commit directly to the dispatched branch (no prep PR)"
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - "abernix/test-prep-action-*"
@@ -45,6 +50,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          # No persisted credentials — keeps apollo-bot2's PAT out of the
+          # default remote URL so it isn't implicitly available to every
+          # subsequent step.  The one step that needs write access to a
+          # protected branch (pre-release prep push) supplies the PAT
+          # inline via env at push time.
+          persist-credentials: false
 
       - name: Resolve version + mode
         id: vars
@@ -53,6 +64,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION='${{ inputs.version }}'
             DRY_RUN='${{ inputs.dry_run }}'
+            PRE_RELEASE='${{ inputs.pre_release }}'
           else
             # Branch name like abernix/test-prep-action-2.14.0 → version 2.14.0
             VERSION="${GITHUB_REF_NAME##*-}"
@@ -62,10 +74,17 @@ jobs:
             else
               DRY_RUN=true
             fi
+            # Auto-detect pre-release from semver suffix (e.g. 2.14.2-rc.0).
+            if echo "$VERSION" | grep -q -- '-'; then
+              PRE_RELEASE=true
+            else
+              PRE_RELEASE=false
+            fi
           fi
-          echo "Resolved: version=$VERSION dry_run=$DRY_RUN"
+          echo "Resolved: version=$VERSION dry_run=$DRY_RUN pre_release=$PRE_RELEASE"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          echo "pre_release=$PRE_RELEASE" >> "$GITHUB_OUTPUT"
 
       # ---------------------------------------------------------------------
       # Diagnostic: list available env var NAMES (values redacted by GHA for
@@ -125,7 +144,13 @@ jobs:
           cargo deny --version || true
 
       - name: Run release prepare (no commit, no push)
-        run: cargo xtask release prepare ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ '${{ steps.vars.outputs.pre_release }}' = 'true' ]; then
+            cargo xtask release prepare --pre-release '${{ steps.vars.outputs.version }}'
+          else
+            cargo xtask release prepare '${{ steps.vars.outputs.version }}'
+          fi
 
       - name: Show resulting diff
         run: |
@@ -144,6 +169,7 @@ jobs:
           fi
 
       - name: Verify CHANGELOG.md gained a v${{ steps.vars.outputs.version }} entry
+        if: steps.vars.outputs.pre_release != 'true'
         run: |
           VERSION='${{ steps.vars.outputs.version }}'
           if ! grep -q "^# \[${VERSION}\]" CHANGELOG.md; then
@@ -151,6 +177,17 @@ jobs:
             exit 1
           fi
           echo "Found v${VERSION} heading in CHANGELOG.md"
+
+      - name: Verify CHANGELOG.md was NOT modified (pre-release)
+        if: steps.vars.outputs.pre_release == 'true'
+        run: |
+          if ! git diff --quiet -- CHANGELOG.md; then
+            echo "::error::Pre-release prep should not modify CHANGELOG.md, but it did."
+            echo "  This usually means the --pre-release flag was lost or the xtask changed behavior."
+            git diff -- CHANGELOG.md | head -40
+            exit 1
+          fi
+          echo "CHANGELOG.md untouched, as expected for a pre-release."
 
       # ---------------------------------------------------------------------
       # Auto-tag observability (logs only — does not push tags).
@@ -233,8 +270,51 @@ jobs:
           echo "  - workflow_dispatch: pass dry_run=false to actually run"
           echo "  - push trigger:      include '[execute]' in commit message"
 
-      - name: Commit prep on a fresh branch
-        if: steps.vars.outputs.dry_run != 'true'
+      # =====================================================================
+      # Pre-release path: push the version-bump commit directly to the
+      # dispatched branch.  Used for RC/preview cuts where there's nothing
+      # for a human reviewer to look at — just version bumps, no CHANGELOG
+      # changes — and a separate prep PR is just ceremony.
+      #
+      # The push step is the only place apollo-bot2's PAT is exposed: a
+      # fresh remote URL with the token baked in is used for that single
+      # `git push` and the token is left out of any persistent config.
+      # =====================================================================
+
+      - name: Commit prep on the dispatched branch (pre-release)
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "apollo-bot2"
+          git config user.email "apollo-bot2@users.noreply.github.com"
+          git add -A
+          git commit -m "prep release: v${{ steps.vars.outputs.version }}"
+
+      - name: Push prep commit directly to ${{ github.ref_name }} (pre-release)
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release == 'true'
+        env:
+          APOLLO_BOT2_GITHUB_PAT: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APOLLO_BOT2_GITHUB_PAT:-}" ]; then
+            echo "::error::APOLLO_BOT2_GITHUB_PAT secret is required to push to a protected release branch."
+            exit 1
+          fi
+          # PAT-bearing URL only used for this single push command — never
+          # persisted into the local repo's git config.
+          git push \
+            "https://x-access-token:${APOLLO_BOT2_GITHUB_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${GITHUB_REF_NAME}"
+          echo "Pushed prep commit directly to ${GITHUB_REF_NAME} as apollo-bot2."
+
+      # =====================================================================
+      # Final-release path: existing fresh-branch + open-PR flow.  Reviewers
+      # need to look at the CHANGELOG entries before they hit the release
+      # branch, so we don't push direct here.
+      # =====================================================================
+
+      - name: Commit prep on a fresh branch (final release)
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -244,12 +324,24 @@ jobs:
           git commit -m "prep release: v${{ steps.vars.outputs.version }}"
           echo "PREP_BRANCH=$PREP_BRANCH" >> "$GITHUB_ENV"
 
-      - name: Push prep branch
-        if: steps.vars.outputs.dry_run != 'true'
-        run: git push origin "$PREP_BRANCH"
+      - name: Push prep branch (final release)
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
+        env:
+          APOLLO_BOT2_GITHUB_PAT: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          set -euo pipefail
+          # New prep branch — workflow token is enough if its `contents:
+          # write` permission covers branch creation; fall through to bot2
+          # PAT if not.  Either way, no PAT persisted in local git config.
+          if [ -n "${APOLLO_BOT2_GITHUB_PAT:-}" ]; then
+            REMOTE_URL="https://x-access-token:${APOLLO_BOT2_GITHUB_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          else
+            REMOTE_URL="https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          git push "$REMOTE_URL" "$PREP_BRANCH"
 
       - name: Extract this release's CHANGELOG section
-        if: steps.vars.outputs.dry_run != 'true'
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
         run: |
           perl -0777 \
             -sne 'print "$1\n" if m{
@@ -262,8 +354,8 @@ jobs:
               -version="${{ steps.vars.outputs.version }}" \
               CHANGELOG.md > this_release.md
 
-      - name: Open prep PR
-        if: steps.vars.outputs.dry_run != 'true'
+      - name: Open prep PR (final release)
+        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -293,7 +385,9 @@ jobs:
       - name: Done
         run: |
           if [ '${{ steps.vars.outputs.dry_run }}' = 'true' ]; then
-            echo "Dry-run complete.  No PR opened."
+            echo "Dry-run complete.  No commit, push, or PR."
+          elif [ '${{ steps.vars.outputs.pre_release }}' = 'true' ]; then
+            echo "Pre-release prep pushed directly to ${GITHUB_REF_NAME} as apollo-bot2."
           else
             echo "Prep PR opened from $PREP_BRANCH into ${{ steps.vars.outputs.version }}."
           fi

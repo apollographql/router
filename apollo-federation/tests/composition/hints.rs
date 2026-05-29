@@ -521,6 +521,44 @@ mod value_type_fields {
     }
 
     #[test]
+    fn no_hint_for_interface_value_type_field_missing_from_interface_object_subgraph() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                interface Product {
+                    id: ID!
+                    name: String
+                    price: Int
+                }
+
+                type Book implements Product @key(fields: "id") {
+                    id: ID!
+                    name: String
+                    price: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Product @interfaceObject @key(fields: "id") {
+                    id: ID!
+                    reviews: [String!]!
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2])
+            .expect("Expected composition to succeed");
+        assert_no_hints(&result);
+    }
+
+    #[test]
     fn hints_on_input_object_field_missing_from_some_subgraphs() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",

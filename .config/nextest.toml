@@ -1,24 +1,3 @@
-[[profile.default.overrides]]
-# These are known flaky tests according to the test flakiness report provided
-# in CircleCI insights, based on the `dev` branch:
-#
-# https://app.circleci.com/insights/github/apollographql/router/workflows/ci_checks/tests
-#
-# We will retry these tests up to 2 additional times. Retry counts are recorded.
-# Items on this list should be prioritized to get improved and removed from this
-# list at the time they are fixed.
-#
-# Frankly, it may be best to just retry all tests in the apollo-router::integration_tests
-# module, as they have a high failure rate, in general.
-retries = 2
-filter = '''
-   ( binary_id(=apollo-router::integration_tests) & test(=integration::connectors::authentication::test_aws_sig_v4_signing) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::coprocessor::test_coprocessor_response_handling) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_valid_extensions_service_for_subgraph_error) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback_pure_error_payload) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback) )
-'''
-
 [profile.ci]
 # Print out output for failing tests as soon as they fail, and also at the end
 # of the run (for easy scrollability).

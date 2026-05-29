@@ -286,6 +286,17 @@ impl Merger {
                 .minimum_federation_version()
                 .gt(linked_federation_version)
         {
+            let locations = subgraph
+                .schema()
+                .metadata()
+                .and_then(|links| {
+                    links
+                        .all_links()
+                        .iter()
+                        .find(|link| link.url.identity == *spec.identity())
+                })
+                .map(|link| link.locations(subgraph))
+                .unwrap_or_default();
             error_reporter.add_hint(CompositionHint {
                 definition: HintCode::ImplicitlyUpgradedFederationVersion.definition(),
                 message: format!(
@@ -294,7 +305,7 @@ impl Merger {
                     linked_federation_version,
                     spec.minimum_federation_version()
                 ),
-                locations: Default::default(), // TODO: need @link directive application AST node
+                locations,
             });
             return spec.minimum_federation_version();
         }
@@ -829,7 +840,7 @@ impl Merger {
             .subgraphs
             .iter()
             .enumerate()
-            .map(|(idx, sg)| (idx, sg.schema().get_type(mismatched_type.type_name()).ok()))
+            .map(|(idx, sg)| (idx, sg.schema().try_get_type(mismatched_type.type_name())))
             .collect();
         let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
             let type_kind_description =
@@ -1640,6 +1651,8 @@ impl Merger {
             if !field_is_defined
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
+                && !matches!(dest, ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    if self.is_field_provided_by_an_interface_object(field.field_name(), dest.type_name()))
             {
                 self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),

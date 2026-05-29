@@ -1380,6 +1380,54 @@ mod composition {
         );
         assert_eq!(auth_directives[1].to_string(), "@auth");
     }
+
+    #[test]
+    fn deduplicates_directive_using_subgraph_definition_defaults() {
+        // Subgraph A defines @foo with a default value for `debug` and applies
+        // it without specifying the argument (relying on the default).
+        // Subgraph B defines @foo without a default value for `debug` and
+        // applies it explicitly with the value matching subgraph A's default.
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
+            extend schema @composeDirective(name: "@foo")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/foo/v1.0", import: ["@foo"])
+            directive @foo(name: String!, debug: Boolean = false) on FIELD_DEFINITION
+
+            type Query {
+              shared: String @shareable @foo(name: "test")
+            }
+        "#).expect("valid subgraph");
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
+            extend schema @composeDirective(name: "@foo")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/foo/v1.1", import: ["@foo"])
+            directive @foo(name: String!, debug: Boolean) on FIELD_DEFINITION
+
+            type Query {
+              shared: String @shareable @foo(name: "test", debug: false)
+            }
+        "#).expect("valid subgraph");
+
+        let result = compose(vec![subgraph_a, subgraph_b]).expect("composed successfully");
+        let schema = result.schema().schema();
+
+        let shared_field = coord!(Query.shared)
+            .lookup_field(schema)
+            .expect("field exists");
+        assert_eq!(
+            shared_field.to_string(),
+            r#"shared: String @foo(name: "test")"#
+        );
+
+        let has_inconsistent_hint = result
+            .hints()
+            .iter()
+            .any(|h| h.definition.code() == "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS");
+        assert!(
+            !has_inconsistent_hint,
+            "Should not produce INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS hint — applications are identical when resolved with correct subgraph defaults"
+        );
+    }
 }
 
 fn generate_subgraph(

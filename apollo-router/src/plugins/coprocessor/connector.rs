@@ -1,5 +1,6 @@
 //! Connector coprocessor stage implementation
 
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
@@ -262,7 +263,10 @@ where
         serde_json::from_str::<Value>(&body).unwrap_or_else(|_| Value::String(body.clone().into()))
     });
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let service_name_to_send = request_config.service_name.then_some(service_name);
 
@@ -447,7 +451,10 @@ where
         None
     };
 
-    let context_to_send = response_config.context.get_context(&context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&context) {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let service_name_to_send = response_config.service_name.then_some(service_name);
 
     let payload = Externalizable::connector_builder()
@@ -497,7 +504,12 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(&context, returned_context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &context,
+            returned_context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(body) = co_processor_output.body {
