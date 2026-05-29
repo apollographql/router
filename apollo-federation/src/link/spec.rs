@@ -283,18 +283,21 @@ impl str::FromStr for Url {
                     // namespaced name because it's not valid GraphQL to do so--but you can
                     // explicitly import elements from a spec with an invalid name.
                     .map(Name::new_unchecked)?;
-                let scheme = url.scheme();
-                if !scheme.starts_with("http") {
+                if !url.scheme().starts_with("http") {
                     return Err(SpecError::ParseError("invalid `@link` specification url: only http(s) urls are supported currently".to_string()));
                 }
-                let url_domain = url.domain().ok_or(SpecError::ParseError(
-                    "invalid `@link` specification url".to_string(),
-                ))?;
+                let origin = url.origin();
+                if !origin.is_tuple() {
+                    return Err(SpecError::ParseError(
+                        "invalid `@link` specification url: missing host".to_string(),
+                    ));
+                }
+                let origin = origin.ascii_serialization();
                 let path_remainder = segments.collect::<Vec<&str>>();
                 let domain = if path_remainder.is_empty() {
-                    format!("{scheme}://{url_domain}")
+                    origin
                 } else {
-                    format!("{}://{}/{}", scheme, url_domain, path_remainder.join("/"))
+                    format!("{origin}/{}", path_remainder.join("/"))
                 };
                 Ok(Url {
                     identity: Identity { domain, name },
