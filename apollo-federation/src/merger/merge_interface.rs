@@ -148,7 +148,7 @@ impl Merger {
                     .map(|(idx, subgraph)| {
                         let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
                             .schema()
-                            .get_type(itf.type_name.clone())
+                            .get_type(&itf.type_name)
                             .ok()
                             .and_then(|ty| ty.try_into().ok());
                         (idx, maybe_ty)

@@ -177,6 +177,8 @@ limits:
     warn_only: true # warn_only mode always enabled
 ```
 
+If you'd rather not configure `limits` at all yet — or you want to capture the offending operations along with attributes like client name and operation name in your logs or APM — see [Logging operations that exceed a candidate limit](#logging-operations-that-exceed-a-candidate-limit).
+
 ### Response format for exceeded limits
 
 Whenever your router rejects a request because it exceeds an operation limit, the router responds with a 400 HTTP status code and a standard GraphQL error response body:
@@ -285,6 +287,45 @@ telemetry:
           description: "Root fields for an operation"
 ```
 You should also configure the router to [export metrics](/graphos/reference/router/telemetry/metrics-exporters/overview) to your APM tool.
+
+#### Logging operations that exceed a candidate limit
+
+If you'd like to identify which operations — and which clients — would exceed a limit before enforcing it, you can configure a [custom event](/graphos/reference/router/telemetry/instrumentation/events#custom-events) with a [`gt` condition](/graphos/reference/router/telemetry/instrumentation/conditions#gt) on the `query` selector. The router only logs the event when an operation exceeds the threshold, so you don't need to set `limits` or enable `warn_only` mode.
+
+This approach also lets you attach the client name and version (from the `apollographql-client-name` and `apollographql-client-version` headers) so you can see which clients are sending the offending operations:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      supergraph:
+        OPERATION_OVER_ALIAS_LIMIT:
+          message: "operation exceeded candidate alias limit"
+          on: response
+          level: warn
+          condition:
+            gt: # fire only when aliases > 50 — replace with your candidate limit
+              - query: aliases
+              - 50
+          attributes:
+            graphql.operation.name: true
+            apollo.client.name:
+              request_header: apollographql-client-name
+              default: "unknown"
+            apollo.client.version:
+              request_header: apollographql-client-version
+              default: "unknown"
+            query.aliases:
+              query: aliases
+            query.depth:
+              query: depth
+            query.height:
+              query: height
+            query.root_fields:
+              query: root_fields
+```
+
+Repeat the block — with a different event name, selector, and threshold in `condition.gt` — for each of `depth`, `height`, and `root_fields` you want to track. After you're confident in the values, you can switch over to enforcing them with `limits.max_*`.
 
 ## Network-based limits
 

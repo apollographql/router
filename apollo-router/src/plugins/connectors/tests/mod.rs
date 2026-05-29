@@ -1132,14 +1132,14 @@ async fn test_operation_counter() {
             None,
         )
         .await;
-        req_asserts::matches(
-            &mock_server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/users"),
+        Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
                 Matcher::new().method("GET").path("/users/1"),
                 Matcher::new().method("GET").path("/users/2"),
-            ],
-        );
+            ]),
+        ])
+        .assert_matches(&mock_server.received_requests().await.unwrap());
         assert_counter!(
             "apollo.router.operations.connectors",
             3,
