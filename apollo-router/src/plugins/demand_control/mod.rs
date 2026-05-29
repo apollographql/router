@@ -86,9 +86,6 @@ pub(crate) enum StrategyConfig {
         ///
         /// * `by_subgraph` (default) computes the cost of each subgraph response and sums them
         ///   to get the total query cost.
-        /// * `by_response_shape` computes the cost based on the final structure of the composed
-        ///   response, not including any interim structures from subgraph responses that did not
-        ///   make it to the composed response.
         #[serde(default)]
         actual_cost_mode: ActualCostMode,
 
@@ -110,12 +107,6 @@ pub(crate) enum ActualCostMode {
     /// Computes the cost of each subgraph response and sums them to get the total query cost.
     #[default]
     BySubgraph,
-
-    /// Computes the cost based on the final structure of the composed response, not including any
-    /// interim structures from subgraph responses that did not make it to the composed response.
-    #[deprecated(since = "TBD", note = "use `BySubgraph` instead")]
-    #[warn(deprecated_in_future)]
-    ByResponseShape,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
@@ -129,22 +120,11 @@ pub(crate) struct SubgraphStrategyConfig {
 
 impl StrategyConfig {
     fn validate(&self, subgraph_names: HashSet<&String>) -> Result<(), BoxError> {
-        let (actual_cost_mode, subgraphs) = match self {
-            StrategyConfig::StaticEstimated {
-                actual_cost_mode,
-                subgraph,
-                ..
-            } => (actual_cost_mode, subgraph),
+        let subgraphs = match self {
+            StrategyConfig::StaticEstimated { subgraph, .. } => subgraph,
             #[cfg(test)]
             StrategyConfig::Test { .. } => return Ok(()),
         };
-
-        #[allow(deprecated_in_future)]
-        if matches!(actual_cost_mode, ActualCostMode::ByResponseShape) {
-            tracing::warn!(
-                "Actual cost computation mode `by_response_shape` will be deprecated in the future; migrate to `by_subgraph` when possible",
-            );
-        }
 
         if subgraphs.all.max.is_some_and(|s| s < 0.0) {
             return Err("Maximum per-subgraph query cost for `all` is negative".into());
