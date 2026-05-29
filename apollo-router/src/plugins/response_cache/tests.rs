@@ -4329,8 +4329,6 @@ async fn include_cache_control_header_on_router_response_false_suppresses_header
         .unwrap();
     let response = service.oneshot(request).await.unwrap();
 
-    dbg!(&response.response.headers());
-
     // Cache-Control header should NOT be present
     assert!(
         get_cache_control_header(&response).is_none(),

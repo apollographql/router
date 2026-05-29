@@ -41,7 +41,7 @@ pub(crate) struct CacheControl {
     /// response: Indicates that caches of any kind should not store this response.
     // TODO: remove no_store pub facing
     #[serde(skip_serializing_if = "is_false", default)]
-    pub no_store: bool,
+    no_store: bool,
 
     /// request: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
     /// response: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
@@ -270,7 +270,7 @@ impl Display for CacheControl {
         }
 
         if self.must_understand {
-            write!(&mut formatter, "must_understand")?;
+            write!(&mut formatter, "must-understand")?;
         }
 
         if self.private {
@@ -299,10 +299,6 @@ impl Display for CacheControl {
         if let Some(min_fresh) = self.min_fresh {
             let min_fresh = remaining_ttl(min_fresh, elapsed);
             write!(&mut formatter, "min-fresh={}", min_fresh)?;
-        }
-
-        if self.no_transform {
-            write!(&mut formatter, "no-transform")?;
         }
 
         if self.only_if_cached {
@@ -352,6 +348,10 @@ impl CacheControl {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn merge_no_store(&mut self, other: &Self) {
+        self.no_store |= other.no_store;
     }
 
     pub(crate) fn merge_and_update_ttl(&self, other: &Self) -> Self {

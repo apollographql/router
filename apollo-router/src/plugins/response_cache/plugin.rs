@@ -1046,7 +1046,7 @@ impl CacheService {
 
                 // if the request had no_store on it, propagate that to this cache control
                 if let Some(request_cache_control) = request_cache_control {
-                    cache_control.no_store |= request_cache_control.no_store;
+                    cache_control.merge_no_store(&request_cache_control);
                 }
 
                 if self.debug {
@@ -1208,7 +1208,7 @@ impl CacheService {
 
                 // if the request had no_store on it, propagate that to this cache control
                 if let Some(request_cache_control) = request_cache_control {
-                    cache_control.no_store |= request_cache_control.no_store;
+                    cache_control.merge_no_store(&request_cache_control);
                 }
 
                 if !is_known_private && cache_control.private() {
