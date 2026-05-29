@@ -267,11 +267,6 @@ impl CacheControl {
         }
     }
 
-    /// Merge cache control values without updating the TTL
-    pub(crate) fn merge_without_update(&self, other: &CacheControl) -> CacheControl {
-        self.merge_inner(other, None)
-    }
-
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
         self.merge_inner(other, now_epoch_seconds().into())
     }
@@ -369,10 +364,6 @@ impl CacheControl {
         self.private
     }
 
-    pub(crate) fn public(&self) -> bool {
-        self.public
-    }
-
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
         let expired = if elapsed < 0 {
@@ -392,14 +383,6 @@ impl CacheControl {
 
     pub(crate) fn is_no_store(&self) -> bool {
         self.no_store
-    }
-
-    pub(crate) fn s_max_age_or_max_age(&self) -> Option<u64> {
-        self.s_max_age.or(self.max_age)
-    }
-
-    pub(crate) fn age(&self) -> Option<u64> {
-        self.age
     }
 
     #[cfg(test)]

@@ -707,7 +707,7 @@ impl Selector for SubgraphSelector {
                             Some(opentelemetry::Value::String("public".to_string().into()))
                         }
                     }
-                    CacheControlSelector::NoStore => Some(cc.is_no_store().into()),
+                    CacheControlSelector::NoStore => Some(cc.no_store().into()),
                     CacheControlSelector::MaxAge => cc
                         .ttl()
                         .and_then(|ttl| Some(opentelemetry::Value::I64(i64::try_from(ttl).ok()?))),
@@ -1758,7 +1758,7 @@ mod test {
         header_map.insert(CACHE_CONTROL, HeaderValue::from_static("public,max-age=60"));
 
         let cache_control =
-            crate::plugins::response_cache::cache_control::CacheControl::new(&header_map, None)
+            crate::plugins::response_cache::cache_control::CacheControl::try_from(&header_map)
                 .unwrap();
         let context = crate::context::Context::new();
         let mut cache_controls: CacheControls = HashMap::new();

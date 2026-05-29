@@ -105,21 +105,27 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
         .ok()??;
     cache_keys.iter_mut().for_each(|ck| {
         ck.invalidation_keys.sort();
-        ck.cache_control.set_created(0);
+        ck.cache_control.zero_out_created();
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
     Some(cache_keys)
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
+    let mut cache_control_headers = response
+        .response
+        .headers()
+        .get_all(CACHE_CONTROL)
+        .iter()
+        .peekable();
+
+    if cache_control_headers.peek().is_none() {
+        return None;
+    }
+
     Some(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)?
-            .to_str()
-            .ok()?
-            .split(',')
+        cache_control_headers
+            .flat_map(|header| header.to_str().unwrap().split(','))
             .map(ToString::to_string)
             .collect(),
     )
@@ -4322,6 +4328,8 @@ async fn include_cache_control_header_on_router_response_false_suppresses_header
         .build()
         .unwrap();
     let response = service.oneshot(request).await.unwrap();
+
+    dbg!(&response.response.headers());
 
     // Cache-Control header should NOT be present
     assert!(

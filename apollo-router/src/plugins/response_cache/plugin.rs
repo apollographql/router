@@ -414,10 +414,10 @@ impl PluginPrivate for ResponseCache {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     if has_errors {
-                        cache_control = CacheControl::no_store();
+                        cache_control = CacheControl::default_no_store();
                     }
 
-                    let _ = cache_control.to_headers(response.response.headers_mut());
+                    let _ = cache_control.update_headers(response.response.headers_mut());
                 }
 
                 if debug
@@ -455,12 +455,12 @@ impl PluginPrivate for ResponseCache {
             let private_queries = self.private_queries.clone();
             let inner = ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
-                    update_cache_control(
-                        &response.context,
-                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
-                            .ok()
-                            .unwrap_or_else(CacheControl::no_store),
-                    );
+                    let subgraph_cache_control =
+                        CacheControl::try_from(response.response.headers())
+                            .unwrap_or_else(|_| CacheControl::default_no_store())
+                            .with_default_ttl(Some(subgraph_ttl));
+
+                    update_cache_control(&response.context, &subgraph_cache_control);
 
                     response
                 })
@@ -484,12 +484,12 @@ impl PluginPrivate for ResponseCache {
         } else {
             ServiceBuilder::new()
                 .map_response(move |response: subgraph::Response| {
-                    update_cache_control(
-                        &response.context,
-                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
-                            .ok()
-                            .unwrap_or_else(CacheControl::no_store),
-                    );
+                    let subgraph_cache_control =
+                        CacheControl::try_from(response.response.headers())
+                            .unwrap_or_else(|_| CacheControl::default_no_store())
+                            .with_default_ttl(Some(subgraph_ttl));
+
+                    update_cache_control(&response.context, &subgraph_cache_control);
 
                     response
                 })
@@ -780,12 +780,11 @@ impl CacheService {
                 return self
                     .service
                     .map_response(move |response: subgraph::Response| {
-                        update_cache_control(
-                            &response.context,
-                            &CacheControl::new(response.response.headers(), None)
-                                .ok()
-                                .unwrap_or_else(CacheControl::no_store),
-                        );
+                        let subgraph_cache_control =
+                            CacheControl::try_from(response.response.headers())
+                                .unwrap_or_else(|_| CacheControl::default_no_store());
+
+                        update_cache_control(&response.context, &subgraph_cache_control);
 
                         response
                     })
@@ -821,7 +820,7 @@ impl CacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            let cache_control = match CacheControl::new(request.subgraph_request.headers(), None) {
+            let cache_control = match CacheControl::try_from(request.subgraph_request.headers()) {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
                     return Ok(subgraph::Response::builder()
@@ -840,9 +839,9 @@ impl CacheService {
             };
 
             // Don't use cache at all if both no-store and no-cache are set in cache-control header
-            if cache_control.is_no_cache() && cache_control.is_no_store() {
+            if cache_control.no_cache() && cache_control.no_store() {
                 let mut resp = self.service.call(request).await?;
-                cache_control.to_headers(resp.response.headers_mut())?;
+                cache_control.update_headers(resp.response.headers_mut())?;
                 return Ok(resp);
             }
 
@@ -911,8 +910,8 @@ impl CacheService {
         }
         let resp = self.service.call(request).await?;
         if self.debug {
-            let cache_control =
-                CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
+            let cache_control = CacheControl::try_from(resp.response.headers())?
+                .with_default_ttl(Some(self.subgraph_ttl));
             let kind = if is_entity {
                 CacheEntryKind::Entity {
                     typename: "".to_string(),
@@ -1187,7 +1186,8 @@ impl CacheService {
                             .subgraph_name(self.name)
                             .extensions(Object::new())
                             .build();
-                        CacheControl::no_store().to_headers(response.response.headers_mut())?;
+                        CacheControl::default_no_store()
+                            .update_headers(response.response.headers_mut())?;
 
                         return Ok(response);
                     }
@@ -1203,7 +1203,7 @@ impl CacheService {
                 );
 
                 if let Some(control_from_cached) = cache_result.1 {
-                    cache_control = cache_control.merge(&control_from_cached);
+                    cache_control = cache_control.merge_and_update_ttl(&control_from_cached);
                 }
 
                 // if the request had no_store on it, propagate that to this cache control
@@ -1230,7 +1230,7 @@ impl CacheService {
                 )
                 .await?;
 
-                cache_control.to_headers(response.response.headers_mut())?;
+                cache_control.update_headers(response.response.headers_mut())?;
 
                 Ok(response)
             }
@@ -1279,7 +1279,7 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
-    if cache_control.is_some_and(|c| c.is_no_cache()) {
+    if cache_control.is_some_and(|c| c.no_cache()) {
         // skip cache lookup if no-cache is set - we have no means of revalidating entries without
         // just performing the query, so there's no benefit to hitting the cache
         return Ok(ControlFlow::Continue((request, key, invalidation_keys)));
@@ -1344,7 +1344,9 @@ async fn cache_lookup_root(
                     .subgraph_name(request.subgraph_name.clone())
                     .build();
 
-                value.control.to_headers(response.response.headers_mut())?;
+                value
+                    .control
+                    .update_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
                 Span::current().set_span_dyn_attribute(
@@ -1510,7 +1512,7 @@ async fn cache_lookup_entities(
     debug: bool,
     cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
-    let is_no_cache = cache_control.is_some_and(|c| c.is_no_cache());
+    let is_no_cache = cache_control.is_some_and(|c| c.no_cache());
 
     let cache_metadata = extract_cache_keys(
         &name,
@@ -1650,7 +1652,7 @@ async fn cache_lookup_entities(
 
         cache_control
             .unwrap_or_default()
-            .to_headers(response.response.headers_mut())?;
+            .update_headers(response.response.headers_mut())?;
 
         Ok(ControlFlow::Break(response))
     }
@@ -1659,12 +1661,12 @@ async fn cache_lookup_entities(
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
-            *c = c.merge(cache_control);
+            *c = c.merge_and_update_ttl(cache_control);
         } else {
             // Go through the "merge" algorithm even with a single value
             // in order to keep single-fetch queries consistent between cache hit and miss,
             // and with multi-fetch queries.
-            let new_cache_control = cache_control.merge(cache_control);
+            let new_cache_control = cache_control.merge_and_update_ttl(cache_control);
             lock.insert(new_cache_control);
         }
     })
@@ -2407,11 +2409,11 @@ fn filter_representations(
                 cache_hit.entry(typename.clone()).or_default().hit += 1;
                 match cache_control.as_mut() {
                     None => cache_control = Some(entry.control.clone()),
-                    Some(c) => *c = c.merge(&entry.control),
+                    Some(c) => *c = c.merge_and_update_ttl(&entry.control),
                 }
                 match non_updated_cache_control.as_mut() {
                     None => non_updated_cache_control = Some(entry.control.clone()),
-                    Some(c) => *c = c.merge_without_update(&entry.control),
+                    Some(c) => *c = c.merge_without_ttl_update(&entry.control),
                 }
             }
         }

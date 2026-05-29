@@ -9,7 +9,6 @@ use std::time::Duration;
 use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
-use http::header::CACHE_CONTROL;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -427,11 +426,7 @@ impl Response {
         &self,
         default_ttl: Option<Duration>,
     ) -> Result<CacheControl, BoxError> {
-        if self.response.headers().contains_key(&CACHE_CONTROL) {
-            CacheControl::new(self.response.headers(), default_ttl)
-        } else {
-            Ok(CacheControl::no_store())
-        }
+        Ok(CacheControl::try_from(self.response.headers())?.with_default_ttl(default_ttl))
     }
 
     pub(crate) fn get_from_extensions(&self, key: &str) -> Option<&Value> {

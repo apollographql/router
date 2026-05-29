@@ -1,14 +1,14 @@
 use std::fmt::Formatter;
 
-pub(super) struct DelimitedFormatter<'a> {
-    formatter: &'a mut Formatter<'_>,
+pub(super) struct DelimitedFormatter<'a, 'b> {
+    formatter: &'a mut Formatter<'b>,
     delimiter: &'a str,
     wrote_prev: bool,
 }
 
 // Defaults to comma delimited
-impl<'a> From<&'a mut Formatter<'_>> for DelimitedFormatter<'a> {
-    fn from(formatter: &'a mut Formatter<'_>) -> Self {
+impl<'a, 'b> From<&'a mut Formatter<'b>> for DelimitedFormatter<'a, 'b> {
+    fn from(formatter: &'a mut Formatter<'b>) -> Self {
         Self {
             formatter,
             delimiter: ",",
@@ -17,8 +17,8 @@ impl<'a> From<&'a mut Formatter<'_>> for DelimitedFormatter<'a> {
     }
 }
 
-impl<'a> DelimitedFormatter<'a> {
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::fmt::Result {
+impl<'a, 'b> DelimitedFormatter<'a, 'b> {
+    pub(super) fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::fmt::Result {
         if self.wrote_prev {
             self.formatter.write_str(self.delimiter)?;
         }

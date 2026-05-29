@@ -1098,11 +1098,26 @@ async fn cache_control_merging_multi_fetch() {
 }
 
 fn parse_max_age(cache_control: &str) -> u32 {
-    cache_control
-        .strip_prefix("max-age=")
-        .and_then(|s| s.strip_suffix(",public"))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
+    let extract_directive_value =
+        |dir: &&str| dir.split('=').nth(1).unwrap().parse::<u32>().unwrap();
+
+    let cache_control_elems = cache_control.split(",").collect::<Vec<&str>>();
+
+    if let Some(s_max_age_directive) = cache_control_elems
+        .iter()
+        .find(|x| x.starts_with("s-maxage"))
+    {
+        return extract_directive_value(s_max_age_directive);
+    }
+
+    if let Some(max_age_directive) = cache_control_elems
+        .iter()
+        .find(|x| x.starts_with("max-age"))
+    {
+        return extract_directive_value(max_age_directive);
+    }
+
+    panic!("expected max-age or s-maxage, got '{cache_control}'");
 }
 
 macro_rules! check_cache_key {
