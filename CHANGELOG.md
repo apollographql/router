@@ -2,6 +2,343 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.15.0] - 2026-05-26
+
+## 🚀 Features
+
+### Add `ignore_auth_context` option to subscription deduplication config ([PR #9078](https://github.com/apollographql/router/pull/9078))
+
+When the router's JWT authentication plugin validates a token, it decodes the claims and stores them internally on the request — before any subgraph request is built.  The router then factors those stored claims into its check for whether two subscriptions are identical, separately from any HTTP headers it may forward downstream.
+
+This means that on any router with JWT authentication enabled, every authenticated user effectively gets their own subgraph WebSocket connection — even if the subscription data is identical for all users, and even if the `Authorization` header is never forwarded to the subgraph at all.  Adding `authorization` to `ignored_headers` doesn't help here, because it only affects HTTP headers; the decoded claims live in a different layer that `ignored_headers` never touches.
+
+Two new capabilities are added to the `deduplication` config block:
+
+- `ignore_auth_context: bool` (default: `false`) — when `true`, the router skips stored JWT claims when checking subscription identity, allowing all authenticated users to share a single subgraph WebSocket connection when the subscription data is truly non-personalized (e.g., product price updates, stock price feeds).
+- Per-subgraph deduplication control via `all:` / `subgraphs:` — deduplication settings can now be set globally with a default and overridden per subgraph by name, using the standard `SubgraphConfiguration<T>` pattern already used elsewhere in the router config.
+
+```yaml
+subscription:
+  deduplication:
+    all:
+      enabled: true
+    subgraphs:
+      stocks:
+        ignore_auth_context: true
+```
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9078
+
+### Add `include_cache_control_header_on_router_response` to suppress `Cache-Control` on client responses ([PR #9002](https://github.com/apollographql/router/pull/9002))
+
+The response cache plugin now supports a `include_cache_control_header_on_router_response` boolean config option (defaults to `true`). When set to `false`, the router omits the `Cache-Control` header from supergraph responses sent to clients, while all internal caching behavior — Redis storage, TTL enforcement, cache key computation, and the cache debugger — remains unchanged.
+
+This is useful when the router sits behind a CDN or reverse proxy that manages its own caching headers, or when you want to prevent clients from caching responses locally while keeping server-side caching active.
+
+```yaml
+response_cache:
+  enabled: true
+  include_cache_control_header_on_router_response: false  # default: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+```
+
+By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/9002
+
+### Add per-subgraph and per-connector HTTP response size limits ([PR #9160](https://github.com/apollographql/router/pull/9160))
+
+The router can now cap the number of bytes it reads from subgraph and connector HTTP response bodies, protecting against out-of-memory conditions when a downstream service returns an unexpectedly large payload.
+
+The limit is enforced as the response body streams in — the router stops reading and returns a GraphQL error as soon as the limit is exceeded, without buffering the full body first.
+
+Configure a global default and optional per-subgraph or per-source overrides:
+
+```yaml
+limits:
+  subgraph:
+    all:
+      http_max_response_size: 10MB # 10 MB for all subgraphs
+    subgraphs:
+      products:
+        http_max_response_size: 20MB # 20 MB override for 'products'
+
+  connector:
+    all:
+      http_max_response_size: 5MB # 5 MB for all connector sources
+    sources:
+      products.rest:
+        http_max_response_size: 10MB # 10 MB override for 'products.rest'
+```
+
+There is no default limit; responses are unrestricted unless you configure this option.
+
+When a response is aborted due to the limit, the router:
+- Returns a GraphQL error to the client with extension code `SUBREQUEST_HTTP_ERROR`
+- Increments the `apollo.router.limits.subgraph_response_size.exceeded` or `apollo.router.limits.connector_response_size.exceeded` counter
+- Records `apollo.subgraph.response.aborted: "response_size_limit"` or `apollo.connector.response.aborted: "response_size_limit"` on the relevant span
+
+**Configuration migration**: Existing `limits` fields (previously at the top level of `limits`) are now nested under `limits.router`. A configuration migration is included that updates your config file automatically.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9160
+
+### Add `apollo.router.connection.acquire.duration` metric for TCP/TLS connection timing ([PR #9309](https://github.com/apollographql/router/pull/9309))
+
+Adds a new histogram metric, `apollo.router.connection.acquire.duration`, that records how long it takes to establish a new TCP or Unix socket connection to a downstream service (subgraph, connector, or coprocessor). The metric fires only when the connection pool opens a new connection — pool hits are not recorded.
+
+This metric is useful for diagnosing connection establishment latency. For example, if a subgraph shows elevated overall response latency, a high `connection.acquire.duration` indicates the delay is in TCP/TLS setup; a near-zero value (or no data) points to post-connection causes like slow server responses.
+
+Attributes:
+
+- `network.transport`: `tcp` for HTTP connections, `unix` for Unix socket connections
+- `subgraph.name`: name of the subgraph (for subgraph connections)
+- `connector.source.name`: name of the connector source (for connector connections)
+- `coprocessor`: `true` (for coprocessor connections)
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9309
+
+### Add `max_lifetime` configuration for subscriptions ([PR #9216](https://github.com/apollographql/router/pull/9216))
+
+Adds a new `max_lifetime` field to the `subscription` configuration block, allowing operators to set a maximum duration for how long a subscription can remain open. After the configured duration the subscription is closed and the client receives a terminal error with extension code `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED`.
+
+```yaml
+subscription:
+  enabled: true
+  max_lifetime: 10m  # close subscriptions after 10 minutes
+  mode:
+    callback:
+      public_url: "https://my-router.example.com/subscription/callback"
+```
+
+By default (`max_lifetime` unset) there is no lifetime limit, preserving the existing behaviour.
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9216
+
+### Add `operation_body_timeout` for file upload requests ([PR #9243](https://github.com/apollographql/router/pull/9243))
+
+Adds a new `operation_body_timeout` limit to the file uploads plugin, allowing operators to set a tight deadline on reading the operations field (GraphQL query + variables) from multipart request bodies, independently of the overall router `timeout`.
+
+File uploads is the only router flow where the request body is read as a stream in the plugin layer: the multipart body must be parsed to extract the operations field before query planning can begin. This means a slow or stalled client can hold a connection open until the global router `timeout` fires. The new `operation_body_timeout` lets you set a tighter deadline specifically for that body-reading phase.
+
+If `operation_body_timeout` is not set, no additional body-read timeout is applied — the overall router `timeout` remains the only bound.
+
+```yaml
+preview_file_uploads:
+  enabled: true
+  protocols:
+    multipart:
+      enabled: true
+      limits:
+        operation_body_timeout: 5s  # optional; no default
+```
+
+When the timeout fires, the router returns a `504 Gateway Timeout` response with extension code `GATEWAY_TIMEOUT`.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9243
+
+## 🐛 Fixes
+
+### Resolve `@connect` field values when a root query alias is combined with field-level aliases ([Issue #9347](https://github.com/apollographql/router/issues/9347))
+
+Queries that aliased both the root query field and one or more of its subfields on a `@connect`-backed type returned null for every aliased subfield, which could cascade into null propagation for non-nullable types. Either alias in isolation worked correctly — only the combination of both triggered the bug.
+
+Given this query:
+
+```graphql
+{
+  items: search_items(query: "test") {
+    results {
+        id 
+        link: viewUri 
+    }
+  }
+}
+```
+
+**Before**
+
+Aliased fields returned null, and null propagation bubbled up through non-nullable types until the entire result was nullified:
+
+```json
+{
+  "data": { "items": null },
+  "extensions": {
+    "valueCompletion": [
+      { "message": "Null value found for non-nullable type String", "path": ["items", "results", 0] },
+      { "message": "Null value found for non-nullable type Item", "path": ["items", "results", 0] },
+      { "message": "Null value found for non-nullable type [Item!]", "path": ["items", "results"] }
+    ]
+  }
+}
+```
+
+**After** 
+
+Root and field aliases now work together as expected:
+
+```json
+{
+  "data": {
+    "items": {
+      "results": [
+        { "id": "1", "link": "https://example.com/docs/001" }
+      ]
+    }
+  }
+}
+```
+
+By [@jhrldev](https://github.com/jhrldev) in https://github.com/apollographql/router/pull/9358
+
+### Record `apollo.router.operations.coprocessor.duration` even when the coprocessor call times out ([PR #9296](https://github.com/apollographql/router/pull/9296))
+
+`apollo.router.operations.coprocessor.duration` is now recorded even when a coprocessor call is cut short by a router timeout.  Previously, the metric was only emitted when the call completed normally, leaving timeout latencies invisible in the histogram.
+
+By [@conwuegb](https://github.com/conwuegb) and [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9296
+
+### Retry reloads automatically after transient failures instead of staying on a stale schema ([PR #9391](https://github.com/apollographql/router/pull/9391))
+
+Previously, if a schema reload failed — for example, because a persisted query manifest fetch from Uplink encountered a transient network error — the router would log "error while reloading, continuing with previous configuration" and then stop retrying. All subsequent background polls from Uplink would return `Unchanged` (because `last_id` had already advanced to the new schema ID), leaving the router permanently serving the old schema until manually restarted.
+
+The router now enters a `Reloading` state on reload failure and schedules automatic retries. The retry delay (default 10 seconds) and maximum retry count (default 5) are configurable via the new `reload` configuration key:
+
+```yaml
+reload:
+  max_retries: 5    # 0 to disable, null for unlimited
+  retry_delay: 10s
+```
+
+The retry budget is reset whenever a new reload trigger arrives — a new schema or license from Uplink, a configuration or rhai script file change, or an explicit reload signal — so any new change always gets a fresh set of attempts even if previous retries were exhausted.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9391
+
+### Scope SigV4 signing params to a single subgraph request instead of sharing them across the operation ([PR #9385](https://github.com/apollographql/router/pull/9385))
+
+When `authentication.subgraph.subgraphs` configured `aws_sig_v4` for a specific subgraph, the signing parameters were visible to every other subgraph in the same operation — causing unconfigured subgraphs to have their `Authorization` header overwritten with AWS credentials.
+
+Signing parameters are now scoped to the individual subgraph HTTP request rather than the operation, so AWS credentials only travel with requests to the subgraph they were configured for.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9385
+
+### Identify the primary `@defer` chunk correctly in the `is_primary_response` telemetry selector ([PR #9238](https://github.com/apollographql/router/pull/9238))
+
+The `is_primary_response: true` supergraph telemetry selector returned `false` for every chunk of a multipart `@defer` response — including the primary (first) chunk — when evaluated at `on_response` or `on_response_event` scope.  This made it impossible to distinguish primary from deferred chunks in metrics, events, and conditional telemetry.
+
+The selector now returns `true` for the primary chunk and `false` for subsequent deferred chunks, so per-chunk filtering works as documented:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        my.defer.primary.duration:
+          value: event_duration
+          type: histogram
+          attributes:
+            is_primary:
+              is_primary_response: true
+```
+
+Now produces split metric series (`is_primary="true"` for the primary chunk, `is_primary="false"` for deferred chunks) instead of a single series with `is_primary="false"` for everything.
+
+By [@ebylund](https://github.com/ebylund) in https://github.com/apollographql/router/pull/9238
+
+### Evaluate `on_graphql_error` per response part in coprocessors and telemetry for `@defer` responses ([PR #9365](https://github.com/apollographql/router/pull/9365))
+
+Previously, the `on_graphql_error` condition used in coprocessor and telemetry configurations did not work correctly for deferred (`@defer`) multipart responses:
+
+- The **supergraph coprocessor** evaluated the condition once before any stream chunks were consumed, so it never fired for errors that appeared only in incremental chunks.
+- The **router coprocessor** read the sticky `CONTAINS_GRAPHQL_ERROR` context flag, which caused it to fire for every subsequent chunk once any earlier chunk had errors — and to never fire if the first chunk was clean.
+- The `on_graphql_error` **telemetry selector** at the supergraph stage returned the accumulated error state rather than the current chunk's error state.
+
+The router and supergraph coprocessors, along with telemetry selectors, now evaluate `on_graphql_error` conditions per response part, so the condition fires exactly once per part that contains GraphQL errors — no more, no less.
+
+Additionally, `on_graphql_error: false` (fire when there are *no* errors) now works correctly in all selector contexts: router, supergraph, and subgraph.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9365
+
+### Drop duplicate Rhai script watcher notifications when the change channel is full ([PR #9391](https://github.com/apollographql/router/pull/9391))
+
+When many filesystem events arrived in quick succession, the Rhai script watcher could spin an OS thread or panic — the previous retry loop kept trying to send on a full channel, and would panic if the receiver closed before the retry succeeded.
+
+The watcher now drops duplicate notifications when the channel is already full, matching the behavior introduced for the configuration file watcher in [PR #8336](https://github.com/apollographql/router/pull/8336). Reloads always re-read the current file from disk, so a single pending notification in the channel is sufficient to guarantee the latest contents will be picked up.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9391
+
+### Resolve entity fields when `cache-control: no-cache` is set with `response_cache` enabled ([PR #9197](https://github.com/apollographql/router/pull/9197))
+
+When `response_cache` (or `preview_entity_cache`) was enabled and an incoming request carried `cache-control: no-cache`, entity fields resolved via `_entities` queries returned `null`.  Root fields were unaffected.  Regression introduced in v2.13.0.
+
+The cache plugin's `no-cache` path is now treated as all-cache-miss: the cache builds a properly sized result list so `_entities` is assembled correctly, skips the Redis round-trip, and suppresses misleading hit/miss telemetry for requests that intentionally bypass the cache.
+
+By [@OriginLeon](https://github.com/OriginLeon) in https://github.com/apollographql/router/pull/9197
+
+## 🛠 Maintenance
+
+### Make `batching.mode` optional and reject unknown subgraph batching fields ([PR #9315](https://github.com/apollographql/router/pull/9315))
+
+The `batching` configuration struct now uses a struct-level `#[serde(default)]` with an explicit `impl Default`, rather than per-field `#[serde(default)]` annotations. This aligns with the project's [YAML design guidance](https://github.com/apollographql/router/blob/dev/dev-docs/yaml-design-guidance.md#use-serdedefault-on-struct-instead-of-fields-when-possible), which requires that the serde deserialization path and the `Default` implementation use the same mechanism.
+
+As a result of this change:
+
+- The `mode` field now has an explicit default of `batch_http_link` (the only supported mode), so it is no longer required in YAML configuration. Existing configurations that specify `mode: batch_http_link` are unaffected.
+- The `subgraph` batching configuration now rejects unknown fields, consistent with the rest of the router configuration.
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9315
+
+### Deprecate `connectors.subgraphs` configuration field ([PR #9415](https://github.com/apollographql/router/pull/9415))
+
+The `connectors.subgraphs` configuration field is now deprecated in favor of `connectors.sources`. When `connectors.subgraphs` is set, the router will emit a deprecation warning at startup directing operators to rename the key. The field will be removed in a future 3.x release.
+
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9415
+
+### Improve `Query::apply_root_selection_set` performance by 5-15% ([PR #9458](https://github.com/apollographql/router/pull/9458))
+
+`Query::apply_root_selection_set` now combines three separate map lookups into one, reducing work on every query plan application by 5-15%.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9458
+
+## 📚 Documentation
+
+### Document how to log operations that exceed a candidate operation limit ([PR #9294](https://github.com/apollographql/router/pull/9294))
+
+Adds a new section to the request limits docs showing how to use a custom telemetry event with a `gt` condition on the `query` selector to log operations that exceed a candidate `max_aliases`, `max_depth`, `max_height`, or `max_root_fields` value — without configuring `limits` or enabling `warn_only` mode. The example also captures the client name and version from the `apollographql-client-name` and `apollographql-client-version` headers so you can see which clients are sending the offending operations. The `warn_only` section now cross-references this approach.
+
+By [@smyrick](https://github.com/smyrick) in https://github.com/apollographql/router/pull/9294
+
+### Clarify authorization directive behavior on federated root operation types ([PR #9213](https://github.com/apollographql/router/pull/9213))
+
+The authorization docs now explain what happens when you apply `@authenticated`, `@requiresScopes`, or `@policy` directly to a root operation type (`Query`, `Mutation`, or `Subscription`) in a subgraph. Because root operation types are shared merged types in a federated graph, the directive composes into the supergraph root type and applies to every field on that type, including fields contributed by other subgraphs. To scope authorization reliably, apply the directive to each field rather than to the root type.
+
+By [@andywgarcia](https://github.com/andywgarcia) in https://github.com/apollographql/router/pull/9213
+
+### Surface Redis TLS configuration on every Redis-using feature page ([PR #9172](https://github.com/apollographql/router/pull/9172))
+
+Redis TLS configuration is now documented inline on every feature page that exposes a Redis configuration section — [APQ distributed caching](https://www.apollographql.com/docs/graphos/routing/operations/apq#distributed-caching-with-redis), [query plan distributed caching](https://www.apollographql.com/docs/graphos/routing/query-planning/caching), and [response cache customization](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization) — instead of being mentioned only on the central [TLS overview](https://www.apollographql.com/docs/graphos/routing/security/tls#redis-tls-configuration) page.  Operators configuring Redis for any specific feature can now find the TLS guidance directly on the page they're already reading.
+
+By [@bignimbus](https://github.com/bignimbus) in https://github.com/apollographql/router/pull/9172
+
+### Document `http2_max_headers_list_bytes` and correct the `limits` config example ([PR #9388](https://github.com/apollographql/router/pull/9388))
+
+The [Request Limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) page now documents the `limits.router.http2_max_headers_list_bytes` option, including its default (`16KiB`) and what the router returns on overflow (`431 Request Header Fields Too Large`).  The combined `limits` YAML example on the same page has also been updated to match the nested `limits.router.*` / `limits.subgraph.*` / `limits.connector.*` shape that v2.15.0 introduced — so copy-pasting the example into a router config now produces a configuration the router will accept.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9388
+
+### Document `apollo.router.cache.redis.reconnection` and `apollo.router.cache.redis.unresponsive` metrics ([PR #9306](https://github.com/apollographql/router/pull/9306))
+
+Two Redis-health counters that the router already emits are now documented on the [standard instruments reference page](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments) and the [response cache observability page](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability):
+
+- `apollo.router.cache.redis.reconnection` — increments when a Redis server signals the client to reconnect.
+- `apollo.router.cache.redis.unresponsive` — increments when a Redis server stops responding.
+
+Both carry `kind` (which Redis-backed cache — APQ, query plan, entity cache, response cache) and `server` (the specific Redis endpoint) attributes, making it possible to track Redis health per cache and per endpoint.
+
+By [@apollo-mateuswgoettems](https://github.com/apollo-mateuswgoettems) in https://github.com/apollographql/router/pull/9306
+
+
+
 # [2.14.2] - 2026-05-21
 
 ## 🐛 Fixes
