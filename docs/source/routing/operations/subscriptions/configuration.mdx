@@ -498,7 +498,9 @@ subscription:
   #highlight-end
 ```
 
-When the subgraph WebSocket connection drops and reconnection is configured, the router re-establishes the connection and re-sends the original subscription request transparently, client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. If all retry attempts are exhausted, the subscription terminates normally and the router increments the `apollo.router.operations.subscriptions.terminated.subgraph` metric.
+When the subgraph WebSocket connection drops and reconnection is configured, the router re-establishes the connection and re-sends the original subscription request transparently, client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. Each reconnect attempt increments the `apollo.router.operations.subscriptions.reconnect` counter (labeled with `subgraph.name`). If all retry attempts are exhausted, the subscription terminates and the router increments the `apollo.router.operations.subscriptions.terminated.subgraph` metric.
+
+When `max_reconnect_attempts > 0`, intermediate closures that are recovered by a successful reconnect do not increment `apollo.router.operations.subscriptions.terminated.subgraph` — only the final closure that ends the subscription does. Existing dashboards or alerts on that metric should be reviewed when enabling reconnection.
 
 Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
 

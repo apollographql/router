@@ -271,6 +271,9 @@ async fn call_websocket(
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
     // connection drop. Connection lifecycle is managed by the WebSocket infrastructure, so we
     // don't need to handle connection_closed_signal here.
+    // Capture the current span so reconnect handshakes chain to the originating subscription
+    // trace rather than starting a fresh root traceparent.
+    let forwarding_span = tracing::Span::current();
     tokio::task::spawn(
         async move {
             let mut gql_stream = gql_stream;
@@ -375,18 +378,27 @@ async fn call_websocket(
                         );
                         let (retry_parts, retry_body) =
                             retry_subgraph_request.clone().into_parts();
-                        match open_ws_gql_stream(
-                            &service_name_for_task,
-                            retry_parts,
-                            retry_body,
-                            retry_connection_params.clone(),
-                            retry_signing_params.clone(),
-                            &retry_subgraph_cfg,
-                            retry_subscription_hash.clone(),
-                            log_request_level,
-                        )
-                        .await
-                        {
+                        // The handshake (TCP + TLS + ConnectionAck) can take seconds. If all
+                        // clients drop during it, abort rather than completing a fresh subgraph
+                        // subscription that will immediately need to be torn down.
+                        let handshake_result = select! {
+                            biased;
+                            _ = subscription_closing_signal.recv() => {
+                                tracing::debug!("subscription_closing_signal received during reconnect handshake");
+                                break 'retry;
+                            },
+                            res = open_ws_gql_stream(
+                                &service_name_for_task,
+                                retry_parts,
+                                retry_body,
+                                retry_connection_params.clone(),
+                                retry_signing_params.clone(),
+                                &retry_subgraph_cfg,
+                                retry_subscription_hash.clone(),
+                                log_request_level,
+                            ) => res,
+                        };
+                        match handshake_result {
                             Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
                                 stream_completed_normally = new_completed_normally;
@@ -410,7 +422,8 @@ async fn call_websocket(
             // closes the WebSocket and there are no reconnect attempts left.
             let _ = handle_sink.close().await;
         }
-        .with_current_meter_provider(),
+        .with_current_meter_provider()
+        .instrument(forwarding_span),
     );
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
