@@ -240,10 +240,12 @@ impl Display for CacheControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut formatter = DelimitedFormatter::from(f);
 
-        // If no-store, write just that and return early. This prevents potentially conflicting
-        // directives (https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing).
-        // TODO: write no-store if max-age = 0?
-        // TODO: is this really what we want? what if it's not no-cache?
+        // If no-store, emit just that directive and return early. Per RFC 9111, no-store is the
+        // strongest cache directive and makes all others irrelevant. Note that max-age=0 is
+        // intentionally not treated as no-store: max-age=0 means "expired, always revalidate",
+        // whereas no-store means "do not cache at all". The router determines cacheability via
+        // should_store(), not by inspecting the serialized header.
+        // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store {
             write!(&mut formatter, "no-store")?;
             return Ok(());
@@ -371,9 +373,9 @@ impl CacheControl {
     }
 
     fn merge_inner(&self, other: &Self, now_epoch: u64, update_ttl: bool) -> Self {
-        // If no-store, write just that and return early. This prevents potentially conflicting
-        // directives (https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing).
-        // TODO: is this really what we want? what if it's not no-cache?
+        // If either side has no-store, the merged result is no-store only. Per RFC 9111, no-store
+        // is the strongest cache directive and makes all others irrelevant.
+        // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store || other.no_store {
             return Self {
                 created: now_epoch,
