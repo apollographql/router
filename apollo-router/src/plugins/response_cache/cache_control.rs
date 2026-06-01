@@ -756,4 +756,457 @@ mod tests {
         let cc: CacheControl = serde_json::from_str(json).unwrap();
         assert_eq!(cc.stale_while_revalidate, Some(60));
     }
+
+    // --- Parsing (TryFrom<&HeaderMap>) ---
+
+    fn header_map(pairs: &[(&str, &str)]) -> http::HeaderMap {
+        pairs
+            .iter()
+            .fold(http::HeaderMap::new(), |mut map, (k, v)| {
+                map.insert(
+                    http::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                    http::HeaderValue::from_str(v).unwrap(),
+                );
+                map
+            })
+    }
+
+    #[test]
+    fn parse_missing_cache_control_header() {
+        // No Cache-Control header should default to no_store per pre-existing behavior
+        let cc = CacheControl::try_from(&http::HeaderMap::new()).unwrap();
+        assert!(cc.no_store());
+    }
+
+    #[test]
+    fn parse_max_age() {
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "max-age=60")])).unwrap();
+        assert_eq!(cc.max_age, Some(60));
+        assert_eq!(cc.s_max_age, None);
+    }
+
+    #[test]
+    fn parse_s_maxage() {
+        // s-maxage should be stored separately, not collapsed into max_age
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30")])).unwrap();
+        assert_eq!(cc.s_max_age, Some(30));
+        assert_eq!(cc.max_age, None);
+    }
+
+    #[test]
+    fn parse_s_maxage_and_max_age_kept_separate() {
+        // Both directives present: must not be collapsed together
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "max-age=60,s-maxage=30")])).unwrap();
+        assert_eq!(cc.max_age, Some(60));
+        assert_eq!(cc.s_max_age, Some(30));
+        // max_age() getter prefers s-maxage (router acts as shared cache)
+        assert_eq!(cc.max_age(), Some(30));
+    }
+
+    #[test]
+    fn parse_no_cache() {
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "no-cache")])).unwrap();
+        assert!(cc.no_cache());
+    }
+
+    #[test]
+    fn parse_no_store() {
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "no-store")])).unwrap();
+        assert!(cc.no_store());
+    }
+
+    #[test]
+    fn parse_private_overrides_public() {
+        // If both private and public are present, private wins
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "public,private")])).unwrap();
+        assert!(cc.private());
+        assert!(!cc.public());
+    }
+
+    #[test]
+    fn parse_age_header() {
+        let cc = CacheControl::try_from(&header_map(&[
+            ("cache-control", "max-age=60"),
+            ("age", "10"),
+        ]))
+        .unwrap();
+        assert_eq!(cc.age(), Some(10));
+        // TTL should account for age: 60 - 10 = 50
+        assert_eq!(cc.ttl(), Some(50));
+    }
+
+    #[test]
+    fn parse_max_stale_without_value() {
+        // Bare max-stale means accept any stale age (u64::MAX sentinel)
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "max-stale")])).unwrap();
+        assert_eq!(cc.max_stale, Some(u64::MAX));
+    }
+
+    #[test]
+    fn parse_max_stale_with_value() {
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "max-stale=120")])).unwrap();
+        assert_eq!(cc.max_stale, Some(120));
+    }
+
+    #[test]
+    fn parse_extension_directives_ignored() {
+        // RFC 9111 §5.2: unknown directives must be silently ignored
+        let cc = CacheControl::try_from(&header_map(&[(
+            "cache-control",
+            "max-age=60,cdn-cache-control=120,some-future-directive",
+        )]))
+        .unwrap();
+        assert_eq!(cc.max_age, Some(60));
+    }
+
+    #[test]
+    fn parse_multiple_cache_control_headers() {
+        // Multiple Cache-Control headers should be merged
+        let mut map = http::HeaderMap::new();
+        map.append(
+            http::header::CACHE_CONTROL,
+            http::HeaderValue::from_static("max-age=60"),
+        );
+        map.append(
+            http::header::CACHE_CONTROL,
+            http::HeaderValue::from_static("no-transform"),
+        );
+        let cc = CacheControl::try_from(&map).unwrap();
+        assert_eq!(cc.max_age, Some(60));
+        assert!(cc.no_transform);
+    }
+
+    // --- s-maxage preservation through merge and display ---
+
+    #[test]
+    fn s_maxage_preserved_through_merge() {
+        // The old code collapsed s-maxage into max-age during merge.
+        // Verify the new code keeps them as separate fields.
+        let now = now_epoch_seconds();
+        let first = CacheControl {
+            created: now,
+            s_max_age: Some(30),
+            max_age: None,
+            ..Default::default()
+        };
+        let second = CacheControl {
+            created: now,
+            s_max_age: Some(60),
+            max_age: Some(120),
+            ..Default::default()
+        };
+        let merged = first.merge_inner(&second, now, true);
+        assert_eq!(merged.s_max_age, Some(30));
+        assert_eq!(merged.max_age, Some(120));
+        // Effective TTL uses s_max_age
+        assert_eq!(merged.max_age(), Some(30));
+    }
+
+    #[test]
+    fn s_maxage_in_display() {
+        // s-maxage and max-age should be emitted as separate directives
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            s_max_age: Some(30),
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let header = cc.to_string();
+        assert!(header.contains("s-maxage=30"), "got: {header}");
+        assert!(header.contains("max-age=60"), "got: {header}");
+    }
+
+    #[test]
+    fn s_maxage_round_trip() {
+        // Parse s-maxage from a header, serialize back, confirm it's preserved
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30,max-age=60")])).unwrap();
+        let header = cc.to_string();
+        assert!(header.contains("s-maxage="), "got: {header}");
+        assert!(header.contains("max-age="), "got: {header}");
+    }
+
+    // --- Display ---
+
+    #[test]
+    fn display_decrements_max_age_by_elapsed() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now - 10,
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let header = cc.to_string();
+        // elapsed is ~10s, so max-age should be ~50
+        let emitted: u64 = header
+            .split(',')
+            .find(|d| d.starts_with("max-age="))
+            .and_then(|d| d.trim_start_matches("max-age=").parse().ok())
+            .unwrap();
+        assert!(emitted <= 50 && emitted >= 48, "expected ~50, got {emitted}");
+    }
+
+    #[test]
+    fn display_no_store_suppresses_other_directives() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            no_store: true,
+            max_age: Some(60),
+            no_cache: true,
+            ..Default::default()
+        };
+        assert_eq!(cc.to_string(), "no-store");
+    }
+
+    // --- with_default_ttl ---
+
+    #[test]
+    fn with_default_ttl_sets_max_age_when_absent() {
+        let cc = CacheControl::default().with_default_ttl(Some(Duration::from_secs(60)));
+        assert_eq!(cc.max_age, Some(60));
+    }
+
+    #[test]
+    fn with_default_ttl_does_not_override_existing_max_age() {
+        let cc = CacheControl {
+            max_age: Some(30),
+            ..Default::default()
+        }
+        .with_default_ttl(Some(Duration::from_secs(60)));
+        assert_eq!(cc.max_age, Some(30));
+    }
+
+    #[test]
+    fn with_default_ttl_no_op_when_no_store() {
+        let cc = CacheControl::default_no_store().with_default_ttl(Some(Duration::from_secs(60)));
+        assert_eq!(cc.max_age, None);
+    }
+
+    // --- should_store ---
+
+    #[test]
+    fn should_store_true_when_fresh() {
+        let cc = CacheControl {
+            max_age: Some(60),
+            ..Default::default()
+        };
+        assert!(cc.should_store());
+    }
+
+    #[test]
+    fn should_store_true_when_no_max_age() {
+        // No max_age means no expiry, so should still store
+        let cc = CacheControl::default();
+        assert!(cc.should_store());
+    }
+
+    #[test]
+    fn should_store_false_when_no_store() {
+        assert!(!CacheControl::default_no_store().should_store());
+    }
+
+    #[test]
+    fn should_store_false_when_ttl_zero() {
+        // Already expired at time of receipt (age >= max_age)
+        let cc = CacheControl {
+            max_age: Some(10),
+            age: Some(10),
+            ..Default::default()
+        };
+        assert!(!cc.should_store());
+    }
+
+    // --- update_headers ---
+
+    #[test]
+    fn update_headers_sets_cache_control() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+        cc.update_headers(&mut headers).unwrap();
+        assert!(headers.contains_key(http::header::CACHE_CONTROL));
+        let value = headers[http::header::CACHE_CONTROL].to_str().unwrap();
+        assert!(value.contains("max-age="), "got: {value}");
+    }
+
+    #[test]
+    fn update_headers_sets_age_when_positive() {
+        let cc = CacheControl {
+            age: Some(15),
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+        cc.update_headers(&mut headers).unwrap();
+        assert!(headers.contains_key(http::header::AGE));
+    }
+
+    #[test]
+    fn update_headers_omits_age_when_zero() {
+        let cc = CacheControl {
+            age: Some(0),
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let mut headers = http::HeaderMap::new();
+        cc.update_headers(&mut headers).unwrap();
+        assert!(!headers.contains_key(http::header::AGE));
+    }
+
+    // --- merge_without_ttl_update ---
+
+    #[test]
+    fn merge_without_ttl_update_ignores_elapsed() {
+        // The key distinction between merge and merge_without_ttl_update:
+        // merge subtracts elapsed time since creation; merge_without_ttl_update does not.
+        // This matters for the telemetry use case where we want to report the original TTL.
+        let now = now_epoch_seconds();
+        let first = CacheControl {
+            created: now - 10,
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let second = CacheControl {
+            created: now - 10,
+            max_age: Some(60),
+            ..Default::default()
+        };
+
+        // merge accounts for elapsed: 60 - 10s elapsed = 50
+        let with_update = first.merge_inner(&second, now, true);
+        assert_eq!(with_update.ttl(), Some(50));
+
+        // merge_without_ttl_update ignores elapsed: stays at 60
+        let without_update = first.merge_inner(&second, now, false);
+        assert_eq!(without_update.ttl(), Some(60));
+    }
+
+    #[test]
+    fn merge_without_ttl_update_still_takes_minimum() {
+        let now = now_epoch_seconds();
+        let first = CacheControl {
+            created: now,
+            max_age: Some(30),
+            ..Default::default()
+        };
+        let second = CacheControl {
+            created: now,
+            max_age: Some(60),
+            ..Default::default()
+        };
+        let merged = first.merge_inner(&second, now, false);
+        assert_eq!(merged.ttl(), Some(30));
+    }
+
+    // --- remaining_ttl (public, time-relative) ---
+
+    #[test]
+    fn remaining_ttl_accounts_for_elapsed() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now - 10,
+            max_age: Some(60),
+            ..Default::default()
+        };
+        // ttl() = 60 (age-relative only, ignores elapsed)
+        assert_eq!(cc.ttl(), Some(60));
+        // remaining_ttl() = 60 - 10s elapsed = ~50
+        let remaining = cc.remaining_ttl().unwrap();
+        assert!(remaining <= 50 && remaining >= 48, "expected ~50, got {remaining}");
+    }
+
+    #[test]
+    fn remaining_ttl_accounts_for_age_and_elapsed() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now - 5,
+            max_age: Some(60),
+            age: Some(10),
+            ..Default::default()
+        };
+        // remaining_ttl() = 60 - 10(age) - ~5(elapsed) = ~45
+        let remaining = cc.remaining_ttl().unwrap();
+        assert!(remaining <= 45 && remaining >= 43, "expected ~45, got {remaining}");
+    }
+
+    #[test]
+    fn remaining_ttl_returns_zero_when_expired() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            max_age: Some(10),
+            age: Some(20), // age > max_age: already expired at receipt
+            ..Default::default()
+        };
+        assert_eq!(cc.remaining_ttl(), Some(0));
+    }
+
+    #[test]
+    fn remaining_ttl_returns_none_without_max_age() {
+        let cc = CacheControl::default();
+        assert_eq!(cc.remaining_ttl(), None);
+    }
+
+    // --- merge_no_store ---
+
+    #[test]
+    fn merge_no_store_propagates_from_other() {
+        let mut cc = CacheControl {
+            max_age: Some(60),
+            ..Default::default()
+        };
+        cc.merge_no_store(&CacheControl::default_no_store());
+        assert!(cc.no_store());
+        // Other fields should be unaffected
+        assert_eq!(cc.max_age, Some(60));
+    }
+
+    #[test]
+    fn merge_no_store_no_op_when_other_is_not_no_store() {
+        let mut cc = CacheControl {
+            max_age: Some(60),
+            ..Default::default()
+        };
+        cc.merge_no_store(&CacheControl::default());
+        assert!(!cc.no_store());
+        assert_eq!(cc.max_age, Some(60));
+    }
+
+    // --- max_age() getter ---
+
+    #[test]
+    fn max_age_getter_prefers_s_max_age() {
+        let cc = CacheControl {
+            max_age: Some(60),
+            s_max_age: Some(30),
+            ..Default::default()
+        };
+        assert_eq!(cc.max_age(), Some(30));
+    }
+
+    #[test]
+    fn max_age_getter_falls_back_to_max_age() {
+        let cc = CacheControl {
+            max_age: Some(60),
+            s_max_age: None,
+            ..Default::default()
+        };
+        assert_eq!(cc.max_age(), Some(60));
+    }
+
+    #[test]
+    fn max_age_getter_returns_none_when_neither_set() {
+        assert_eq!(CacheControl::default().max_age(), None);
+    }
 }
