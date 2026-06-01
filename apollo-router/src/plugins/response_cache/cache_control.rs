@@ -564,15 +564,9 @@ fn now_epoch_seconds() -> u64 {
 /// Parses a single Cache-Control directive of the form `key` or `key=value`.
 /// Returns an error if the directive contains more than one `=` sign.
 fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
-    let mut directive_kv = directive.trim().split('=');
-    let (key, value) = (directive_kv.next(), directive_kv.next());
-
-    if key.is_none() || directive_kv.next().is_some() {
-        return Err("invalid Cache-Control header value".into());
-    }
-
-    let key = key.expect("key was checked above");
-    Ok((key, value))
+    let mut parts = directive.trim().splitn(2, '=');
+    let key = parts.next().filter(|k| !k.is_empty()).ok_or("invalid Cache-Control header value")?;
+    Ok((key, parts.next()))
 }
 
 fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
