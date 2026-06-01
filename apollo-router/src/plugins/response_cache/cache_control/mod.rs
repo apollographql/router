@@ -375,7 +375,7 @@ impl CacheControl {
                 other.remaining_s_max_age(now),
             ),
             no_cache: self.no_cache || other.no_cache,
-            no_store: self.no_store || other.no_store,
+            no_store: false,
             no_transform: self.no_transform || other.no_transform,
             must_revalidate: self.must_revalidate || other.must_revalidate,
             proxy_revalidate: self.proxy_revalidate || other.proxy_revalidate,
