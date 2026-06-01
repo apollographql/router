@@ -425,10 +425,7 @@ impl CacheControl {
                 self.stale_while_revalidate,
                 other.stale_while_revalidate,
             ),
-            stale_if_error: minimum_optional_value(
-                self.stale_if_error,
-                other.stale_if_error,
-            ),
+            stale_if_error: minimum_optional_value(self.stale_if_error, other.stale_if_error),
             max_stale: minimum_optional_value(
                 self.remaining_max_stale(now),
                 other.remaining_max_stale(now),
@@ -576,7 +573,10 @@ fn now_epoch_seconds() -> u64 {
 /// Returns an error if the directive contains more than one `=` sign.
 fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
     let mut parts = directive.trim().splitn(2, '=');
-    let key = parts.next().filter(|k| !k.is_empty()).ok_or("invalid Cache-Control header value")?;
+    let key = parts
+        .next()
+        .filter(|k| !k.is_empty())
+        .ok_or("invalid Cache-Control header value")?;
     Ok((key, parts.next()))
 }
 
