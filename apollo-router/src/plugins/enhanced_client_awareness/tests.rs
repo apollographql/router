@@ -1,3 +1,4 @@
+use http::StatusCode;
 use tower::ServiceExt;
 
 use super::EnhancedClientAwareness;
@@ -98,4 +99,56 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
         .unwrap();
 
     let _ = service_stack.oneshot(request).await;
+}
+
+#[tokio::test]
+async fn invalid_library_name_returns_bad_request() {
+    let mock_service = MockSupergraphService::new();
+
+    let service_stack =
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+            .await
+            .unwrap()
+            .supergraph_service(mock_service.boxed());
+
+    let mut clients_map = serde_json_bytes::map::Map::new();
+    clients_map.insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#.into());
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into());
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::default())
+        .query("{query:{ foo { bar } }}")
+        .extensions(extensions_map)
+        .build()
+        .unwrap();
+
+    let response = service_stack.oneshot(request).await.unwrap();
+    assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn invalid_library_version_returns_bad_request() {
+    let mock_service = MockSupergraphService::new();
+
+    let service_stack =
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+            .await
+            .unwrap()
+            .supergraph_service(mock_service.boxed());
+
+    let mut clients_map = serde_json_bytes::map::Map::new();
+    clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#.into());
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into());
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::default())
+        .query("{query:{ foo { bar } }}")
+        .extensions(extensions_map)
+        .build()
+        .unwrap();
+
+    let response = service_stack.oneshot(request).await.unwrap();
+    assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
 }
