@@ -22,7 +22,6 @@ use tower::BoxError;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
     // -- shared between request and response --
-
     /// Unix timestamp (seconds) at which this struct was created. Used to compute elapsed time
     /// for TTL calculations.
     created: u64,
@@ -61,7 +60,6 @@ pub(crate) struct CacheControl {
     stale_if_error: Option<u64>,
 
     // -- request only --
-
     /// `max-stale[=N]`: the client accepts a stale response, optionally capped at N seconds past
     /// expiry. A bare `max-stale` (no value) is stored as `u64::MAX` (~584 billion years).
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -76,7 +74,6 @@ pub(crate) struct CacheControl {
     only_if_cached: bool,
 
     // -- response only --
-
     /// Value of the `Age` response header, indicating how many seconds old the response is.
     /// Used to offset `max_age` when computing the remaining TTL.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -587,7 +584,6 @@ fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
     ttl.saturating_sub(elapsed)
 }
 
-
 #[cfg(test)]
 impl CacheControl {
     /// Returns the remaining TTL in seconds at the given Unix timestamp.
@@ -795,8 +791,7 @@ mod tests {
     #[test]
     fn parse_s_maxage() {
         // s-maxage should be stored separately, not collapsed into max_age
-        let cc =
-            CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30")])).unwrap();
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30")])).unwrap();
         assert_eq!(cc.s_max_age, Some(30));
         assert_eq!(cc.max_age, None);
     }
@@ -804,7 +799,9 @@ mod tests {
     #[test]
     fn parse_s_maxage_and_max_age_kept_separate() {
         // Both directives present: must not be collapsed together
-        let cc = CacheControl::try_from(&header_map(&[("cache-control", "max-age=60,s-maxage=30")])).unwrap();
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "max-age=60,s-maxage=30")]))
+                .unwrap();
         assert_eq!(cc.max_age, Some(60));
         assert_eq!(cc.s_max_age, Some(30));
         // max_age() getter prefers s-maxage (router acts as shared cache)
@@ -813,22 +810,21 @@ mod tests {
 
     #[test]
     fn parse_no_cache() {
-        let cc =
-            CacheControl::try_from(&header_map(&[("cache-control", "no-cache")])).unwrap();
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "no-cache")])).unwrap();
         assert!(cc.no_cache());
     }
 
     #[test]
     fn parse_no_store() {
-        let cc =
-            CacheControl::try_from(&header_map(&[("cache-control", "no-store")])).unwrap();
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "no-store")])).unwrap();
         assert!(cc.no_store());
     }
 
     #[test]
     fn parse_private_overrides_public() {
         // If both private and public are present, private wins
-        let cc = CacheControl::try_from(&header_map(&[("cache-control", "public,private")])).unwrap();
+        let cc =
+            CacheControl::try_from(&header_map(&[("cache-control", "public,private")])).unwrap();
         assert!(cc.private());
         assert!(!cc.public());
     }
@@ -848,8 +844,7 @@ mod tests {
     #[test]
     fn parse_max_stale_without_value() {
         // Bare max-stale means accept any stale age (u64::MAX sentinel)
-        let cc =
-            CacheControl::try_from(&header_map(&[("cache-control", "max-stale")])).unwrap();
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "max-stale")])).unwrap();
         assert_eq!(cc.max_stale, Some(u64::MAX));
     }
 
@@ -947,7 +942,8 @@ mod tests {
     fn s_maxage_round_trip() {
         // Parse s-maxage from a header, serialize back, confirm it's preserved
         let cc =
-            CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30,max-age=60")])).unwrap();
+            CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30,max-age=60")]))
+                .unwrap();
         let header = cc.to_response_header_value();
         assert!(header.contains("s-maxage="), "got: {header}");
         assert!(header.contains("max-age="), "got: {header}");
@@ -970,7 +966,10 @@ mod tests {
             .find(|d| d.starts_with("max-age="))
             .and_then(|d| d.trim_start_matches("max-age=").parse().ok())
             .unwrap();
-        assert!(emitted <= 50 && emitted >= 48, "expected ~50, got {emitted}");
+        assert!(
+            emitted <= 50 && emitted >= 48,
+            "expected ~50, got {emitted}"
+        );
     }
 
     #[test]
@@ -1144,7 +1143,10 @@ mod tests {
         assert_eq!(cc.ttl(), Some(60));
         // remaining_ttl() = 60 - 10s elapsed = ~50
         let remaining = cc.remaining_ttl().unwrap();
-        assert!(remaining <= 50 && remaining >= 48, "expected ~50, got {remaining}");
+        assert!(
+            remaining <= 50 && remaining >= 48,
+            "expected ~50, got {remaining}"
+        );
     }
 
     #[test]
@@ -1158,7 +1160,10 @@ mod tests {
         };
         // remaining_ttl() = 60 - 10(age) - ~5(elapsed) = ~45
         let remaining = cc.remaining_ttl().unwrap();
-        assert!(remaining <= 45 && remaining >= 43, "expected ~45, got {remaining}");
+        assert!(
+            remaining <= 45 && remaining >= 43,
+            "expected ~45, got {remaining}"
+        );
     }
 
     #[test]

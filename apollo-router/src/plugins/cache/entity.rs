@@ -1798,9 +1798,7 @@ async fn insert_entities_in_result(
                 if !has_errors
                     && cache_control.should_store()
                     && should_cache_private
-                    && request_cache_control
-                        .as_ref()
-                        .is_none_or(|c| !c.no_store())
+                    && request_cache_control.as_ref().is_none_or(|c| !c.no_store())
                 {
                     to_insert.push((
                         RedisKey(key),

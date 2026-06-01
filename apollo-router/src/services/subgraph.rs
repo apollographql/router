@@ -9,7 +9,6 @@ use std::time::Duration;
 use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
-use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Deserialize;
