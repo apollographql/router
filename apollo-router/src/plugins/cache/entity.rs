@@ -996,7 +996,7 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
+    if request_cache_control.is_some_and(|c| c.no_cache()) {
         return Ok(ControlFlow::Continue((request, key)));
     }
 
@@ -1072,7 +1072,7 @@ async fn cache_lookup_entities(
     expose_keys_in_context: bool,
     request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
-    let is_no_cache = request_cache_control.is_some_and(|c| c.is_no_cache());
+    let is_no_cache = request_cache_control.is_some_and(|c| c.no_cache());
 
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
@@ -1800,7 +1800,7 @@ async fn insert_entities_in_result(
                     && should_cache_private
                     && request_cache_control
                         .as_ref()
-                        .is_none_or(|c| !c.is_no_store())
+                        .is_none_or(|c| !c.no_store())
                 {
                     to_insert.push((
                         RedisKey(key),

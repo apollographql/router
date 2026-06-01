@@ -42,13 +42,13 @@ pub(crate) struct CacheControl {
 
     /// request: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
     /// response: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
-    /// TODO: not sure if used by the router
+    /// The router does not transform response bodies, so this directive does not affect caching behavior.
+    /// It is parsed and propagated to the client for downstream caches to honor.
     #[serde(skip_serializing_if = "is_false", default)]
     no_transform: bool,
 
     /// request: Indicates that the browser is interested in receiving stale content on error from any intermediate server for a particular origin.
     /// response: Indicates that the cache can reuse a stale response when an upstream server generates an error, or when the error is generated locally. Here, an error is considered any response with a status code of 500, 502, 503, or 504.
-    /// TODO: apparently this is not supported by any browser.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     stale_if_error: Option<u64>,
 
@@ -83,7 +83,8 @@ pub(crate) struct CacheControl {
     proxy_revalidate: bool,
 
     /// Indicates that a cache should store the response only if it understands the requirements for caching based on status code.
-    /// TODO: not sure what this means for our use case
+    /// The router does not validate status code semantics before caching, so this directive is parsed and propagated
+    /// to the client but not actively enforced.
     #[serde(skip_serializing_if = "is_false", default)]
     must_understand: bool,
 
@@ -96,14 +97,14 @@ pub(crate) struct CacheControl {
     public: bool,
 
     /// Indicates that the response will not be updated while it's fresh.
-    /// TODO: not sure if used by the router
+    /// The router does not currently use this to optimize cache revalidation, but it is parsed and propagated to the client.
     #[serde(skip_serializing_if = "is_false", default)]
     immutable: bool,
 
     /// Indicates that the cache could reuse a stale response while it revalidates it to a cache.
-    /// TODO: not sure if used by the router
-    /// TODO: I think this is a type change, make sure that existing 'true' values are deserialized as none
-    /// TODO: make sure that unknown fields in the redis cache control value do not mess up deserialization
+    /// The router does not currently serve stale responses while revalidating; see [`can_use`].
+    /// Note: if cached Redis entries contain this field as a boolean from an older schema version,
+    /// deserialization will fail. Verify before enabling stale-while-revalidate support.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     stale_while_revalidate: Option<u64>,
 }
@@ -299,8 +300,8 @@ impl CacheControl {
         }
     }
 
-    // TODO better docstring - set max-age based on ttl if max-age not already present
-    //  NOTE: doesn't set it if no-store is set
+    /// Sets `max_age` to the given TTL if `max_age` is not already present in the header.
+    /// Has no effect if `no_store` is set.
     pub(crate) fn with_default_ttl(mut self, ttl: Option<Duration>) -> Self {
         if self.no_store {
             return self;
@@ -366,7 +367,6 @@ impl CacheControl {
                 self.remaining_max_age(now),
                 other.remaining_max_age(now),
             ),
-            // TODO: prev logic would eliminate s_max_age in favor of bundling it with max_age. ideally this would not happen during the merge
             s_max_age: minimum_optional_value(
                 self.remaining_s_max_age(now),
                 other.remaining_s_max_age(now),
@@ -378,7 +378,6 @@ impl CacheControl {
             proxy_revalidate: self.proxy_revalidate || other.proxy_revalidate,
             must_understand: self.must_understand || other.must_understand,
             private,
-            // TODO: prev logic would public based on value of private. ideally this would not happen during the merge
             public: !private && (self.public || other.public),
             immutable: self.immutable || other.immutable,
             stale_while_revalidate: minimum_optional_value(
@@ -425,25 +424,29 @@ impl CacheControl {
 
     pub(crate) fn can_use(&self) -> bool {
         // TODO: honor stale-while-revalidate
-        !self.no_cache && self.ttl_new().is_none_or(|ttl| ttl > 0)
+        !self.no_cache && self.remaining_ttl().is_none_or(|ttl| ttl > 0)
     }
 
     pub(crate) fn age(&self) -> Option<u64> {
         self.age
     }
 
-    // TODO doc that this includes s_max_age adn why
+    /// Returns the effective max age in seconds, preferring `s-maxage` over `max-age`.
+    /// `s-maxage` is used because the router acts as a shared cache.
     pub(crate) fn max_age(&self) -> Option<u64> {
         self.s_max_age.or(self.max_age)
     }
 
-    // TODO: this is relative to age, not now!!
+    /// Returns the remaining TTL in seconds, computed as `max_age - age`.
+    /// This accounts for the `Age` header (how old the response was when received) but not
+    /// for time elapsed since this struct was created. Use [`remaining_ttl`] for a fully time-relative TTL.
     pub(crate) fn ttl(&self) -> Option<u64> {
         self.remaining_duration(self.max_age(), None)
     }
 
-    // TODO: this is relative to now as well!! I think we should use it
-    pub(crate) fn ttl_new(&self) -> Option<u64> {
+    /// Returns the remaining TTL in seconds as of now, computed as `max_age - age - elapsed`
+    /// where `elapsed` is the time since this struct was created.
+    pub(crate) fn remaining_ttl(&self) -> Option<u64> {
         let max_age = self.s_max_age.or(self.max_age);
         self.remaining_duration(max_age, Some(now_epoch_seconds()))
     }
@@ -509,7 +512,8 @@ fn now_epoch_seconds() -> u64 {
         .as_secs()
 }
 
-/// TODO needs docstring
+/// Parses a single Cache-Control directive of the form `key` or `key=value`.
+/// Returns an error if the directive contains more than one `=` sign.
 fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
     let mut directive_kv = directive.trim().split('=');
     let (key, value) = (directive_kv.next(), directive_kv.next());
@@ -557,12 +561,13 @@ impl<'a, 'b> DelimitedFormatter<'a, 'b> {
 
 #[cfg(test)]
 impl CacheControl {
-    /// TODO doc (used below)
-    fn remaining_ttl(&self, now: u64) -> Option<u64> {
+    /// Returns the remaining TTL in seconds at the given Unix timestamp.
+    /// Used in tests to assert TTL values at a specific point in time without depending on the current clock.
+    fn remaining_ttl_at(&self, now: u64) -> Option<u64> {
         self.remaining_duration(self.max_age(), Some(now))
     }
 
-    /// TODO doc - used to standardize snapshots
+    /// Sets `created` to 0, making time-dependent fields deterministic in snapshot tests.
     pub(crate) fn zero_out_created(&mut self) {
         self.created = 0;
     }
@@ -588,13 +593,13 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(first.remaining_ttl(now), Some(30));
-        assert_eq!(second.remaining_ttl(now), Some(40));
+        assert_eq!(first.remaining_ttl_at(now), Some(30));
+        assert_eq!(second.remaining_ttl_at(now), Some(40));
 
         let merged = first.merge_inner(&second, now, true);
 
         assert_eq!(merged.ttl(), Some(30));
-        assert_eq!(merged.remaining_ttl(now), Some(30));
+        assert_eq!(merged.remaining_ttl_at(now), Some(30));
         assert!(merged.can_use());
     }
 
@@ -708,5 +713,22 @@ mod tests {
         };
         assert!(!cc.can_use()); // Because created is bigger than now
         assert!(!cc.should_store()); // Because age is bigger than max_age
+    }
+
+    #[test]
+    fn deserialize_stale_while_revalidate_as_bool_fails() {
+        // Confirms that old Redis entries storing stale_while_revalidate as a boolean
+        // cannot be deserialized into the current Option<u64> schema. Any cached entries
+        // from an older schema version will need to be flushed before enabling
+        // stale-while-revalidate support.
+        let json = r#"{"created":0,"staleWhileRevalidate":true}"#;
+        assert!(serde_json::from_str::<CacheControl>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_stale_while_revalidate_as_number_works() {
+        let json = r#"{"created":0,"staleWhileRevalidate":60}"#;
+        let cc: CacheControl = serde_json::from_str(json).unwrap();
+        assert_eq!(cc.stale_while_revalidate, Some(60));
     }
 }
