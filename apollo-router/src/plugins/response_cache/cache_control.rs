@@ -218,7 +218,13 @@ impl TryFrom<&HeaderMap> for CacheControl {
                     "immutable" => cache_control.immutable = true,
                     "must-revalidate" => cache_control.must_revalidate = true,
                     "must-understand" => cache_control.must_understand = true,
-                    "no-cache" => cache_control.no_cache = true,
+                    // RFC 9111 §5.2.2.4: bare no-cache means "always revalidate before serving".
+                    // The field-specific form no-cache="Authorization" means "you may cache this
+                    // response, but strip the listed header fields before forwarding". Since the
+                    // router does not forward raw subgraph headers as part of cached responses,
+                    // the field list has no actionable meaning and we can treat the response as
+                    // freely cacheable.
+                    "no-cache" if value.is_none() => cache_control.no_cache = true,
                     "no-store" => cache_control.no_store = true,
                     "no-transform" => cache_control.no_transform = true,
                     "only-if-cached" => cache_control.only_if_cached = true,
