@@ -303,7 +303,7 @@ impl CacheControl {
         if self.private {
             parts.push("private".to_string());
         }
-        if self.public {
+        if self.public && !self.private {
             parts.push("public".to_string());
         }
         if self.immutable {
