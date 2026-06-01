@@ -103,10 +103,32 @@ pub(crate) struct CacheControl {
 
     /// Indicates that the cache could reuse a stale response while it revalidates it to a cache.
     /// The router does not currently serve stale responses while revalidating; see [`can_use`].
-    /// Note: if cached Redis entries contain this field as a boolean from an older schema version,
-    /// deserialization will fail. Verify before enabling stale-while-revalidate support.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    /// Older schema versions stored this field as a boolean; the custom deserializer handles both.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "deserialize_stale_while_revalidate"
+    )]
     stale_while_revalidate: Option<u64>,
+}
+
+/// Deserializes `stale_while_revalidate` from either a `u64` (current schema) or a `bool`
+/// (legacy schema). A boolean value is treated as `None` since no duration is available.
+fn deserialize_stale_while_revalidate<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrU64 {
+        Duration(u64),
+        Bool(bool),
+    }
+
+    Ok(match Option::<BoolOrU64>::deserialize(deserializer)? {
+        Some(BoolOrU64::Duration(n)) => Some(n),
+        Some(BoolOrU64::Bool(_)) | None => None,
+    })
 }
 
 fn is_false(b: &bool) -> bool {
@@ -716,13 +738,16 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_stale_while_revalidate_as_bool_fails() {
-        // Confirms that old Redis entries storing stale_while_revalidate as a boolean
-        // cannot be deserialized into the current Option<u64> schema. Any cached entries
-        // from an older schema version will need to be flushed before enabling
-        // stale-while-revalidate support.
+    fn deserialize_stale_while_revalidate_as_bool_succeeds() {
+        // Old Redis entries may have stored stale_while_revalidate as a boolean.
+        // A boolean value is treated as None since no duration is available.
         let json = r#"{"created":0,"staleWhileRevalidate":true}"#;
-        assert!(serde_json::from_str::<CacheControl>(json).is_err());
+        let cc: CacheControl = serde_json::from_str(json).unwrap();
+        assert_eq!(cc.stale_while_revalidate, None);
+
+        let json = r#"{"created":0,"staleWhileRevalidate":false}"#;
+        let cc: CacheControl = serde_json::from_str(json).unwrap();
+        assert_eq!(cc.stale_while_revalidate, None);
     }
 
     #[test]
