@@ -10,97 +10,113 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-/// REQUEST Cache control header either:
-/// * Sent from client to router to control response cache
-/// * Sent from router to subgraph to control external cache (ie CDN)
+/// Represents a parsed `Cache-Control` header, used in both request and response contexts:
 ///
-/// RESPONSE Cache control header either:
-/// * Returned from subgraph to router to control response cache
-/// * Returned from router to client to control external cache (ie CDN)
+/// - **Request**: sent from the client to the router, or from the router to a subgraph,
+///   to control how caches should handle the request.
+/// - **Response**: returned from a subgraph to the router, or from the router to the client,
+///   to control how caches should store and serve the response.
+///
+/// Fields are annotated to indicate whether they are request-only, response-only, or shared.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
-    /////// shared between request and response
+    // -- shared between request and response --
+
+    /// Unix timestamp (seconds) at which this struct was created. Used to compute elapsed time
+    /// for TTL calculations.
     created: u64,
 
-    /// Indicates that the response remains fresh until N seconds after the response is generated
+    /// `max-age=N`: the response remains fresh for N seconds after it was generated.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     max_age: Option<u64>,
 
-    /// request: Asks cache to validate the response with the origin server before reuse.
-    /// response: Indicates that the response can be stored in caches, but the response must be validated with the origin server before each reuse, even when the cache is disconnected from the origin server.
+    /// `no-cache`: the cache must revalidate with the origin before serving a stored response.
+    ///
+    /// In a request, asks caches to bypass stored responses and revalidate.
+    /// In a response, requires revalidation before each reuse even when disconnected from origin.
     #[serde(skip_serializing_if = "is_false", default)]
     no_cache: bool,
 
-    /// request: Asks cache to refrain from storing the request and corresponding response — even if the origin server's response could be stored.
-    /// response: Indicates that caches of any kind should not store this response.
+    /// `no-store`: caches must not store the request or response.
+    ///
+    /// In a request, asks caches to refrain from storing the request and corresponding response.
+    /// In a response, indicates that caches of any kind should not store this response.
     // TODO: remove no_store pub facing
     #[serde(skip_serializing_if = "is_false", default)]
     no_store: bool,
 
-    /// request: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
-    /// response: Indicates that any intermediary (regardless of whether it implements a cache) shouldn't transform the response contents.
-    /// The router does not transform response bodies, so this directive does not affect caching behavior.
-    /// It is parsed and propagated to the client for downstream caches to honor.
+    /// `no-transform`: intermediaries must not transform the response body.
+    ///
+    /// The router does not transform response bodies, so this directive does not affect its
+    /// caching behavior. It is parsed and propagated to the client for downstream caches to honor.
     #[serde(skip_serializing_if = "is_false", default)]
     no_transform: bool,
 
-    /// request: Indicates that the browser is interested in receiving stale content on error from any intermediate server for a particular origin.
-    /// response: Indicates that the cache can reuse a stale response when an upstream server generates an error, or when the error is generated locally. Here, an error is considered any response with a status code of 500, 502, 503, or 504.
+    /// `stale-if-error=N`: the cache may reuse a stale response when an upstream error occurs
+    /// (HTTP 500, 502, 503, or 504), for up to N seconds after the response went stale.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     stale_if_error: Option<u64>,
 
-    ////// request only
-    /// Indicates that the client allows a stored response that is stale within N seconds.
+    // -- request only --
+
+    /// `max-stale[=N]`: the client accepts a stale response, optionally capped at N seconds past
+    /// expiry. A bare `max-stale` (no value) is stored as `u64::MAX` (~584 billion years).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     max_stale: Option<u64>,
 
-    /// Indicates that the client allows a stored response that is fresh for at least N seconds
+    /// `min-fresh=N`: the client requires a response that will remain fresh for at least N more seconds.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     min_fresh: Option<u64>,
 
-    /// Indicates that an already-cached response should be returned. If a cache has a stored response, even a stale one, it will be returned. If no cached response is available, a 504 Gateway Timeout response will be returned.
+    /// `only-if-cached`: the client wants a stored response; returns 504 if none is available.
     #[serde(skip_serializing_if = "is_false", default)]
     only_if_cached: bool,
 
-    /////// response only
-    /// Not actually part of the header, used to offset the max_age
+    // -- response only --
+
+    /// Value of the `Age` response header, indicating how many seconds old the response is.
+    /// Used to offset `max_age` when computing the remaining TTL.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     age: Option<u64>,
 
-    /// Indicates how long the response remains fresh in a shared cache. Overrides the value specified by max-age.
+    /// `s-maxage=N`: overrides `max-age` for shared caches. Takes precedence over `max-age`
+    /// in [`max_age()`] and TTL calculations since the router acts as a shared cache.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     s_max_age: Option<u64>,
 
-    /// Indicates that the response can be stored in caches and can be reused while fresh. If the response becomes stale, it must be validated with the origin server before reuse.
+    /// `must-revalidate`: once stale, the cache must not serve the response without revalidating.
     #[serde(skip_serializing_if = "is_false", default)]
     must_revalidate: bool,
 
-    /// The equivalent of `must-revalidate`, but specifically for shared caches.
+    /// `proxy-revalidate`: equivalent to `must-revalidate` but applies only to shared caches.
     #[serde(skip_serializing_if = "is_false", default)]
     proxy_revalidate: bool,
 
-    /// Indicates that a cache should store the response only if it understands the requirements for caching based on status code.
-    /// The router does not validate status code semantics before caching, so this directive is parsed and propagated
-    /// to the client but not actively enforced.
+    /// `must-understand`: the cache should only store the response if it understands the
+    /// caching requirements for the response's status code. The router does not enforce this;
+    /// it is parsed and propagated to the client.
     #[serde(skip_serializing_if = "is_false", default)]
     must_understand: bool,
 
-    /// Indicates that the response can be stored only in a private cache (e.g., local caches in browsers).
+    /// `private`: the response may only be stored in a private cache (e.g., a browser cache).
+    /// Takes precedence over `public` — see [`public()`].
     #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
 
-    /// Indicates that the response can be stored in a shared cache (i.e., despite the presence of the `Authorization` header).
+    /// `public`: the response may be stored in a shared cache even when it would otherwise
+    /// not be cacheable (e.g., when an `Authorization` header is present).
     #[serde(skip_serializing_if = "is_false", default)]
     public: bool,
 
-    /// Indicates that the response will not be updated while it's fresh.
-    /// The router does not currently use this to optimize cache revalidation, but it is parsed and propagated to the client.
+    /// `immutable`: indicates the response body will not change while it is fresh.
+    /// The router does not currently use this to skip revalidation; it is parsed and propagated.
     #[serde(skip_serializing_if = "is_false", default)]
     immutable: bool,
 
-    /// Indicates that the cache could reuse a stale response while it revalidates it to a cache.
-    /// The router does not currently serve stale responses while revalidating; see [`can_use`].
+    /// `stale-while-revalidate=N`: the cache may serve a stale response for up to N seconds
+    /// while revalidating in the background. The router does not currently honor this directive.
+    ///
     /// Older schema versions stored this field as a boolean; the custom deserializer handles both.
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -322,10 +338,12 @@ impl CacheControl {
         self
     }
 
+    /// Returns the number of seconds elapsed since this struct was created.
     fn elapsed(&self) -> u64 {
         now_epoch_seconds().saturating_sub(self.created)
     }
 
+    /// Writes the `Cache-Control` (and `Age` if applicable) headers into the given header map.
     pub(crate) fn update_response_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
         headers.insert(
             CACHE_CONTROL,
@@ -341,14 +359,20 @@ impl CacheControl {
         Ok(())
     }
 
+    /// Propagates `no_store` from `other` into `self`, leaving all other fields unchanged.
+    /// Used to apply a request's `no-store` directive to the accumulated response cache control.
     pub(crate) fn merge_no_store(&mut self, other: &Self) {
         self.no_store |= other.no_store;
     }
 
+    /// Merges two `CacheControl` values, taking the most restrictive of each directive.
+    /// TTL fields are decremented by elapsed time so the result reflects freshness as of now.
     pub(crate) fn merge(&self, other: &Self) -> Self {
         self.merge_inner(other, now_epoch_seconds(), true)
     }
 
+    /// Like [`merge`], but does not account for elapsed time when computing remaining TTLs.
+    /// Used when merging cached entries for telemetry, where the original TTL should be preserved.
     pub(crate) fn merge_without_ttl_update(&self, other: &Self) -> Self {
         self.merge_inner(other, now_epoch_seconds(), false)
     }
@@ -409,32 +433,43 @@ impl CacheControl {
     }
 }
 
-// various getters
 impl CacheControl {
+    /// Returns `true` if the `no-cache` directive is set.
     pub(crate) fn no_cache(&self) -> bool {
         self.no_cache
     }
+
+    /// Returns `true` if the `no-store` directive is set.
     pub(crate) fn no_store(&self) -> bool {
         self.no_store
     }
+
+    /// Returns `true` if the `private` directive is set.
     pub(crate) fn private(&self) -> bool {
         self.private
     }
+
+    /// Returns `true` if the `public` directive is set.
+    /// Note: `private` takes precedence — both will not be true simultaneously.
     pub(crate) fn public(&self) -> bool {
         self.public
     }
 
-    // TODO: consider using this as the inverse of no_store and replacing no_store with no_store_raw --
-    //  ideally we'd just use this
+    /// Returns `true` if this response should be stored in the cache.
+    /// A response should be stored if `no-store` is not set and the TTL (if present) is > 0.
+    // TODO: consider using this as the inverse of no_store and replacing no_store with no_store_raw
     pub(crate) fn should_store(&self) -> bool {
         !self.no_store && self.ttl().is_none_or(|ttl| ttl > 0)
     }
 
+    /// Returns `true` if a cached response can be served to the client right now.
+    /// A response can be used if `no-cache` is not set and the remaining TTL (if present) is > 0.
+    // TODO: honor stale-while-revalidate
     pub(crate) fn can_use(&self) -> bool {
-        // TODO: honor stale-while-revalidate
         !self.no_cache && self.remaining_ttl().is_none_or(|ttl| ttl > 0)
     }
 
+    /// Returns the value of the `Age` header, if present.
     pub(crate) fn age(&self) -> Option<u64> {
         self.age
     }
@@ -460,8 +495,11 @@ impl CacheControl {
     }
 }
 
-// various helpers - not sure where they should really live
 impl CacheControl {
+    /// Computes a remaining duration in seconds, subtracting `age` and optionally elapsed time.
+    ///
+    /// If `now` is `Some`, elapsed time since `created` is also subtracted. If `None`, only
+    /// the `Age` header offset is applied (useful for merge operations that don't update the TTL).
     fn remaining_duration(&self, value: Option<u64>, now: Option<u64>) -> Option<u64> {
         let value = value?;
         let elapsed = now.map(|now| now.saturating_sub(self.created));
@@ -495,6 +533,7 @@ impl CacheControl {
     }
 }
 
+/// Returns the smaller of two optional values. If one is `None`, the other is returned.
 fn minimum_optional_value<T: Ord>(x: Option<T>, y: Option<T>) -> Option<T> {
     match (x, y) {
         (None, None) => None,
@@ -504,6 +543,7 @@ fn minimum_optional_value<T: Ord>(x: Option<T>, y: Option<T>) -> Option<T> {
     }
 }
 
+/// Returns the larger of two optional values. If one is `None`, the other is returned.
 fn maximum_optional_value<T: Ord>(x: Option<T>, y: Option<T>) -> Option<T> {
     match (x, y) {
         (None, None) => None,
@@ -513,6 +553,7 @@ fn maximum_optional_value<T: Ord>(x: Option<T>, y: Option<T>) -> Option<T> {
     }
 }
 
+/// Returns the current time as seconds since the Unix epoch.
 fn now_epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
