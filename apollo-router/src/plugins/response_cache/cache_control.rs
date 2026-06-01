@@ -44,7 +44,6 @@ pub(crate) struct CacheControl {
     ///
     /// In a request, asks caches to refrain from storing the request and corresponding response.
     /// In a response, indicates that caches of any kind should not store this response.
-    // TODO: remove no_store pub facing
     #[serde(skip_serializing_if = "is_false", default)]
     no_store: bool,
 
@@ -443,7 +442,11 @@ impl CacheControl {
         self.no_cache
     }
 
-    /// Returns `true` if the `no-store` directive is set.
+    /// Returns `true` if the `no-store` directive is literally set in the parsed header.
+    ///
+    /// Use this when you need to check the specific directive (e.g., for telemetry or generating
+    /// cache-control warnings). For caching decisions, prefer [`should_store()`], which also
+    /// accounts for TTL expiry.
     pub(crate) fn no_store(&self) -> bool {
         self.no_store
     }
@@ -460,8 +463,9 @@ impl CacheControl {
     }
 
     /// Returns `true` if this response should be stored in the cache.
-    /// A response should be stored if `no-store` is not set and the TTL (if present) is > 0.
-    // TODO: consider using this as the inverse of no_store and replacing no_store with no_store_raw
+    ///
+    /// A response should be stored if `no-store` is not set and the TTL (if present) has not
+    /// already expired. Prefer this over [`no_store()`] for caching decisions.
     pub(crate) fn should_store(&self) -> bool {
         !self.no_store && self.ttl().is_none_or(|ttl| ttl > 0)
     }
