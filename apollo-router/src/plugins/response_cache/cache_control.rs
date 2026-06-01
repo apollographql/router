@@ -142,7 +142,8 @@ where
     #[serde(untagged)]
     enum BoolOrU64 {
         Duration(u64),
-        Bool(()),
+        #[allow(dead_code)]
+        Bool(bool),
     }
 
     Ok(match Option::<BoolOrU64>::deserialize(deserializer)? {
@@ -234,7 +235,14 @@ impl TryFrom<&HeaderMap> for CacheControl {
 
                     "max-age" => cache_control.max_age = Some(parse_value(value)?),
                     "s-maxage" => cache_control.s_max_age = Some(parse_value(value)?),
-                    "stale-if-error" => cache_control.stale_if_error = Some(parse_value(value)?),
+                    "stale-if-error" => {
+                        // RFC 5861 requires a delta-seconds argument, but old router versions
+                        // accepted the bare form (no value) and cached the response normally.
+                        // To avoid regressing those deployments, treat bare stale-if-error as
+                        // u64::MAX, mirroring the max-stale handling above.
+                        let value = value.map_or(Ok(u64::MAX), |v| v.parse())?;
+                        cache_control.stale_if_error = Some(value);
+                    }
                     "stale-while-revalidate" => {
                         cache_control.stale_while_revalidate = Some(parse_value(value)?)
                     }
