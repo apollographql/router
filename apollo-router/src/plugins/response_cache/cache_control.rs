@@ -273,9 +273,10 @@ impl TryFrom<&HeaderMap> for CacheControl {
 impl CacheControl {
     /// Formats this cache control as a `Cache-Control` response header value.
     ///
-    /// TTL fields (`max-age`, `s-maxage`, `stale-while-revalidate`, `stale-if-error`) are
-    /// decremented by elapsed time since this struct was created, so the emitted value reflects
-    /// the remaining freshness at the time of serialization.
+    /// `max-age` and `s-maxage` are decremented by elapsed time since this struct was created,
+    /// so the emitted value reflects the remaining freshness at the time of serialization.
+    /// `stale-while-revalidate` and `stale-if-error` are emitted as their raw stored values —
+    /// these windows are measured from when the response goes stale, not from receipt.
     ///
     /// Request-only directives (`min-fresh`, `max-stale`, `only-if-cached`) are intentionally
     /// omitted — they have no meaning in a response header.
