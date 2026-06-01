@@ -1,3 +1,87 @@
+/// Regression coverage for static skip directives interacting with `@requires`.
+///
+/// `b @skip(if: true)` should statically drop `b`; the only live reason to
+/// visit Subgraph2 is the sibling `c`, which has no `@requires`. Therefore
+/// the Subgraph1 fetch should not pull `a`, and the Subgraph2 entity fetch's
+/// declared inputs should match Subgraph2's `@key` for `T` (just `id`) — not
+/// include `a`. Surfaced by fuzzing with `FUZZ_CORRECTNESS=1`.
+///
+/// TODO(FED-707): the planner currently leaks the skipped `b`'s
+/// `@requires(fields: "a")` into the Subgraph2 entity fetch input set,
+/// which is then not matched by Subgraph2's `@key` (just `id`) nor by any
+/// active `@requires`. `correctness::check_plan` flags the mismatch, so
+/// this test demonstrates the failure via `#[should_panic]`. Once the
+/// planner is fixed, remove `#[should_panic]` and update the snapshot.
+#[test]
+#[should_panic(expected = "generated correct plan")]
+fn handles_static_skip_on_a_requires_field() {
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              t: T
+            }
+
+            type T @key(fields: "id") {
+              id: ID!
+              a: Int
+            }
+        "#,
+        Subgraph2: r#"
+            type T @key(fields: "id") {
+              id: ID!
+              a: Int @external
+              b: Int @requires(fields: "a")
+              c: Int
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            {
+              t {
+                b @skip(if: true)
+                c
+              }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+              ... on T @skip(if: true) {
+                a
+              }
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                a
+              }
+            } =>
+            {
+              ... on T {
+                b @skip(if: true)
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 #[test]
 fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
     let planner = planner!(
