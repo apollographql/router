@@ -255,7 +255,17 @@ commands:
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  mise install --yes --quiet
+                  for i in 1 2 3; do
+                    if mise install --yes --quiet; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "mise install failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
       - when:
           condition:
             or:
@@ -271,7 +281,17 @@ commands:
                 name: Install mise
                 command: |
                   scoop install mise@${MISE_VERSION#v}
-                  mise install --yes --quiet
+                  for i in 1 2 3; do
+                    if mise install --yes --quiet; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "mise install failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
   fetch_dependencies:
     steps:
       - run:

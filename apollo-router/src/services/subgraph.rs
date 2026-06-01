@@ -10,6 +10,7 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Deserialize;
 use serde::Serialize;
@@ -470,39 +471,88 @@ impl Request {
             hasher.update(query.as_bytes());
         }
 
-        // this assumes headers are in the same order
-        for (name, value) in http_req
-            .headers()
-            .iter()
-            .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
-        {
-            hasher.update(name.as_str().as_bytes());
-            hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
-        }
+        // HeaderMap iteration order is not stable across requests, so sort
+        // (name, value) pairs before feeding them to the hasher. Without this,
+        // two logically identical requests can produce different hashes and
+        // miss the dedup cache.
+        //
+        // A NUL byte is fed between every name/value/pair so concatenated
+        // pairs cannot collide (e.g. `[("x","y"), ("xy","")]` vs
+        // `[("x","yxy")]` would otherwise both feed the hasher "xyxy"), and
+        // raw `as_bytes()` is used so non-ASCII header values are not
+        // collapsed via lossy `to_str()`.
+        // Each section below is preceded by a distinct two-byte tag so that an
+        // empty section followed by a populated one cannot produce the same byte
+        // stream as the populated section followed by an empty one. Without these
+        // tags `{variables: {"k": "1"}, extensions: {}}` and
+        // `{variables: {}, extensions: {"k": "1"}}` hash identically, causing
+        // subgraph dedup-cache collisions.
+        let mut headers: Vec<(&[u8], &[u8])> = Vec::with_capacity(http_req.headers().len());
+        headers.extend(
+            http_req
+                .headers()
+                .iter()
+                .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
+                .map(|(name, value)| (name.as_str().as_bytes(), value.as_bytes())),
+        );
+        hasher.update(b"\0H");
+        sort_and_hash(&mut hasher, headers);
+
         if !ignore_auth_context
             && let Some(claim) = self
                 .context
                 .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         {
+            hasher.update(b"\0C");
             hasher.update(format!("{claim:?}").as_bytes());
         }
         let body = http_req.body();
         if let Some(operation_name) = &body.operation_name {
+            hasher.update(b"\0O");
             hasher.update(operation_name.as_bytes());
         }
         if let Some(query) = &body.query {
+            hasher.update(b"\0Q");
             hasher.update(query.as_bytes());
         }
-        for (var_name, var_value) in &body.variables {
-            hasher.update(var_name.inner());
-            hasher.update(var_value.to_bytes());
-        }
-        for (name, val) in &body.extensions {
-            hasher.update(name.inner());
-            hasher.update(val.to_bytes());
-        }
+        // Apply the same sort + NUL-delimiter pattern as the headers above so
+        // logically identical bodies hash identically regardless of insertion order,
+        // and concatenated (name, value) pairs cannot collide across distinct logical
+        // inputs.
+
+        hasher.update(b"\0V");
+        sort_and_hash(
+            &mut hasher,
+            body.variables
+                .iter()
+                .map(|(k, v)| (k.inner(), v.to_bytes())),
+        );
+        hasher.update(b"\0E");
+        sort_and_hash(
+            &mut hasher,
+            body.extensions
+                .iter()
+                .map(|(k, v)| (k.inner(), v.to_bytes())),
+        );
 
         hex::encode(hasher.finalize())
+    }
+}
+
+/// Stabilizes the ordering of headers, bodies, variables, and so on before hashing to make
+/// same-but-differently ordered headers, bodies, variables, etc, produce the same hash
+fn sort_and_hash(
+    hasher: &mut Sha256,
+    pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+) {
+    let sorted = pairs
+        .into_iter()
+        .sorted_unstable_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
+    for (k, v) in sorted {
+        hasher.update(k.as_ref());
+        hasher.update([0]);
+        hasher.update(v.as_ref());
+        hasher.update([0]);
     }
 }
 
@@ -637,6 +687,281 @@ mod tests {
                 .get::<ShouldNotSurviveClone>()
                 .is_none(),
             "arbitrary extension types must not be copied when SubgraphRequest is cloned"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_no_delimiter_collision() {
+        // Without delimiters between concatenated (name, value) bytes, these
+        // two requests would feed the hasher the same `"xyxy"` byte sequence
+        // (sorted: `("x","y"),("xy","")` and `("x","yxy")` respectively).
+        let req_two_headers = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x", "y")
+                    .header("xy", "")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let req_one_header = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x", "yxy")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_two_headers.to_sha256(&ignored_headers, false),
+            req_one_header.to_sha256(&ignored_headers, false),
+            "header pairs must be delimited so concatenations cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_non_ascii_value_distinguishable() {
+        // Pre-fix, both non-ASCII values collapsed to the literal "ERROR" via
+        // `to_str().unwrap_or(...)`, producing identical hashes. Post-fix the
+        // raw bytes are hashed and the two requests are distinguishable.
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header(
+                        "x-custom",
+                        http::HeaderValue::from_bytes(&[0xC3, 0xA9]).unwrap(),
+                    )
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header(
+                        "x-custom",
+                        http::HeaderValue::from_bytes(&[0xC3, 0xB1]).unwrap(),
+                    )
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "non-ASCII header values must not be collapsed to a single sentinel"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_variables_order_independence() {
+        use serde_json_bytes::json;
+
+        let mut vars_a = JsonMap::new();
+        vars_a.insert("a", json!(1));
+        vars_a.insert("b", json!(2));
+        vars_a.insert("c", json!(3));
+        let mut vars_b = JsonMap::new();
+        vars_b.insert("c", json!(3));
+        vars_b.insert("a", json!(1));
+        vars_b.insert("b", json!(2));
+
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars_a).build())
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars_b).build())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_eq!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "two requests with the same variables in different insertion orders must hash identically"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_variables_no_delimiter_collision() {
+        use serde_json_bytes::json;
+
+        // Without delimiters between concatenated (name, value) bytes, these
+        // two requests would feed the hasher the same `"key1value2null"` byte
+        // sequence: `{"key": 1, "value2": null}` flattens to "key" + "1" +
+        // "value2" + "null", and `{"key1value2": null}` flattens to
+        // "key1value2" + "null".
+        let mut vars_two = JsonMap::new();
+        vars_two.insert("key", json!(1));
+        vars_two.insert("value2", json!(null));
+        let mut vars_one = JsonMap::new();
+        vars_one.insert("key1value2", json!(null));
+
+        let req_two = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars_two).build())
+                    .unwrap(),
+            )
+            .build();
+        let req_one = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars_one).build())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_two.to_sha256(&ignored_headers, false),
+            req_one.to_sha256(&ignored_headers, false),
+            "variable pairs must be delimited so concatenations cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_no_cross_section_collision_variables_vs_extensions() {
+        use serde_json_bytes::json;
+
+        // Without per-section tags, these two requests would feed the hasher
+        // the same byte stream (`"k\01\0"`), because `sort_and_hash` emits no
+        // bytes for an empty iterator and no terminator for the section as a
+        // whole. A swap between variables and extensions would then produce
+        // identical hashes — letting the subgraph dedup cache return request
+        // A's response to request B.
+        let mut vars = JsonMap::new();
+        vars.insert("k", json!(1));
+        let mut exts = JsonMap::new();
+        exts.insert("k", json!(1));
+
+        let req_vars_only = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().variables(vars).build())
+                    .unwrap(),
+            )
+            .build();
+        let req_exts_only = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().extensions(exts).build())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_vars_only.to_sha256(&ignored_headers, false),
+            req_exts_only.to_sha256(&ignored_headers, false),
+            "the variables and extensions sections must be domain-separated so identical \
+             entries in different sections cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_no_cross_section_collision_query_vs_operation_name() {
+        // Without per-section tags, `operation_name + query` is just concatenated
+        // bytes, so `operation_name: "AB", query: "CD"` and
+        // `operation_name: "ABC", query: "D"` would hash identically.
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        graphql::Request::builder()
+                            .operation_name("AB")
+                            .query("CD")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        graphql::Request::builder()
+                            .operation_name("ABC")
+                            .query("D")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "operation_name and query must be domain-separated so concatenations cannot collide"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_extensions_order_independence() {
+        use serde_json_bytes::json;
+
+        let mut ext_a = JsonMap::new();
+        ext_a.insert("alpha", json!("x"));
+        ext_a.insert("beta", json!("y"));
+        let mut ext_b = JsonMap::new();
+        ext_b.insert("beta", json!("y"));
+        ext_b.insert("alpha", json!("x"));
+
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().extensions(ext_a).build())
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().extensions(ext_b).build())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_eq!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "two requests with the same extensions in different insertion orders must hash identically"
+        );
+    }
+
+    #[test]
+    fn test_subgraph_request_hash_header_order_independence() {
+        let req_a = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x-a", "1")
+                    .header("x-b", "2")
+                    .header("x-c", "3")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let req_b = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("x-c", "3")
+                    .header("x-a", "1")
+                    .header("x-b", "2")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_eq!(
+            req_a.to_sha256(&ignored_headers, false),
+            req_b.to_sha256(&ignored_headers, false),
+            "two requests with the same headers in different insertion orders must hash identically"
         );
     }
 }

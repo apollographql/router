@@ -216,7 +216,10 @@ where
         .body
         .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
     let query_plan = request_config
@@ -378,7 +381,11 @@ where
         .then(|| externalize_header_map(&parts.headers));
     let body_to_send = filter_graphql_response_body(&first, &response_config.body);
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::execution_builder()
@@ -435,7 +442,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -459,7 +471,11 @@ where
             async move {
                 let body_to_send =
                     filter_graphql_response_body(&deferred_response, &response_config.body);
-                let context_to_send = response_config_context.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match response_config_context.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -514,6 +530,7 @@ where
                             &generator_map_context,
                             context,
                             &response_config_context,
+                            &keys_sent,
                         )?;
                     }
 

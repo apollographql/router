@@ -151,6 +151,38 @@ where
             && let Some(additional_properties) = custom.get("additionalProperties")
         {
             object["additionalProperties"] = additional_properties.clone();
+
+            // Properties marked with `x-allow-selector` can also accept an Ext
+            // (selector) value in addition to their declared type. This reflects the
+            // Extendable serde deserializer which tries Ext first for every key.
+            if let Some(props) = object.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                for (_key, prop_schema) in props.iter_mut() {
+                    let dominated_by_selector = prop_schema
+                        .as_object()
+                        .and_then(|o| o.get("x-allow-selector"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !dominated_by_selector {
+                        continue;
+                    }
+                    let mut original = prop_schema.clone();
+                    if let Some(o) = original.as_object_mut() {
+                        o.remove("x-allow-selector");
+                    }
+                    // Hoist the description to the outer schema so documentation
+                    // checks still find it at the property level.
+                    let description = original
+                        .as_object_mut()
+                        .and_then(|o| o.remove("description"));
+                    let mut wrapped = serde_json::json!({
+                        "anyOf": [original, additional_properties]
+                    });
+                    if let Some(desc) = description {
+                        wrapped["description"] = desc;
+                    }
+                    *prop_schema = wrapped;
+                }
+            }
         }
         schema
     }
@@ -337,6 +369,43 @@ mod test {
             }),
         )
         .expect_err("Should have errored");
+    }
+
+    #[test]
+    fn test_extendable_selector_for_known_attribute() {
+        // Regression: using a selector for a known attribute like `client.name` must work.
+        // Both serde deserialization and schema validation must accept this.
+        let json = serde_json::json!({
+            "http.response.status_code": true,
+            "client.name": {
+                "request_header": "x-my-header"
+            }
+        });
+
+        // Verify serde deserialization succeeds
+        let extendable_conf =
+            serde_json::from_value::<Extendable<RouterAttributes, RouterSelector>>(json.clone())
+                .expect("selector for client.name should deserialize");
+        assert_eq!(extendable_conf.attributes.client_name, None);
+        assert_eq!(
+            extendable_conf.custom.get("client.name"),
+            Some(&RouterSelector::RequestHeader {
+                request_header: String::from("x-my-header"),
+                redact: None,
+                default: None
+            })
+        );
+
+        // Verify JSON schema validation accepts this config
+        let schema = schemars::generate::SchemaSettings::draft07()
+            .into_generator()
+            .into_root_schema_for::<Extendable<RouterAttributes, RouterSelector>>();
+        let schema_value = serde_json::to_value(&schema).unwrap();
+        let validator = jsonschema::draft7::new(&schema_value).expect("schema should compile");
+        assert!(
+            validator.is_valid(&json),
+            "schema should accept a selector value for client.name"
+        );
     }
 
     #[test]
