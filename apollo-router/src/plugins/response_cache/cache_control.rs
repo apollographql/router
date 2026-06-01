@@ -310,13 +310,10 @@ impl CacheControl {
             parts.push("immutable".to_string());
         }
         if let Some(stale) = self.stale_while_revalidate {
-            parts.push(format!(
-                "stale-while-revalidate={}",
-                remaining_ttl(stale, elapsed)
-            ));
+            parts.push(format!("stale-while-revalidate={stale}"));
         }
         if let Some(stale) = self.stale_if_error {
-            parts.push(format!("stale-if-error={}", remaining_ttl(stale, elapsed)));
+            parts.push(format!("stale-if-error={stale}"));
         }
 
         parts.join(",")
@@ -419,12 +416,12 @@ impl CacheControl {
             public: !private && (self.public || other.public),
             immutable: self.immutable || other.immutable,
             stale_while_revalidate: minimum_optional_value(
-                self.remaining_stale_while_revalidate(now),
-                other.remaining_stale_while_revalidate(now),
+                self.stale_while_revalidate,
+                other.stale_while_revalidate,
             ),
             stale_if_error: minimum_optional_value(
-                self.remaining_stale_if_error(now),
-                other.remaining_stale_if_error(now),
+                self.stale_if_error,
+                other.stale_if_error,
             ),
             max_stale: minimum_optional_value(
                 self.remaining_max_stale(now),
@@ -525,14 +522,6 @@ impl CacheControl {
 
     fn remaining_s_max_age(&self, now: Option<u64>) -> Option<u64> {
         self.remaining_duration(self.s_max_age, now)
-    }
-
-    fn remaining_stale_while_revalidate(&self, now: Option<u64>) -> Option<u64> {
-        self.remaining_duration(self.stale_while_revalidate, now)
-    }
-
-    fn remaining_stale_if_error(&self, now: Option<u64>) -> Option<u64> {
-        self.remaining_duration(self.stale_if_error, now)
     }
 
     fn remaining_max_stale(&self, now: Option<u64>) -> Option<u64> {
