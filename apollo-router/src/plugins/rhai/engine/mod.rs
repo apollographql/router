@@ -1466,6 +1466,10 @@ impl Rhai {
             "APOLLO_RESPONSE_CACHE_KEY".into(),
             response_cache::plugin::CONTEXT_CACHE_KEY.into(),
         );
+        global_variables.insert(
+            "APOLLO_RESPONSE_CACHE_TAGS_KEY".into(),
+            response_cache::plugin::CONTEXT_CACHE_TAGS.into(),
+        );
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
         global_variables.insert(
             "APOLLO_PERSISTED_QUERY_ID_KEY".into(),

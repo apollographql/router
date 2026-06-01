@@ -2,7 +2,7 @@
 
 Adds a new opt-in `propagate_cache_tags` block under `response_cache` that emits the aggregated set of cache tags involved in a request as a configurable response header on the supergraph response. This lets a downstream CDN (Cloudflare, Fastly, others) perform tag-based purging keyed on the same tags Apollo Router already maintains internally for `By cache tag` invalidation, so router-side and CDN-side caches can be invalidated in step.
 
-The aggregated tag set is also exposed on the request context as a typed extension, available to coprocessor and rhai consumers without additional plumbing.
+The aggregated tag set is also mirrored onto the request context under the string key `apollo::response_cache::cache_tags` (a sorted JSON array) and exposed to rhai as the `Router.APOLLO_RESPONSE_CACHE_TAGS_KEY` global, so rhai scripts and coprocessors can read it. To customize what reaches the CDN — for example to prefix or filter tags, or emit them on a different header — read this set and rewrite the response header from your script or coprocessor (which run after the router emits the default header).
 
 ```yaml
 response_cache:

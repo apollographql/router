@@ -179,6 +179,158 @@ fn supergraph_service(service) {
 }
 ```
 
+## Propagate cache tags to a CDN
+
+{/* TODO(erik): confirm the target release version and add an availability note. */}
+
+When the router runs behind a CDN that supports tag-based purging (such as Cloudflare or Fastly), it can emit the set of cache tags involved in a request as a response header. Your CDN reads that header and keys its edge entry on those tags, so a single purge by tag can invalidate the router's response cache and the CDN edge cache in step.
+
+This is the most common reason to pair response caching with a CDN: you cache aggressively at the edge with long TTLs, and still invalidate precisely by tag (for example `product-42`) when the underlying data changes—without flushing the whole edge cache.
+
+### How it works
+
+When `propagate_cache_tags.enabled` is `true`, then for each supergraph response the router:
+
+1. Aggregates the union of cache tags contributed by every subgraph call in the request—resolved `@cacheTag` directive values, plus `apolloCacheTags` (root fields) and `apolloEntityCacheTags` (entities) returned in subgraph response extensions.
+2. Sorts and deduplicates that set for deterministic output.
+3. Emits the joined value as a configurable response header (default `Cache-Tag`).
+
+Cache tags are persisted on every cache entry, so a cache-hit response carries the same aggregated tag set as a cache-miss response for the same query.
+
+### Configuration
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  propagate_cache_tags:
+    enabled: true               # opt-in; default false
+    header: "Cache-Tag"         # configurable header name; default "Cache-Tag"
+    separator: ","              # how to join multiple tags into one header value
+    max_bytes: 16384            # cap on the joined header value, per CDN limits
+    on_overflow: "truncate"     # "truncate" | "drop" | "header_per_tag"
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://localhost:6379"]
+```
+
+#### Configuration options
+
+##### `enabled`
+
+Emit the configured header on the supergraph response. Defaults to `false`, so existing deployments see no change.
+
+##### `header`
+
+Name of the response header used to carry the aggregated tags. Defaults to `Cache-Tag`. Set this to match your CDN's convention—for example `Cache-Tag` for Cloudflare or `Surrogate-Key` for Fastly. Check your CDN's documentation for the exact header name and separator it expects.
+
+##### `separator`
+
+String used to join multiple tags into a single header value. Defaults to `,`. Some CDNs expect whitespace-separated values; set `separator: " "` in that case.
+
+##### `max_bytes`
+
+Maximum size, in bytes, of the joined header value. Defaults to `16384`. CDN edge servers typically reject oversized header values; when the joined value would exceed this limit, the router applies `on_overflow` rather than emitting a header the CDN would reject.
+
+##### `on_overflow`
+
+What to do when the joined value would exceed `max_bytes`:
+
+- `truncate` (default): emit as many tags as fit, in sorted order.
+- `drop`: omit the header entirely.
+- `header_per_tag`: emit one header per tag instead of a single joined header, for CDNs that accept repeated headers.
+
+`truncate` and `drop` log a structured `warn` with `max_bytes`, `actual_bytes`, and `dropped_count` so you can monitor sizing.
+
+### Round-trip example
+
+A schema that tags products and the homepage:
+
+```graphql title="products.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@cacheTag"]
+  )
+
+type Query {
+  product(id: ID!): Product @cacheTag(format: "product-{$args.id}")
+  homepage: Homepage @cacheTag(format: "homepage")
+}
+
+type Product @key(fields: "id") @cacheTag(format: "product-{$key.id}") {
+  id: ID!
+  name: String!
+  price: Int!
+}
+```
+
+A request for `product(id: "42")` together with the homepage produces a supergraph response with:
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=300, public
+Cache-Tag: homepage,product-42
+```
+
+Your CDN keys its edge entry on `homepage` and `product-42`. When the product changes, your invalidation workflow purges both layers by the same tag:
+
+```bash
+# Purge the router's response cache
+curl --request POST \
+  --header "authorization: ${INVALIDATION_SHARED_KEY}" \
+  --header "content-type: application/json" \
+  --url http://router-internal:3000/invalidation \
+  --data '[{"kind":"cache_tag","subgraphs":["products"],"cache_tag":"product-42"}]'
+
+# Purge the CDN edge by the same tag (Cloudflare example)
+curl --request POST \
+  --header "authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  --header "content-type: application/json" \
+  --url "https://api.cloudflare.com/client/v4/zones/${ZONE}/purge_cache" \
+  --data '{"tags":["product-42"]}'
+```
+
+Both caches drop their `product-42` entries together; the rest of each cache stays warm. For the full set of invalidation request shapes, see [Invalidation methods](/router/performance/caching/response-caching/invalidation#invalidation-methods).
+
+### Read or customize the propagated tags from a script or coprocessor
+
+When `propagate_cache_tags.enabled` is `true`, the router also mirrors the aggregated tag set onto the request context under the key `apollo::response_cache::cache_tags`, as a sorted array of strings. Rhai scripts read it through the `Router.APOLLO_RESPONSE_CACHE_TAGS_KEY` global; coprocessors receive it in the context payload at the `SupergraphResponse` stage (enable context forwarding for that stage).
+
+This is a **read** surface. The router emits the default `Cache-Tag` header itself; to change what reaches your CDN—prefix the tags, filter them, or emit them on a different header—read this set and write the header you want. A script's or coprocessor's response stage runs after the router has emitted the default header, so the value you set takes precedence.
+
+```rhai title="cache_tags.rhai"
+fn supergraph_service(service) {
+    const response_callback = Fn("process_response");
+    service.map_response(response_callback);
+}
+
+fn process_response(response) {
+    let tags = response.context[Router.APOLLO_RESPONSE_CACHE_TAGS_KEY];
+    if tags != () {
+        let header = "";
+        for tag in tags {
+            if header != "" { header += ","; }
+            header += "acme:";
+            header += tag;
+        }
+        if header != "" {
+            response.headers["cache-tag"] = header;
+        }
+    }
+}
+```
+
+<Note>
+
+- The header is emitted only when `propagate_cache_tags.enabled` is `true`.
+- If no subgraph contributed a cache tag, the router emits no header rather than an empty one.
+- Cache entries written before this feature shipped carry no aggregated tag set and contribute no tags until they age out via TTL. To populate tags across the full cache set immediately, flush Redis before enabling propagation.
+
+</Note>
+
 ## Advanced Redis configuration
 
 The router provides multiple Redis options to ensure you can scale properly and achieve the best performance.
