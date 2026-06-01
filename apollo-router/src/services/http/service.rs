@@ -14,6 +14,7 @@ use http::header::CONTENT_ENCODING;
 use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioTimer;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
@@ -34,6 +35,7 @@ use super::HttpResponse;
 use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
+use crate::configuration::shared::DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::HttpClientAttributes;
@@ -101,6 +103,7 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
+    /// Creates a client for talking to subgraphs
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
@@ -193,6 +196,11 @@ impl HttpClientService {
             .https_or_http()
             .enable_http1();
 
+        let http2_keep_alive_interval = client_config.experimental_http2_keep_alive_interval;
+        let http2_keep_alive_timeout = client_config
+            .experimental_http2_keep_alive_timeout
+            .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
+
         let http2 = client_config.experimental_http2.unwrap_or_default();
         let connector = if http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
@@ -200,11 +208,23 @@ impl HttpClientService {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                .http2_only(http2 == Http2Config::Http2Only)
-                .build(connector);
+        let mut client_builder =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
+        client_builder
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+            .http2_only(http2 == Http2Config::Http2Only);
+        if let Some(interval) = http2_keep_alive_interval {
+            client_builder
+                // WARN: http2 keep-alive requires a timer; don't remove this
+                .timer(TokioTimer::new())
+                .http2_keep_alive_interval(Some(interval))
+                .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                // Send pings even when the connection is idle in the pool, so stale
+                // connections are detected before a request is made on them
+                .http2_keep_alive_while_idle(true);
+        }
+        let http_client = client_builder.build(connector);
+
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
@@ -220,6 +240,15 @@ impl HttpClientService {
                 ),
             service: Arc::new(service.into()),
         })
+    }
+
+    /// Creates a client using only a `Client` config, with an empty TLS root store.
+    #[cfg(test)]
+    pub(crate) fn from_client_config(
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let tls_client_config = generate_tls_client_config(RootCertStore::empty(), None)?;
+        Self::new("test", tls_client_config, client_config)
     }
 
     pub(crate) fn native_roots_store() -> RootCertStore {
