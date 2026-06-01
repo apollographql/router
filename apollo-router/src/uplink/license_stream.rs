@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use futures::Stream;
@@ -39,6 +40,10 @@ use crate::uplink::license_stream::license_query::FetchErrorCode;
 use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
+
+/// Tokio's timer wheel supports at most `(1 << 36) - 1` ms (~2 years 64 days).
+/// We clamp scheduled deadlines to half that to stay safely within range.
+const MAX_TIMER_DURATION: Duration = Duration::from_millis(1 << 35);
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -272,8 +277,11 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
 
     // system_time is likely to be a time in the future, but may be in the past.
     match system_time.duration_since(now_system_time) {
-        // system_time was in the future.
-        Ok(duration) => now_instant + duration,
+        // system_time was in the future — clamp to MAX_TIMER_DURATION so that
+        // `DelayQueue::insert_at` cannot overflow tokio's timer wheel.
+        // License refreshes from Uplink happen far more frequently than this
+        // cap, so in practice the clamped timer is always replaced before it fires.
+        Ok(duration) => now_instant + duration.min(MAX_TIMER_DURATION),
 
         // system_time was in the past.
         Err(_) => now_instant,
@@ -406,6 +414,55 @@ mod test {
         let past_instant = to_positive_instant(past_system_time);
         assert!(past_instant > now_instant);
         assert!(past_instant < Instant::now());
+    }
+
+    #[test]
+    fn test_to_instant_far_future_is_clamped() {
+        let now_instant = Instant::now();
+        let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
+        let far_future = SystemTime::now() + three_years;
+
+        let result = to_positive_instant(far_future);
+
+        assert!(
+            result < now_instant + three_years,
+            "far-future instant must be clamped below the original duration"
+        );
+        assert!(
+            result <= now_instant + super::MAX_TIMER_DURATION + Duration::from_secs(1),
+            "clamped instant must not exceed MAX_TIMER_DURATION"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_far_future_does_not_panic() {
+        let three_years_secs: u64 = 3 * 365 * 24 * 3600;
+        let now = SystemTime::now();
+        let license = License {
+            claims: Some(Claims {
+                iss: "".to_string(),
+                sub: "".to_string(),
+                aud: OneOrMany::One(Audience::SelfHosted),
+                warn_at: now + Duration::from_secs(three_years_secs - 1000),
+                halt_at: now + Duration::from_secs(three_years_secs),
+                tps: Default::default(),
+                allowed_features: Default::default(),
+            }),
+        };
+
+        // Before the clamp fix this would panic with "invalid deadline; err=Invalid"
+        // because the deadline exceeded tokio's timer wheel maximum of ~2^36 ms.
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0], SimpleEvent::UpdateLicense);
+        // Both warn_at and halt_at are clamped to the same MAX_TIMER_DURATION, so their
+        // relative order depends on DelayQueue tie-breaking (insertion order).
+        assert!(events.contains(&SimpleEvent::WarnLicense));
+        assert!(events.contains(&SimpleEvent::HaltLicense));
     }
 
     #[tokio::test]
