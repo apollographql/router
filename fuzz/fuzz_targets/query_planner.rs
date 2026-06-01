@@ -8,15 +8,29 @@
 //! The schema apollo-smith generates from is taken from the planner itself so
 //! that whatever the planner accepts — including `@defer` when enabled in the
 //! config — is also in scope for the generator.
+//!
+//! ## Optional correctness checking
+//!
+//! Setting the environment variable `FUZZ_CORRECTNESS=1` additionally runs
+//! `apollo_federation::correctness::check_plan` against every successful plan.
+//! That oracle compares the response shape of the input operation against the
+//! response shape interpreted from the generated plan; a mismatch is treated
+//! as a fuzz finding (panic). This catches plans that compile cleanly but
+//! silently drop fields or otherwise diverge from the operation's intent.
+//! Off by default because it makes each iteration roughly 2-3x slower.
 #![no_main]
 
+use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::correctness::check_plan;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::schema::ValidFederationSchema;
 use apollo_federation::Supergraph;
 use libfuzzer_sys::fuzz_target;
 use router_fuzz::generate_valid_operation_from_schema;
@@ -34,14 +48,45 @@ fn planner_config() -> QueryPlannerConfig {
     }
 }
 
-fn planner() -> &'static QueryPlanner {
-    static PLANNER: OnceLock<QueryPlanner> = OnceLock::new();
-    PLANNER.get_or_init(|| {
+/// Shared per-process state for the fuzz target.
+struct FuzzContext {
+    planner: QueryPlanner,
+    /// The supergraph schema, retained so we can hand it to the correctness checker.
+    supergraph_schema: ValidFederationSchema,
+    /// Subgraph schemas extracted once at init, in the form `check_plan` expects.
+    subgraphs_by_name: IndexMap<Arc<str>, ValidFederationSchema>,
+}
+
+fn ctx() -> &'static FuzzContext {
+    static CTX: OnceLock<FuzzContext> = OnceLock::new();
+    CTX.get_or_init(|| {
         let supergraph =
             Supergraph::new(SUPERGRAPH_SCHEMA).expect("fuzz supergraph schema should be valid");
-        QueryPlanner::new(&supergraph, planner_config())
-            .expect("query planner should build from fuzz supergraph")
+        let planner = QueryPlanner::new(&supergraph, planner_config())
+            .expect("query planner should build from fuzz supergraph");
+        let subgraphs_by_name = supergraph
+            .extract_subgraphs()
+            .expect("subgraph extraction should succeed")
+            .into_iter()
+            .map(|(name, sg)| (name, sg.schema))
+            .collect();
+        FuzzContext {
+            planner,
+            supergraph_schema: supergraph.schema,
+            subgraphs_by_name,
+        }
     })
+}
+
+fn planner() -> &'static QueryPlanner {
+    &ctx().planner
+}
+
+/// Whether to additionally run `apollo_federation::correctness::check_plan` on
+/// every successful query plan. Opt-in at runtime via `FUZZ_CORRECTNESS=1`.
+fn correctness_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("FUZZ_CORRECTNESS").is_some())
 }
 
 /// SDL of the planner's API schema, conditioned for apollo-smith.
@@ -94,9 +139,9 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return,
     };
 
-    let planner = planner();
+    let ctx = ctx();
     let document = match ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
+        ctx.planner.api_schema().schema(),
         &operation,
         "fuzz.graphql",
     ) {
@@ -104,5 +149,26 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return,
     };
 
-    let _ = planner.build_query_plan(&document, None, QueryPlanOptions::default());
+    let Ok(plan) = ctx
+        .planner
+        .build_query_plan(&document, None, QueryPlanOptions::default())
+    else {
+        // Planner returning `Err` on adversarial input is expected, not a finding.
+        return;
+    };
+
+    if correctness_enabled() {
+        if let Err(e) = check_plan(
+            ctx.planner.api_schema(),
+            &ctx.supergraph_schema,
+            &ctx.subgraphs_by_name,
+            &document,
+            &plan,
+        ) {
+            panic!(
+                "correctness check failed:\nerror: {}\noperation:\n{}\nplan:\n{}",
+                e, operation, plan
+            );
+        }
+    }
 });

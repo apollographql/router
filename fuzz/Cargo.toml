@@ -12,7 +12,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.10"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation" }
+apollo-federation = { path = "../apollo-federation", features = ["correctness"] }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
 bnf = "0.6"

@@ -49,3 +49,12 @@ cargo +nightly fuzz run query_planner -- -max_len=4096
 `-max_len=4096` is recommended: apollo-smith consumes a lot of bytes per operation, and at libFuzzer's
 default starting size the generated operations rarely contain `@defer` or other interesting directives.
 With 4096-byte inputs roughly half the generated operations carry `@defer`.
+
+Set `FUZZ_CORRECTNESS=1` to additionally run `apollo_federation::correctness::check_plan` against every
+successful plan — a stronger oracle that compares the response shape of the operation against the shape
+interpreted from the generated plan. A mismatch is treated as a fuzz finding. Off by default because it
+makes each iteration roughly 2-3x slower.
+
+```
+FUZZ_CORRECTNESS=1 cargo +nightly fuzz run query_planner -- -max_len=4096
+```
