@@ -1,6 +1,5 @@
-mod delimited_formatter;
-
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -12,8 +11,6 @@ use http::header::CACHE_CONTROL;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
-
-use self::delimited_formatter::DelimitedFormatter;
 
 /// REQUEST Cache control header either:
 /// * Sent from client to router to control response cache
@@ -527,6 +524,35 @@ fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
 
 fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
     ttl.saturating_sub(elapsed)
+}
+
+struct DelimitedFormatter<'a, 'b> {
+    formatter: &'a mut Formatter<'b>,
+    delimiter: &'a str,
+    wrote_prev: bool,
+}
+
+impl<'a, 'b> From<&'a mut Formatter<'b>> for DelimitedFormatter<'a, 'b> {
+    fn from(formatter: &'a mut Formatter<'b>) -> Self {
+        Self {
+            formatter,
+            delimiter: ",",
+            wrote_prev: false,
+        }
+    }
+}
+
+impl<'a, 'b> DelimitedFormatter<'a, 'b> {
+    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::fmt::Result {
+        if self.wrote_prev {
+            self.formatter.write_str(self.delimiter)?;
+        }
+
+        self.formatter.write_fmt(fmt)?;
+        self.wrote_prev = true;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
