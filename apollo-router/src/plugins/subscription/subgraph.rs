@@ -367,15 +367,6 @@ async fn call_websocket(
                             },
                             _ = tokio::time::sleep(reconnect_delay) => {},
                         }
-                        // Count only attempts that actually issue a handshake — a closing
-                        // signal during the delay short-circuits without ever calling
-                        // `open_ws_gql_stream`, so it shouldn't be charged to this counter.
-                        u64_counter!(
-                            "apollo.router.operations.subscriptions.reconnect",
-                            "Number of subscription WebSocket reconnect attempts",
-                            1,
-                            subgraph.name = service_name_for_task.clone()
-                        );
                         let (retry_parts, retry_body) =
                             retry_subgraph_request.clone().into_parts();
                         // The handshake (TCP + TLS + ConnectionAck) can take seconds. If all
@@ -398,6 +389,16 @@ async fn call_websocket(
                                 log_request_level,
                             ) => res,
                         };
+                        // Count only attempts that actually issued a handshake. A closing signal
+                        // during the reconnect delay or during the handshake itself breaks out of
+                        // 'retry above without ever completing `open_ws_gql_stream`, so it is not
+                        // charged to this counter. Both successful and failed handshakes count.
+                        u64_counter!(
+                            "apollo.router.operations.subscriptions.reconnect",
+                            "Number of subscription WebSocket reconnect attempts",
+                            1,
+                            subgraph.name = service_name_for_task.clone()
+                        );
                         match handshake_result {
                             Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
