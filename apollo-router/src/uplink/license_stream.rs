@@ -43,6 +43,11 @@ const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_O
 
 /// Tokio's timer wheel supports at most `(1 << 36) - 1` ms (~2 years 64 days).
 /// We clamp scheduled deadlines to half that to stay safely within range.
+///
+/// When both `warn_at` and `halt_at` exceed the cap they collapse to the same
+/// instant, so the usual soft-then-hard grace period is not preserved and both
+/// fire together (DelayQueue insertion order). That is an acceptable trade-off
+/// for otherwise-unschedulable deadlines; Uplink refresh replaces them first.
 const MAX_TIMER_DURATION: Duration = Duration::from_millis(1 << 35);
 
 #[derive(GraphQLQuery)]
@@ -218,6 +223,8 @@ fn reset_checks_for_licenses(
 
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
+    // If both were clamped to MAX_TIMER_DURATION, warn and halt share one deadline
+    // instead of the staged soft-then-hard window (see MAX_TIMER_DURATION).
     let now = Instant::now();
     // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
     if halt_at > now {
@@ -459,8 +466,7 @@ mod test {
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(events.len(), 3);
         assert_eq!(events[0], SimpleEvent::UpdateLicense);
-        // Both warn_at and halt_at are clamped to the same MAX_TIMER_DURATION, so their
-        // relative order depends on DelayQueue tie-breaking (insertion order).
+        // Clamped warn/halt share one deadline; event order is not staged (see MAX_TIMER_DURATION).
         assert!(events.contains(&SimpleEvent::WarnLicense));
         assert!(events.contains(&SimpleEvent::HaltLicense));
     }
