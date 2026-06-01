@@ -41,14 +41,32 @@ use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
-/// Tokio's timer wheel supports at most `(1 << 36) - 1` ms (~2 years 64 days).
-/// We clamp scheduled deadlines to half that to stay safely within range.
+/// Maximum span from "now" to `halt_at` for offline licenses in
+/// `docs/source/routing/license.mdx`: at most one year of validity plus a
+/// 28-day grace period (~393 days).
+const DOCUMENTED_MAX_HALT_OFFSET_DAYS: u64 = 365 + 28;
+
+/// Slack above the documented span so legitimate `warn_at` / `halt_at` values are
+/// not truncated if validity or grace windows change.
+const LICENSE_SCHEDULE_HEADROOM_DAYS: u64 = 90;
+
+const SECS_PER_DAY: u64 = 24 * 60 * 60;
+
+/// Tokio's timer wheel rejects deadlines beyond `(1 << 36) - 1` ms (~795 days).
+const TOKIO_TIMER_WHEEL_MAX_MILLIS: u64 = (1 << 36) - 1;
+
+const MAX_TIMER_DURATION_SECS: u64 =
+    (DOCUMENTED_MAX_HALT_OFFSET_DAYS + LICENSE_SCHEDULE_HEADROOM_DAYS) * SECS_PER_DAY;
+
+const _: () = assert!(MAX_TIMER_DURATION_SECS * 1000 < TOKIO_TIMER_WHEEL_MAX_MILLIS);
+
+/// Upper bound for scheduling `warn_at` / `halt_at` in `DelayQueue`.
 ///
-/// When both `warn_at` and `halt_at` exceed the cap they collapse to the same
-/// instant, so the usual soft-then-hard grace period is not preserved and both
-/// fire together (DelayQueue insertion order). That is an acceptable trade-off
-/// for otherwise-unschedulable deadlines; Uplink refresh replaces them first.
-const MAX_TIMER_DURATION: Duration = Duration::from_millis(1 << 35);
+/// Derived from the documented license timeline plus headroom, and kept below
+/// Tokio's timer wheel maximum so `insert_at` cannot panic. When both deadlines
+/// exceed this cap they collapse to the same instant, so the usual soft-then-hard
+/// grace period is not preserved and both fire together.
+const MAX_TIMER_DURATION: Duration = Duration::from_secs(MAX_TIMER_DURATION_SECS);
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -423,21 +441,18 @@ mod test {
         assert!(past_instant < Instant::now());
     }
 
-    #[test]
-    fn test_to_instant_far_future_is_clamped() {
+    #[tokio::test(start_paused = true)]
+    async fn test_to_instant_far_future_is_clamped() {
         let now_instant = Instant::now();
         let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
         let far_future = SystemTime::now() + three_years;
 
         let result = to_positive_instant(far_future);
 
-        assert!(
-            result < now_instant + three_years,
-            "far-future instant must be clamped below the original duration"
-        );
-        assert!(
-            result <= now_instant + super::MAX_TIMER_DURATION + Duration::from_secs(1),
-            "clamped instant must not exceed MAX_TIMER_DURATION"
+        assert_eq!(
+            result,
+            now_instant + super::MAX_TIMER_DURATION,
+            "far-future SystemTime must clamp to MAX_TIMER_DURATION from the current Instant"
         );
     }
 
