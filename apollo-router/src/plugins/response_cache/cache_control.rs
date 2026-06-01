@@ -198,8 +198,10 @@ impl TryFrom<&HeaderMap> for CacheControl {
         if header_values.peek().is_none() {
             // TODO: defaulting to no_store here is correct for subgraph responses (no header = don't
             // cache), but wrong for client requests (no header = no preference). TryFrom is currently
-            // used for both. Consider splitting into separate constructors so that parsing a client
-            // request with no Cache-Control header doesn't incorrectly block cache lookups.
+            // used for both. In practice this is harmless because all callsites that parse request
+            // headers are guarded with contains_key(CACHE_CONTROL) before calling TryFrom, so the
+            // no_store default is never reached for requests. Still, splitting into separate
+            // constructors would make this contract explicit and eliminate the latent risk.
             cache_control.no_store = true;
             return Ok(cache_control);
         }
