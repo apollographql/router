@@ -1062,13 +1062,13 @@ pub fn write_markdown<W: Write>(
     writeln!(out, "## After applying — switch to `connect/v0.4`")?;
     writeln!(out)?;
     let outstanding = if questions.is_empty() {
-        "Once the rewrites above are applied"
+        "Once the rewrites above are applied **and verified**"
     } else {
-        "Once the rewrites are applied and the questions resolved"
+        "Once the rewrites are applied, the questions resolved, **and verified**"
     };
     writeln!(
         out,
-        "{outstanding}, bump each migrated schema's connect `@link` to `connect/v0.4` — that's the version this manifest's diff targeted, and the one the rewrites make safe:"
+        "{outstanding}, bump each migrated schema's connect `@link` to `connect/v0.4` as the **last** step — that's the version this manifest's diff targeted, and the one the rewrites make safe:"
     )?;
     writeln!(out)?;
     writeln!(out, "```graphql")?;
@@ -1080,7 +1080,12 @@ pub fn write_markdown<W: Write>(
     writeln!(out)?;
     writeln!(
         out,
-        "Update the existing `@link(url: \".../connect/v0.n\")` in place — keep each schema's other links (federation, etc.) untouched. Re-run `connect-migrate analyze` afterward to confirm a clean `safe-to-upgrade` verdict."
+        "Update the existing `@link(url: \".../connect/v0.n\")` in place — keep each schema's other links (federation, etc.) untouched."
+    )?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "**Verify before this bump, not after.** Re-run `connect-migrate analyze` while the schema is *still* on its old `connect/v0.n` link and confirm zero divergent sites — that proves the fortifications took. Once the `@link` is on v0.4 the analyzer has nothing left to diff and reports `safe-to-upgrade` regardless, so a post-bump check can't tell a correct migration from one that skipped every fortification."
     )?;
     Ok(())
 }

@@ -77,15 +77,29 @@ flow by bouncing them through a separate tool.
 ## Prerequisite: install `connect-migrate`
 
 The CLI lives at <https://github.com/apollographql/connect-migrate>.
-On macOS and Linux:
+
+**While the repo is private, the one-line installer can't be fetched
+anonymously** — `curl …/raw.githubusercontent.com/.../install.sh` 404s
+without auth. The reliable path is an authenticated release download via
+the GitHub CLI (`gh`), which picks up your existing login:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/apollographql/connect-migrate/main/install.sh | sh
+gh release download -R apollographql/connect-migrate \
+  -p "*$(uname -s | tr 'A-Z' 'a-z')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')*" \
+  --dir /tmp/cm && mkdir -p ~/.local/bin && chmod +x /tmp/cm/connect-migrate-* \
+  && mv /tmp/cm/connect-migrate-* ~/.local/bin/connect-migrate
 ```
 
-Verify with `connect-migrate --version`. If the install fails, see the
-repo README for fallback instructions (Windows users download the
-binary manually).
+(Installs to `~/.local/bin` — no `sudo`, matching `install.sh`. Ensure
+`~/.local/bin` is on your `PATH`.)
+
+If you have a token, the piped installer also works:
+`curl -fsSL -H "Authorization: token $(gh auth token)" …/install.sh | sh`.
+Once the repo is public, the plain `curl …/install.sh | sh` is fine.
+
+Verify with `connect-migrate --version`. **If you cannot install or run
+it, stop and tell the developer** — do not hand-migrate (see Step 1).
+Windows users download the `.exe` from the Releases page.
 
 ---
 
@@ -125,6 +139,16 @@ to have `analyze` write the file itself, or `--format json` for one
 JSONL record per site if you'd rather consume typed records than parse
 markdown.
 
+**The tool's manifest is the source of truth — do not hand-migrate.**
+Every edit you make comes from a manifest the tool actually produced.
+If you cannot install or run `connect-migrate` (no published binary for
+your platform, install failed, no repo access), **stop and tell the
+developer** — do **not** reconstruct the migration from memory, the
+docs, or web searches. A hand-built migration silently drops
+fortifications, and (see Step 5) a post-upgrade `analyze` will *not*
+catch the omission — so a from-memory attempt looks clean while quietly
+changing behavior. The tool is cheap; guessing is not.
+
 ---
 
 ## Step 2: read the verdict
@@ -138,16 +162,17 @@ for the full prescription:
 - **`nothing-to-migrate`** — files scanned, no `@connect` directives.
   Report it; ask whether to look elsewhere. Stop.
 - **`safe-to-upgrade`** — directives present, zero divergence. State the
-  verdict and point the developer at the `@link` snippet in the file.
-  No source edits beyond the developer's own `@link` bump.
+  verdict. No fortifications are needed; the only change is the `@link`
+  bump (Step 6) — bump it with the developer's go-ahead.
 - **`safe-after-rewrites`** — divergence exists but every site is
-  mechanical: apply the rewrites (Step 3), then verify (Step 5). There
-  are **no questions** — a clean bill of health.
-- **`needs-decisions`** — apply the rewrites (Step 3), then interview
-  the developer over the questions (Step 4).
+  mechanical: apply the rewrites (Step 3), verify (Step 5), then bump the
+  `@link` (Step 6). There are **no questions** — a clean bill of health.
+- **`needs-decisions`** — apply the rewrites (Step 3), interview the
+  developer over the questions (Step 4), verify (Step 5), bump (Step 6).
 
-Do not edit source until you've read the verdict and, for the `@link`
-bump, have the developer's go-ahead.
+Do not edit source until you've read the verdict; whoever performs the
+`@link` bump, it is the **last** step and only after Step 5 verifies
+(see Steps 5–6).
 
 ---
 
@@ -204,6 +229,13 @@ To apply one:
    the token `text` occupies `source_range` (byte offsets into the
    selection body). Replace it with `rewrite_to` — the exact
    replacement text.
+   - **Mind the escaping.** `rewrite_to` is shown JSON-escaped in the
+     machine block (e.g. `"$.\"USD\""`). The value you actually splice
+     is `$."USD"`. In a **block-string** `"""…"""` selection, write it
+     **unescaped** — `currencyCode: $."USD"`. Only in a **single-line**
+     `"…"` selection do the inner quotes need escaping —
+     `selection: "currencyCode: $.\"USD\""`. (Over-escaping inside a
+     block string is the most common splice slip.)
 3. **Preserve quoting and indentation.** Keep `"""` vs `"` as the source
    has it. GraphQL block strings strip common leading whitespace at
    parse time, so re-indent the spliced text to match the surrounding
@@ -254,9 +286,11 @@ distinct fork**, not one per site. For each:
 
 ---
 
-## Step 5: verify
+## Step 5: verify — *before* you bump the `@link`
 
-Re-run `analyze` against the same path. Expected post-apply state:
+After applying the fortifications (and any interview answers), re-run
+`analyze` **while the schemas are still on their original
+`connect/v0.n` link** — do **not** bump the `@link` yet. Expected state:
 
 - Sites you fortified no longer appear (their `id` is gone from the new
   manifest).
@@ -265,14 +299,34 @@ Re-run `analyze` against the same path. Expected post-apply state:
 - **No new sites** appear. A new divergence means an edit went wrong —
   revert it and escalate.
 
-A clean run lands on `safe-to-upgrade` (or `safe-after-rewrites` if only
-no-op sites remain). Then run the project's build check (`cargo check`,
-`npm run check`, etc.) and, if a sandbox is available, spot-check a
-selection or two against real backend responses.
+**Why the order matters — this is the load-bearing check.** `analyze`
+only detects *pre-upgrade* divergence: it diffs each schema's linked
+`connect/v0.n` against v0.4. The moment you bump a schema's `@link` to
+v0.4, its "from" side *is* v0.4, so `analyze` has nothing left to compare
+and will report `safe-to-upgrade` **whether or not you applied the
+fortifications**. A post-bump re-analyze therefore proves nothing — it
+will happily "pass" a migration that silently skipped every fortification
+(leaving field accesses as string literals, a behavior change). Verify
+*here*, on the old version, where a missed fortification still shows up.
+
+Then run the project's build check (`cargo check`, `npm run check`,
+etc.) and, if a sandbox is available, spot-check a selection or two
+against real backend responses.
 
 ---
 
-## Step 6: audit trail and summary
+## Step 6: bump the `@link` to `connect/v0.4`
+
+**Only after Step 5 comes back clean.** In each connector schema, update
+the existing `@link(url: "https://specs.apollo.dev/connect/v0.n", …)` to
+`connect/v0.4` in place; leave every other link (federation, etc.)
+untouched. This is the **last** edit — it's what actually moves the
+schema onto v0.4, which is exactly why it follows verification rather
+than preceding it.
+
+---
+
+## Step 7: audit trail and summary
 
 The timestamped manifest is a durable record of what diverged and what
 was decided. Suggest committing it alongside the source edits:
@@ -348,8 +402,9 @@ Directly under the H1 title:
   `needs-decisions`.
 - **`## After applying — switch to connect/v0.4`** — the closing
   section, with the ready-to-paste `@link(.../connect/v0.4)` line each
-  migrated schema should adopt once its rewrites (and any questions) are
-  done. Point the developer here so they know the target to update to.
+  migrated schema should adopt. Bump the `@link` **last** — only after
+  the Step 5 verify passes on the *old* version, since once a schema is
+  on v0.4 `analyze` can no longer detect a missed fortification.
 
 ### Heads up — selections not analyzed
 
@@ -397,7 +452,8 @@ One block per site (grouped sites carry `occurrences: N`):
   directives that failed to parse — read those before concluding. Stop.
 - **`safe-to-upgrade`** — directives present, zero divergence
   (`divergent-sites: 0`). A trustworthy positive verdict, not the
-  absence of one. State it; point at the `@link` snippet. Stop.
+  absence of one. State it; the only change is the `@link` bump
+  (Step 6), done with the developer's go-ahead.
 - **`safe-after-rewrites`** — divergence exists, but every site is a
   deterministic fortification or a no-op (`questions: 0`). Apply the
   rewrites; no developer decisions are required.
