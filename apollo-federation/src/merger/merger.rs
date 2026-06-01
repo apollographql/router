@@ -286,6 +286,17 @@ impl Merger {
                 .minimum_federation_version()
                 .gt(linked_federation_version)
         {
+            let locations = subgraph
+                .schema()
+                .metadata()
+                .and_then(|links| {
+                    links
+                        .all_links()
+                        .iter()
+                        .find(|link| link.url.identity == *spec.identity())
+                })
+                .map(|link| link.locations(subgraph))
+                .unwrap_or_default();
             error_reporter.add_hint(CompositionHint {
                 definition: HintCode::ImplicitlyUpgradedFederationVersion.definition(),
                 message: format!(
@@ -294,7 +305,7 @@ impl Merger {
                     linked_federation_version,
                     spec.minimum_federation_version()
                 ),
-                locations: Default::default(), // TODO: need @link directive application AST node
+                locations,
             });
             return spec.minimum_federation_version();
         }
@@ -1640,6 +1651,8 @@ impl Merger {
             if !field_is_defined
                 && !self.are_all_fields_external(*idx, source)?
                 && !subgraph.is_interface_object_type(&source.clone().into())
+                && !matches!(dest, ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    if self.is_field_provided_by_an_interface_object(field.field_name(), dest.type_name()))
             {
                 self.error_reporter.report_mismatch_hint(
                         hint_id.clone(),
@@ -1857,13 +1870,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (dest, ast_node) in fields_to_insert {
             trace!("Filling in missing interface object field {dest} with {ast_node}",);
             dest.insert(&mut self.merged, Component::new(ast_node))?;
-            // now we can merge access control directives
-            for directive_name in &access_control_directive_names {
-                self.merge_applied_directive(
-                    directive_name,
-                    &Default::default(),
-                    &dest.clone().into(),
-                )?;
+            // Merge access control directives only if there are additional sources
+            // (e.g. from @interfaceObject field propagation). Matches JS behavior
+            // which checks `additionalSources.length > 0` before merging.
+            let dest_position: DirectiveTargetPosition = dest.clone().into();
+            let additional_sources = self.access_control_additional_sources()?;
+            let ac_directives_to_merge: Vec<_> = self
+                .access_control_directives_in_supergraph
+                .iter()
+                .filter(|(ac_name, _)| {
+                    additional_sources.contains_key(&format!("{dest_position}_{ac_name}"))
+                })
+                .map(|(_, name_in_supergraph)| name_in_supergraph.clone())
+                .collect();
+            for name in &ac_directives_to_merge {
+                self.merge_applied_directive(name, &Default::default(), &dest_position)?;
             }
 
             // If we had to add a field here, it means that, for this particular implementation, the

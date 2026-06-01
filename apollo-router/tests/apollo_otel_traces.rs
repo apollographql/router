@@ -212,6 +212,165 @@ async fn start_connector_mock_server() -> MockServer {
     server
 }
 
+/// Spin up a localhost wiremock server that mimics the three Apollo demo
+/// subgraphs (`accounts`, `products`, `reviews`) referenced by
+/// `tests/fixtures/supergraph.graphql`. The supergraph hardcodes
+/// `https://{name}.demo.starstuff.dev/` for each subgraph, so any test that
+/// uses `with_subgraph_network_requests()` makes a real HTTPS call out to
+/// those public hosts. When that public infrastructure flakes (TLS RST,
+/// transient teardown, etc.) the router surfaces a `SubrequestHttpError`
+/// (`ECONNRESET` / `os error 104`) which then poisons the OTel trace shape
+/// — `http_request` span has status code 2 (ERROR) instead of OK, and the
+/// `apollo_private.ftv1` attribute the subgraph would have emitted is
+/// missing, blowing up the snapshot assertion.
+///
+/// The mock listens on three distinct paths (one per subgraph) so the
+/// router can be pointed at it via `override_subgraph_url`. Each path
+/// returns a fixed payload captured from the live demo deployment,
+/// including a valid base64-encoded FTV1 trace in `extensions.ftv1`. The
+/// FTV1 bytes themselves are redacted by `assert_report!` so any
+/// non-empty blob suffices, but using captured-from-live blobs keeps the
+/// router's federation-trace decoder happy.
+///
+/// The server is leaked (`Box::leak`) so it lives for the duration of the
+/// process — same pattern as `start_connector_mock_server` above. Tests
+/// in this file are serialised by the `serial-apollo-telemetry-integration`
+/// nextest group, so leaking is safe.
+async fn start_demo_subgraphs_mock_server() -> MockServer {
+    let server = wiremock::MockServer::builder().start().await;
+
+    // products: `{ topProducts { __typename upc name } }`.
+    // Response shape captured from `https://products.demo.starstuff.dev/`
+    // — 4 products. Names/upcs don't show up in the snapshot (redacted),
+    // but the count drives the count of downstream `reviews` `_entities`
+    // representations and ultimately how many `accounts` lookups happen.
+    Mock::given(method("POST"))
+        .and(path("/products"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "topProducts": [
+                    {"__typename": "Product", "upc": "1", "name": "Table"},
+                    {"__typename": "Product", "upc": "2", "name": "Couch"},
+                    {"__typename": "Product", "upc": "3", "name": "Chair"},
+                    {"__typename": "Product", "upc": "4", "name": "Bed"},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgwI+Py80AYQwPCHgAIiDAj4/LzQBhDA8IeAAljyuRRywgJivwIKC3RvcFByb2R1Y3RzGglbUHJvZHVjdF1AyK4KSIDhC2JEEABiHwoDdXBjGgdTdHJpbmchQMS8DUju7w1qB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQIS3Dkjwyg5qB1Byb2R1Y3RiRBABYh8KA3VwYxoHU3RyaW5nIUDGqA9IutQPagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0De5g9I7vMPagdQcm9kdWN0YkQQAmIfCgN1cGMaB1N0cmluZyFA4LIQSPC/EGoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdAsOoQSOb7EGoHUHJvZHVjdGJEEANiHwoDdXBjGgdTdHJpbmchQILBEUjI0BFqB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQLLjEUik8BFqB1Byb2R1Y3RqBVF1ZXJ5+QEAAAAAAADwPw=="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // reviews: federation `_entities` fetch over Product. Returns a
+    // review-shaped payload with author User refs. Captured from
+    // `https://reviews.demo.starstuff.dev/` against the exact operation
+    // text the router emits for the `test_send_variable_value` query.
+    Mock::given(method("POST"))
+        .and(path("/reviews"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "_entities": [
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "1"}},
+                        {"author": {"__typename": "User", "id": "2"}},
+                    ]},
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "1"}},
+                    ]},
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "2"}},
+                    ]},
+                    {"reviews": []},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgwI+/y80AYQwObxvAMiDAj7/LzQBhDA1P26A1imyfwBcuEDYt4DCglfZW50aXRpZXMaCltfRW50aXR5XSFAjq/wAUjyr/oBYq0BEABiqAEKB3Jldmlld3MaCFtSZXZpZXddQL7h8wFIwuX0AWI/EABiOwoGYXV0aG9yGgRVc2VyQIa/9QFI/tP1AWIZCgJpZBoDSUQhQNyc9gFIrLH2AWoEVXNlcmoGUmV2aWV3Yj8QAWI7CgZhdXRob3IaBFVzZXJAju32AUiO9/YBYhkKAmlkGgNJRCFA7Jz3AUiGpfcBagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiaxABYmcKB3Jldmlld3MaCFtSZXZpZXddQKrG9wFIsuP3AWI/EABiOwoGYXV0aG9yGgRVc2VyQKD99wFI0pb4AWIZCgJpZBoDSUQhQISr+AFIssL4AWoEVXNlcmoGUmV2aWV3agdQcm9kdWN0YmsQAmJnCgdyZXZpZXdzGghbUmV2aWV3XUDG5fgBSKSB+QFiPxAAYjsKBmF1dGhvchoEVXNlckDilvkBSNqw+QFiGQoCaWQaA0lEIUDqwvkBSKLf+QFqBFVzZXJqBlJldmlld2oHUHJvZHVjdGIqEANiJgoHcmV2aWV3cxoIW1Jldmlld11A8v35AUjMiPoBagdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // accounts: federation `_entities` fetch over User. Returns names.
+    // Captured from `https://accounts.demo.starstuff.dev/` — the
+    // subgraph that triggered the ECONNRESET in the CircleCI failure
+    // (apollographql/router job 377214, ROUTER-1814).
+    Mock::given(method("POST"))
+        .and(path("/accounts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "_entities": [
+                    {"name": "Ada Lovelace"},
+                    {"name": "Alan Turing"},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgsIgv280AYQwPP2NCILCIL9vNAGEMDhgjNY3JDaAXJyYnAKCV9lbnRpdGllcxoKW19FbnRpdHldIUCE/dQBSOqn2AFiIhAAYh4KBG5hbWUaBlN0cmluZ0DUuNcBSPru1wFqBFVzZXJiIhABYh4KBG5hbWUaBlN0cmluZ0DgidgBSNCV2AFqBFVzZXJqBVF1ZXJ5+QEAAAAAAADwPw=="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    server
+}
+
+/// Variant of `get_router_service` that points the three demo subgraph URLs
+/// at a localhost wiremock instead of the public
+/// `https://*.demo.starstuff.dev/` hosts. The wiremock returns canned
+/// federation responses (including valid FTV1 traces) captured from the
+/// live demo subgraphs so the resulting OTel trace shape matches what the
+/// existing snapshots expect, but without any off-box network egress.
+///
+/// Introduced to fix ROUTER-1814: `test_send_variable_value` flaked on
+/// Linux CI when the accounts demo subgraph reset the TLS connection
+/// (`ECONNRESET` / `os error 104`). See the
+/// `start_demo_subgraphs_mock_server` doc comment for the broader root
+/// cause.
+async fn get_router_service_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    use_legacy_request_span: bool,
+    _mocked: bool,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+
+    let subgraph_mock = start_demo_subgraphs_mock_server().await;
+    let mock_url = subgraph_mock.uri();
+    // Leak so the wiremock outlives this helper's return — the harness
+    // hangs on to the returned router service, which will fire requests
+    // at the mock during the test body. Same pattern as
+    // `start_connector_mock_server`.
+    let _ = Box::leak(Box::new(subgraph_mock));
+
+    // Wire in `override_subgraph_url` so the router rewrites the
+    // hardcoded `https://*.demo.starstuff.dev/` URIs to our localhost
+    // mock paths. The trailing path segment per subgraph is how the
+    // wiremock distinguishes which canned response to return.
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "override_subgraph_url".to_string(),
+            serde_json::json!({
+                "accounts": format!("{mock_url}/accounts"),
+                "products": format!("{mock_url}/products"),
+                "reviews": format!("{mock_url}/reviews"),
+            }),
+        );
+    }
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .with_subgraph_network_requests();
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
+}
+
 async fn get_connector_router_service(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     use_legacy_request_span: bool,
@@ -642,6 +801,37 @@ async fn get_trace_report(
     .await
 }
 
+/// Variant of `get_trace_report` that swaps the real
+/// `https://*.demo.starstuff.dev/` subgraph egress for a localhost
+/// wiremock. Used by `test_send_variable_value` to make the test
+/// hermetic on Linux CI runners where the public demo subgraphs
+/// occasionally reset the TLS connection. See `ROUTER-1814` for the
+/// failure that motivated this.
+async fn get_trace_report_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    request: router::Request,
+    use_legacy_request_span: bool,
+) -> ExportTraceServiceRequest {
+    get_traces(
+        get_router_service_with_subgraph_mock,
+        reports,
+        use_legacy_request_span,
+        false,
+        request,
+        |r| {
+            !r.resource_spans
+                .first()
+                .expect("resource spans required")
+                .scope_spans
+                .first()
+                .expect("scope spans required")
+                .spans
+                .is_empty()
+        },
+    )
+    .await
+}
+
 async fn get_connector_trace_report(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
@@ -992,6 +1182,18 @@ async fn test_batch_send_header() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
+    // Uses the wiremock-backed `get_trace_report_with_subgraph_mock`
+    // rather than `get_trace_report`. The latter routes through
+    // `with_subgraph_network_requests()` against the live
+    // `https://*.demo.starstuff.dev/` subgraphs hardcoded in
+    // `fixtures/supergraph.graphql`; on Linux CI those hosts sporadically
+    // reset the TLS connection (`ECONNRESET` / `os error 104`), which
+    // turns the `apollo.subgraph.name=accounts` `http_request` span's
+    // status from OK to ERROR and the snapshot then drifts (see
+    // ROUTER-1814 for the CircleCI failure). The mock returns canned
+    // federation responses with valid FTV1 trace blobs captured from
+    // the live demo deployment so the resulting OTel trace shape still
+    // matches the existing snapshot.
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
@@ -1001,7 +1203,8 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }

@@ -14,6 +14,11 @@ pub struct RuntimeError {
     pub subgraph_name: Option<String>,
     pub path: String,
     pub extensions: Map<ByteString, Value>,
+    /// Tracks whether a span event has already been emitted for this error at its source site
+    /// (e.g. in `process_response`). When set, the centralized catch-all in `count_operation_errors`
+    /// skips re-emitting so traces carry exactly one event per error.
+    #[serde(skip)]
+    span_event_emitted: bool,
 }
 
 impl RuntimeError {
@@ -25,6 +30,7 @@ impl RuntimeError {
             subgraph_name: None,
             path: response_key.path_string(),
             extensions: Default::default(),
+            span_event_emitted: false,
         }
     }
 
@@ -69,6 +75,14 @@ impl RuntimeError {
     pub fn code(&self) -> &str {
         self.code.as_deref().unwrap_or("CONNECTORS_FETCH")
     }
+
+    pub fn span_event_emitted(&self) -> bool {
+        self.span_event_emitted
+    }
+
+    pub fn set_span_event_emitted(&mut self, value: bool) {
+        self.span_event_emitted = value;
+    }
 }
 
 /// An error sending a connector request. This represents a problem with sending the request
@@ -101,6 +115,7 @@ impl Error {
             subgraph_name: Some(connector.id.subgraph_name.clone()),
             path: response_key.path_string(),
             extensions: Default::default(),
+            span_event_emitted: false,
         }
     }
 

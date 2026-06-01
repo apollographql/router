@@ -12,6 +12,7 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
 use tracing::trace;
 
@@ -29,6 +30,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -888,6 +890,36 @@ pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchem
     Ok(schema)
 }
 
+/// Coerce unquoted `fields` argument on `@key` from enum to string value.
+/// `FieldSet` is a custom scalar, and fed1 schemas were allowed to use `@key(fields: id)`
+/// (unquoted) which is parsed as an enum value. We keep this for backward compatibility.
+fn coerce_key_fieldset_enum_values(schema: &mut Schema) {
+    if !schema
+        .directive_definitions
+        .contains_key(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    {
+        return;
+    }
+
+    schema
+        .types
+        .values_mut()
+        .filter_map(|ty| match ty {
+            ExtendedType::Object(obj) => Some(&mut obj.make_mut().directives),
+            ExtendedType::Interface(itf) => Some(&mut itf.make_mut().directives),
+            _ => None,
+        })
+        .flat_map(|directives| directives.iter_mut())
+        .filter(|d| d.name == FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+        .flat_map(|d| &mut d.make_mut().arguments)
+        .filter(|arg| arg.name == FEDERATION_FIELDS_ARGUMENT_NAME)
+        .for_each(|arg| {
+            if let Value::Enum(name) = arg.make_mut().value.make_mut() {
+                *arg.make_mut().value.make_mut() = Value::String(name.to_string());
+            }
+        });
+}
+
 /// Expands schema with all imported federation definitions.
 pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, FederationError> {
     let mut schema: FederationSchema = new_federation_subgraph_schema(schema)?;
@@ -915,6 +947,12 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     // Now we fill in the missing definitions
     trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
+
+    // `FieldSet` is a custom scalar, and fed1 allowed `@key(fields: id)` (unquoted).
+    // Coerce these enum values to strings for backward compatibility.
+    if !schema.is_fed_2() {
+        coerce_key_fieldset_enum_values(schema.schema_mut());
+    }
 
     // Since we backfilled definitions, we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
