@@ -484,6 +484,10 @@ impl CacheControl {
 
     /// Returns `true` if a cached response can be served to the client right now.
     /// A response can be used if `no-cache` is not set and the remaining TTL (if present) is > 0.
+    ///
+    /// Note: entries at exactly `remaining_ttl = 0` are treated as expired. This is stricter than
+    /// the old behavior (which allowed serving at the boundary) but matches RFC 9111 §4.2, which
+    /// defines freshness as `freshness_lifetime > current_age` (strict greater-than).
     // TODO: honor stale-while-revalidate
     pub(crate) fn can_use(&self) -> bool {
         !self.no_cache && self.remaining_ttl().is_none_or(|ttl| ttl > 0)
