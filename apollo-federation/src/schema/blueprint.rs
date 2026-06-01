@@ -417,7 +417,19 @@ impl FederationBlueprint {
     }
 
     fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
+        // PORT_NOTE: Matches JS `expandKnownFeatures` which skips link, federation, and join.
+        // Link and federation are already handled earlier. Join is a supergraph-only spec
+        // whose elements are added by the merger, not during subgraph expansion.
+        // See: https://github.com/apollographql/federation/blob/8200b154/internals-js/src/federation.ts#L2238
+        let skip = [
+            Identity::link_identity(),
+            Identity::federation_identity(),
+            Identity::join_identity(),
+        ];
         for feature in schema.all_features()? {
+            if skip.contains(feature.identity()) {
+                continue;
+            }
             feature.add_elements_to_schema(schema)?;
         }
 

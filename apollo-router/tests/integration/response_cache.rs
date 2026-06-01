@@ -48,6 +48,51 @@ async fn redis_client() -> Result<Client, BoxError> {
     Ok(client)
 }
 
+/// Block until Redis responds to PING within `per_attempt` on a freshly built fred
+/// client, retrying for up to `total` before panicking.
+///
+/// Why: the router's response_cache uses fred with a default `default_command_timeout`
+/// of 500ms. When a `TestHarness` spins up a new fred pool under CI load, the pool's
+/// first per-client command can race that 500ms budget if Redis or the host has not
+/// yet stabilised (e.g. another harness is still tearing down its connections, or
+/// the container is warming up). Issuing a PING from a fresh fred client here proves
+/// that a brand-new connection can complete one full request/response round-trip
+/// within the same budget the router will be operating under, which is exactly the
+/// condition the router needs for its first lookup not to time out.
+async fn wait_for_redis_responsive(per_attempt: Duration, total: Duration) {
+    let deadline = Instant::now() + total;
+    let mut last_err: Option<String>;
+    loop {
+        // Build a fresh client each attempt so we exercise the same cold-start path
+        // the router's pool exercises, not a long-lived warm connection.
+        let attempt = async {
+            let config =
+                fred::prelude::Config::from_url(REDIS_URL).map_err(|e| format!("config: {e}"))?;
+            let client = Builder::from_config(config)
+                .build()
+                .map_err(|e| format!("build: {e}"))?;
+            client.init().await.map_err(|e| format!("init: {e}"))?;
+            let _: () = client.ping(None).await.map_err(|e| format!("ping: {e}"))?;
+            // Best-effort tidy-up; ignore errors during teardown.
+            let _ = client.quit().await;
+            Ok::<(), String>(())
+        };
+        match attempt.timeout(per_attempt).await {
+            Ok(Ok(())) => return,
+            Ok(Err(e)) => last_err = Some(e),
+            Err(_) => last_err = Some(format!("PING did not complete within {per_attempt:?}")),
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "redis at {REDIS_URL} was not responsive within {total:?} \
+                 (per-attempt deadline {per_attempt:?}); last error: {}",
+                last_err.unwrap_or_else(|| "<none>".into())
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String> {
     response
         .extensions
@@ -1225,6 +1270,15 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
+    // The router's response_cache uses fred's default 500ms `default_command_timeout`.
+    // Each `TestHarness::builder()` below spins up a brand-new fred pool, and we have
+    // historically seen the second pool's first per-client lookup time out under CI
+    // load: fred reports the client as "connected" but the first request/response
+    // round-trip exceeds 500ms because the host (or Redis itself) has not yet
+    // stabilised. Prove Redis can serve a fresh-client PING within a budget
+    // comfortably below 500ms before each harness is built, so the router pool's
+    // first command operates against a demonstrably warm Redis.
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
     let namespace = namespace();
     let client = redis_client().await?;
 
@@ -1362,6 +1416,12 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         assert_cache_key_exists!(&namespace, cache_key, &client);
     }
 
+    // Tearing down the first harness's fred pool and standing up the second one's can
+    // briefly contend with Redis. Re-prove the server is responsive before building
+    // the next harness so its pool's first lookup doesn't race the 500ms default
+    // command timeout (see the comment at the top of this test).
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
+
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
             "response_cache": {
@@ -1423,6 +1483,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     for review_key in reviews_cache_keys {
         assert_cache_key_exists!(&namespace, review_key, &client);
     }
+
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()

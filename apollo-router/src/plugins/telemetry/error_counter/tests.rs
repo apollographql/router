@@ -341,6 +341,49 @@ async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+    let config = ErrorsConfiguration {
+        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        ..Default::default()
+    };
+
+    let context = Context::default();
+    let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+    let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+    let _ = context.insert(OPERATION_KIND, "query".to_string());
+    let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+    let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+    let error_id = Uuid::new_v4();
+    count_subgraph_errors(
+        SubgraphResponse::fake_builder()
+            .context(context)
+            .status_code(StatusCode::BAD_REQUEST)
+            .errors(vec![
+                graphql::Error::builder()
+                    .message("subgraph went boom")
+                    .extension_code("SUBGRAPH_HTTP_ERROR")
+                    .apollo_id(error_id)
+                    .build(),
+            ])
+            .build(),
+        &config,
+    )
+    .await;
+
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("graphql.error.extensions.code"),
+        "expected a span event carrying `graphql.error.extensions.code`"
+    );
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("SUBGRAPH_HTTP_ERROR"),
+        "expected the extension code on the emitted event"
+    );
+}
+
 #[tokio::test]
 async fn test_count_execution_errors() {
     async {
@@ -403,6 +446,109 @@ async fn test_count_execution_errors() {
     }
     .with_metrics()
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_count_operation_errors_skips_span_event_when_marker_is_set() {
+    async {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        let config = ErrorsConfiguration {
+            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+        let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+        let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+        let mut pre_emitted = graphql::Error::builder()
+            .message("connector went boom")
+            .extension_code("ALREADY_EMITTED_CODE")
+            .apollo_id(Uuid::new_v4())
+            .build();
+        pre_emitted.set_span_event_emitted(true);
+
+        let _ = count_execution_errors(
+            ExecutionResponse::fake_builder()
+                .context(context)
+                .status_code(StatusCode::BAD_REQUEST)
+                .errors(vec![pre_emitted])
+                .build()
+                .unwrap(),
+            &config,
+        )
+        .await;
+
+        // Metric still fires — only the span event is suppressed.
+        assert_counter!(
+            "apollo.router.operations.error",
+            1,
+            "apollo.operation.id" = "some-id",
+            "graphql.operation.name" = "SomeOperation",
+            "graphql.operation.type" = "query",
+            "apollo.client.name" = "client-1",
+            "apollo.client.version" = "version-1",
+            "graphql.error.extensions.code" = "ALREADY_EMITTED_CODE",
+            "graphql.error.extensions.severity" = "ERROR",
+            "graphql.error.path" = "",
+            "apollo.router.error.service" = ""
+        );
+
+        assert!(
+            !crate::test_harness::tracing_test::logs_contain("ALREADY_EMITTED_CODE"),
+            "span event must not be re-emitted when span_event_emitted is set"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_count_execution_errors_emits_span_event_with_error_code() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+    let config = ErrorsConfiguration {
+        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        ..Default::default()
+    };
+
+    let context = Context::default();
+    let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+    let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+    let _ = context.insert(OPERATION_KIND, "query".to_string());
+    let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+    let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+    let error_id = Uuid::new_v4();
+    let _ = count_execution_errors(
+        ExecutionResponse::fake_builder()
+            .context(context)
+            .status_code(StatusCode::BAD_REQUEST)
+            .errors(vec![
+                graphql::Error::builder()
+                    .message("execution went boom")
+                    .extension_code("EXECUTION_ERROR_CODE")
+                    .apollo_id(error_id)
+                    .build(),
+            ])
+            .build()
+            .unwrap(),
+        &config,
+    )
+    .await;
+
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("graphql.error.extensions.code"),
+        "expected a span event carrying `graphql.error.extensions.code` from the stream.inspect path"
+    );
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("EXECUTION_ERROR_CODE"),
+        "expected the extension code on the emitted event"
+    );
 }
 
 #[tokio::test]

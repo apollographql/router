@@ -401,11 +401,15 @@ mod test {
         assert!(future_instant < now_instant + Duration::from_secs(1025));
         assert!(future_instant > now_instant + Duration::from_secs(1023));
 
-        // An instant in the past will return something greater than the original now_instant, but less than a new instant.
+        // An instant in the past will return something greater than the original
+        // now_instant, and at most equal to a new instant. The upper bound is
+        // inclusive because on low-resolution monotonic clocks (Windows ticks at
+        // ~16ms) the `Instant::now()` here can read the same value
+        // `to_positive_instant` did during the same tick.
         let past_system_time = now_system_time - Duration::from_secs(1024);
         let past_instant = to_positive_instant(past_system_time);
         assert!(past_instant > now_instant);
-        assert!(past_instant < Instant::now());
+        assert!(past_instant <= Instant::now());
     }
 
     #[tokio::test]
