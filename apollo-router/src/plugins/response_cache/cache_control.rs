@@ -142,7 +142,7 @@ where
     #[serde(untagged)]
     enum BoolOrU64 {
         Duration(u64),
-        Bool(bool),
+        Bool(()),
     }
 
     Ok(match Option::<BoolOrU64>::deserialize(deserializer)? {
@@ -514,10 +514,10 @@ impl CacheControl {
     fn remaining_duration(&self, value: Option<u64>, now: Option<u64>) -> Option<u64> {
         let value = value?;
         // A future-dated created (clock skew) means elapsed would be negative; treat as expired.
-        if let Some(now) = now {
-            if now < self.created {
-                return Some(0);
-            }
+        if let Some(now) = now
+            && now < self.created
+        {
+            return Some(0);
         }
         let elapsed = now.map(|now| now.saturating_sub(self.created));
         let subtrahend = self.age.unwrap_or(0).saturating_add(elapsed.unwrap_or(0));
@@ -593,6 +593,7 @@ impl CacheControl {
     }
 
     /// Sets `created` to 0, making time-dependent fields deterministic in snapshot tests.
+    #[allow(dead_code)]
     pub(crate) fn zero_out_created(&mut self) {
         self.created = 0;
     }
@@ -981,10 +982,7 @@ mod tests {
             .find(|d| d.starts_with("max-age="))
             .and_then(|d| d.trim_start_matches("max-age=").parse().ok())
             .unwrap();
-        assert!(
-            emitted <= 50 && emitted >= 48,
-            "expected ~50, got {emitted}"
-        );
+        assert!((48..=50).contains(&emitted), "expected ~50, got {emitted}");
     }
 
     #[test]
@@ -1159,7 +1157,7 @@ mod tests {
         // remaining_ttl() = 60 - 10s elapsed = ~50
         let remaining = cc.remaining_ttl().unwrap();
         assert!(
-            remaining <= 50 && remaining >= 48,
+            (48..=50).contains(&remaining),
             "expected ~50, got {remaining}"
         );
     }
@@ -1176,7 +1174,7 @@ mod tests {
         // remaining_ttl() = 60 - 10(age) - ~5(elapsed) = ~45
         let remaining = cc.remaining_ttl().unwrap();
         assert!(
-            remaining <= 45 && remaining >= 43,
+            (43..=45).contains(&remaining),
             "expected ~45, got {remaining}"
         );
     }
