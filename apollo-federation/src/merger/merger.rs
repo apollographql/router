@@ -1870,13 +1870,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         for (dest, ast_node) in fields_to_insert {
             trace!("Filling in missing interface object field {dest} with {ast_node}",);
             dest.insert(&mut self.merged, Component::new(ast_node))?;
-            // now we can merge access control directives
-            for directive_name in &access_control_directive_names {
-                self.merge_applied_directive(
-                    directive_name,
-                    &Default::default(),
-                    &dest.clone().into(),
-                )?;
+            // Merge access control directives only if there are additional sources
+            // (e.g. from @interfaceObject field propagation). Matches JS behavior
+            // which checks `additionalSources.length > 0` before merging.
+            let dest_position: DirectiveTargetPosition = dest.clone().into();
+            let additional_sources = self.access_control_additional_sources()?;
+            let ac_directives_to_merge: Vec<_> = self
+                .access_control_directives_in_supergraph
+                .iter()
+                .filter(|(ac_name, _)| {
+                    additional_sources.contains_key(&format!("{dest_position}_{ac_name}"))
+                })
+                .map(|(_, name_in_supergraph)| name_in_supergraph.clone())
+                .collect();
+            for name in &ac_directives_to_merge {
+                self.merge_applied_directive(name, &Default::default(), &dest_position)?;
             }
 
             // If we had to add a field here, it means that, for this particular implementation, the

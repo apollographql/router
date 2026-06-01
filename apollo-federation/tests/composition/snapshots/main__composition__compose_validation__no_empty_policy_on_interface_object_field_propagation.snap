@@ -1,0 +1,11 @@
+---
+source: apollo-federation/tests/composition/compose_validation.rs
+assertion_line: 673
+expression: book.to_string()
+---
+type Book implements Product @join__implements(graph: SUBGRAPHA, interface: "Product") @join__type(graph: SUBGRAPHA, key: "id") {
+  id: ID!
+  name: String!
+  isbn: String! @policy(policies: [["read"]])
+  reviews: [String!]! @join__field
+}
