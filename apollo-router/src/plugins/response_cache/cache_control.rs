@@ -27,7 +27,9 @@ pub(crate) struct CacheControl {
     /// for TTL calculations.
     created: u64,
 
-    /// `max-age=N`: the response remains fresh for N seconds after it was generated.
+    /// `max-age=N`: in a response, indicates the response remains fresh for N seconds after it
+    /// was generated. In a request, indicates the client prefers a response whose age is less
+    /// than or equal to N seconds (RFC 9111 §5.2.1.1, §5.2.2.1).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     max_age: Option<u64>,
 
@@ -46,10 +48,11 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     no_store: bool,
 
-    /// `no-transform`: intermediaries must not transform the response body.
+    /// `no-transform`: intermediaries must not transform the content, in both request and response
+    /// contexts (RFC 9111 §5.2.1.6, §5.2.2.6).
     ///
-    /// The router does not transform response bodies, so this directive does not affect its
-    /// caching behavior. It is parsed and propagated to the client for downstream caches to honor.
+    /// The router does not transform content, so this directive does not affect its caching
+    /// behavior. It is parsed and propagated to the client for downstream caches to honor.
     #[serde(skip_serializing_if = "is_false", default)]
     no_transform: bool,
 
@@ -99,8 +102,9 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     must_understand: bool,
 
-    /// `private`: the response may only be stored in a private cache (e.g., a browser cache).
-    /// Takes precedence over `public` — see [`public()`].
+    /// `private`: the response MUST NOT be stored by a shared cache; it may be stored in a
+    /// private cache (e.g., a browser cache). Takes precedence over `public` — see [`public()`].
+    /// (RFC 9111 §5.2.2.7)
     #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
 
