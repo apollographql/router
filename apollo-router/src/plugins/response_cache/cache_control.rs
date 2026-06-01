@@ -872,6 +872,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_stale_if_error_with_value() {
+        // Regression test for ROUTER-1830: stale-if-error=N was previously parsed as a
+        // boolean-only field, causing SUBREQUEST_HTTP_ERROR when a value was present.
+        let cc = CacheControl::try_from(&header_map(&[(
+            "cache-control",
+            "public, max-age=60, stale-if-error=600",
+        )]))
+        .unwrap();
+        assert_eq!(cc.max_age, Some(60));
+        assert!(cc.public);
+        assert_eq!(cc.stale_if_error, Some(600));
+    }
+
+    #[test]
     fn parse_multiple_cache_control_headers() {
         // Multiple Cache-Control headers should be merged
         let mut map = http::HeaderMap::new();
