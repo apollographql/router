@@ -56,7 +56,13 @@ pub(crate) struct CacheControl {
 
     /// `stale-if-error=N`: the cache may reuse a stale response when an upstream error occurs
     /// (HTTP 500, 502, 503, or 504), for up to N seconds after the response went stale.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    ///
+    /// Older schema versions stored this field as a boolean; the custom deserializer handles both.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "deserialize_option_u64_or_bool"
+    )]
     stale_if_error: Option<u64>,
 
     // -- request only --
@@ -121,14 +127,14 @@ pub(crate) struct CacheControl {
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
-        deserialize_with = "deserialize_stale_while_revalidate"
+        deserialize_with = "deserialize_option_u64_or_bool"
     )]
     stale_while_revalidate: Option<u64>,
 }
 
-/// Deserializes `stale_while_revalidate` from either a `u64` (current schema) or a `bool`
+/// Deserializes an `Option<u64>` field that may appear as a `u64` (current schema) or a `bool`
 /// (legacy schema). A boolean value is treated as `None` since no duration is available.
-fn deserialize_stale_while_revalidate<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+fn deserialize_option_u64_or_bool<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
