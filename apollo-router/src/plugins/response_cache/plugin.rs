@@ -417,7 +417,7 @@ impl PluginPrivate for ResponseCache {
                         cache_control = CacheControl::default_no_store();
                     }
 
-                    let _ = cache_control.update_headers(response.response.headers_mut());
+                    let _ = cache_control.update_response_headers(response.response.headers_mut());
                 }
 
                 if debug
@@ -841,7 +841,7 @@ impl CacheService {
             // Don't use cache at all if both no-store and no-cache are set in cache-control header
             if cache_control.no_cache() && cache_control.no_store() {
                 let mut resp = self.service.call(request).await?;
-                cache_control.update_headers(resp.response.headers_mut())?;
+                cache_control.update_response_headers(resp.response.headers_mut())?;
                 return Ok(resp);
             }
 
@@ -1187,7 +1187,7 @@ impl CacheService {
                             .extensions(Object::new())
                             .build();
                         CacheControl::default_no_store()
-                            .update_headers(response.response.headers_mut())?;
+                            .update_response_headers(response.response.headers_mut())?;
 
                         return Ok(response);
                     }
@@ -1230,7 +1230,7 @@ impl CacheService {
                 )
                 .await?;
 
-                cache_control.update_headers(response.response.headers_mut())?;
+                cache_control.update_response_headers(response.response.headers_mut())?;
 
                 Ok(response)
             }
@@ -1346,7 +1346,7 @@ async fn cache_lookup_root(
 
                 value
                     .control
-                    .update_headers(response.response.headers_mut())?;
+                    .update_response_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
                 Span::current().set_span_dyn_attribute(
@@ -1652,7 +1652,7 @@ async fn cache_lookup_entities(
 
         cache_control
             .unwrap_or_default()
-            .update_headers(response.response.headers_mut())?;
+            .update_response_headers(response.response.headers_mut())?;
 
         Ok(ControlFlow::Break(response))
     }

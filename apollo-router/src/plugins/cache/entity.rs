@@ -389,7 +389,7 @@ impl PluginPrivate for EntityCache {
                     .extensions()
                     .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
-                    let _ = cache_control.update_headers(response.response.headers_mut());
+                    let _ = cache_control.update_response_headers(response.response.headers_mut());
                 }
 
                 response
@@ -876,7 +876,7 @@ impl CacheService {
                                 .extensions(Object::new())
                                 .build();
                             CacheControl::default_no_store()
-                                .update_headers(response.response.headers_mut())?;
+                                .update_response_headers(response.response.headers_mut())?;
 
                             return Ok(response);
                         }
@@ -891,7 +891,7 @@ impl CacheService {
                     if self.expose_keys_in_context {
                         // Update cache keys needed for surrogate cache key when it's new data and not data from the cache
                         let response_id = response.id.clone();
-                        let cache_control_str = cache_control.to_string();
+                        let cache_control_str = cache_control.to_response_header_value();
                         response.context.upsert::<_, CacheKeysContext>(
                             CONTEXT_CACHE_KEYS,
                             |mut value| {
@@ -937,7 +937,7 @@ impl CacheService {
                     )
                     .await?;
 
-                    cache_control.update_headers(response.response.headers_mut())?;
+                    cache_control.update_response_headers(response.response.headers_mut())?;
 
                     Ok(response)
                 }
@@ -1009,7 +1009,7 @@ async fn cache_lookup_root(
                 update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
-                    let cache_control_header = value.0.control.to_string();
+                    let cache_control_header = value.0.control.to_response_header_value();
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_CACHE_KEYS,
                         |mut val| {
@@ -1048,7 +1048,7 @@ async fn cache_lookup_root(
                 value
                     .0
                     .control
-                    .update_headers(response.response.headers_mut())?;
+                    .update_response_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
                 Ok(ControlFlow::Continue((request, key)))
@@ -1142,7 +1142,7 @@ async fn cache_lookup_entities(
                     cache_entries.push(CacheKeyContext {
                         key: intermediate_result.key.clone(),
                         status: CacheKeyStatus::Cached,
-                        cache_control: cache_entry.control.to_string(),
+                        cache_control: cache_entry.control.to_response_header_value(),
                     });
                 }
                 None => {
@@ -1150,8 +1150,8 @@ async fn cache_lookup_entities(
                         key: intermediate_result.key.clone(),
                         status: CacheKeyStatus::New,
                         cache_control: match &cache_control {
-                            Some(cc) => cc.to_string(),
-                            None => CacheControl::default().to_string(),
+                            Some(cc) => cc.to_response_header_value(),
+                            None => CacheControl::default().to_response_header_value(),
                         },
                     });
                 }
@@ -1200,7 +1200,7 @@ async fn cache_lookup_entities(
 
         cache_control
             .unwrap_or_default()
-            .update_headers(response.response.headers_mut())?;
+            .update_response_headers(response.response.headers_mut())?;
 
         Ok(ControlFlow::Break(response))
     }
@@ -1250,7 +1250,7 @@ async fn cache_store_root_from_response(
             let data = data.clone();
             if expose_keys_in_context {
                 let response_id = response.id.clone();
-                let cache_control_header = cache_control.to_string();
+                let cache_control_header = cache_control.to_response_header_value();
 
                 response
                     .context

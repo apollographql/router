@@ -1,5 +1,3 @@
-use std::fmt::Display;
-use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -236,86 +234,70 @@ impl TryFrom<&HeaderMap> for CacheControl {
     }
 }
 
-impl Display for CacheControl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut formatter = DelimitedFormatter::from(f);
+impl CacheControl {
+    /// Formats this cache control as a `Cache-Control` response header value.
+    ///
+    /// TTL fields (`max-age`, `s-maxage`, `stale-while-revalidate`, `stale-if-error`) are
+    /// decremented by elapsed time since this struct was created, so the emitted value reflects
+    /// the remaining freshness at the time of serialization.
+    ///
+    /// Request-only directives (`min-fresh`, `max-stale`, `only-if-cached`) are intentionally
+    /// omitted — they have no meaning in a response header.
+    pub(crate) fn to_response_header_value(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
 
-        // If no-store, emit just that directive and return early. Per RFC 9111, no-store is the
-        // strongest cache directive and makes all others irrelevant. Note that max-age=0 is
-        // intentionally not treated as no-store: max-age=0 means "expired, always revalidate",
-        // whereas no-store means "do not cache at all". The router determines cacheability via
-        // should_store(), not by inspecting the serialized header.
+        // If no-store, emit just that directive. Per RFC 9111, no-store is the strongest cache
+        // directive and makes all others irrelevant. Note that max-age=0 is intentionally not
+        // treated as no-store: max-age=0 means "expired, always revalidate", whereas no-store
+        // means "do not cache at all". The router determines cacheability via should_store().
         // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store {
-            write!(&mut formatter, "no-store")?;
-            return Ok(());
+            return "no-store".to_string();
         }
 
         let elapsed = self.elapsed();
 
         if let Some(max_age) = self.max_age {
-            let max_age = remaining_ttl(max_age, elapsed);
-            write!(&mut formatter, "max-age={}", max_age)?;
+            parts.push(format!("max-age={}", remaining_ttl(max_age, elapsed)));
         }
-
-        if let Some(max_age) = self.s_max_age {
-            let max_age = remaining_ttl(max_age, elapsed);
-            write!(&mut formatter, "s-maxage={}", max_age)?;
+        if let Some(s_max_age) = self.s_max_age {
+            parts.push(format!("s-maxage={}", remaining_ttl(s_max_age, elapsed)));
         }
-
         if self.no_cache {
-            write!(&mut formatter, "no-cache")?;
+            parts.push("no-cache".to_string());
         }
-
         if self.no_transform {
-            write!(&mut formatter, "no-transform")?;
+            parts.push("no-transform".to_string());
         }
-
         if self.must_revalidate {
-            write!(&mut formatter, "must-revalidate")?;
+            parts.push("must-revalidate".to_string());
         }
-
         if self.proxy_revalidate {
-            write!(&mut formatter, "proxy-revalidate")?;
+            parts.push("proxy-revalidate".to_string());
         }
-
         if self.must_understand {
-            write!(&mut formatter, "must-understand")?;
+            parts.push("must-understand".to_string());
         }
-
         if self.private {
-            write!(&mut formatter, "private")?;
+            parts.push("private".to_string());
         }
-
         if self.public {
-            write!(&mut formatter, "public")?;
+            parts.push("public".to_string());
         }
-
         if self.immutable {
-            write!(&mut formatter, "immutable")?;
+            parts.push("immutable".to_string());
         }
-
         if let Some(stale) = self.stale_while_revalidate {
-            let stale = remaining_ttl(stale, elapsed);
-            write!(&mut formatter, "stale-while-revalidate={}", stale)?;
+            parts.push(format!(
+                "stale-while-revalidate={}",
+                remaining_ttl(stale, elapsed)
+            ));
         }
-
         if let Some(stale) = self.stale_if_error {
-            let stale = remaining_ttl(stale, elapsed);
-            write!(&mut formatter, "stale-if-error={}", stale)?;
+            parts.push(format!("stale-if-error={}", remaining_ttl(stale, elapsed)));
         }
 
-        // TODO: check this logic, pretty sure it's right though
-        if let Some(min_fresh) = self.min_fresh {
-            let min_fresh = remaining_ttl(min_fresh, elapsed);
-            write!(&mut formatter, "min-fresh={}", min_fresh)?;
-        }
-
-        if self.only_if_cached {
-            write!(&mut formatter, "only-if-cached")?;
-        }
-
-        Ok(())
+        parts.join(",")
     }
 }
 
@@ -344,11 +326,10 @@ impl CacheControl {
         now_epoch_seconds().saturating_sub(self.created)
     }
 
-    pub(crate) fn update_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
-        let cache_control_header_value = self.to_string();
+    pub(crate) fn update_response_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
         headers.insert(
             CACHE_CONTROL,
-            HeaderValue::from_str(&cache_control_header_value)?,
+            HeaderValue::from_str(&self.to_response_header_value())?,
         );
 
         if let Some(age) = self.age
@@ -557,34 +538,6 @@ fn remaining_ttl(ttl: u64, elapsed: u64) -> u64 {
     ttl.saturating_sub(elapsed)
 }
 
-struct DelimitedFormatter<'a, 'b> {
-    formatter: &'a mut Formatter<'b>,
-    delimiter: &'a str,
-    wrote_prev: bool,
-}
-
-impl<'a, 'b> From<&'a mut Formatter<'b>> for DelimitedFormatter<'a, 'b> {
-    fn from(formatter: &'a mut Formatter<'b>) -> Self {
-        Self {
-            formatter,
-            delimiter: ",",
-            wrote_prev: false,
-        }
-    }
-}
-
-impl<'a, 'b> DelimitedFormatter<'a, 'b> {
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::fmt::Result {
-        if self.wrote_prev {
-            self.formatter.write_str(self.delimiter)?;
-        }
-
-        self.formatter.write_fmt(fmt)?;
-        self.wrote_prev = true;
-
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 impl CacheControl {
@@ -687,7 +640,7 @@ mod tests {
             private: true,
             ..Default::default()
         };
-        let cache_control_header = first.to_string();
+        let cache_control_header = first.to_response_header_value();
         assert_eq!(cache_control_header, "no-store".to_string());
     }
 
@@ -922,7 +875,7 @@ mod tests {
             max_age: Some(60),
             ..Default::default()
         };
-        let header = cc.to_string();
+        let header = cc.to_response_header_value();
         assert!(header.contains("s-maxage=30"), "got: {header}");
         assert!(header.contains("max-age=60"), "got: {header}");
     }
@@ -932,7 +885,7 @@ mod tests {
         // Parse s-maxage from a header, serialize back, confirm it's preserved
         let cc =
             CacheControl::try_from(&header_map(&[("cache-control", "s-maxage=30,max-age=60")])).unwrap();
-        let header = cc.to_string();
+        let header = cc.to_response_header_value();
         assert!(header.contains("s-maxage="), "got: {header}");
         assert!(header.contains("max-age="), "got: {header}");
     }
@@ -940,14 +893,14 @@ mod tests {
     // --- Display ---
 
     #[test]
-    fn display_decrements_max_age_by_elapsed() {
+    fn response_header_decrements_max_age_by_elapsed() {
         let now = now_epoch_seconds();
         let cc = CacheControl {
             created: now - 10,
             max_age: Some(60),
             ..Default::default()
         };
-        let header = cc.to_string();
+        let header = cc.to_response_header_value();
         // elapsed is ~10s, so max-age should be ~50
         let emitted: u64 = header
             .split(',')
@@ -958,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn display_no_store_suppresses_other_directives() {
+    fn response_header_no_store_suppresses_other_directives() {
         let now = now_epoch_seconds();
         let cc = CacheControl {
             created: now,
@@ -967,7 +920,7 @@ mod tests {
             no_cache: true,
             ..Default::default()
         };
-        assert_eq!(cc.to_string(), "no-store");
+        assert_eq!(cc.to_response_header_value(), "no-store");
     }
 
     // --- with_default_ttl ---
@@ -1028,10 +981,10 @@ mod tests {
         assert!(!cc.should_store());
     }
 
-    // --- update_headers ---
+    // --- update_response_headers ---
 
     #[test]
-    fn update_headers_sets_cache_control() {
+    fn update_response_headers_sets_cache_control() {
         let now = now_epoch_seconds();
         let cc = CacheControl {
             created: now,
@@ -1039,33 +992,33 @@ mod tests {
             ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
-        cc.update_headers(&mut headers).unwrap();
+        cc.update_response_headers(&mut headers).unwrap();
         assert!(headers.contains_key(http::header::CACHE_CONTROL));
         let value = headers[http::header::CACHE_CONTROL].to_str().unwrap();
         assert!(value.contains("max-age="), "got: {value}");
     }
 
     #[test]
-    fn update_headers_sets_age_when_positive() {
+    fn update_response_headers_sets_age_when_positive() {
         let cc = CacheControl {
             age: Some(15),
             max_age: Some(60),
             ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
-        cc.update_headers(&mut headers).unwrap();
+        cc.update_response_headers(&mut headers).unwrap();
         assert!(headers.contains_key(http::header::AGE));
     }
 
     #[test]
-    fn update_headers_omits_age_when_zero() {
+    fn update_response_headers_omits_age_when_zero() {
         let cc = CacheControl {
             age: Some(0),
             max_age: Some(60),
             ..Default::default()
         };
         let mut headers = http::HeaderMap::new();
-        cc.update_headers(&mut headers).unwrap();
+        cc.update_response_headers(&mut headers).unwrap();
         assert!(!headers.contains_key(http::header::AGE));
     }
 
