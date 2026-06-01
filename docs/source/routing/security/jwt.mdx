@@ -806,6 +806,12 @@ If your router enables [tracing](/router/configuration/telemetry/exporters/traci
 
 If your router [exports metrics](/graphos/routing/observability/telemetry/metrics-exporters/overview), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded.
 
+<Note>
+
+`apollo.router.operations.jwt` is deprecated. Use `apollo.router.operations.authentication.jwt` with `authentication.jwt.failed = false` instead. `apollo.router.operations.jwt` will be removed in a future release.
+
+</Note>
+
 ## Additional resources
 
 You can use the Apollo Solutions [router JWKS generator](https://github.com/apollosolutions/router-jwks-generator) to create a router configuration file for use with the authentication plugin.
