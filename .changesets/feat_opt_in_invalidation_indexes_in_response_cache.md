@@ -1,8 +1,6 @@
-### Add opt-in `index_modes` to `response_cache` invalidation config ([Issue #9521](https://github.com/apollographql/router/issues/9521))
+### Add per-subgraph `indexes` configuration to `response_cache` invalidation ([Issue #9521](https://github.com/apollographql/router/issues/9521))
 
-`response_cache` previously maintained Redis ZSET indexes for all three invalidation modes (`by subgraph`, `by type`, `by cache tag`) on every cache insert, regardless of which modes a deployment actually used. Customers who only invalidate by cache tag paid continuous Redis CPU and memory cost for indexes they never queried.
-
-The new per-subgraph `index_modes` setting under `response_cache.subgraph.<all|subgraphs.NAME>.invalidation` lets operators opt out of unused index modes. The field defaults to all three modes (`["subgraph", "type", "cache_tag"]`) for backward compatibility, so existing deployments are unchanged.
+Adds a new `indexes` block under each subgraph's `response_cache.subgraph.<name>.invalidation` configuration, letting operators choose which invalidation indexes Apollo Router maintains in Redis for that subgraph. All three indexes are enabled by default, so existing deployments are unchanged.
 
 ```yaml
 response_cache:
@@ -16,16 +14,20 @@ response_cache:
       invalidation:
         enabled: true
         shared_key: "${env.INVALIDATION_SHARED_KEY}"
-        index_modes: ["cache_tag"]   # default: ["subgraph", "type", "cache_tag"]
+        indexes:                # all three default to true; omit fields you want kept on
+          subgraph: false       # disable `By subgraph` invalidation for this subgraph
+          type: false           # disable `By type` invalidation for this subgraph
+          # cache_tag inherits its default (true) and continues to be honored
     subgraphs:
       networkapi_subgraph:
         invalidation:
           enabled: true
-          index_modes: ["cache_tag", "type"]   # mix per subgraph
+          indexes:
+            type: false         # mix per subgraph; other fields inherit their defaults
 ```
 
-When a request to `/invalidation` targets a subgraph whose `index_modes` does not include the requested kind, the endpoint returns HTTP 400 with a structured error: `invalidation kind '<kind>' is not enabled for subgraph '<name>'; index_modes does not include this kind`. Surfaces misconfiguration to callers quickly rather than no-oping.
+When a subgraph's `indexes` block disables a mode, the corresponding ZSET writes are skipped on cache inserts and the `/invalidation` endpoint returns HTTP 400 with a structured error for requests of that kind. Operators with workloads that only ever invalidate by a subset of modes can use this to tailor `response_cache`'s indexing to their access pattern.
 
-`index_modes: []` is a supported configuration meaning "pure TTL-based caching with no invalidation API"; all per-insert ZSET writes are eliminated and every `/invalidation` request returns 400.
+**Index changes are additive only.** Enabling a previously-disabled index does not retroactively populate it for entries that were written under the prior configuration. If a deployment changes `indexes.subgraph` from `false` to `true`, the `subgraph-{name}` ZSET will only see entries written after the change; pre-change entries are invisible to `By subgraph` invalidation requests until they age out via TTL. To bring a newly-enabled index online over the full cache set, flush Redis (or the affected namespace) before turning the index on.
 
-By [@ebylund](https://github.com/ebylund) in PR
+By [@ebylund](https://github.com/ebylund) in [PR #9531](https://github.com/apollographql/router/pull/9531)
