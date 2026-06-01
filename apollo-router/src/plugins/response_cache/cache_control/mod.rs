@@ -204,6 +204,11 @@ impl TryFrom<&HeaderMap> for CacheControl {
             }
         }
 
+        // private overrules public
+        if cache_control.public && cache_control.private {
+            cache_control.public = false;
+        }
+
         Ok(cache_control)
     }
 }
@@ -356,6 +361,7 @@ impl CacheControl {
 
         let now = update_ttl.then_some(now_epoch);
 
+        let private = self.private || other.private;
         Self {
             created: now_epoch,
             age: None,
@@ -374,9 +380,9 @@ impl CacheControl {
             must_revalidate: self.must_revalidate || other.must_revalidate,
             proxy_revalidate: self.proxy_revalidate || other.proxy_revalidate,
             must_understand: self.must_understand || other.must_understand,
-            private: self.private || other.private,
+            private,
             // TODO: prev logic would public based on value of private. ideally this would not happen during the merge
-            public: self.public || other.public,
+            public: !private && (self.public || other.public),
             immutable: self.immutable || other.immutable,
             stale_while_revalidate: minimum_optional_value(
                 self.remaining_stale_while_revalidate(now),
@@ -411,8 +417,7 @@ impl CacheControl {
         self.private
     }
     pub(crate) fn public(&self) -> bool {
-        // NB: private overrides public
-        !self.private && self.public
+        self.public
     }
 
     // TODO: consider using this as the inverse of no_store and replacing no_store with no_store_raw --
