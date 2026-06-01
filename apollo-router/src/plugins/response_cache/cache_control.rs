@@ -515,7 +515,7 @@ impl CacheControl {
         let value = value?;
         let elapsed = now.map(|now| now.saturating_sub(self.created));
 
-        let subtrahend = self.age.unwrap_or(0) + elapsed.unwrap_or(0);
+        let subtrahend = self.age.unwrap_or(0).saturating_add(elapsed.unwrap_or(0));
         Some(value.saturating_sub(subtrahend))
     }
 
