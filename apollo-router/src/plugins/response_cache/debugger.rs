@@ -115,7 +115,8 @@ impl CacheKeyContext {
                 }
             }
             None => {
-                // only warn if no-store isn't set TODO doc
+                // Only warn about missing max-age if no-store isn't set; if no-store is set,
+                // the CACHE_CONTROL_NO_STORE warning above already covers the non-caching case.
                 if !self.cache_control.no_store() {
                     // Default ttl
                     self.warnings.push(Warning {
