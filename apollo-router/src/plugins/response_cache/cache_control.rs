@@ -510,8 +510,13 @@ impl CacheControl {
     /// the `Age` header offset is applied (useful for merge operations that don't update the TTL).
     fn remaining_duration(&self, value: Option<u64>, now: Option<u64>) -> Option<u64> {
         let value = value?;
+        // A future-dated created (clock skew) means elapsed would be negative; treat as expired.
+        if let Some(now) = now {
+            if now < self.created {
+                return Some(0);
+            }
+        }
         let elapsed = now.map(|now| now.saturating_sub(self.created));
-
         let subtrahend = self.age.unwrap_or(0).saturating_add(elapsed.unwrap_or(0));
         Some(value.saturating_sub(subtrahend))
     }
@@ -727,6 +732,21 @@ mod tests {
         };
         assert!(!cc.can_use()); // Because created is bigger than now
         assert!(!cc.should_store()); // Because age is bigger than max_age
+    }
+
+    #[test]
+    fn future_dated_created_is_treated_as_expired() {
+        // If created is in the future (clock skew), the entry must not be served.
+        // age < max_age so this would be fresh under a normal clock.
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now + 1000,
+            max_age: Some(60),
+            age: None,
+            ..Default::default()
+        };
+        assert_eq!(cc.remaining_ttl(), Some(0));
+        assert!(!cc.can_use());
     }
 
     #[test]
