@@ -3008,7 +3008,9 @@ fn emit_cache_tag_header(
                 }
             }
             if !first {
-                tracing::debug!("response_cache emitted aggregated cache-tag headers (one per tag)");
+                tracing::debug!(
+                    "response_cache emitted aggregated cache-tag headers (one per tag)"
+                );
             }
         }
     }
@@ -3121,7 +3123,11 @@ mod propagate_cache_tags_tests {
     #[test]
     fn emit_omits_header_when_empty() {
         let mut headers = HeaderMap::new();
-        emit_cache_tag_header(&mut headers, HashSet::new(), &PropagateCacheTagsConfig::default());
+        emit_cache_tag_header(
+            &mut headers,
+            HashSet::new(),
+            &PropagateCacheTagsConfig::default(),
+        );
         assert!(headers.get("Cache-Tag").is_none());
     }
 
@@ -3138,7 +3144,10 @@ mod propagate_cache_tags_tests {
             .iter()
             .map(|v| v.to_str().unwrap().to_string())
             .collect();
-        assert_eq!(values, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            values,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
@@ -3194,10 +3203,7 @@ mod cache_tags_aggregator_tests {
     fn record_external_cache_tags_filters_internal_prefix() {
         let context = Context::new();
         let internal = format!("{INTERNAL_CACHE_TAG_PREFIX}only");
-        record_external_cache_tags(
-            &context,
-            vec![internal.clone(), "public-tag".to_string()],
-        );
+        record_external_cache_tags(&context, vec![internal.clone(), "public-tag".to_string()]);
         let snapshot = context.extensions().with_lock(|lock| {
             lock.get::<CacheTagsAggregator>()
                 .map(|a| a.snapshot())

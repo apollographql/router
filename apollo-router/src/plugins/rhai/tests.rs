@@ -936,8 +936,7 @@ async fn it_can_read_response_cache_tags_and_rewrite_header() -> Result<(), BoxE
         .find(|factory| factory.name == "apollo.rhai")
         .expect("Plugin not found")
         .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"cache_tags.rhai"}"#)
-                .unwrap(),
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"cache_tags.rhai"}"#).unwrap(),
         )
         .await
         .unwrap();
