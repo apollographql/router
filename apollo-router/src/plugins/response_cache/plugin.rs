@@ -41,8 +41,8 @@ use tracing::Level;
 use tracing::Span;
 
 use super::cache_control::CacheControl;
-use super::invalidation::Invalidation;
 use super::cache_tag::CacheTag;
+use super::invalidation::Invalidation;
 use super::invalidation_endpoint::IndexMode;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationIndexes;
@@ -1032,8 +1032,8 @@ impl CacheService {
                 // CacheTag index being active for this subgraph; when disabled, the extension
                 // values are ignored on the cache write path.
                 if self.indexes.is_enabled(IndexMode::CacheTag)
-                    && let Some(Value::Array(extension_tags)) =
-                        response.get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                    && let Some(Value::Array(extension_tags)) = response
+                        .get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
                     cache_tags.extend(
                         extension_tags
@@ -1073,7 +1073,10 @@ impl CacheService {
                     let cache_key_context = CacheKeyContext {
                         key: root_cache_key.clone(),
                         hashed_private_id: private_id.clone(),
-                        invalidation_keys: cache_tags.iter().filter_map(|t| t.user_value().map(String::from)).collect(),
+                        invalidation_keys: cache_tags
+                            .iter()
+                            .filter_map(|t| t.user_value().map(String::from))
+                            .collect(),
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },

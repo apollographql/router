@@ -92,10 +92,9 @@ impl InvalidationIndexes {
             IndexMode::CacheTag => self.cache_tag,
         }
     }
-
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct SubgraphInvalidationConfig {
     /// Enable the invalidation
@@ -112,16 +111,6 @@ pub(crate) struct SubgraphInvalidationConfig {
     /// useful for pure TTL-based caching without an invalidation API.
     #[serde(default)]
     pub(crate) indexes: InvalidationIndexes,
-}
-
-impl Default for SubgraphInvalidationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            shared_key: String::default(),
-            indexes: InvalidationIndexes::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -506,7 +495,6 @@ mod indexes_tests {
         assert!(indexes.is_enabled(IndexMode::CacheTag));
     }
 
-
     #[test]
     fn subgraph_invalidation_config_default_has_all_three_indexes_enabled() {
         let cfg = SubgraphInvalidationConfig::default();
@@ -678,7 +666,10 @@ indexes:
         // `users` is disabled (subgraph index off); `orders` is fully enabled.
         let cfg = subgraph_config(
             Some(InvalidationIndexes::default()),
-            Some(("users", indexes_with(&[IndexMode::Subgraph, IndexMode::Type]))),
+            Some((
+                "users",
+                indexes_with(&[IndexMode::Subgraph, IndexMode::Type]),
+            )),
         );
         let mut subgraphs = std::collections::HashSet::new();
         subgraphs.insert("users".to_string());
