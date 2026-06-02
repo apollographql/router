@@ -471,6 +471,28 @@ mod test {
         assert!(events.contains(&SimpleEvent::HaltLicense));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_far_future_halt_only_clamped() {
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        // warn_at stays under the cap; only halt_at is clamped. This is the more likely
+        // real-world shape and must preserve warn-before-halt ordering.
+        let license = license_with_claim(15_000, three_years_ms);
+
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn license_expander() {
         let events_stream = futures::stream::iter(vec![license_with_claim(15, 30)])
