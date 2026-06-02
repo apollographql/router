@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use http::HeaderMap;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::Context;
 use crate::configuration::header_masking_config::HeaderMaskingConfig;
 
 /// Per-selector masking override. `Allow` shows the raw header value; `Mask`
@@ -21,7 +23,7 @@ pub(crate) enum RedactMode {
     Mask,
 }
 
-const MASKED_VALUE: &str = "***MASKED***";
+pub(crate) const MASKED_VALUE: &str = "***MASKED***";
 
 /// Compiled header masking rules for efficient lookup
 #[derive(Clone, Debug, Default)]
@@ -64,43 +66,6 @@ impl HeaderMaskingRules {
             self.sensitive_headers
                 .contains(&header_name.to_ascii_lowercase())
         }
-    }
-
-    /// Mask a HeaderMap and convert to HashMap for coprocessor
-    #[allow(dead_code)]
-    pub(crate) fn mask_header_map(
-        &self,
-        input: &HeaderMap<HeaderValue>,
-    ) -> HashMap<String, Vec<String>> {
-        let mut output = HashMap::with_capacity(input.keys_len());
-
-        for (k, v) in input {
-            let k_str = k.as_str();
-            let should_mask = self.should_mask(k_str);
-
-            match String::from_utf8(v.as_bytes().to_vec()) {
-                Ok(v) => {
-                    let value = if should_mask {
-                        MASKED_VALUE.to_string()
-                    } else {
-                        v
-                    };
-                    output
-                        .entry(k_str.to_owned())
-                        .or_insert_with(Vec::new)
-                        .push(value);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "unable to convert header value to utf-8 for {}, will not be sent to coprocessor: {}",
-                        k_str,
-                        e
-                    );
-                }
-            }
-        }
-
-        output
     }
 
     /// Mask already-externalized headers (the `HashMap<String, Vec<String>>`
@@ -211,6 +176,95 @@ impl MaskingRulesMap {
     pub(crate) fn get_response(&self, subgraph_name: Option<&str>) -> &Arc<HeaderMaskingRules> {
         self.response.get(subgraph_name)
     }
+
+    fn rules_for(&self, direction: Direction, subgraph: Option<&str>) -> &Arc<HeaderMaskingRules> {
+        match direction {
+            Direction::Request => self.get_request(subgraph),
+            Direction::Response => self.get_response(subgraph),
+        }
+    }
+}
+
+/// Request vs response masking direction. Selects which rule set a caller
+/// consults via [`MaskingRulesMap::get_request`] / [`MaskingRulesMap::get_response`].
+#[derive(Clone, Copy)]
+pub(crate) enum Direction {
+    Request,
+    Response,
+}
+
+/// The built-in fail-secure masking rules (the default sensitive-header list).
+///
+/// Used when no per-request [`MaskingRulesMap`] is installed in context, so a
+/// code path that bypasses the headers plugin still masks known secrets
+/// (authorization, cookie, set-cookie, ...) rather than logging them in the
+/// clear. The headers plugin is mandatory, so in the normal pipeline a map is
+/// always present and this fallback only guards stray/synthesized requests.
+fn default_masking_rules() -> &'static HeaderMaskingRules {
+    static DEFAULT: OnceLock<HeaderMaskingRules> = OnceLock::new();
+    DEFAULT.get_or_init(|| HeaderMaskingRules::from_config(&HeaderMaskingConfig::default()))
+}
+
+/// Whether `header_name` should be masked per the masking rules installed in
+/// `context` for the given direction/subgraph. Falls back to the built-in
+/// [`default_masking_rules`] (fail-secure) when no rules are present.
+fn should_mask_header(
+    context: &Context,
+    direction: Direction,
+    subgraph: Option<&str>,
+    header_name: &str,
+) -> bool {
+    context.extensions().with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
+        Some(m) => m.rules_for(direction, subgraph).should_mask(header_name),
+        None => default_masking_rules().should_mask(header_name),
+    })
+}
+
+/// Resolve the value a telemetry header selector should emit, applying — in
+/// priority order — the per-selector `redact` override and then the
+/// global/per-subgraph masking rules from `context`. `value` is the raw header
+/// value (`None` if the header is absent).
+///
+/// Defined once so every selector surface (router, supergraph, subgraph,
+/// connector, http-client) shares identical redaction precedence rather than
+/// re-implementing it per call site.
+pub(crate) fn redact_header_value(
+    context: &Context,
+    direction: Direction,
+    subgraph: Option<&str>,
+    header_name: &str,
+    value: Option<String>,
+    redact: Option<&RedactMode>,
+) -> Option<String> {
+    match (redact, &value) {
+        // An explicit per-selector override always wins.
+        (Some(RedactMode::Allow), _) => value,
+        (Some(RedactMode::Mask), Some(_)) => Some(MASKED_VALUE.to_string()),
+        // Otherwise defer to the configured masking rules.
+        (None, Some(_)) if should_mask_header(context, direction, subgraph, header_name) => {
+            Some(MASKED_VALUE.to_string())
+        }
+        // Nothing to mask: absent value, or the rules say "show".
+        _ => value,
+    }
+}
+
+/// Render `headers` for debug logging, masking sensitive values per the rules
+/// in `context` for the given direction/subgraph. Falls back to the built-in
+/// [`default_masking_rules`] (fail-secure) when no masking rules are installed,
+/// so a stray request can't log secrets in the clear.
+///
+/// Defined once so a new header-logging site can't forget to consult the rules.
+pub(crate) fn masked_headers_for_log(
+    context: &Context,
+    direction: Direction,
+    subgraph: Option<&str>,
+    headers: &HeaderMap<HeaderValue>,
+) -> String {
+    context.extensions().with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
+        Some(m) => m.rules_for(direction, subgraph).mask_headers_debug(headers),
+        None => default_masking_rules().mask_headers_debug(headers),
+    })
 }
 
 #[cfg(test)]
@@ -252,64 +306,6 @@ mod tests {
         assert!(!rules.should_mask("content-type"));
         assert!(!rules.should_mask("accept"));
         assert!(!rules.should_mask("x-custom-header"));
-    }
-
-    #[test]
-    fn test_mask_header_map() {
-        let rules = create_test_rules();
-        let mut headers = HeaderMap::new();
-
-        headers.insert(
-            HeaderName::from_static("authorization"),
-            HeaderValue::from_static("Bearer secret-token"), // gitleaks:allow
-        );
-        headers.insert(
-            HeaderName::from_static("content-type"),
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(
-            HeaderName::from_static("cookie"),
-            HeaderValue::from_static("session=abc123"),
-        );
-
-        let result = rules.mask_header_map(&headers);
-
-        // Sensitive headers should be masked
-        assert_eq!(
-            result.get("authorization"),
-            Some(&vec![MASKED_VALUE.to_string()])
-        );
-        assert_eq!(result.get("cookie"), Some(&vec![MASKED_VALUE.to_string()]));
-
-        // Non-sensitive headers should not be masked
-        assert_eq!(
-            result.get("content-type"),
-            Some(&vec!["application/json".to_string()])
-        );
-    }
-
-    #[test]
-    fn test_mask_header_map_multiple_values() {
-        let rules = create_test_rules();
-        let mut headers = HeaderMap::new();
-
-        // HTTP allows multiple values for the same header
-        headers.append(
-            HeaderName::from_static("cookie"),
-            HeaderValue::from_static("session=abc123"),
-        );
-        headers.append(
-            HeaderName::from_static("cookie"),
-            HeaderValue::from_static("user=john"),
-        );
-
-        let result = rules.mask_header_map(&headers);
-
-        // All values should be masked
-        assert_eq!(
-            result.get("cookie"),
-            Some(&vec![MASKED_VALUE.to_string(), MASKED_VALUE.to_string()])
-        );
     }
 
     #[test]
@@ -431,24 +427,5 @@ mod tests {
         );
         // Unknown subgraph falls back to global response rules.
         assert!(map.get_response(Some("nobody")).should_mask("set-cookie"));
-    }
-
-    #[test]
-    fn test_mask_header_map_case_insensitive_in_headermap() {
-        let rules = create_test_rules();
-        let mut headers = HeaderMap::new();
-
-        // HeaderMap normalizes to lowercase, but test with mixed case in value
-        headers.insert(
-            HeaderName::from_static("authorization"),
-            HeaderValue::from_static("Bearer SECRET"), // gitleaks:allow
-        );
-
-        // Even though the header name is lowercase in HeaderMap, our rule should match
-        let result = rules.mask_header_map(&headers);
-        assert_eq!(
-            result.get("authorization"),
-            Some(&vec![MASKED_VALUE.to_string()])
-        );
     }
 }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use derivative::Derivative;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -70,27 +68,16 @@ impl Selector for HttpClientSelector {
                     .get(request_header)
                     .and_then(|h| h.to_str().ok())
                     .map(|h| h.to_string());
-                let value = match (redact.as_ref(), &header_value) {
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    (None, Some(_)) => {
-                        // HTTP-client layer has no subgraph identity on the
-                        // request, so fall back to the global request rules.
-                        let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_request(None).should_mask(request_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    _ => header_value,
-                };
+                // HTTP-client layer has no subgraph identity, so use the global
+                // request rules.
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
                 value
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
@@ -117,25 +104,16 @@ impl Selector for HttpClientSelector {
                     .get(response_header)
                     .and_then(|h| h.to_str().ok())
                     .map(|h| h.to_string());
-                let value = match (redact.as_ref(), &header_value) {
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    (None, Some(_)) => {
-                        let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_response(None).should_mask(response_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    _ => header_value,
-                };
+                // HTTP-client layer has no subgraph identity, so use the global
+                // response rules.
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
                 value
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
@@ -164,6 +142,8 @@ impl Selector for HttpClientSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::*;
     use crate::Context;
 

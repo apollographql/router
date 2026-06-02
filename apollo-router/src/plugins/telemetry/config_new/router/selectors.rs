@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use derivative::Derivative;
 use http_body::Body;
 use schemars::JsonSchema;
@@ -260,30 +258,14 @@ impl Selector for RouterSelector {
                     .get(request_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_request(None).should_mask(request_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .map(|v| v.into())
@@ -436,25 +418,14 @@ impl Selector for RouterSelector {
                     .get(response_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                let value = match (redact.as_ref(), &header_value) {
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    (None, Some(_)) => {
-                        let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_response(None).should_mask(response_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .map(|v| v.into())
@@ -1012,7 +983,7 @@ mod test {
     }
 
     #[test]
-    fn router_request_header_no_masking_without_rules() {
+    fn router_request_header_masked_by_defaults_without_rules() {
         let selector = RouterSelector::RequestHeader {
             request_header: "authorization".to_string(),
             redact: None,
@@ -1022,11 +993,12 @@ mod test {
             .header("authorization", "Bearer secret") // gitleaks:allow
             .build()
             .unwrap();
-        // No rules in context → header passes through unmasked
+        // Fail-secure: no rules in context → the built-in defaults still mask
+        // `authorization`.
         assert_eq!(
             selector.on_request(&request).unwrap(),
-            "Bearer secret".into()
-        ); // gitleaks:allow
+            "***MASKED***".into()
+        );
     }
 
     #[test]

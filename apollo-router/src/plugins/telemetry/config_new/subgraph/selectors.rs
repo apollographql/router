@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
@@ -427,33 +425,14 @@ impl Selector for SubgraphSelector {
                     .get(subgraph_request_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| {
-                                    m.get_request(Some(request.subgraph_name.as_str()))
-                                        .should_mask(subgraph_request_header)
-                                })
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    Some(request.subgraph_name.as_str()),
+                    subgraph_request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .or_else(|| default.clone())
@@ -470,33 +449,18 @@ impl Selector for SubgraphSelector {
                     .get(supergraph_request_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| {
-                                    m.get_request(Some(request.subgraph_name.as_str()))
-                                        .should_mask(supergraph_request_header)
-                                })
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                // Masking scope is the *supergraph* (client-facing) request, so
+                // consult the global request rules — not this subgraph's rules,
+                // which a `masking.enabled: false` subgraph would empty out and
+                // thereby unmask the client header.
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    supergraph_request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .or_else(|| default.clone())
@@ -570,33 +534,14 @@ impl Selector for SubgraphSelector {
                     .get(subgraph_response_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| {
-                                    m.get_response(Some(response.subgraph_name.as_str()))
-                                        .should_mask(subgraph_response_header)
-                                })
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    Some(response.subgraph_name.as_str()),
+                    subgraph_response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .or_else(|| default.clone())

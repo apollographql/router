@@ -232,14 +232,12 @@ async fn call_websocket(
 
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
-        let headers_str = context.extensions().with_lock(|lock| {
-            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                .map(|m| {
-                    m.get_request(Some(service_name))
-                        .mask_headers_debug(request.headers())
-                })
-                .unwrap_or_else(|| format!("{:?}", request.headers()))
-        });
+        let headers_str = crate::services::header_masking::masked_headers_for_log(
+            &context,
+            crate::services::header_masking::Direction::Request,
+            Some(service_name),
+            request.headers(),
+        );
         attrs.push(KeyValue::new(
             Key::from_static_str("http.request.headers"),
             opentelemetry::Value::String(headers_str.into()),

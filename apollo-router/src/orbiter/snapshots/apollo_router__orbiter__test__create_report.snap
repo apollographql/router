@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/orbiter/mod.rs
-assertion_line: 382
 expression: report
 ---
 session_id: "[session_id]"

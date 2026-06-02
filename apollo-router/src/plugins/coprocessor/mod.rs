@@ -67,21 +67,16 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-/// Produce a copy of `payload` with sensitive headers masked, for use in debug
-/// logs. Without this scrub, the `tracing::debug!(?payload, ...)` lines in each
-/// coprocessor stage would print the full Debug of `Externalizable`, including
-/// the raw `headers` field — defeating the masking the surrounding "(masked)"
-/// log just performed.
-pub(super) fn scrub_payload_for_log<T, F>(
+/// Clone `payload` and mask its sensitive headers via `rule_for_direction`.
+/// Shared by the lazy debug wrappers below.
+fn mask_payload_clone<T, F>(
     payload: &Externalizable<T>,
     masking_rules: Option<&MaskingRulesMap>,
-    rule_for_direction: F,
+    rule_for_direction: &F,
 ) -> Externalizable<T>
 where
     T: Clone,
-    F: FnOnce(
-        &MaskingRulesMap,
-    ) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
 {
     let mut clone = payload.clone();
     if let (Some(rules), Some(headers)) = (masking_rules, clone.headers.as_mut()) {
@@ -90,25 +85,90 @@ where
     clone
 }
 
-/// Scrub the `Ok` arm of a coprocessor reply for logging. The symmetric
-/// `tracing::debug!(?co_processor_result, "co-processor returned")` line at
-/// each stage would otherwise print the raw `headers` field of the returned
-/// `Externalizable`, leaking values that the outbound `scrub_payload_for_log`
-/// just masked.
+/// Lazily produce a Debug view of `payload` with sensitive headers masked, for
+/// use in debug logs. The clone + mask happens only when the value is actually
+/// formatted — i.e. when the `tracing::debug!` level is enabled — so a disabled
+/// `debug!` pays nothing (previously the masked clone was built on every
+/// request regardless of log level).
+///
+/// Without this scrub, the `tracing::debug!(?payload, ...)` lines in each
+/// coprocessor stage would print the full Debug of `Externalizable`, including
+/// the raw `headers` field — defeating the surrounding "(masked)" log.
+pub(super) fn scrub_payload_for_log<'a, T, F>(
+    payload: &'a Externalizable<T>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+) -> ScrubbedForLog<'a, T, F>
+where
+    T: Clone + std::fmt::Debug + 'a,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>
+        + 'a,
+{
+    ScrubbedForLog {
+        payload,
+        masking_rules,
+        rule_for_direction,
+    }
+}
+
+/// Lazily produce a Debug view of the `Ok` arm of a coprocessor reply with
+/// sensitive headers masked (the symmetric `tracing::debug!(?co_processor_result,
+/// ...)` line). Masks only when formatted, like [`scrub_payload_for_log`].
 pub(super) fn scrub_result_for_log<'a, T, F>(
     result: &'a Result<Externalizable<T>, BoxError>,
-    masking_rules: Option<&MaskingRulesMap>,
+    masking_rules: Option<&'a MaskingRulesMap>,
     rule_for_direction: F,
-) -> Result<Externalizable<T>, &'a BoxError>
+) -> ScrubbedResultForLog<'a, T, F>
 where
-    T: Clone,
-    F: FnOnce(
-        &MaskingRulesMap,
-    ) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+    T: Clone + std::fmt::Debug + 'a,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>
+        + 'a,
 {
-    result
-        .as_ref()
-        .map(|p| scrub_payload_for_log(p, masking_rules, rule_for_direction))
+    ScrubbedResultForLog {
+        result,
+        masking_rules,
+        rule_for_direction,
+    }
+}
+
+pub(super) struct ScrubbedForLog<'a, T, F> {
+    payload: &'a Externalizable<T>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+}
+
+impl<T, F> std::fmt::Debug for ScrubbedForLog<'_, T, F>
+where
+    T: Clone + std::fmt::Debug,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let masked = mask_payload_clone(self.payload, self.masking_rules, &self.rule_for_direction);
+        std::fmt::Debug::fmt(&masked, f)
+    }
+}
+
+pub(super) struct ScrubbedResultForLog<'a, T, F> {
+    result: &'a Result<Externalizable<T>, BoxError>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+}
+
+impl<T, F> std::fmt::Debug for ScrubbedResultForLog<'_, T, F>
+where
+    T: Clone + std::fmt::Debug,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.result {
+            Ok(payload) => {
+                let masked =
+                    mask_payload_clone(payload, self.masking_rules, &self.rule_for_direction);
+                f.debug_tuple("Ok").field(&masked).finish()
+            }
+            Err(e) => f.debug_tuple("Err").field(e).finish(),
+        }
+    }
 }
 
 // Type alias for coprocessor HTTP client - uses HttpClientService with timeout

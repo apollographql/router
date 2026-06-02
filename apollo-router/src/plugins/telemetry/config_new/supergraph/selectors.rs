@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use derivative::Derivative;
 use opentelemetry::Value;
 use schemars::JsonSchema;
@@ -270,30 +268,14 @@ impl Selector for SupergraphSelector {
                     .get(request_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = request.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_request(None).should_mask(request_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .or_else(|| default.clone())
@@ -385,30 +367,14 @@ impl Selector for SupergraphSelector {
                     .get(response_header)
                     .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                // Apply redaction logic
-                let value = match (redact.as_ref(), &header_value) {
-                    // If redact is "allow", return the actual value
-                    (Some(crate::services::header_masking::RedactMode::Allow), _) => header_value,
-                    // If redact has any other value, mask it
-                    (Some(crate::services::header_masking::RedactMode::Mask), Some(_)) => {
-                        Some("***MASKED***".to_string())
-                    }
-                    // If redact is None, check global rules
-                    (None, Some(_)) => {
-                        let should_mask = response.context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_response(None).should_mask(response_header))
-                                .unwrap_or(false)
-                        });
-                        if should_mask {
-                            Some("***MASKED***".to_string())
-                        } else {
-                            header_value
-                        }
-                    }
-                    // No value to mask
-                    _ => header_value,
-                };
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
 
                 value
                     .or_else(|| default.clone())
@@ -1612,12 +1578,13 @@ mod test {
             .build()
             .unwrap();
 
-        // Header should NOT be masked (no rules configured)
+        // Fail-secure: with no rules in context, the built-in sensitive-header
+        // defaults still mask `authorization`.
         let result = selector.on_request(&request).unwrap();
         assert_eq!(
             result.as_str(),
-            "Bearer token",
-            "Headers should not be masked when no rules are configured"
+            "***MASKED***",
+            "Built-in defaults should mask authorization even without configured rules"
         );
     }
 

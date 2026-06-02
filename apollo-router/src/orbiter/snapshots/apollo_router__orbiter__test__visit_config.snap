@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/orbiter/mod.rs
-assertion_line: 359
 expression: usage
 ---
 configuration.headers.all.len: 1
