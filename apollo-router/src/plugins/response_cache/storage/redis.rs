@@ -797,7 +797,7 @@ mod tests {
             let mut expected_cache_tag_keys = Vec::new();
             for document in &documents {
                 expected_document_keys.push(document.key.clone());
-                expected_cache_tag_keys.push(render_doc_keys(&document, SUBGRAPH_NAME));
+                expected_cache_tag_keys.push(render_doc_keys(document, SUBGRAPH_NAME));
             }
 
             let all_expected_cache_tag_keys: Vec<String> = expected_cache_tag_keys

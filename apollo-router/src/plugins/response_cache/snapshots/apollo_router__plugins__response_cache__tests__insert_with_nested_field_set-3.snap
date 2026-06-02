@@ -9,6 +9,11 @@ expression: cache_keys
     "invalidationKeys": [
       "allProducts"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "allProducts"
@@ -48,6 +53,11 @@ expression: cache_keys
     "invalidationKeys": [
       "user-email:test@test.com-country-a:France"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "typename": "User",
       "entityKey": {

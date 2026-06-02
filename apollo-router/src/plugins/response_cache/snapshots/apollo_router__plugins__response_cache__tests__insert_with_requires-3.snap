@@ -10,6 +10,11 @@ expression: cache_keys
       "product",
       "product-1"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "typename": "Product",
       "entityKey": {
@@ -43,6 +48,11 @@ expression: cache_keys
       "topProducts",
       "topProducts-5"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "topProducts"

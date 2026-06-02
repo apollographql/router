@@ -6,6 +6,11 @@ expression: cache_keys
   {
     "key": "version:1.2:subgraph:orga:type:Query:hash:ecb60e7b7532188345c92d38694462036d11b95b414d0e70830e1d4d091b1caa:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "invalidationKeys": [],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "orga"
@@ -48,6 +53,11 @@ expression: cache_keys
     "invalidationKeys": [
       "currentUser"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "currentUser"
@@ -83,6 +93,11 @@ expression: cache_keys
       "organization",
       "organization-1"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "typename": "Organization",
       "entityKey": {
