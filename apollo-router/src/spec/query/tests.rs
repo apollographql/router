@@ -6044,6 +6044,74 @@ fn skip_and_include() {
             },
         }})
         .test();
+
+    // same fragment name with complementary @skip/@include on each spread;
+    // a skipped spread must not prevent the active spread from executing
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": true
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": false
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
 }
 
 #[test]
