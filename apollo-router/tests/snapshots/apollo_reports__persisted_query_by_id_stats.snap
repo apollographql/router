@@ -50,6 +50,13 @@ traces_per_query:
                 estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
+              upc:
+                return_type: String!
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
           Query:
             per_field_stat:
               topProducts:
