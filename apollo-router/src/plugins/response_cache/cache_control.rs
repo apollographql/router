@@ -281,6 +281,30 @@ impl TryFrom<&HeaderMap> for CacheControl {
 }
 
 impl CacheControl {
+    // --- Construction ---
+
+    pub(crate) fn default_no_store() -> Self {
+        Self {
+            no_store: true,
+            ..Self::default()
+        }
+    }
+
+    /// Sets `max_age` to the given TTL if `max_age` is not already present in the header.
+    /// Has no effect if `no_store` is set.
+    pub(crate) fn with_default_ttl(mut self, ttl: Option<Duration>) -> Self {
+        if self.no_store {
+            return self;
+        }
+
+        let ttl: Option<u64> = ttl.as_ref().map(Duration::as_secs);
+        self.max_age = self.max_age.or(ttl);
+
+        self
+    }
+
+    // --- Serialization ---
+
     /// Formats this cache control as a `Cache-Control` response header value.
     ///
     /// `max-age` and `s-maxage` are decremented by elapsed time since this struct was created,
@@ -343,33 +367,6 @@ impl CacheControl {
 
         parts.join(",")
     }
-}
-
-impl CacheControl {
-    pub(crate) fn default_no_store() -> Self {
-        Self {
-            no_store: true,
-            ..Self::default()
-        }
-    }
-
-    /// Sets `max_age` to the given TTL if `max_age` is not already present in the header.
-    /// Has no effect if `no_store` is set.
-    pub(crate) fn with_default_ttl(mut self, ttl: Option<Duration>) -> Self {
-        if self.no_store {
-            return self;
-        }
-
-        let ttl: Option<u64> = ttl.as_ref().map(Duration::as_secs);
-        self.max_age = self.max_age.or(ttl);
-
-        self
-    }
-
-    /// Returns the number of seconds elapsed since this struct was created.
-    fn elapsed(&self) -> u64 {
-        now_epoch_seconds().saturating_sub(self.created)
-    }
 
     /// Writes the `Cache-Control` (and `Age` if applicable) headers into the given header map.
     pub(crate) fn update_response_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
@@ -386,6 +383,8 @@ impl CacheControl {
 
         Ok(())
     }
+
+    // --- Merging ---
 
     /// Propagates `no_store` from `other` into `self`, leaving all other fields unchanged.
     /// Used to apply a request's `no-store` directive to the accumulated response cache control.
@@ -456,9 +455,9 @@ impl CacheControl {
             only_if_cached: self.only_if_cached || other.only_if_cached,
         }
     }
-}
 
-impl CacheControl {
+    // --- Accessors ---
+
     /// Returns `true` if the `no-cache` directive is set.
     pub(crate) fn no_cache(&self) -> bool {
         self.no_cache
@@ -547,9 +546,14 @@ impl CacheControl {
     pub(crate) fn remaining_ttl(&self) -> Option<u64> {
         self.remaining_duration(self.max_age(), Some(now_epoch_seconds()))
     }
-}
 
-impl CacheControl {
+    // --- Private helpers ---
+
+    /// Returns the number of seconds elapsed since this struct was created.
+    fn elapsed(&self) -> u64 {
+        now_epoch_seconds().saturating_sub(self.created)
+    }
+
     /// Computes a remaining duration in seconds, subtracting `age` and optionally elapsed time.
     ///
     /// If `now` is `Some`, elapsed time since `created` is also subtracted. If `None`, only
@@ -613,7 +617,9 @@ fn now_epoch_seconds() -> u64 {
 }
 
 /// Parses a single Cache-Control directive of the form `key` or `key=value`.
-/// Returns an error if the directive contains more than one `=` sign.
+/// Parses a single Cache-Control directive of the form `key` or `key=value`.
+/// Values may themselves contain `=` (e.g. base64 or extension directives); everything
+/// after the first `=` is treated as the value.
 fn parse_directive(directive: &str) -> Result<(&str, Option<&str>), BoxError> {
     let mut parts = directive.trim().splitn(2, '=');
     let key = parts

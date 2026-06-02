@@ -345,12 +345,19 @@ async fn cache_control_merging_multi_fetch() {
 }
 
 fn parse_max_age(cache_control: &str) -> u32 {
-    cache_control
-        .split(',')
-        .find(|d| d.starts_with("max-age="))
-        .and_then(|d| d.strip_prefix("max-age="))
+    let directives: Vec<&str> = cache_control.split(',').collect();
+    // Prefer s-maxage (authoritative for shared caches) over max-age
+    let directive = directives
+        .iter()
+        .find(|d| d.trim().starts_with("s-maxage="))
+        .or_else(|| directives.iter().find(|d| d.trim().starts_with("max-age=")))
+        .unwrap_or_else(|| panic!("expected max-age or s-maxage directive, got '{cache_control}'"));
+    directive
+        .trim()
+        .split('=')
+        .nth(1)
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("expected a max-age directive, got '{cache_control}'"))
+        .unwrap_or_else(|| panic!("expected numeric value, got '{cache_control}'"))
 }
 
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
