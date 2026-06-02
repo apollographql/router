@@ -538,8 +538,7 @@ impl CacheControl {
     /// Returns the remaining TTL in seconds as of now, computed as `max_age - age - elapsed`
     /// where `elapsed` is the time since this struct was created.
     pub(crate) fn remaining_ttl(&self) -> Option<u64> {
-        let max_age = self.s_max_age.or(self.max_age);
-        self.remaining_duration(max_age, Some(now_epoch_seconds()))
+        self.remaining_duration(self.max_age(), Some(now_epoch_seconds()))
     }
 }
 
