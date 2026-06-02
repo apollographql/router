@@ -112,23 +112,20 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
-    let mut cache_control_headers = response
+    let cache_control_headers = response
         .response
         .headers()
         .get_all(CACHE_CONTROL)
         .iter()
-        .peekable();
+        .flat_map(|header| header.to_str().unwrap().split(','))
+        .map(ToString::to_string)
+        .collect();
 
-    if cache_control_headers.peek().is_none() {
+    if cache_control_headers.is_empty() {
         return None;
     }
 
-    Some(
-        cache_control_headers
-            .flat_map(|header| header.to_str().unwrap().split(','))
-            .map(ToString::to_string)
-            .collect(),
-    )
+    Some(cache_control_headers)
 }
 
 fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {

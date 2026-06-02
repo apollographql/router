@@ -504,6 +504,10 @@ impl CacheControl {
     /// Used after parsing to detect headers that contain only unrecognized extension directives
     /// (e.g. `cdn-cache-control=300`), which should be treated as `no-store` since there are no
     /// freshness or cacheability instructions the router can act on.
+    ///
+    /// `immutable`, `no-transform`, and `must-understand` are intentionally excluded: without an
+    /// accompanying `max-age` or `s-maxage`, `immutable` provides no TTL and would cause the
+    /// response to be cached indefinitely. The other two have no effect on caching decisions.
     fn has_caching_directives(&self) -> bool {
         self.max_age.is_some()
             || self.s_max_age.is_some()
@@ -1092,6 +1096,16 @@ mod tests {
     #[test]
     fn should_store_false_when_no_store() {
         assert!(!CacheControl::default_no_store().should_store());
+    }
+
+    #[test]
+    fn should_store_false_when_immutable_only() {
+        // immutable without max-age provides no TTL; treating it as cacheable would store the
+        // entry indefinitely. has_caching_directives() intentionally excludes immutable for this
+        // reason, so immutable-only headers fall through to no_store=true.
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "immutable")])).unwrap();
+        assert!(cc.no_store);
+        assert!(!cc.should_store());
     }
 
     #[test]
