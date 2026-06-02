@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.14.2"
+version = "2.15.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,7 +59,7 @@ snapshot = []
 addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.14.2" }
+apollo-federation = { path = "../apollo-federation", version = "=2.15.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -205,7 +205,7 @@ prost = "0.14.0"
 prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
-rhai = { version = "1.23.6", features = ["sync", "serde", "internals"] }
+rhai = { version = "~1.23.6", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls",

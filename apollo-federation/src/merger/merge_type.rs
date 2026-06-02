@@ -51,7 +51,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Union(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -62,7 +62,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Enum(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -73,7 +73,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -176,7 +176,8 @@ impl Merger {
 
                 for key in keys {
                     let extension = key.origin.extension_id().is_some()
-                        || source.has_applied_directive(subgraph.schema(), &extends_directive_name);
+                        || source.has_applied_directive(subgraph.schema(), &extends_directive_name)
+                        || subgraph.is_orphan_extension_type(source.type_name());
                     let key_fields =
                         key.specified_argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME);
                     let key_resolvable =
