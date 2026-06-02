@@ -284,31 +284,29 @@ fn reset_checks_for_licenses(
     ))))
 }
 
-/// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
-/// The generated instant is only approximate.
-/// Subtracting from instants is not supported on all platforms, so if the calculated instant was in the past we just return now as we don't care about how long ago the instant was, just that it happened already.
+/// Converts an externally generated `SystemTime` (e.g. JWT `warn_at` / `halt_at`) into a
+/// `tokio::time::Instant` for scheduling license state transitions in a `DelayQueue`.
 ///
-/// Returns a `tokio::time::Instant` (rather than `std::time::Instant`) so that scheduling
-/// respects `tokio::time::pause()` / `tokio::time::advance()` in tests. The downstream
-/// `DelayQueue` reads `tokio::time::Instant::now()` to decide when entries fire; using a
-/// `tokio::time::Instant` here keeps the "now" reference consistent with the queue's clock,
-/// which is required for deterministic virtual-time tests.
+/// The result is approximate: there is no exact conversion between `SystemTime` and
+/// `Instant`. If `system_time` is in the past, returns `Instant::now()` — we only need to
+/// know the event already happened, not how far in the past. (Subtracting from instants is
+/// not supported on all platforms, which motivates treating past times as "now".)
+///
+/// Uses `tokio::time::Instant` (not `std::time::Instant`) so scheduling respects
+/// `tokio::time::pause()` / `tokio::time::advance()` in tests and stays consistent with the
+/// queue's clock.
+///
+/// Future times are clamped to [`MAX_TIMER_DURATION`] so `DelayQueue::insert_at` cannot
+/// overflow Tokio's timer wheel. Uplink license refreshes occur far more frequently than
+/// this cap, so the clamped deadline is replaced before it fires in practice. When both
+/// `warn_at` and `halt_at` exceed the cap they schedule at the same instant and the usual
+/// soft-then-hard grace ordering is not preserved.
 fn to_positive_instant(system_time: SystemTime) -> Instant {
-    // This is approximate as there is no real conversion between SystemTime and Instant.
-    // We use `tokio::time::Instant::now()` so the returned instant is anchored to the same
-    // clock as `DelayQueue`'s scheduler (this clock is virtualized under `tokio::time::pause()`).
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
-    // system_time is likely to be a time in the future, but may be in the past.
     match system_time.duration_since(now_system_time) {
-        // system_time was in the future — clamp to MAX_TIMER_DURATION so that
-        // `DelayQueue::insert_at` cannot overflow tokio's timer wheel.
-        // License refreshes from Uplink happen far more frequently than this
-        // cap, so in practice the clamped timer is always replaced before it fires.
         Ok(duration) => now_instant + duration.min(MAX_TIMER_DURATION),
-
-        // system_time was in the past.
         Err(_) => now_instant,
     }
 }
