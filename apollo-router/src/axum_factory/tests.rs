@@ -2311,6 +2311,100 @@ async fn test_defer_is_not_buffered() {
     assert_eq!(counts, [1, 2]);
 }
 
+/// Verifies that compression does not buffer `@defer` parts by gating the deferred subgraph
+/// ("accounts", which is only called for the deferred `author` field) until after the first part is
+/// read. If compression buffered across chunks, `count_after_first` would be 2.
+#[tokio::test]
+async fn test_defer_is_not_buffered_with_compression() {
+    // The "accounts" subgraph is only called for the deferred `author` field. Block it until
+    // we've confirmed the first part arrived with count=1.
+    let (unblock_tx, unblock_rx) = tokio::sync::oneshot::channel::<()>();
+    let users_gate = Arc::new(std::sync::Mutex::new(Some(unblock_rx)));
+
+    let counter = GraphQLResponseCounter::default();
+    let counter_for_hook = counter.clone();
+    let gate_for_hook = Arc::clone(&users_gate);
+
+    let service = TestHarness::builder()
+        .configuration_json(json!({"include_subgraph_errors": {"all": true}}))
+        .unwrap()
+        .supergraph_hook(move |service| {
+            let counter = counter_for_hook.clone();
+            service
+                .map_response(move |mut response| {
+                    response.response.extensions_mut().insert(counter.clone());
+                    response.map_stream(move |graphql_response| {
+                        counter.increment();
+                        graphql_response
+                    })
+                })
+                .boxed()
+        })
+        .subgraph_hook(move |name, service| {
+            if name != "accounts" {
+                return service;
+            }
+            let gate = Arc::clone(&gate_for_hook);
+            service
+                .map_future(move |future| {
+                    let gate = Arc::clone(&gate);
+                    async move {
+                        let rx = gate.lock().unwrap().take();
+                        if let Some(rx) = rx {
+                            let _ = rx.await;
+                        }
+                        future.await
+                    }
+                })
+                .boxed()
+        })
+        .build_http_service()
+        .await
+        .unwrap()
+        .map_err(Into::into);
+
+    let service = http_client::response_decompression(service);
+    let service = http_client::defer_spec_20220824_multipart(service);
+    let service = http_client::json(service);
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .header("host", "127.0.0.1")
+        .body(json!({
+            "query": "query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } ... @defer { author { id name } } } } }",
+            "variables": {"first": 2_u32},
+        }))
+        .unwrap();
+
+    let mut response = service.oneshot(request).await.unwrap();
+    assert_compressed(&response, true);
+    assert_eq!(response.status().as_u16(), 200);
+
+    let counter: GraphQLResponseCounter = response.extensions_mut().remove().unwrap();
+    let mut parts = response.into_body().expect_multipart();
+
+    let first_part: serde_json::Value = parts.next().await.expect("first part");
+    let count_after_first = counter.get();
+
+    // Release the deferred subgraph now that the first part is in hand.
+    let _ = unblock_tx.send(());
+
+    let second_part: serde_json::Value = parts.next().await.expect("second part");
+    let count_after_second = counter.get();
+
+    let all_parts = serde_json::Value::Array(vec![first_part, second_part]);
+    insta::assert_json_snapshot!(all_parts);
+
+    assert_eq!(
+        count_after_first, 1,
+        "first part arrived before deferred fragment was generated"
+    );
+    assert_eq!(
+        count_after_second, 2,
+        "second part arrived after deferred fragment was generated"
+    );
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn listening_to_unix_socket() {

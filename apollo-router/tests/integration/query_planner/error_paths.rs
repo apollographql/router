@@ -196,8 +196,42 @@ async fn send_query_to_router(
 
     let (_, response) = router.execute_query(query).await;
     assert_eq!(response.status(), 200);
-    let parsed_response = serde_json::from_str(&response.text().await?)?;
+    let mut parsed_response: Value = serde_json::from_str(&response.text().await?)?;
+    canonicalize_errors(&mut parsed_response);
     Ok(parsed_response)
+}
+
+/// Canonicalize the `errors` array of a router response so snapshots are
+/// stable across runs.
+///
+/// Sibling subgraph fetches run in parallel under the multi-thread tokio
+/// runtime, so errors from different fetches arrive in completion order —
+/// non-deterministic between runs. The committed snapshot pins a single
+/// legal order; under different scheduling the other legal order surfaces
+/// and the `insta` comparison fails (intra-test emission ordering race).
+///
+/// Sort entries by `(path, service, message)` using a lexical comparison
+/// of the JSON-serialized `path` array. Service and message are tie-
+/// breakers when two entries share a path.
+fn canonicalize_errors(response: &mut Value) {
+    let Some(errors) = response.get_mut("errors").and_then(Value::as_array_mut) else {
+        return;
+    };
+    errors.sort_by(|a, b| {
+        let path_a = a.get("path").map(ToString::to_string).unwrap_or_default();
+        let path_b = b.get("path").map(ToString::to_string).unwrap_or_default();
+        let service_a = a
+            .pointer("/extensions/service")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let service_b = b
+            .pointer("/extensions/service")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let message_a = a.get("message").and_then(Value::as_str).unwrap_or("");
+        let message_b = b.get("message").and_then(Value::as_str).unwrap_or("");
+        (path_a, service_a, message_a).cmp(&(path_b, service_b, message_b))
+    });
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -434,13 +434,15 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+            SupergraphSelector::OnGraphQLError { on_graphql_error } => {
                 let contains_error = response
                     .context
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
             SupergraphSelector::OperationName {
                 operation_name,
@@ -529,13 +531,9 @@ impl Selector for SupergraphSelector {
                     .flatten()
                     .map(opentelemetry::Value::from),
             },
-            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                let contains_error = ctx
-                    .get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
-            }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } => Some(
+                opentelemetry::Value::Bool(response.contains_errors() == *on_graphql_error),
+            ),
             SupergraphSelector::OperationName {
                 operation_name,
                 default,
@@ -1366,6 +1364,54 @@ mod test {
     }
 
     #[test]
+    fn supergraph_on_graphql_error_on_response() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
+
+        // on_graphql_error: true — returns true when errors present, false when absent
+        let selector_true = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let ctx_with_errors = crate::Context::default();
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors = SupergraphResponse::fake_builder()
+            .context(ctx_with_errors)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_with_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let response_no_errors = SupergraphResponse::fake_builder().build().unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted: true when no errors, false when errors present
+        let selector_false = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let ctx_with_errors2 = crate::Context::default();
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors2 = SupergraphResponse::fake_builder()
+            .context(ctx_with_errors2)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_false.on_response(&response_with_errors2),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
     fn test_request_header_no_masking_when_not_sensitive() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
         use crate::services::header_masking::HeaderMaskingRules;
@@ -1612,6 +1658,43 @@ mod test {
             result.as_str(),
             "***MASKED***",
             "Case-insensitive matching should work for headers"
+        );
+    }
+
+    #[test]
+    fn supergraph_on_graphql_error_on_response_event() {
+        use crate::graphql;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        // on_graphql_error: true — true when chunk has errors, false when not
+        let selector_true = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let chunk_with_errors = graphql::Response::builder()
+            .error(graphql::Error::builder().message("oops").build())
+            .build();
+        assert_eq!(
+            selector_true.on_response_event(&chunk_with_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let chunk_no_errors = graphql::Response::builder().build();
+        assert_eq!(
+            selector_true.on_response_event(&chunk_no_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response_event(&chunk_no_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(true))
+        );
+        assert_eq!(
+            selector_false.on_response_event(&chunk_with_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(false))
         );
     }
 }

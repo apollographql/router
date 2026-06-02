@@ -1,0 +1,198 @@
+# Test workflow — exercises `cargo xtask release new` on a GitHub Actions
+# runner.  Same shape as `test-release-prep.yml`: side-branch sandbox now,
+# graduates to `release-dispatch-new.yml` on the default branch later.
+#
+# Two trigger paths:
+#
+#   - `workflow_dispatch` — the future graduation path.  Won't actually
+#     fire until this file lands on the default branch (`dev`).  Inputs
+#     are locked in so the call shape matches what the eventual
+#     `release-dispatch-new.yml` will expect.
+#
+#   - `push` to `abernix/test-release-new-*` — the current sandbox.
+#     Branch name encodes line + kind:
+#
+#       abernix/test-release-new-<line>--<kind>
+#
+#     Examples:
+#       - abernix/test-release-new-tip--patch
+#       - abernix/test-release-new-tip--2.14.2
+#       - abernix/test-release-new-2.10.x--patch
+#
+#     The `--` (double-dash) is the separator — line names like `2.10.x`
+#     contain dots but never `--`, so it's unambiguous.
+#
+# Defaults to **dry-run**: prints the plan, exits.  Push trigger requires
+# `[execute]` in the commit message to actually push the version branch
+# and open the draft release PR.  workflow_dispatch defaults dry_run to
+# true.
+
+name: Test release new
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "patch, minor, major, or specific version like 2.14.2"
+        required: true
+        type: string
+      line:
+        description: "Release line: tip, 2.10.x, 3.x, etc."
+        required: false
+        default: tip
+        type: string
+      dry_run:
+        description: "Dry-run — don't push branch or open the release PR"
+        required: false
+        default: true
+        type: boolean
+  push:
+    branches:
+      - "abernix/test-release-new-*"
+
+jobs:
+  test-new:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to push the version branch (when not dry-run)
+      pull-requests: write     # to open the draft release PR (when not dry-run)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          # Use apollo-bot2's PAT so any pushes the xtask makes are
+          # attributed to apollo-bot2, not github-actions[bot].  Falls
+          # back to the workflow token when the secret isn't set — the
+          # dry-run path won't push anything anyway.
+          token: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
+
+      - name: Resolve line + kind + mode
+        id: vars
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            LINE='${{ inputs.line }}'
+            KIND='${{ inputs.kind }}'
+            DRY_RUN='${{ inputs.dry_run }}'
+          else
+            # Branch name: abernix/test-release-new-<line>--<kind>
+            SUFFIX="${GITHUB_REF_NAME#abernix/test-release-new-}"
+            if [[ "$SUFFIX" != *--* ]]; then
+              echo "::error::Branch name must be abernix/test-release-new-<line>--<kind> (got: $GITHUB_REF_NAME)"
+              exit 1
+            fi
+            LINE="${SUFFIX%%--*}"
+            KIND="${SUFFIX#*--}"
+            # Default dry-run unless commit message contains `[execute]`.
+            if git log -1 --format=%B "$GITHUB_SHA" | grep -qF '[execute]'; then
+              DRY_RUN=false
+            else
+              DRY_RUN=true
+            fi
+          fi
+          echo "Resolved: line=$LINE kind=$KIND dry_run=$DRY_RUN"
+          echo "line=$LINE" >> "$GITHUB_OUTPUT"
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # Diagnostic: list available env var NAMES (values redacted by GHA for
+      # secrets) so we can confirm what's plumbed in.
+      # ---------------------------------------------------------------------
+      - name: Log env variable names (values redacted)
+        env:
+          APOLLO_BOT2_GITHUB_PAT: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          echo "::group::Environment variable names"
+          env | cut -d= -f1 | sort
+          echo "::endgroup::"
+          if [ -n "${APOLLO_BOT2_GITHUB_PAT:-}" ]; then
+            echo "✓ APOLLO_BOT2_GITHUB_PAT is set (token length: ${#APOLLO_BOT2_GITHUB_PAT})"
+          else
+            echo "✗ APOLLO_BOT2_GITHUB_PAT is NOT set — add it as a repo secret to enable apollo-bot2 auth."
+          fi
+
+      # ---------------------------------------------------------------------
+      # Auth check: prove APOLLO_BOT2_GITHUB_PAT actually authenticates as
+      # apollo-bot2.  Read-only — calls /user.
+      # ---------------------------------------------------------------------
+      - name: Authenticate as apollo-bot2
+        env:
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::APOLLO_BOT2_GITHUB_PAT secret not configured — skipping auth check."
+            echo "  Configure it (Settings → Secrets and variables → Actions) to enable this step."
+            exit 0
+          fi
+          echo "Attempting to authenticate as apollo-bot2..."
+          IDENTITY=$(gh api user --jq '"login=\(.login) id=\(.id) type=\(.type)"')
+          echo "✓ Authenticated: $IDENTITY"
+          case "$IDENTITY" in
+            *login=apollo-bot2*) echo "  Identity matches expectation (apollo-bot2)." ;;
+            *) echo "::error::Authenticated user is not apollo-bot2.  Check the PAT owner." ; exit 1 ;;
+          esac
+
+      - name: Install dev environment (mise)
+        uses: jdx/mise-action@v4
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      # ---------------------------------------------------------------------
+      # Dry-run path: print the plan, don't push, don't open PRs.
+      # ---------------------------------------------------------------------
+      - name: Run release new (dry-run)
+        if: steps.vars.outputs.dry_run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          echo "Dry-run mode — printing the plan without pushing or opening a PR."
+          echo "  - workflow_dispatch: pass dry_run=false to actually run"
+          echo "  - push trigger:      include '[execute]' in commit message"
+          echo
+          cargo xtask release new \
+            --non-interactive \
+            --line '${{ steps.vars.outputs.line }}' \
+            --dry-run \
+            '${{ steps.vars.outputs.kind }}'
+
+      # ---------------------------------------------------------------------
+      # Execute path: actually cut the branch, push, and open the draft PR.
+      # `cargo xtask release new` does the destructive work; we just give it
+      # apollo-bot2's PAT for both git pushes (via checkout token) and `gh`.
+      # ---------------------------------------------------------------------
+      - name: Run release new (execute)
+        if: steps.vars.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::APOLLO_BOT2_GITHUB_PAT secret is required for execute mode."
+            echo "  Configure it (Settings → Secrets and variables → Actions) and re-run."
+            exit 1
+          fi
+          # Identify pushes as apollo-bot2.  The checkout step already set
+          # the http extraheader to use this PAT — git config below just
+          # makes sure commits made by the xtask carry the right author.
+          git config user.name "apollo-bot2"
+          git config user.email "apollo-bot2@users.noreply.github.com"
+          cargo xtask release new \
+            --non-interactive \
+            --line '${{ steps.vars.outputs.line }}' \
+            '${{ steps.vars.outputs.kind }}'
+
+      - name: Done
+        run: |
+          if [ '${{ steps.vars.outputs.dry_run }}' = 'true' ]; then
+            echo "Dry-run complete.  No branch pushed, no PR opened."
+          else
+            echo "Cut release branch and opened draft release PR."
+            echo "Line: ${{ steps.vars.outputs.line }}   Kind: ${{ steps.vars.outputs.kind }}"
+          fi

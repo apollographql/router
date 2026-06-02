@@ -1,0 +1,181 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 26
+expression: connectors.by_service_name
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/recursive_input.graphql
+---
+{
+    "connectors_Query_foo_0": Connector {
+        id: ConnectId {
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            named: None,
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.foo),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
+        },
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "http://example",
+                                    location: 0..14,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/",
+                                location: 0..1,
+                            },
+                        ),
+                        Expression(
+                            Expression {
+                                expression: JSONSelection {
+                                    inner: Value(
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
+                                                            WithRange {
+                                                                node: $args,
+                                                                range: Some(
+                                                                    0..5,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "input",
+                                                                        ),
+                                                                        range: Some(
+                                                                            6..11,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "name",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    12..16,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Empty,
+                                                                                range: Some(
+                                                                                    16..16,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            11..16,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    5..16,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            0..16,
+                                                        ),
+                                                    },
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..16,
+                                            ),
+                                        },
+                                    ),
+                                    spec: V0_1,
+                                },
+                                location: 2..18,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
+        selection: JSONSelection {
+            inner: Value(
+                WithRange {
+                    node: Path(
+                        PathSelection {
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $,
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            1..1,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    0..1,
+                                ),
+                            },
+                        },
+                    ),
+                    range: Some(
+                        0..1,
+                    ),
+                },
+            ),
+            spec: V0_1,
+        },
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+        spec: V0_1,
+        schema_subtypes_map: {},
+        request_headers: {},
+        response_headers: {},
+        request_variable_keys: {
+            $args: {
+                "input",
+            },
+        },
+        response_variable_keys: {},
+        batch_settings: None,
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+            connect_is_success: None,
+        },
+        label: Label(
+            "connectors.example http: GET /{$args.input.name}",
+        ),
+    },
+}

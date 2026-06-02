@@ -147,28 +147,48 @@ pub(crate) fn remove_non_semantic_directives(schema: &mut Schema) {
 // Just a boolean with a `?` operator
 type CoerceResult = Result<(), ()>;
 
-/// Recursively assign default values in input object values, mutating the value.
+#[derive(Clone, Copy)]
+enum DefaultValueBehavior {
+    /// Inject missing input object fields from their type-level defaults.
+    /// Correct for executable document coercion at runtime.
+    Expand,
+    /// Preserve the literal as written — only check validity.
+    /// Correct for schema-level default values in composition output.
+    Check,
+}
+
+/// Recursively coerce input object values, mutating the value.
 /// If the default value is invalid, returns `Err(())`.
 fn coerce_value(
     types: &IndexMap<Name, ExtendedType>,
     target: &mut Node<Value>,
     ty: &Type,
+    default_value_behavior: DefaultValueBehavior,
 ) -> CoerceResult {
     match (target.make_mut(), types.get(ty.inner_named_type())) {
         (Value::Object(object), Some(ExtendedType::InputObject(definition))) if ty.is_named() => {
             for (field_name, field_definition) in definition.fields.iter() {
                 match object.iter_mut().find(|(key, _value)| key == field_name) {
                     Some((_name, value)) => {
-                        coerce_value(types, value, &field_definition.ty)?;
+                        coerce_value(types, value, &field_definition.ty, default_value_behavior)?;
                     }
                     None => {
-                        if let Some(default_value) = &field_definition.default_value {
-                            let mut value = default_value.clone();
-                            // If the default value is an input object we may need to fill in
-                            // its defaulted fields recursively.
-                            coerce_value(types, &mut value, &field_definition.ty)?;
-                            object.push((field_name.clone(), value));
-                        } else if field_definition.is_required() {
+                        if matches!(default_value_behavior, DefaultValueBehavior::Expand) {
+                            if let Some(default_value) = &field_definition.default_value {
+                                let mut value = default_value.clone();
+                                coerce_value(
+                                    types,
+                                    &mut value,
+                                    &field_definition.ty,
+                                    DefaultValueBehavior::Expand,
+                                )?;
+                                object.push((field_name.clone(), value));
+                            } else if field_definition.is_required() {
+                                return Err(());
+                            }
+                        } else if field_definition.default_value.is_none()
+                            && field_definition.is_required()
+                        {
                             return Err(());
                         }
                     }
@@ -177,7 +197,7 @@ fn coerce_value(
         }
         (Value::List(list), Some(_)) if ty.is_list() => {
             for element in list {
-                coerce_value(types, element, ty.item_type())?;
+                coerce_value(types, element, ty.item_type(), default_value_behavior)?;
             }
         }
         // Coerce single values (except null) to a list.
@@ -190,7 +210,7 @@ fn coerce_value(
             | Value::Boolean(_),
             Some(_),
         ) if ty.is_list() => {
-            coerce_value(types, target, ty.item_type())?;
+            coerce_value(types, target, ty.item_type(), default_value_behavior)?;
             *target.make_mut() = Value::List(vec![target.clone()]);
         }
 
@@ -241,7 +261,7 @@ fn coerce_arguments_default_values(
             continue;
         };
 
-        if coerce_value(types, default_value, &arg.ty).is_err() {
+        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
             arg.default_value = None;
         }
     }
@@ -252,9 +272,6 @@ fn coerce_arguments_default_values(
 /// JS keeps `= {}` verbatim in the upgraded subgraph SDL regardless of required fields;
 /// the supergraph/API-schema path uses [`coerce_arguments_default_values`] directly, which
 /// still strips them there.
-///
-/// Valid `= {}` (input type whose required fields all have defaults) is still expanded as
-/// normal; only the stripping-on-failure is suppressed for empty-object values.
 fn coerce_arguments_default_values_keep_empty_object(
     types: &IndexMap<Name, ExtendedType>,
     arguments: &mut Vec<Node<InputValueDefinition>>,
@@ -266,7 +283,7 @@ fn coerce_arguments_default_values_keep_empty_object(
         };
         let is_empty_object =
             matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-        if coerce_value(types, default_value, &arg.ty).is_err() {
+        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
             if is_empty_object {
                 // Restore `= {}` — coerce_value may have partially mutated the value before
                 // failing. Matches graphql-js parse-time behavior: keep `= {}` even when the
@@ -313,7 +330,14 @@ pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
                         continue;
                     };
 
-                    if coerce_value(&types, default_value, &field.ty).is_err() {
+                    if coerce_value(
+                        &types,
+                        default_value,
+                        &field.ty,
+                        DefaultValueBehavior::Check,
+                    )
+                    .is_err()
+                    {
                         field.default_value = None;
                     }
                 }
@@ -390,7 +414,14 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                         continue;
                     };
                     let is_empty_object = matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-                    if coerce_value(&types, default_value, &field.ty).is_err() {
+                    if coerce_value(
+                        &types,
+                        default_value,
+                        &field.ty,
+                        DefaultValueBehavior::Check,
+                    )
+                    .is_err()
+                    {
                         if is_empty_object {
                             *default_value.make_mut() = Value::Object(Default::default());
                         } else {
@@ -454,7 +485,12 @@ fn coerce_directive_application_values(
                 continue;
             };
             let arg = arg.make_mut();
-            _ = coerce_value(&schema.types, &mut arg.value, &definition.ty);
+            _ = coerce_value(
+                &schema.types,
+                &mut arg.value,
+                &definition.ty,
+                DefaultValueBehavior::Expand,
+            );
         }
     }
 }
@@ -474,7 +510,12 @@ fn coerce_directive_application_values_schema(
                 continue;
             };
             let arg = arg.make_mut();
-            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
+            _ = coerce_value(
+                type_definitions,
+                &mut arg.value,
+                &definition.ty,
+                DefaultValueBehavior::Check,
+            );
         }
     }
 }
@@ -494,7 +535,12 @@ fn coerce_directive_application_values_ast(
                 continue;
             };
             let arg = arg.make_mut();
-            _ = coerce_value(type_definitions, &mut arg.value, &definition.ty);
+            _ = coerce_value(
+                type_definitions,
+                &mut arg.value,
+                &definition.ty,
+                DefaultValueBehavior::Check,
+            );
         }
     }
 }
@@ -513,7 +559,12 @@ fn coerce_selection_set_values(
                         continue;
                     };
                     let arg = arg.make_mut();
-                    _ = coerce_value(&schema.types, &mut arg.value, &definition.ty);
+                    _ = coerce_value(
+                        &schema.types,
+                        &mut arg.value,
+                        &definition.ty,
+                        DefaultValueBehavior::Expand,
+                    );
                 }
                 coerce_directive_application_values(schema, &mut field.directives);
                 coerce_selection_set_values(schema, &mut field.selection_set);
@@ -545,7 +596,12 @@ fn coerce_operation_values(schema: &Valid<Schema>, operation: &mut Node<executab
         // query planner behaviour.
         // In queries, I hope we can just reject queries with invalid default values instead of
         // silently doing the wrong thing :)
-        _ = coerce_value(&schema.types, default_value, &variable.ty);
+        _ = coerce_value(
+            &schema.types,
+            default_value,
+            &variable.ty,
+            DefaultValueBehavior::Expand,
+        );
     }
 
     coerce_selection_set_values(schema, &mut operation.selection_set);

@@ -218,11 +218,11 @@ async fn call_websocket(
         _ => None,
     };
 
-    let request = get_websocket_request(service_name, parts, subgraph_cfg)?;
+    // Extract before get_websocket_request, which consumes parts (headers only;
+    // extensions are not forwarded to the WebSocket request).
+    let signing_params = parts.extensions.get::<Arc<SigningParamsConfig>>().cloned();
 
-    let signing_params = context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
+    let request = get_websocket_request(service_name, parts, subgraph_cfg)?;
 
     let request = if let Some(signing_params) = signing_params {
         signing_params.sign_empty(request, service_name).await?

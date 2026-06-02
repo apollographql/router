@@ -97,7 +97,7 @@ impl<'a> SubgraphConstraint<'a> {
                     continue;
                 };
                 let field_type_name = field.ty.inner_named_type();
-                let field_type_pos = subgraph_schema.get_type(field_type_name.clone())?;
+                let field_type_pos = subgraph_schema.get_type(field_type_name)?;
                 if let Ok(composite_type) =
                     CompositeTypeDefinitionPosition::try_from(field_type_pos)
                 {

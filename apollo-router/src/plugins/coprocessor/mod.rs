@@ -582,31 +582,41 @@ pub(super) enum NewContextConf {
 }
 
 impl ContextConf {
-    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::NewContextConf(NewContextConf::All) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
+                    (elt.key().clone(), elt.value().clone())
+                }));
+                new_ctx.id = ctx.id.clone();
+                Some((new_ctx, keys_sent))
+            }
+            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+                let mut keys_sent = HashSet::new();
+                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
                     (
                         context_key_to_deprecated(elt.key().clone()),
                         elt.value().clone(),
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
+                        keys_sent.insert(elt.key().clone());
                         Some((elt.key().clone(), elt.value().clone()))
                     } else {
                         None
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::Deprecated(false) => None,
         }
@@ -663,12 +673,11 @@ pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
     context_config: &ContextConf,
+    keys_sent: &HashSet<String>,
 ) -> Result<(), BoxError> {
-    // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
     for (mut key, value) in context_returned.try_into_iter()? {
-        // Handle deprecated key names - convert back to actual key names
         if context_config.is_deprecated() {
             key = context_key_from_deprecated(key);
         }
@@ -677,21 +686,9 @@ pub(crate) fn update_context_from_coprocessor(
         target_context.insert_json_value(key, value);
     }
 
-    // Delete keys that were sent but are missing from the returned context
-    // If the context config is selective, only delete keys that are in the selective list
-    match context_config {
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
-            target_context.retain(|key, _v| {
-                if keys_returned.contains(key) {
-                    return true;
-                } else if context_keys.contains(key) {
-                    return false;
-                }
-                true
-            });
-        }
-        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
-    }
+    // Only delete keys that were SENT to the coprocessor but NOT returned.
+    // Keys never sent (e.g. added concurrently by parallel subgraph stages) are preserved.
+    target_context.retain(|key, _v| keys_returned.contains(key) || !keys_sent.contains(key));
 
     Ok(())
 }
@@ -1050,7 +1047,10 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -1070,9 +1070,8 @@ where
     });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
@@ -1203,7 +1202,7 @@ async fn process_router_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
     sdl: Arc<String>,
-    mut response: router::Response,
+    response: router::Response,
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
     executed: &mut bool,
@@ -1217,14 +1216,15 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    if !response_config.condition.evaluate_response(&response) {
-        return Ok(response);
-    }
-    // split the response into parts + body
-    let (parts, body) = response.response.into_parts();
+    // Evaluate HTTP-level conditions before into_parts() moves the response.
+    let response_condition_matches = response_config.condition.evaluate_response(&response);
 
-    // we split the body (which is a stream) into first response + rest of responses,
-    // for which we will implement mapping later
+    let context = response.context.clone();
+
+    // Split the response into parts + body
+    let (mut parts, body) = response.response.into_parts();
+
+    // Split the body stream into first chunk + rest
     let mut stream = body.into_data_stream();
     let first = stream.next().await.transpose()?;
     let rest = stream;
@@ -1242,109 +1242,109 @@ where
         }
     };
 
-    // Now we process our first chunk of response
-    // Encode headers, body, status, context, sdl to create a payload
-    let headers_to_send = response_config
-        .headers
-        .then(|| externalize_header_map(&parts.headers));
-
-    // Log headers with masking for security
-    if response_config.headers
-        && let Some(rules) = header_masking_rules.as_deref()
-    {
-        tracing::debug!(
-            headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
-            "Router response headers (masked)"
-        );
-    }
-
-    let body_to_send = response_config
-        .body
-        .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
-        .transpose()?;
-    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable::router_builder()
-        .stage(PipelineStep::RouterResponse)
-        .id(response.context.id.clone())
-        .and_headers(headers_to_send)
-        .and_body(body_to_send)
-        .and_context(context_to_send)
-        .and_status_code(status_to_send)
-        .and_sdl(sdl_to_send.clone())
-        .build();
+    // Evaluate the condition for the first chunk. HTTP-level conditions use
+    // response_condition_matches (checked above); on_graphql_error reads
+    // CHUNK_CONTAINS_GRAPHQL_ERROR from context, set by check_for_errors for this chunk.
+    let chunk_condition_matches = response_config
+        .condition
+        .evaluate_event_response(&(), &context);
 
-    // Second, call our co-processor and get a reply.
-    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
-        r.get_response(None)
-    });
-    tracing::debug!(payload = ?payload_for_log, "externalized output");
-    // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
-    //
-    // WARN: be careful if you're changing out this context to using the request's context; see
-    // above, but also validate what happens downstream for that context
-    let co_processor_result = {
-        // Instantiate timer within the scope of this coprocessor run so it will be
-        // dropped automatically when the run goes out of scope
-        let _timer = get_coprocessor_timer(PipelineStep::RouterResponse);
-        payload
-            .call(http_client.clone(), &coprocessor_url, Context::new())
-            .await
-        // elapsed time is recorded
-    };
-    // Indicate the stage was executed to raise execution metric on parent
-    *executed = true;
+    let first_bytes: Bytes = if response_condition_matches || chunk_condition_matches {
+        // Encode headers, body, status, context, sdl to create a payload
+        let headers_to_send = response_config
+            .headers
+            .then(|| externalize_header_map(&parts.headers));
 
-    // Scoped so the cloned `Externalizable` drops before `?` (see notes at
-    // the RouterRequest site).
-    {
-        let co_processor_result_for_log =
-            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+        // Log headers with masking for security
+        if response_config.headers
+            && let Some(rules) = header_masking_rules.as_deref()
+        {
+            tracing::debug!(
+                headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
+                "Router response headers (masked)"
+            );
+        }
+
+        let body_to_send = response_config
+            .body
+            .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
+            .transpose()?;
+        let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+        let (context_to_send, keys_sent) = match response_config.context.get_context(&context) {
+            Some((ctx, keys)) => (Some(ctx), keys),
+            None => (None, HashSet::new()),
+        };
+
+        let payload = Externalizable::router_builder()
+            .stage(PipelineStep::RouterResponse)
+            .id(context.id.clone())
+            .and_headers(headers_to_send)
+            .and_body(body_to_send)
+            .and_context(context_to_send)
+            .and_status_code(status_to_send)
+            .and_sdl(sdl_to_send.clone())
+            .build();
+
+        // Second, call our co-processor and get a reply.
+        let payload_for_log =
+            scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
                 r.get_response(None)
             });
-        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
-    }
-    let co_processor_output = co_processor_result?;
+        tracing::debug!(payload = ?payload_for_log, "externalized output");
+        // Use a fresh context for the coprocessor HTTP call. The pipeline's request
+        // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
+        // HttpClientService) intended for subgraph requests, not for the coprocessor
+        // endpoint
+        //
+        // WARN: be careful if you're changing out this context to using the request's context; see
+        // above, but also validate what happens downstream for that context
+        let co_processor_result = {
+            let _timer = get_coprocessor_timer(PipelineStep::RouterResponse);
+            payload
+                .call(http_client.clone(), &coprocessor_url, Context::new())
+                .await
+        };
+        *executed = true;
 
-    validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
+        // Scoped so the cloned `Externalizable` drops before `?` (see notes at
+        // the RouterRequest site).
+        {
+            let co_processor_result_for_log =
+                scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                    r.get_response(None)
+                });
+            tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+        }
+        let co_processor_output = co_processor_result?;
+        validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
-    // Third, process our reply and act on the contents. Our processing logic is
-    // that we replace "bits" of our incoming response with the updated bits if they
-    // are present in our co_processor_output. If they aren't present, just use the
-    // bits that we sent to the co_processor.
-
-    let new_body = match co_processor_output.body {
-        Some(bytes) => router::body::from_bytes(bytes),
-        None => router::body::from_bytes(bytes),
+        // Apply coprocessor output: replace body bytes and update parts in place
+        let result: Bytes = match co_processor_output.body {
+            Some(b) => b.into(),
+            None => bytes,
+        };
+        if let Some(control) = co_processor_output.control {
+            parts.status = control.get_http_status()?;
+        }
+        if let Some(ctx) = co_processor_output.context {
+            update_context_from_coprocessor(&context, ctx, &response_config.context, &keys_sent)?;
+        }
+        if let Some(headers) = co_processor_output.headers {
+            parts.headers = internalize_header_map(headers)?;
+        }
+        result
+    } else {
+        bytes
     };
 
-    response.response = http::Response::from_parts(parts, new_body);
+    let map_context = context.clone();
+    let stream_condition = response_config.condition.clone();
+    let stream_body = response_config.body;
+    let stream_context_conf = response_config.context.clone();
 
-    if let Some(control) = co_processor_output.control {
-        *response.response.status_mut() = control.get_http_status()?
-    }
-
-    if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
-    }
-
-    if let Some(headers) = co_processor_output.headers {
-        *response.response.headers_mut() = internalize_header_map(headers)?;
-    }
-
-    // Now break our co-processor modified response back into parts
-    let (parts, body) = response.response.into_parts();
-
-    // Clone all the bits we need
-    let context = response.context.clone();
-    let map_context = response.context.clone();
-
-    // Map the rest of our body to process subsequent chunks of response
+    // Map the rest of our body to process subsequent chunks with per-chunk condition evaluation
     let mapped_stream = rest
         .map_err(BoxError::from)
         .and_then(move |deferred_response| {
@@ -1353,17 +1353,30 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
-            let context_conf = response_config.context.clone();
+            let context_conf = stream_context_conf.clone();
+            let deferred_condition = stream_condition.clone();
             let header_masking_rules = header_masking_rules.clone();
 
             async move {
+                // Evaluate condition per-chunk. CHUNK_CONTAINS_GRAPHQL_ERROR has been set in
+                // context by check_for_errors for this chunk, so on_graphql_error conditions
+                // reflect the current chunk accurately.
+                let chunk_condition_matches =
+                    deferred_condition.evaluate_event_response(&(), &generator_map_context);
+
+                if !chunk_condition_matches {
+                    return Ok(deferred_response);
+                }
+
                 let bytes = deferred_response.to_vec();
-                let body_to_send = response_config
-                    .body
+                let body_to_send = stream_body
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
-                let generator_map_context = generator_map_context.clone();
-                let context_to_send = context_conf.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match context_conf.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1386,15 +1399,17 @@ where
                 );
                 tracing::debug!(payload = ?payload_for_log, "externalized output");
                 // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-                // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-                // HttpClientService) intended for subgraph requests, not for the coprocessor
-                // endpoint
+                // context may carry extensions intended for subgraph requests, not for the
+                // coprocessor endpoint
                 //
                 // WARN: be careful if you're changing out this context to using the request's context; see
                 // above, but also validate what happens downstream for that context
-                let co_processor_result = payload
-                    .call(generator_client, &generator_coprocessor_url, Context::new())
-                    .await;
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::RouterResponse);
+                    payload
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
+                        .await
+                };
                 {
                     let co_processor_result_for_log = scrub_result_for_log(
                         &co_processor_result,
@@ -1403,42 +1418,42 @@ where
                     );
                     tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
                 }
-                let co_processor_output = co_processor_result?;
-
-                validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
-
-                // Third, process our reply and act on the contents. Our processing logic is
-                // that we replace "bits" of our incoming response with the updated bits if they
-                // are present in our co_processor_output. If they aren't present, just use the
-                // bits that we sent to the co_processor.
-                let final_bytes: Bytes = match co_processor_output.body {
-                    Some(bytes) => bytes.into(),
-                    None => bytes.into(),
-                };
-
-                if let Some(context) = co_processor_output.context {
-                    update_context_from_coprocessor(
-                        &generator_map_context,
-                        context,
-                        &context_conf,
+                let result: Result<Bytes, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::RouterResponse,
                     )?;
-                }
 
-                // We return the final_bytes into our stream of response chunks
-                Ok(final_bytes)
+                    let final_bytes: Bytes = match co_processor_output.body {
+                        Some(bytes) => bytes.into(),
+                        None => bytes.into(),
+                    };
+
+                    if let Some(ctx) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            ctx,
+                            &context_conf,
+                            &keys_sent,
+                        )?;
+                    }
+
+                    Ok(final_bytes)
+                }
+                .await;
+                record_coprocessor_operation(PipelineStep::RouterResponse, result.is_ok());
+                result
             }
         });
 
-    // Create our response stream which consists of the bytes from our first body chained with the
-    // rest of the responses in our mapped stream.
-    let bytes = router::body::into_bytes(body).await.map_err(BoxError::from);
+    // Create our response stream: first chunk bytes chained with the mapped deferred stream
     let final_stream = RouterBody::new(http_body_util::StreamBody::new(
-        once(ready(bytes))
+        once(ready(Ok(first_bytes)))
             .chain(mapped_stream)
             .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
     ));
 
-    // Finally, return a response which has a Body that wraps our stream of response chunks
     router::Response::http_response_builder()
         .context(context)
         .response(http::Response::from_parts(parts, final_stream))
@@ -1499,7 +1514,10 @@ where
         .body
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1525,9 +1543,8 @@ where
     });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
@@ -1693,7 +1710,11 @@ where
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
-    let context_to_send = response_config.context.get_context(&response.context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let subgraph_name = service_name.clone();
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
@@ -1716,9 +1737,8 @@ where
     });
     tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
-    // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
-    // HttpClientService) intended for subgraph requests, not for the coprocessor
-    // endpoint
+    // context may carry extensions intended for subgraph requests, not for the
+    // coprocessor endpoint
     //
     // WARN: be careful if you're changing out this context to using the request's context; see
     // above, but also validate what happens downstream for that context
@@ -1768,7 +1788,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
