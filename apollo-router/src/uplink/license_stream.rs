@@ -241,8 +241,6 @@ fn reset_checks_for_licenses(
 
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
-    // If both were clamped to MAX_TIMER_DURATION, warn and halt share one deadline
-    // instead of the staged soft-then-hard window (see MAX_TIMER_DURATION).
     let now = Instant::now();
     // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
     if halt_at > now {
