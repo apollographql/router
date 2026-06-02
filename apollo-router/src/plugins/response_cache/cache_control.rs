@@ -268,6 +268,11 @@ impl TryFrom<&HeaderMap> for CacheControl {
             cache_control.public = false;
         }
 
+        // If every directive was an unrecognized extension, we have no basis for caching.
+        if !cache_control.has_caching_directives() {
+            cache_control.no_store = true;
+        }
+
         Ok(cache_control)
     }
 }
@@ -493,6 +498,23 @@ impl CacheControl {
     // TODO: honor stale-while-revalidate
     pub(crate) fn can_use(&self) -> bool {
         !self.no_cache && self.remaining_ttl().is_none_or(|ttl| ttl > 0)
+    }
+
+    /// Returns `true` if any directive that carries caching intent is present.
+    /// Used after parsing to detect headers that contain only unrecognized extension directives
+    /// (e.g. `cdn-cache-control=300`), which should be treated as `no-store` since there are no
+    /// freshness or cacheability instructions the router can act on.
+    fn has_caching_directives(&self) -> bool {
+        self.max_age.is_some()
+            || self.s_max_age.is_some()
+            || self.no_cache
+            || self.no_store
+            || self.public
+            || self.private
+            || self.must_revalidate
+            || self.proxy_revalidate
+            || self.stale_while_revalidate.is_some()
+            || self.stale_if_error.is_some()
     }
 
     /// Returns the value of the `Age` header, if present.
