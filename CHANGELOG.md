@@ -2,6 +2,39 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.10.4] - 2026-06-02
+
+## 🐛 Fixes
+
+### Preserve null propagation when multiple fragments select the same non-null field ([PR #9032](https://github.com/apollographql/router/pull/9032))
+
+When a query uses multiple fragment spreads on the same parent type and a subgraph response is missing a required non-null field on a union member, the router now correctly returns `null` for the affected field rather than a partial object like `{"__typename": "A"}`.
+
+The GraphQL specification requires that a non-null violation propagates `null` upward to the nearest nullable parent. Previously, if one fragment nullified a field, a subsequent fragment on the same parent could overwrite that `null` with a partial result — producing a spec-incorrect response.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9032
+
+### Reject invalid values for client library name and version ([PR #8934](https://github.com/apollographql/router/pull/8934))
+
+Rejects invalid values (validated against a regex) for library name and version provided in headers or operation extensions, which are used for the Client Awareness feature and telemetry.
+
+By [@BoD](https://github.com/BoD) in https://github.com/apollographql/router/pull/8934
+
+### Only delete coprocessor context keys from those that were sent in a given stage ([PR #9519](https://github.com/apollographql/router/pull/9519))
+
+Addresses a race condition where context keys added by concurrent parallel subgraph stages could unintentionally be deleted.
+
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9519
+
+### Normalize `supergraph.path` to support queries with and without trailing slashes (`/`) ([PR #8860](https://github.com/apollographql/router/pull/8860))
+
+Normalize trailing `/` for `supergraph.path` to support `/graphql` and `/graphql/`. This works by stripping trailing `/` from both the configured path and the incoming query path to ensure they match, regardless of whether the config or query includes a trailing slash.
+
+By [@Jephuff](https://github.com/Jephuff) in https://github.com/apollographql/router/pull/8860
+
+
+
 # [2.10.3] - 2026-05-29
 
 ## 🐛 Fixes
