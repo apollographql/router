@@ -766,29 +766,34 @@ fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
 ///   Fast path: [..., { incremental: [...], hasNext: false }]
 ///   Slow path: [..., { incremental: [...], hasNext: true }, { data: null, hasNext: false }]
 ///
-/// Both are spec-compliant. This function returns true when `received` is the slow-path form of
-/// `expected`.
+/// Both are spec-compliant. This function returns true when `expected` and `received` are the same
+/// deferred response, modulo which of the two forms each happens to be in.
 fn deferred_responses_equivalent(expected: &Value, received: &Value) -> bool {
     let (Some(expected), Some(received)) = (expected.as_array(), received.as_array()) else {
         return false;
     };
+    collapse_terminator(expected) == collapse_terminator(received)
+}
 
-    if received.len() != expected.len() + 1 {
-        return false;
-    }
-
-    if let Some(last_received) = received.last()
-        && let Some(last_expected) = expected.last()
-        && *last_received == serde_json::json!({ "data": null, "hasNext": false })
-        && expected[..expected.len() - 1] == received[..expected.len() - 1]
+/// Collapses the slow-path `{ data: null, hasNext: false }` terminator into the preceding chunk by
+/// flipping its `hasNext` to `false`, producing the fast-path form. Arrays already in fast-path
+/// form, or that don't end in the terminator, pass through unchanged.
+fn collapse_terminator(chunks: &[Value]) -> Vec<Value> {
+    let terminator = serde_json::json!({ "data": null, "hasNext": false });
+    if chunks.len() >= 2
+        && chunks.last() == Some(&terminator)
+        && let Some(prev) = chunks.get(chunks.len() - 2)
+        && prev.get("hasNext") == Some(&Value::Bool(true))
     {
-        let mut normalized = received[expected.len() - 1].clone();
-        if let Some(obj) = normalized.as_object_mut() {
+        let mut collapsed: Vec<Value> = chunks[..chunks.len() - 1].to_vec();
+        if let Some(last) = collapsed.last_mut()
+            && let Some(obj) = last.as_object_mut()
+        {
             obj.insert("hasNext".to_string(), Value::Bool(false));
         }
-        normalized == *last_expected
+        collapsed
     } else {
-        false
+        chunks.to_vec()
     }
 }
 
