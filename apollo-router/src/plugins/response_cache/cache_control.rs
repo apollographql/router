@@ -365,10 +365,10 @@ impl CacheControl {
 
     /// Writes the `Cache-Control` (and `Age` if applicable) headers into the given header map.
     pub(crate) fn update_response_headers(&self, headers: &mut HeaderMap) -> Result<(), BoxError> {
-        headers.insert(
-            CACHE_CONTROL,
-            HeaderValue::from_str(&self.to_response_header_value())?,
-        );
+        let value = self.to_response_header_value();
+        if !value.is_empty() {
+            headers.insert(CACHE_CONTROL, HeaderValue::from_str(&value)?);
+        }
 
         if let Some(age) = self.age
             && age > 0
@@ -1086,6 +1086,20 @@ mod tests {
         assert!(headers.contains_key(http::header::CACHE_CONTROL));
         let value = headers[http::header::CACHE_CONTROL].to_str().unwrap();
         assert!(value.contains("max-age="), "got: {value}");
+    }
+
+    #[test]
+    fn update_response_headers_omits_cache_control_when_empty() {
+        // A CacheControl with no directives (e.g. parsed from an extension-only header like
+        // cdn-cache-control=300) must not write an empty Cache-Control: header.
+        let cc = CacheControl::default();
+        let mut headers = http::HeaderMap::new();
+        cc.update_response_headers(&mut headers).unwrap();
+        assert!(
+            !headers.contains_key(http::header::CACHE_CONTROL),
+            "expected no Cache-Control header, got: {:?}",
+            headers.get(http::header::CACHE_CONTROL)
+        );
     }
 
     #[test]
