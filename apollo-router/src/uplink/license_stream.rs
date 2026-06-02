@@ -430,6 +430,20 @@ mod test {
         assert!(future_instant < now_instant + Duration::from_secs(1025));
         assert!(future_instant > now_instant + Duration::from_secs(1023));
 
+        // One day below the scheduling cap: a realistic license halt window must not be clamped.
+        let one_day_before_cap =
+            super::MAX_TIMER_DURATION - Duration::from_secs(super::SECS_PER_DAY);
+        let near_cap_system_time = now_system_time + one_day_before_cap;
+        let near_cap_instant = to_positive_instant(near_cap_system_time);
+        assert!(
+            near_cap_instant > now_instant + one_day_before_cap - Duration::from_secs(1),
+            "deadline one day below MAX_TIMER_DURATION must not be clamped"
+        );
+        assert!(
+            near_cap_instant < now_instant + one_day_before_cap + Duration::from_secs(1),
+            "deadline one day below MAX_TIMER_DURATION must not be clamped"
+        );
+
         // An instant in the past will return something greater than the original now_instant, but less than a new instant.
         let past_system_time = now_system_time - Duration::from_secs(1024);
         let past_instant = to_positive_instant(past_system_time);
