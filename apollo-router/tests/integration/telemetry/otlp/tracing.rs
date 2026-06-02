@@ -787,11 +787,23 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
     let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("../fixtures/otlp_override_client_name.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
+    // Each iteration validates the resulting trace via `find_valid_trace`,
+    // which can poll for up to 10 s while the harness's reqwest client
+    // holds an idle keep-alive socket to the router. Under CI load the
+    // pooled connection can be RST'd before the next iteration reuses
+    // it, surfacing as `error sending request` from `execute_query`.
+    // Disable client-side keep-alive so each iteration opens a fresh
+    // TCP connection.
+    let reqwest_client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build");
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
         })
         .config(config)
+        .reqwest_client(reqwest_client)
         .build()
         .await;
 

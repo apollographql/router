@@ -82,7 +82,7 @@ impl ConnectorPosition {
         schema: &'s Schema,
     ) -> Option<&'s Component<FieldDefinition>> {
         match self {
-            ConnectorPosition::Field(pos) => pos.field.get(schema).ok(),
+            ConnectorPosition::Field(pos) => pos.field.try_get(schema),
             ConnectorPosition::Type(_) => None,
         }
     }

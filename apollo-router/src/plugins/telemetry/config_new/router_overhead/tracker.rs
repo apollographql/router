@@ -70,6 +70,11 @@ impl RouterOverheadTracker {
         SubgraphRequestGuard::new(self.inner.clone())
     }
 
+    /// Returns the total elapsed time since the request started.
+    pub(crate) fn total_duration(&self) -> Duration {
+        self.request_start.elapsed()
+    }
+
     /// Calculates the router overhead.
     /// This should be called at the end of the request.
     ///
@@ -99,11 +104,6 @@ impl RouterOverheadTracker {
             overhead,
             active_subgraph_requests: active_count,
         }
-    }
-
-    /// Returns the total elapsed time since the request started.
-    pub(crate) fn total_duration(&self) -> Duration {
-        self.request_start.elapsed()
     }
 }
 
@@ -225,12 +225,13 @@ mod tests {
 
         let result = tracker.calculate_overhead();
 
-        // All time is overhead when there are no subgraph requests
-        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
+        // All time is overhead when there are no subgraph requests.
+        // Bounds are intentionally loose to survive CI scheduler stalls; see
+        // test_sequential_subgraph_requests for the detailed rationale.
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
             result.overhead >= Duration::from_millis(80)
-                && result.overhead <= Duration::from_millis(250),
+                && result.overhead <= Duration::from_millis(500),
             "overhead was {:?}",
             result.overhead
         );
