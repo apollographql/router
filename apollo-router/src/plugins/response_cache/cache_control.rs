@@ -245,6 +245,9 @@ impl TryFrom<&HeaderMap> for CacheControl {
                         let value = value.map_or(Ok(u64::MAX), |v| v.parse())?;
                         cache_control.stale_if_error = Some(value);
                     }
+                    // Unlike stale-if-error, bare stale-while-revalidate (no =N) is not
+                    // given a u64::MAX fallback because it was never accepted by old router
+                    // versions (old code also returned Err here). Erroring is intentional.
                     "stale-while-revalidate" => {
                         cache_control.stale_while_revalidate = Some(parse_value(value)?)
                     }
@@ -923,6 +926,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_extension_only_header_sets_no_store() {
+        // A header with only unrecognized extension directives has no caching instructions
+        // the router can act on, so has_caching_directives() returns false and no_store is set.
+        let cc = CacheControl::try_from(&header_map(&[("cache-control", "cdn-cache-control=300")]))
+            .unwrap();
+        assert!(cc.no_store);
+        assert!(!cc.should_store());
+    }
+
+    #[test]
     fn parse_stale_if_error_with_value() {
         // Regression test for ROUTER-1830: stale-if-error=N was previously parsed as a
         // boolean-only field, causing SUBREQUEST_HTTP_ERROR when a value was present.
@@ -947,6 +960,19 @@ mod tests {
         .unwrap();
         assert_eq!(cc.max_age, Some(60));
         assert_eq!(cc.stale_if_error, Some(u64::MAX));
+    }
+
+    #[test]
+    fn parse_bare_stale_while_revalidate_errors() {
+        // Unlike stale-if-error, bare stale-while-revalidate has never been accepted by any
+        // router version, so no u64::MAX fallback is provided. Errors are intentional.
+        assert!(
+            CacheControl::try_from(&header_map(&[(
+                "cache-control",
+                "max-age=60, stale-while-revalidate",
+            )]))
+            .is_err()
+        );
     }
 
     #[test]
