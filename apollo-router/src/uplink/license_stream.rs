@@ -41,10 +41,15 @@ use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
+/// The documented grace window between `warn_at` and `halt_at` (days).
+/// Used both to define the maximum documented halt offset and to restore
+/// the grace window when both deadlines are clamped.
+const HALT_GRACE_PERIOD_DAYS: u64 = 28;
+
 /// Maximum span from "now" to `halt_at` for offline licenses in
 /// `docs/source/routing/license.mdx`: at most one year of validity plus a
 /// 28-day grace period (~393 days).
-const DOCUMENTED_MAX_HALT_OFFSET_DAYS: u64 = 365 + 28;
+const DOCUMENTED_MAX_HALT_OFFSET_DAYS: u64 = 365 + HALT_GRACE_PERIOD_DAYS;
 
 /// Slack above the documented span so legitimate `warn_at` / `halt_at` values are
 /// not truncated if validity or grace windows change.
@@ -64,9 +69,13 @@ const _: () = assert!(MAX_TIMER_DURATION_SECS * 1000 < TOKIO_TIMER_WHEEL_MAX_MIL
 ///
 /// Derived from the documented license timeline plus headroom, and kept below
 /// Tokio's timer wheel maximum so `insert_at` cannot panic. When both deadlines
-/// exceed this cap they collapse to the same instant, so the usual soft-then-hard
-/// grace period is not preserved and both fire together.
+/// exceed this cap, `warn_at` is anchored `WARN_BEFORE_HALT_GRACE` before the
+/// clamped `halt_at` so the soft-then-hard grace ordering is preserved.
 const MAX_TIMER_DURATION: Duration = Duration::from_secs(MAX_TIMER_DURATION_SECS);
+
+/// How far before the clamped `halt_at` to schedule `warn_at` when both deadlines
+/// exceed [`MAX_TIMER_DURATION`]. Matches the documented [`HALT_GRACE_PERIOD_DAYS`]-day grace window.
+const WARN_BEFORE_HALT_GRACE: Duration = Duration::from_secs(HALT_GRACE_PERIOD_DAYS * SECS_PER_DAY);
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -240,7 +249,29 @@ fn reset_checks_for_licenses(
     };
 
     let halt_at = to_positive_instant(claims.halt_at);
-    let warn_at = to_positive_instant(claims.warn_at);
+    let now_system = SystemTime::now();
+
+    // If both deadlines exceed MAX_TIMER_DURATION they would collapse to the same
+    // clamped instant, losing the soft-then-hard grace window. Detect this and
+    // anchor warn_at 28 days before the clamped halt_at to restore staged ordering.
+    let halt_exceeds_cap = claims
+        .halt_at
+        .duration_since(now_system)
+        .map(|d| d > MAX_TIMER_DURATION)
+        .unwrap_or(false);
+    let warn_exceeds_cap = claims
+        .warn_at
+        .duration_since(now_system)
+        .map(|d| d > MAX_TIMER_DURATION)
+        .unwrap_or(false);
+    let warn_at = if halt_exceeds_cap && warn_exceeds_cap {
+        halt_at - WARN_BEFORE_HALT_GRACE
+    } else {
+        to_positive_instant(claims.warn_at)
+    };
+
+    // Capture `now` after all to_positive_instant calls so that a past warn_at
+    // (returned as Instant::now() inside that function) correctly compares as <= now.
     let now = Instant::now();
     // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
     if halt_at > now {
@@ -295,10 +326,9 @@ fn reset_checks_for_licenses(
 /// queue's clock.
 ///
 /// Future times are clamped to [`MAX_TIMER_DURATION`] so `DelayQueue::insert_at` cannot
-/// overflow Tokio's timer wheel. Uplink license refreshes occur far more frequently than
-/// this cap, so the clamped deadline is replaced before it fires in practice. When both
-/// `warn_at` and `halt_at` exceed the cap they schedule at the same instant and the usual
-/// soft-then-hard grace ordering is not preserved.
+/// overflow Tokio's timer wheel. When both `warn_at` and `halt_at` exceed the cap,
+/// `reset_checks_for_licenses` anchors `warn_at` to [`WARN_BEFORE_HALT_GRACE`] before the
+/// clamped `halt_at` so the soft-then-hard grace ordering is preserved.
 fn to_positive_instant(system_time: SystemTime) -> Instant {
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
@@ -482,11 +512,17 @@ mod test {
             .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
-        assert_eq!(events.len(), 3);
-        assert_eq!(events[0], SimpleEvent::UpdateLicense);
-        // Clamped warn/halt share one deadline; event order is not staged (see MAX_TIMER_DURATION).
-        assert!(events.contains(&SimpleEvent::WarnLicense));
-        assert!(events.contains(&SimpleEvent::HaltLicense));
+        // When both deadlines exceed MAX_TIMER_DURATION, warn_at is anchored
+        // WARN_BEFORE_HALT_GRACE before the clamped halt_at, so staged ordering
+        // is preserved even for far-future licenses.
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
     }
 
     #[tokio::test(start_paused = true)]
