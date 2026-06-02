@@ -112,7 +112,7 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
-    let cache_control_headers = response
+    let cache_control_headers: Vec<String> = response
         .response
         .headers()
         .get_all(CACHE_CONTROL)
