@@ -221,9 +221,6 @@ impl Storage {
             .await?)
     }
 
-    /// Create a list of the cache tags that describe this document, without namespaces.
-    ///
-
     fn maintenance_timeout(&self) -> Duration {
         self.maintenance_timeout
     }
@@ -602,13 +599,12 @@ mod tests {
     use super::now;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::response_cache::ErrorCode;
-    use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::cache_tag::CacheTag;
+    use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
     use crate::plugins::response_cache::storage::Error;
 
     const SUBGRAPH_NAME: &str = "test";
-
 
     fn redis_config(clustered: bool) -> Config {
         Config::test(clustered, &random_namespace())
@@ -638,10 +634,7 @@ mod tests {
             key: "key".to_string(),
             data: Default::default(),
             control: Default::default(),
-            cache_tags: vec![
-                CacheTag::Subgraph,
-                CacheTag::Tag("invalidate".to_string()),
-            ],
+            cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
             expire: Duration::from_secs(60),
             debug: true,
         }
@@ -678,11 +671,14 @@ mod tests {
             .map(ToString::to_string)
             .collect();
 
-        let mut cache_tags = render_tag_keys(&{
-            let mut tags = vec![CacheTag::Subgraph];
-            tags.extend(invalidation_keys.iter().cloned().map(CacheTag::Tag));
-            tags
-        }, "products");
+        let mut cache_tags = render_tag_keys(
+            &{
+                let mut tags = vec![CacheTag::Subgraph];
+                tags.extend(invalidation_keys.iter().cloned().map(CacheTag::Tag));
+                tags
+            },
+            "products",
+        );
         cache_tags.sort();
         assert_debug_snapshot!(cache_tags);
     }
@@ -692,7 +688,6 @@ mod tests {
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
     /// * only expired keys will be removed via the cache maintenance
     mod ttl_guarantees {
-        use super::*;
         use std::collections::HashMap;
         use std::time::Duration;
 
@@ -703,6 +698,7 @@ mod tests {
         use super::SUBGRAPH_NAME;
         use super::common_document;
         use super::redis_config;
+        use super::*;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -720,8 +716,7 @@ mod tests {
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             let document_key = document.key.clone();
-            let expected_cache_tag_keys =
-                render_doc_keys(&document, SUBGRAPH_NAME);
+            let expected_cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
             let keys = storage.all_keys_in_namespace().await?;
@@ -769,20 +764,20 @@ mod tests {
                 Document {
                     key: "key1".to_string(),
                     cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("invalidation".to_string()),
-                    CacheTag::Tag("invalidation1".to_string()),
-                ],
+                        CacheTag::Subgraph,
+                        CacheTag::Tag("invalidation".to_string()),
+                        CacheTag::Tag("invalidation1".to_string()),
+                    ],
                     expire: Duration::from_secs(30),
                     ..common_document()
                 },
                 Document {
                     key: "key2".to_string(),
                     cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("invalidation".to_string()),
-                    CacheTag::Tag("invalidation2".to_string()),
-                ],
+                        CacheTag::Subgraph,
+                        CacheTag::Tag("invalidation".to_string()),
+                        CacheTag::Tag("invalidation2".to_string()),
+                    ],
                     expire: Duration::from_secs(60),
                     ..common_document()
                 },
@@ -802,9 +797,7 @@ mod tests {
             let mut expected_cache_tag_keys = Vec::new();
             for document in &documents {
                 expected_document_keys.push(document.key.clone());
-                expected_cache_tag_keys.push(
-                    render_doc_keys(&document, SUBGRAPH_NAME),
-                );
+                expected_cache_tag_keys.push(render_doc_keys(&document, SUBGRAPH_NAME));
             }
 
             let all_expected_cache_tag_keys: Vec<String> = expected_cache_tag_keys
@@ -1047,7 +1040,6 @@ mod tests {
 
     /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
     mod cache_tag_insert_failure_should_abort_key_insertion {
-        use super::*;
         use std::sync::Arc;
 
         use fred::error::Error;
@@ -1064,6 +1056,7 @@ mod tests {
         use super::SUBGRAPH_NAME;
         use super::common_document;
         use super::redis_config;
+        use super::*;
         use crate::plugins::response_cache::ErrorCode;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
@@ -1080,8 +1073,7 @@ mod tests {
 
             let document = common_document();
             let document_key = document.key.clone();
-            let cache_tag_keys =
-                render_doc_keys(&document, SUBGRAPH_NAME);
+            let cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
                 let namespaced_key = storage.make_key(key);
@@ -1120,16 +1112,12 @@ mod tests {
                 },
                 Document {
                     key: "key2".to_string(),
-                    cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("invalidate".to_string()),
-                ],
+                    cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
                     ..common_document()
                 },
             ];
 
-            let cache_tag_keys =
-                render_doc_keys(&documents[1], SUBGRAPH_NAME);
+            let cache_tag_keys = render_doc_keys(&documents[1], SUBGRAPH_NAME);
             for key in cache_tag_keys {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
@@ -1268,12 +1256,12 @@ mod tests {
     }
 
     mod invalidation {
-        use super::*;
         use tokio::sync::broadcast;
         use tower::BoxError;
 
         use super::common_document;
         use super::redis_config;
+        use super::*;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
         use crate::plugins::response_cache::storage::redis::Storage;
@@ -1334,28 +1322,19 @@ mod tests {
 
             let document1 = Document {
                 key: "key1".to_string(),
-                cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("A".to_string()),
-                ],
+                cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("A".to_string())],
                 ..common_document()
             };
 
             let document2 = Document {
                 key: "key2".to_string(),
-                cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("A".to_string()),
-                ],
+                cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("A".to_string())],
                 ..common_document()
             };
 
             let document3 = Document {
                 key: "key3".to_string(),
-                cache_tags: vec![
-                    CacheTag::Subgraph,
-                    CacheTag::Tag("B".to_string()),
-                ],
+                cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("B".to_string())],
                 ..common_document()
             };
 
