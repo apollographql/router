@@ -933,6 +933,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_bare_stale_if_error_defaults_to_max() {
+        // Bare stale-if-error (no =N) is not defined by RFC 5861 but was accepted by old router
+        // versions. For backward compat it is treated as u64::MAX, mirroring max-stale behavior.
+        let cc = CacheControl::try_from(&header_map(&[(
+            "cache-control",
+            "max-age=60, stale-if-error",
+        )]))
+        .unwrap();
+        assert_eq!(cc.max_age, Some(60));
+        assert_eq!(cc.stale_if_error, Some(u64::MAX));
+    }
+
+    #[test]
     fn parse_multiple_cache_control_headers() {
         // Multiple Cache-Control headers should be merged
         let mut map = http::HeaderMap::new();
