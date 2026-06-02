@@ -456,19 +456,8 @@ mod test {
 
     #[tokio::test(start_paused = true)]
     async fn license_expander_far_future_does_not_panic() {
-        let three_years_secs: u64 = 3 * 365 * 24 * 3600;
-        let now = SystemTime::now();
-        let license = License {
-            claims: Some(Claims {
-                iss: "".to_string(),
-                sub: "".to_string(),
-                aud: OneOrMany::One(Audience::SelfHosted),
-                warn_at: now + Duration::from_secs(three_years_secs - 1000),
-                halt_at: now + Duration::from_secs(three_years_secs),
-                tps: Default::default(),
-                allowed_features: Default::default(),
-            }),
-        };
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        let license = license_with_claim(three_years_ms - 1_000_000, three_years_ms);
 
         // Before the clamp fix this would panic with "invalid deadline; err=Invalid"
         // because the deadline exceeded tokio's timer wheel maximum of ~2^36 ms.
