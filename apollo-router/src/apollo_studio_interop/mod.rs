@@ -434,7 +434,7 @@ fn extract_enums_from_selection_set(
     result_set: &mut ReferencedEnums,
 ) {
     let mut stack: Vec<(&[SpecSelection], &Object)> = vec![(selection_set, selection_response)];
-    let mut visited_fragments: HashSet<(&str, *const Object)> = HashSet::new();
+    let mut visited_fragments: HashSet<(&str, &Object)> = HashSet::new();
 
     while let Some((selections, response)) = stack.pop() {
         for selection in selections.iter() {
@@ -465,7 +465,7 @@ fn extract_enums_from_selection_set(
                     stack.push((selection_set, response));
                 }
                 SpecSelection::FragmentSpread { name, .. } => {
-                    let key = (name.as_str(), response as *const Object);
+                    let key = (name.as_str(), response);
                     if visited_fragments.insert(key)
                         && let Some(fragment) = fragments.get(name)
                     {
