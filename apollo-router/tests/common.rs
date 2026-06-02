@@ -198,10 +198,6 @@ fn mint_test_license_jwt() -> String {
 /// bootstrap a missing baseline. If a future test needs Registry-source
 /// schema, the mock has to return a real `supergraphSdl` body (mirror
 /// the License JWT pattern above).
-///
-/// Lifted into the harness from a per-test helper that originally
-/// lived in `tests/integration/telemetry/metrics.rs::test_metrics_reloading`
-/// (`b3a0986e0`).
 async fn mock_license_uplink() -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
 
@@ -429,7 +425,7 @@ pub struct IntegrationTest {
 }
 
 impl IntegrationTest {
-    pub(crate) fn bind_address(&self) -> SocketAddr {
+    pub fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
             .expect("no bind address set, router must be started first.")
@@ -1574,7 +1570,7 @@ impl IntegrationTest {
 
     /// Like `graceful_shutdown` but lets the caller widen the
     /// `assert_shutdown` budget. Use only for tests with a documented
-    /// shutdown-drain race that the default 10 s budget cannot beat.
+    /// shutdown-drain race that the default 20 s budget cannot beat.
     /// Prefer fixing the underlying race when possible.
     #[allow(dead_code)]
     #[cfg(target_family = "unix")]
@@ -1636,7 +1632,15 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn wait_for_log_message(&mut self, msg: &str) {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Windows runners spawn subprocesses and dispatch filesystem-watch
+        // events noticeably slower than Unix, so reload-driven waits run
+        // close to the 30 s ceiling. Give Windows extra headroom.
+        let deadline = Instant::now()
+            + if cfg!(windows) {
+                Duration::from_secs(60)
+            } else {
+                Duration::from_secs(30)
+            };
         loop {
             while let Ok(line) = self.stdio_rx.try_recv() {
                 self.logs.push(line.clone());
@@ -1649,11 +1653,17 @@ impl IntegrationTest {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        self.dump_stack_traces();
+        self.dump_stack_traces().await;
         panic!(
             "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
             logs = self.logs.join("\n")
         );
+    }
+
+    #[allow(dead_code)]
+    pub fn logs(&mut self) -> Vec<String> {
+        self.read_logs();
+        self.logs.clone()
     }
 
     /// Sync fn using a loop to println!() each log
@@ -1703,7 +1713,7 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv()
                 && line.contains(msg)
             {
-                self.dump_stack_traces();
+                self.dump_stack_traces().await;
                 panic!(
                     "'{msg}' detected in logs. Log dump below:\n\n{logs}",
                     logs = self.logs.join("\n")
@@ -2034,24 +2044,33 @@ impl IntegrationTest {
         //   3. CI scheduling slack between the router process draining its
         //      connections and the OS actually reaping the process.
         //
-        // Previously 3 s. Raised to 10 s when the harness began injecting
-        // a `connection_shutdown_timeout` default to prevent the 60 s
+        // History: 3 s → 10 s (when the harness began injecting a
+        // `connection_shutdown_timeout` default to prevent the 60 s
         // production default from hanging tests that hold HTTP/2 client
-        // connections open past the response (see `merge_overrides`).
-        self.assert_shutdown_with_deadline(Duration::from_secs(10))
+        // connections open past the response — see `merge_overrides`) →
+        // 20 s (this change). Three tests independently flaked at the 10 s
+        // boundary in the May 2026 de-flake cycle
+        // (test_http2_max_header_list_size_exceeded fixed in `4d1b3e04e`;
+        // test_unix_socket_max_header_list_size in the same commit;
+        // test_http1_connection_persistence in #9472), each one fixed via a
+        // per-test `graceful_shutdown_with_deadline(20)` override. An audit
+        // then surfaced ~75 more structurally-identical sites across the
+        // telemetry, coprocessor, and subscriptions integration files —
+        // far more than the per-test override pattern can sustainably cover.
+        // Widening the default closes the bug class for the whole harness;
+        // 20 s is still ≪ the production 60 s ceiling, so a real router-exit
+        // regression still surfaces via the panic + thread-dump below, just
+        // 10 s later than before. See T17 in `blog-details.md`.
+        self.assert_shutdown_with_deadline(Duration::from_secs(20))
             .await;
     }
 
-    /// Variant of `assert_shutdown` that lets a specific test widen the
-    /// shutdown-budget when its shutdown path has a documented drain race
-    /// the default 10 s budget cannot beat.
+    /// Variant of `assert_shutdown` with an explicit per-call deadline.
     ///
-    /// Used by tests that trip the default 10 s deadline with a known
-    /// fingerprint (typically a hyper-client pool drain race or
-    /// OpenTelemetry SDK shutdown ordering bug, neither of which can be
-    /// pinned without Linux `dump_stack_traces`). Widening the budget
-    /// per-test rather than via the shared default keeps the rest of the
-    /// harness honest about shutdown regressions.
+    /// Kept for tests that genuinely need a deadline different from the
+    /// default 20 s (either tighter — to assert a specific shutdown bound —
+    /// or wider for documented-slow paths). Most call sites should prefer
+    /// the bare `graceful_shutdown()` and let the default budget handle it.
     #[allow(dead_code)]
     pub async fn assert_shutdown_with_deadline(&mut self, deadline: Duration) {
         let router = self.router.as_mut().expect("router must have been started");
@@ -2067,7 +2086,7 @@ impl IntegrationTest {
             }
         }
 
-        self.dump_stack_traces();
+        self.dump_stack_traces().await;
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 
@@ -2080,33 +2099,55 @@ impl IntegrationTest {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn dump_stack_traces(&self) {
-        if let Ok(trace) = rstack::TraceOptions::new()
-            .symbols(true)
-            .thread_names(true)
-            .trace(self.pid() as u32)
-        {
-            println!("dumped stack traces");
-            for thread in trace.threads() {
-                println!(
-                    "thread id: {}, name: {}",
-                    thread.id(),
-                    thread.name().unwrap_or("<unknown>")
-                );
-
-                for frame in thread.frames() {
+    pub async fn dump_stack_traces(&self) {
+        // rstack uses PTRACE_ATTACH under the hood with no internal timeout.
+        // If the target is in TASK_UNINTERRUPTIBLE or has wedged signal
+        // handling, the attach blocks indefinitely — outliving the panic the
+        // caller was about to fire and letting nextest's slow-timeout kill
+        // the whole process without surfacing the original deadline message.
+        // Bound the diagnostic on a blocking thread so the caller's panic
+        // always gets to run.
+        let pid = self.pid() as u32;
+        let trace_fut = tokio::task::spawn_blocking(move || {
+            rstack::TraceOptions::new()
+                .symbols(true)
+                .thread_names(true)
+                .trace(pid)
+        });
+        match tokio::time::timeout(Duration::from_secs(10), trace_fut).await {
+            Ok(Ok(Ok(trace))) => {
+                println!("dumped stack traces");
+                for thread in trace.threads() {
                     println!(
-                        "  {}",
-                        frame.symbol().map(|s| s.name()).unwrap_or("<unknown>")
+                        "thread id: {}, name: {}",
+                        thread.id(),
+                        thread.name().unwrap_or("<unknown>")
                     );
+
+                    for frame in thread.frames() {
+                        println!(
+                            "  {}",
+                            frame.symbol().map(|s| s.name()).unwrap_or("<unknown>")
+                        );
+                    }
                 }
             }
-        } else {
-            println!("failed to dump stack trace");
+            Ok(Ok(Err(_))) => {
+                println!("failed to dump stack trace");
+            }
+            Ok(Err(_)) => {
+                println!("dump_stack_traces blocking task panicked");
+            }
+            Err(_) => {
+                println!(
+                    "dump_stack_traces timed out after 10s — likely wedged child; \
+                     the panic that follows is authoritative"
+                );
+            }
         }
     }
     #[cfg(not(target_os = "linux"))]
-    pub fn dump_stack_traces(&self) {}
+    pub async fn dump_stack_traces(&self) {}
 
     #[allow(dead_code)]
     pub(crate) fn force_flush(&self) {
@@ -2327,11 +2368,10 @@ fn merge_overrides(
     // "unable to shutdown router, this probably means a hang".
     //
     // This race is latent in any test that makes an HTTP request and then
-    // calls `graceful_shutdown()`. It first surfaced on 2026-04-16 against
-    // `test_http2_max_header_list_size_exceeded` (see commit f4d6aa0c6).
-    // Rather than patch each vulnerable fixture individually, inject a 5 s
-    // default at the harness layer, paired with a widened `assert_shutdown`
-    // budget (see that helper for the matching constant).
+    // calls `graceful_shutdown()`. Rather than patch each vulnerable fixture
+    // individually, inject a 5 s default at the harness layer, paired with a
+    // widened `assert_shutdown` budget (see that helper for the matching
+    // constant).
     //
     // The 5 s value is a trade-off:
     // - Must be long enough that intentionally-in-flight requests finish

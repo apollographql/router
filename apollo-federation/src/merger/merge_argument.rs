@@ -363,10 +363,10 @@ impl Merger {
                 dest_default,
                 sources,
                 &self.subgraphs,
-                |v| Some(format!("default value {v}")),
+                |v| Some(format!("default value {}", v.serialize().no_indent())),
                 |pos, idx| {
                     Some(pos.get_default_value(self.subgraphs[idx].schema())
-                            .map(|v| format!("default value {v}"))
+                            .map(|v| format!("default value {}", v.serialize().no_indent()))
                             .unwrap_or_else(|| "no default value".to_string()))
                 },
             );
@@ -386,7 +386,7 @@ impl Merger {
                 |pos, idx| {
                     Some(
                         pos.get_default_value(self.subgraphs[idx].schema())
-                            .map(|v| v.to_string())
+                            .map(|v| v.serialize().no_indent().to_string())
                             .unwrap_or_else(|| "no default value".to_string()),
                     )
                 },

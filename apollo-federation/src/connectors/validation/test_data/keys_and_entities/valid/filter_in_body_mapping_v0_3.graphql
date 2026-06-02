@@ -1,0 +1,45 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.3"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "api", http: { baseURL: "http://localhost" })
+
+# Historical-memorial fork of `filter_in_body_mapping_v0_4.graphql`,
+# pinned at connect/v0.3. The fused-trie `variable_reference` fix that
+# unblocked RH-1345 / CNN-1093 is not version-gated, so v0.3 sees the
+# same correct behavior — this file documents the equivalence and
+# guards against accidental version skew. The body wraps its object
+# literal in `$(...)` because v0.3's grammar requires the explicit
+# expression wrapper that v0.4's unification dropped.
+
+type Query {
+  cart(id: ID!): Cart
+    @connect(
+      source: "api"
+      http: { GET: "/carts/{$args.id}" }
+      selection: "id items { id name product }"
+      entity: true
+    )
+}
+
+type Cart @key(fields: "id") {
+  id: ID!
+  items: [Item]!
+  result: String
+    @connect(
+      source: "api"
+      http: {
+        POST: "/process"
+        body: "$({ items: $this.items->filter(@.product) { id name } })"
+      }
+      selection: "$"
+    )
+}
+
+type Item {
+  id: ID!
+  name: String
+  product: String
+}

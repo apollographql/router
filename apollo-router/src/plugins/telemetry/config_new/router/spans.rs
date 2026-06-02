@@ -23,6 +23,18 @@ impl DefaultForLevel for RouterSpans {
         kind: TelemetryDataKind,
     ) {
         self.attributes.defaults_for_level(requirement_level, kind);
+
+        // When a user overrides client.name or client.version with a custom
+        // selector (e.g. `request_header`), the Extendable deserializer places
+        // it in `custom` and leaves the typed attribute field as None.
+        // defaults_for_level then mistakenly fills that None with Some(true).
+        // Clear it back so the custom selector is the sole source for the key.
+        if self.attributes.custom.contains_key("client.name") {
+            self.attributes.attributes.client_name = None;
+        }
+        if self.attributes.custom.contains_key("client.version") {
+            self.attributes.attributes.client_version = None;
+        }
     }
 }
 
@@ -455,5 +467,55 @@ mod test {
         assert!(values.iter().any(|key_val| key_val.key
             == opentelemetry::Key::from_static_str(OTEL_NAME)
             && key_val.value == opentelemetry::Value::String(String::from("new_name").into())));
+    }
+
+    #[test]
+    fn test_defaults_do_not_duplicate_custom_client_name_selector() {
+        use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+
+        let json = serde_json::json!({
+            "attributes": {
+                "client.name": {
+                    "request_header": "x-custom-client"
+                }
+            }
+        });
+
+        let mut spans: RouterSpans = serde_json::from_value(json).expect("should deserialize");
+
+        assert!(spans.attributes.attributes.client_name.is_none());
+        assert!(spans.attributes.custom.contains_key("client.name"));
+
+        spans.defaults_for_levels(
+            DefaultAttributeRequirementLevel::Required,
+            TelemetryDataKind::Traces,
+        );
+
+        assert!(
+            spans.attributes.attributes.client_name.is_none(),
+            "defaults_for_level must not set client_name when a custom selector already covers it"
+        );
+
+        // client.version has no custom selector, so it should still get the default.
+        assert_eq!(
+            spans.attributes.attributes.client_version,
+            Some(StandardAttribute::Bool(true)),
+        );
+
+        let request = router::Request::fake_builder()
+            .header("x-custom-client", "from-selector")
+            .build()
+            .unwrap();
+        let attrs = spans.attributes.on_request(&request);
+        let client_names: Vec<_> = attrs
+            .iter()
+            .filter(|kv| kv.key.as_str() == "client.name")
+            .collect();
+
+        assert_eq!(
+            client_names.len(),
+            1,
+            "on_request should produce exactly one client.name (from the custom selector), got {client_names:?}"
+        );
     }
 }

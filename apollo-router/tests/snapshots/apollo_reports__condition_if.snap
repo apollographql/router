@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: report
-snapshot_kind: text
 ---
 header:
   graph_ref: test
@@ -89,16 +88,6 @@ traces_per_query:
                                         error: []
                                         child:
                                           - original_field_name: ""
-                                            type: String
-                                            parent_type: Product
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                          - original_field_name: ""
                                             type: String!
                                             parent_type: Product
                                             cache_policy: ~
@@ -108,6 +97,16 @@ traces_per_query:
                                             child: []
                                             id:
                                               ResponseName: upc
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
                                         id:
                                           Index: 0
                                       - original_field_name: ""
@@ -119,16 +118,6 @@ traces_per_query:
                                         error: []
                                         child:
                                           - original_field_name: ""
-                                            type: String
-                                            parent_type: Product
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                          - original_field_name: ""
                                             type: String!
                                             parent_type: Product
                                             cache_policy: ~
@@ -138,6 +127,16 @@ traces_per_query:
                                             child: []
                                             id:
                                               ResponseName: upc
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
                                         id:
                                           Index: 1
                                       - original_field_name: ""
@@ -149,16 +148,6 @@ traces_per_query:
                                         error: []
                                         child:
                                           - original_field_name: ""
-                                            type: String
-                                            parent_type: Product
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                          - original_field_name: ""
                                             type: String!
                                             parent_type: Product
                                             cache_policy: ~
@@ -168,6 +157,16 @@ traces_per_query:
                                             child: []
                                             id:
                                               ResponseName: upc
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
                                         id:
                                           Index: 2
                                       - original_field_name: ""
@@ -179,16 +178,6 @@ traces_per_query:
                                         error: []
                                         child:
                                           - original_field_name: ""
-                                            type: String
-                                            parent_type: Product
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                          - original_field_name: ""
                                             type: String!
                                             parent_type: Product
                                             cache_policy: ~
@@ -198,6 +187,16 @@ traces_per_query:
                                             child: []
                                             id:
                                               ResponseName: upc
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
                                         id:
                                           Index: 3
                                     id:

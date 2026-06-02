@@ -152,7 +152,7 @@ pub(crate) fn validate_merged_schema(
             // happens for some reason. And of course, the type should be composite since it's also
             // one in at least the subgraph we're currently checking.
             let parent_type_pos_in_supergraph: CompositeTypeDefinitionPosition = supergraph_schema
-                .get_type(parent_field_pos.type_name.clone())?
+                .get_type(&parent_field_pos.type_name)?
                 .try_into()?;
 
             let Err(error) = FieldSet::parse_and_validate(
@@ -335,8 +335,7 @@ fn add_requires_error(
             if other_subgraph.name == subgraph_name {
                 return Ok(None);
             }
-            let Ok(type_pos_in_other_subgraph) =
-                other_subgraph.schema().get_type(type_name.clone())
+            let Ok(type_pos_in_other_subgraph) = other_subgraph.schema().get_type(&type_name)
             else {
                 return Ok(None);
             };

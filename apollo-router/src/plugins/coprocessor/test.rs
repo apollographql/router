@@ -5107,6 +5107,8 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_deletes_missing_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5115,6 +5117,8 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
         target_context.insert("k3", "v3".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2", "k3"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context without k2 (deleted)
         let returned_context = Context::new();
@@ -5129,6 +5133,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5148,12 +5153,16 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_adds_new_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
         // Create a context with some keys
         let target_context = Context::new();
         target_context.insert("k1", "v1".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context with a new key
         let returned_context = Context::new();
@@ -5167,6 +5176,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5204,10 +5214,16 @@ mod tests {
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
         let context_config =
             ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &context_config)
-            .unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_config,
+            &keys_sent,
+        )
+        .unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5227,6 +5243,8 @@ mod tests {
         )]
         context_conf: ContextConf,
     ) {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5234,8 +5252,18 @@ mod tests {
             Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
         let returned_context =
             Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+        let keys_sent: HashSet<String> = [target_context_key_name]
+            .into_iter()
+            .map(String::from)
+            .collect();
 
-        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_conf,
+            &keys_sent,
+        )
+        .unwrap();
 
         assert_eq!(
             target_context.get_json_value(CLIENT_NAME),
@@ -5246,6 +5274,100 @@ mod tests {
             !target_context.contains_key(DEPRECATED_CLIENT_NAME),
             "DEPRECATED_CLIENT_NAME should not be present"
         );
+    }
+
+    #[test]
+    fn test_update_context_from_coprocessor_preserves_concurrently_added_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate: keys_sent = {k1, k2} (snapshot at time T1), then k3 is added
+        // to target concurrently (at time T2), coprocessor returns {k1} (deleted k2).
+        // Result: k1 kept, k2 deleted, k3 preserved (was never sent).
+        let target_context = Context::new();
+        target_context.insert("k1", "v1".to_string()).unwrap();
+        target_context.insert("k2", "v2".to_string()).unwrap();
+        // k3 simulates a key added by a concurrent parallel subgraph stage after the
+        // snapshot was taken but before the retain runs
+        target_context
+            .insert("k3", "concurrent_value".to_string())
+            .unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2"].into_iter().map(String::from).collect();
+        let returned_context = Context::new();
+        returned_context.insert("k1", "v1".to_string()).unwrap();
+        // k2 intentionally removed by coprocessor
+        // k3 was never sent, must survive
+
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        assert!(target_context.contains_key("k1"));
+        assert!(!target_context.contains_key("k2")); // deleted by coprocessor
+        assert!(target_context.contains_key("k3")); // preserved (never sent)
+    }
+
+    #[test]
+    fn test_sibling_subgraph_response_does_not_delete_other_subgraphs_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate the parallel fanout scenario:
+        // - accounts SubgraphRequest added accounts_request_start to shared context
+        // - book SubgraphResponse fires, its snapshot didn't include accounts_request_start
+        // - book's coprocessor returns without accounts_request_start
+        // - accounts_request_start must survive in the shared context
+        let shared_context = Context::new();
+        shared_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        shared_context
+            .insert("accounts_request_start", 1234i64)
+            .unwrap();
+        shared_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+
+        // book's snapshot only had base_key and book_request_start at the time
+        let keys_sent: HashSet<String> = ["base_key", "book_request_start"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let returned_context = Context::new();
+        returned_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        returned_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+        returned_context
+            .insert("book_request_end", 5700i64)
+            .unwrap();
+
+        update_context_from_coprocessor(
+            &shared_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        // accounts_request_start was never sent to book's coprocessor, so it must survive
+        assert!(shared_context.contains_key("accounts_request_start"));
+        assert!(shared_context.contains_key("book_request_start"));
+        // new key added by coprocessor
+        assert!(shared_context.contains_key("book_request_end"));
+        assert!(shared_context.contains_key("base_key"));
     }
 
     // Subgraph stage metrics test
