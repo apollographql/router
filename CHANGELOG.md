@@ -73,6 +73,12 @@ Semantics match Rust's `str::trim` / `str::trim_start` / `str::trim_end`: locale
 
 By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9211
 
+### Support `@connect` directives without an `http` block ([PR #9124](https://github.com/apollographql/router/pull/9124))
+
+A `@connect` directive can now omit its `http` property, producing a *requestless connector* that applies its `selection` mapping to data already available to the connector without issuing an outbound HTTP request. This is useful for computed or derived fields, and is supported in nested mutations.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/9124
+
 ### Add `ignore_auth_context` option to subscription deduplication config ([PR #9078](https://github.com/apollographql/router/pull/9078))
 
 When the router's JWT authentication plugin validates a token, it decodes the claims and stores them internally on the request — before any subgraph request is built.  The router then factors those stored claims into its check for whether two subscriptions are identical, separately from any HTTP headers it may forward downstream.
