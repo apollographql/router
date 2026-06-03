@@ -11,6 +11,7 @@ use http::Method;
 use http::StatusCode;
 use http::header::AUTHORIZATION;
 use http::header::CONTENT_TYPE;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -80,8 +81,6 @@ async fn handle_invalidation(
         .await
 }
 
-const APPLICATION_JSON: &str = "application/json";
-
 async fn handle_invalidation_inner(state: InvalidationState, req: http::Request<Body>) -> Response {
     let (parts, body) = req.into_parts();
     if !parts.headers.contains_key(AUTHORIZATION) {
@@ -122,8 +121,9 @@ async fn handle_invalidation_inner(state: InvalidationState, req: http::Request<
                             .collect::<Vec<&'static str>>()
                             .join(", "),
                     );
-                    let shared_key_is_valid =
-                        body.iter()
+                    let shared_key_is_valid = !body.is_empty()
+                        && body
+                            .iter()
                             .flat_map(|b| b.subgraph_names())
                             .all(|subgraph_name| {
                                 validate_shared_key(&state.config, &shared_key, &subgraph_name)
@@ -146,7 +146,7 @@ async fn handle_invalidation_inner(state: InvalidationState, req: http::Request<
                                 serde_json::to_string(&json!({"count": count})).unwrap_or_default();
                             (
                                 StatusCode::ACCEPTED,
-                                [(CONTENT_TYPE, APPLICATION_JSON)],
+                                [(CONTENT_TYPE, APPLICATION_JSON.essence_str())],
                                 body,
                             )
                                 .into_response()
@@ -180,7 +180,12 @@ fn json_error_response(status: StatusCode, message: &str) -> Response {
         }]
     }))
     .unwrap_or_default();
-    (status, [(CONTENT_TYPE, APPLICATION_JSON)], body).into_response()
+    (
+        status,
+        [(CONTENT_TYPE, APPLICATION_JSON.essence_str())],
+        body,
+    )
+        .into_response()
 }
 
 fn validate_shared_key(

@@ -10,6 +10,8 @@ use bytes::Buf;
 use http::Method;
 use http::StatusCode;
 use http::header::AUTHORIZATION;
+use http::header::CONTENT_TYPE;
+use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -64,8 +66,8 @@ fn concurrent_requests_count() -> u32 {
 
 #[derive(Clone)]
 pub(crate) struct InvalidationState {
-    pub(crate) config: Arc<SubgraphConfiguration<Subgraph>>,
-    pub(crate) invalidation: Invalidation,
+    config: Arc<SubgraphConfiguration<Subgraph>>,
+    invalidation: Invalidation,
 }
 
 pub(crate) fn invalidation_router(
@@ -154,7 +156,12 @@ async fn handle_invalidation_inner(state: InvalidationState, req: http::Request<
                         Ok(count) => {
                             let body =
                                 serde_json::to_string(&json!({"count": count})).unwrap_or_default();
-                            (StatusCode::ACCEPTED, body).into_response()
+                            (
+                                StatusCode::ACCEPTED,
+                                [(CONTENT_TYPE, APPLICATION_JSON.essence_str())],
+                                body,
+                            )
+                                .into_response()
                         }
                         Err(err) => {
                             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -185,7 +192,12 @@ fn error_response(status: StatusCode, message: &str) -> Response {
         }]
     }))
     .unwrap_or_default();
-    (status, body).into_response()
+    (
+        status,
+        [(CONTENT_TYPE, APPLICATION_JSON.essence_str())],
+        body,
+    )
+        .into_response()
 }
 
 fn valid_shared_key(
