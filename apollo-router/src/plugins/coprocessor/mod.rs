@@ -69,6 +69,11 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
 
 /// Clone `payload` and mask its sensitive headers via `rule_for_direction`.
 /// Shared by the lazy debug wrappers below.
+///
+/// NOTE: only the `headers` field is masked. The `body`, `context`, and `sdl`
+/// fields are cloned and logged verbatim — header masking does not scan them.
+/// A coprocessor config that copies a sensitive header value into the request
+/// body or context will still have that value appear in these debug logs.
 fn mask_payload_clone<T, F>(
     payload: &Externalizable<T>,
     masking_rules: Option<&MaskingRulesMap>,
@@ -94,6 +99,9 @@ where
 /// Without this scrub, the `tracing::debug!(?payload, ...)` lines in each
 /// coprocessor stage would print the full Debug of `Externalizable`, including
 /// the raw `headers` field — defeating the surrounding "(masked)" log.
+///
+/// Masking is limited to the `headers` field (see [`mask_payload_clone`]); the
+/// `body`/`context`/`sdl` fields are logged in full.
 pub(super) fn scrub_payload_for_log<'a, T, F>(
     payload: &'a Externalizable<T>,
     masking_rules: Option<&'a MaskingRulesMap>,

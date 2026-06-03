@@ -9,7 +9,7 @@ Adds header masking configuration to automatically mask sensitive header values 
 - **Independently configurable request and response masking** — different sensitive lists for headers leaving the router vs. headers coming back
 - **Global and per-subgraph configuration** — set defaults under `headers.all` and override for specific subgraphs
 - **Connector inheritance** — connectors inherit masking rules from their parent subgraph
-- **Comprehensive coverage** across `router.request`, `router.response`, `supergraph.request`, `supergraph.response`, `connector.request`, `connector.response` telemetry events, coprocessor logging, and OpenTelemetry spans
+- **Comprehensive coverage** across `router.request`, `router.response`, `supergraph.request`, `supergraph.response`, `connector.request`, `connector.response` telemetry events, coprocessor logging, OpenTelemetry spans, and Apollo trace-report header forwarding (`telemetry.apollo.send_headers`) — which now redacts the same sensitive headers as the rest of header masking instead of only a hardcoded `authorization`/`cookie`/`set-cookie` set
 - **Case-insensitive matching** for header names
 
 **Configuration:**
@@ -70,6 +70,8 @@ telemetry:
 ```
 
 > **Note:** Telemetry emitted at the shared `http_client` transport layer uses the global masking rules, because that layer has no subgraph identity. Per-subgraph overrides still apply at the subgraph and connector telemetry layers, and the global rules include the fail-secure defaults.
+>
+> **Note:** Masking applies to header *values*. In coprocessor debug logs, only the headers are masked — a request `body` or `context` that a coprocessor copies a sensitive header into is logged verbatim, so avoid placing secrets there if debug logging is enabled.
 
 When enabled, sensitive header values are replaced with `***MASKED***` in debug logs and telemetry output while preserving header names for debugging purposes.
 

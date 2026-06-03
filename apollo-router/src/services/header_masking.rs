@@ -225,6 +225,15 @@ fn should_mask_header(
     })
 }
 
+/// Whether a request header is sensitive per the global (non-subgraph) masking
+/// rules. Exposed for redaction paths that don't have a subgraph context — e.g.
+/// Apollo trace-report header forwarding — so they share the same sensitivity
+/// source as the rest of header masking instead of a separate hardcoded list.
+/// Fail-secure: uses the built-in defaults when no rules are installed.
+pub(crate) fn is_sensitive_request_header(context: &Context, header_name: &str) -> bool {
+    should_mask_header(context, Direction::Request, None, header_name)
+}
+
 /// Resolve the value a telemetry header selector should emit, applying — in
 /// priority order — the per-selector `redact` override and then the
 /// global/per-subgraph masking rules from `context`. `value` is the raw header
