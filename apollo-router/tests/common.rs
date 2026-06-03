@@ -680,7 +680,7 @@ impl Telemetry {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 );
 
                 if let Some(psr) = psr {
@@ -693,14 +693,14 @@ impl Telemetry {
                 let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.inject_context(
                     &ctx,
-                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 )
             }
             _ => {}
@@ -1458,7 +1458,7 @@ impl IntegrationTest {
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
-                        &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
@@ -1499,7 +1499,7 @@ impl IntegrationTest {
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &span.context(),
-                &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
             );
         });
 
