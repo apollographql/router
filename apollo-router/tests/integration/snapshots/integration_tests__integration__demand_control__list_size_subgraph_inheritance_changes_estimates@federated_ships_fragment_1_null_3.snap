@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/integration/demand_control.rs
+assertion_line: 479
 expression: parse_result_for_snapshot(response).await
 ---
 {
@@ -8,9 +9,9 @@ expression: parse_result_for_snapshot(response).await
     "users": 5.0,
     "vehicles": 10.0
   },
-  "apollo::demand_control::estimated_cost": 8.0,
+  "apollo::demand_control::estimated_cost": 10.0,
   "apollo::demand_control::estimated_cost_by_subgraph": {
-    "users": 2.0,
+    "users": 4.0,
     "vehicles": 6.0
   },
   "apollo::demand_control::result": "COST_OK",

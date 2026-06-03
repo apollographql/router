@@ -9,9 +9,9 @@ expression: parse_result_for_snapshot(response).await
     "users": 5.0,
     "vehicles": 10.0
   },
-  "apollo::demand_control::estimated_cost": 9.0,
+  "apollo::demand_control::estimated_cost": 11.0,
   "apollo::demand_control::estimated_cost_by_subgraph": {
-    "users": 3.0,
+    "users": 5.0,
     "vehicles": 6.0
   },
   "apollo::demand_control::result": "COST_OK",
