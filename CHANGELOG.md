@@ -75,7 +75,7 @@ By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/ro
 
 ### Support `@connect` directives without an `http` block ([PR #9124](https://github.com/apollographql/router/pull/9124))
 
-A `@connect` directive can now omit its `http` property, producing a *requestless connector* that applies its `selection` mapping to data already available to the connector without issuing an outbound HTTP request. This is useful for computed or derived fields, and is supported in nested mutations.
+A `@connect` directive can now omit its `http` property, producing a *mapping-only* (requestless) connector that resolves a field by applying its `selection` to data already available — such as field arguments and the enclosing object — without issuing an outbound HTTP request. Because no transport runs, the selection cannot reference transport-derived data (the response body, `$status`, or `$response`); doing so is rejected at composition. Requestless connectors are also supported in nested mutations.
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/9124
 
