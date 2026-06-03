@@ -45,6 +45,9 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::protocols::websocket::GraphqlWebSocket;
+use crate::protocols::websocket::INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE;
+use crate::protocols::websocket::WEBSOCKET_CLOSE_ERROR_CODE;
+use crate::protocols::websocket::WEBSOCKET_MESSAGE_ERROR_CODE;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::services::OperationKind;
 use crate::services::SubgraphRequest;
@@ -246,6 +249,7 @@ async fn call_websocket(
         subgraph_cfg,
         subscription_hash,
         log_request_level,
+        false,
     )
     .await?;
 
@@ -274,7 +278,7 @@ async fn call_websocket(
     // Capture the current span so reconnect handshakes chain to the originating subscription
     // trace rather than starting a fresh root traceparent.
     let forwarding_span = tracing::Span::current();
-    tokio::task::spawn(
+    let forwarding_task = tokio::task::spawn(
         async move {
             let mut gql_stream = gql_stream;
             let mut stream_completed_normally = completed_normally;
@@ -387,6 +391,7 @@ async fn call_websocket(
                                 &retry_subgraph_cfg,
                                 retry_subscription_hash.clone(),
                                 log_request_level,
+                                true,
                             ) => res,
                         };
                         // Count only attempts that actually issued a handshake. A closing signal
@@ -427,7 +432,14 @@ async fn call_websocket(
         .instrument(forwarding_span),
     );
 
-    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
+    // Hand the client-facing stream to the caller. If the receiver was dropped between spawning
+    // the forwarding task and this send (e.g. the request was cancelled), abort the task so it
+    // doesn't keep the subgraph WebSocket open for a subscription nobody is listening to. The
+    // abort drops `gql_stream` (closing the WS) and `handle_sink` (tearing down the topic).
+    if let Err(err) = subscription_stream_tx.send(Box::pin(handle_stream)).await {
+        forwarding_task.abort();
+        return Err(err.into());
+    }
 
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
@@ -687,6 +699,11 @@ async fn open_ws_gql_stream(
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
     log_request_level: Option<EventLevel>,
+    // When true, this is a reconnect attempt rather than the initial connect. Handshake failures
+    // are then counted by the reconnect machinery's own metric, so they must not also increment
+    // `apollo.router.operations.subscriptions.rejected`, which tracks rejected *subscription
+    // requests*, not reconnect failures.
+    is_reconnect: bool,
 ) -> Result<
     (
         BoxGqlStream,
@@ -797,7 +814,9 @@ async fn open_ws_gql_stream(
             "WebSocket connection failed"
         );
 
-        increment_subgraph_rejected_counter(service_name);
+        if !is_reconnect {
+            increment_subgraph_rejected_counter(service_name);
+        }
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
             reason: format!("cannot connect websocket to subgraph: {error_details}"),
@@ -812,7 +831,9 @@ async fn open_ws_gql_stream(
     )
     .await
     .map_err(|err| {
-        increment_subgraph_rejected_counter(service_name);
+        if !is_reconnect {
+            increment_subgraph_rejected_counter(service_name);
+        }
         FetchError::SubrequestWsError {
             service: service_name.to_string(),
             reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
@@ -823,7 +844,9 @@ async fn open_ws_gql_stream(
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| {
-            increment_subgraph_rejected_counter(service_name);
+            if !is_reconnect {
+                increment_subgraph_rejected_counter(service_name);
+            }
             FetchError::SubrequestWsError {
                 service: service_name.to_string(),
                 reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
@@ -852,17 +875,79 @@ fn increment_subgraph_ended_counter(service_name: &str) {
     );
 }
 
-/// True if the response is one of the synthetic error items emitted by
-/// `convert_websocket_stream` for an abnormal subgraph close or a read failure.
-/// These are transport-level events the reconnect machinery will recover from;
-/// forwarding them to clients with `subscribed=false` would prematurely
-/// terminate HTTP-multipart subscriptions.
+/// True if the response is one of the synthetic error items emitted while reading a subgraph
+/// WebSocket stream — an abnormal close, a read failure, or a message that fails to deserialize.
+/// These are transport-level events the reconnect machinery will recover from; forwarding them to
+/// clients would prematurely terminate HTTP-multipart subscriptions. Matching is keyed on the
+/// shared extension-code constants alone (not on `subscribed`): the close/read errors set
+/// `subscribed=false`, but the deserialize error leaves `subscribed=None`, and both must be
+/// suppressed during the reconnect window.
 fn is_transient_transport_error(resp: &graphql::Response) -> bool {
-    resp.subscribed == Some(false)
-        && resp.errors.iter().any(|e| {
-            matches!(
-                e.extension_code().as_deref(),
-                Some("WEBSOCKET_CLOSE_ERROR") | Some("WEBSOCKET_MESSAGE_ERROR")
-            )
-        })
+    resp.errors.iter().any(|e| {
+        matches!(
+            e.extension_code().as_deref(),
+            Some(WEBSOCKET_CLOSE_ERROR_CODE)
+                | Some(WEBSOCKET_MESSAGE_ERROR_CODE)
+                | Some(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE;
+    use super::WEBSOCKET_CLOSE_ERROR_CODE;
+    use super::WEBSOCKET_MESSAGE_ERROR_CODE;
+    use super::is_transient_transport_error;
+    use crate::graphql;
+
+    fn error_response(code: &str) -> graphql::Error {
+        graphql::Error::builder()
+            .message("transport error")
+            .extension_code(code)
+            .build()
+    }
+
+    #[test]
+    fn suppresses_websocket_close_and_read_errors() {
+        // Close/read errors carry subscribed=false (set by into_graphql_response).
+        let close = graphql::Response::builder()
+            .subscribed(false)
+            .error(error_response(WEBSOCKET_CLOSE_ERROR_CODE))
+            .build();
+        assert!(is_transient_transport_error(&close));
+
+        let read = graphql::Response::builder()
+            .subscribed(false)
+            .error(error_response(WEBSOCKET_MESSAGE_ERROR_CODE))
+            .build();
+        assert!(is_transient_transport_error(&read));
+    }
+
+    #[test]
+    fn suppresses_deserialize_error_even_though_subscribed_is_none() {
+        // Regression: the deserialize error is built without `subscribed(false)`, so
+        // `subscribed` is None. It must still be suppressed during a reconnect window;
+        // otherwise it reaches HTTP-multipart clients, where `subscribed.unwrap_or(false)`
+        // resolves to false and tears the client stream down before reconnect can recover.
+        let parse = graphql::Response::builder()
+            .error(error_response(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE))
+            .build();
+        assert_eq!(parse.subscribed, None);
+        assert!(is_transient_transport_error(&parse));
+    }
+
+    #[test]
+    fn does_not_suppress_data_or_application_errors() {
+        // Normal data event.
+        let data = graphql::Response::builder().subscribed(true).build();
+        assert!(!is_transient_transport_error(&data));
+
+        // A genuine subgraph application error (different code) must reach the client.
+        let app_err = graphql::Response::builder()
+            .subscribed(false)
+            .error(error_response("SOME_SUBGRAPH_ERROR"))
+            .build();
+        assert!(!is_transient_transport_error(&app_err));
+    }
 }

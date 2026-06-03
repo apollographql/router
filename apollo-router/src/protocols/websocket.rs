@@ -39,6 +39,16 @@ const GRAPHQL_WS_SUBPROTOCOL: &str = "graphql-transport-ws";
 /// See [`WebSocketProtocol::SubscriptionsTransportWs`].
 const SUBSCRIPTIONS_TRANSPORT_WS_SUBPROTOCOL: &str = "graphql-ws";
 
+/// Extension code for the synthetic error emitted when the subgraph closes the WebSocket with a
+/// non-normal close code.
+pub(crate) const WEBSOCKET_CLOSE_ERROR_CODE: &str = "WEBSOCKET_CLOSE_ERROR";
+/// Extension code for the synthetic error emitted when reading from the subgraph WebSocket fails.
+pub(crate) const WEBSOCKET_MESSAGE_ERROR_CODE: &str = "WEBSOCKET_MESSAGE_ERROR";
+/// Extension code for the synthetic error emitted when a subgraph WebSocket message cannot be
+/// deserialized.
+pub(crate) const INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE: &str =
+    "INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT";
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema, Copy)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WebSocketProtocol {
@@ -391,7 +401,7 @@ where
                         payload: ServerError::Error(
                             graphql::Error::builder()
                                 .message(format!("websocket connection has been closed with error code '{code}' and reason '{reason}'"))
-                                .extension_code("WEBSOCKET_CLOSE_ERROR")
+                                .extension_code(WEBSOCKET_CLOSE_ERROR_CODE)
                                 .build(),
                         ),
                     })
@@ -406,7 +416,7 @@ where
                     payload: ServerError::Error(
                         graphql::Error::builder()
                             .message("cannot read message from websocket")
-                            .extension_code("WEBSOCKET_MESSAGE_ERROR")
+                            .extension_code(WEBSOCKET_MESSAGE_ERROR_CODE)
                             .build(),
                     ),
                 })
@@ -599,7 +609,7 @@ where
                                     .message(format!(
                                         "cannot deserialize websocket server message: {err:?}"
                                     ))
-                                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                                    .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
                                     .build(),
                             )
                             .build()

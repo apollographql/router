@@ -2717,6 +2717,84 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// First connection: completes the handshake, sends one event, then drops with an abnormal
+    /// close (triggering a reconnect). Every subsequent connection refuses the WebSocket upgrade
+    /// (HTTP 500), so the reconnect handshake fails inside `open_ws_gql_stream`. Used to verify a
+    /// failed *reconnect* handshake does not increment the `rejected` counter.
+    async fn emulate_websocket_server_rejects_reconnect(
+        listener: TcpListener,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        let app = Router::new()
+            .route(
+                "/ws",
+                get(
+                    |ws: WebSocketUpgrade,
+                     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+                     State(count): State<Arc<AtomicU32>>| async move {
+                        let conn_num = count.fetch_add(1, Ordering::SeqCst);
+                        if conn_num > 0 {
+                            // Refuse the upgrade so the reconnect handshake fails.
+                            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "no upgrade")
+                                .into_response();
+                        }
+                        ws.protocols(["graphql-transport-ws"])
+                            .on_upgrade(move |mut socket| async move {
+                                let msg =
+                                    socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                                assert!(matches!(
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    ClientMessage::ConnectionInit { .. }
+                                ));
+                                socket
+                                    .send(Message::text(
+                                        serde_json::to_string(&ServerMessage::ConnectionAck)
+                                            .unwrap(),
+                                    ))
+                                    .await
+                                    .unwrap();
+                                let msg =
+                                    socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                                let client_id = if let ClientMessage::Subscribe { id, .. } =
+                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                {
+                                    id
+                                } else {
+                                    panic!("expected Subscribe message");
+                                };
+                                socket
+                                    .send(Message::text(
+                                        serde_json::to_string(&ServerMessage::Next {
+                                            id: client_id,
+                                            payload: graphql::Response::builder()
+                                                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                                .build(),
+                                        })
+                                        .unwrap(),
+                                    ))
+                                    .await
+                                    .unwrap();
+                                socket
+                                    .send(Message::Close(Some(CloseFrame {
+                                        code: 1011,
+                                        reason: "unexpected termination".into(),
+                                    })))
+                                    .await
+                                    .unwrap();
+                            })
+                            .into_response()
+                    },
+                ),
+            )
+            .with_state(connection_count);
+
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     /// Like `emulate_websocket_server_that_completes` but simulates an unexpected connection drop
     /// (abnormal close frame) instead of a protocol-level Complete. Used to test reconnect logic
     /// without triggering the completed_normally guard.
@@ -3234,6 +3312,108 @@ mod tests {
             assert_counter!(
                 "apollo.router.operations.subscriptions.reconnect",
                 2,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// A failed *reconnect* handshake must increment the reconnect counter but NOT the
+    /// `rejected` counter, which tracks rejected subscription requests rather than reconnect
+    /// failures. The initial connect succeeds (so `rejected` is never touched there); the single
+    /// reconnect attempt fails the WebSocket upgrade.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_failed_reconnect_does_not_increment_rejected() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let connection_count = Arc::new(AtomicU32::new(0));
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_rejects_reconnect(
+                listener,
+                connection_count.clone(),
+            ));
+
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                1,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Event from the initial (successful) connection.
+            let first = gql_stream.next().await.unwrap();
+            assert_eq!(
+                first,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+
+            // The reconnect handshake fails; after the single attempt is exhausted the stream
+            // terminates. Drain any error items, then assert the stream ends.
+            loop {
+                match gql_stream.next().await {
+                    Some(item) if !item.errors.is_empty() => continue,
+                    Some(_) => panic!("unexpected data after failed reconnect"),
+                    None => break,
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // One reconnect attempt was issued (and failed).
+            assert_counter!(
+                "apollo.router.operations.subscriptions.reconnect",
+                1,
+                "subgraph.name" = "test"
+            );
+            // The subscription ultimately terminated subgraph-side.
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+            // A failed reconnect handshake must NOT be counted as a rejected subscription request.
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.rejected",
+                u64,
                 "subgraph.name" = "test"
             );
 
