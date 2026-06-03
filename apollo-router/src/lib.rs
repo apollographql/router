@@ -85,6 +85,8 @@ pub(crate) mod allocator;
 pub mod otel_compat;
 mod registry;
 
+pub use axum;
+
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
