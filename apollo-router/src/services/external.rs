@@ -324,7 +324,7 @@ where
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
 
