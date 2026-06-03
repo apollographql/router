@@ -219,10 +219,12 @@ fn should_mask_header(
     subgraph: Option<&str>,
     header_name: &str,
 ) -> bool {
-    context.extensions().with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
-        Some(m) => m.rules_for(direction, subgraph).should_mask(header_name),
-        None => default_masking_rules().should_mask(header_name),
-    })
+    context
+        .extensions()
+        .with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
+            Some(m) => m.rules_for(direction, subgraph).should_mask(header_name),
+            None => default_masking_rules().should_mask(header_name),
+        })
 }
 
 /// Whether a request header is sensitive per the global (non-subgraph) masking
@@ -275,10 +277,12 @@ pub(crate) fn masked_headers_for_log(
     subgraph: Option<&str>,
     headers: &HeaderMap<HeaderValue>,
 ) -> String {
-    context.extensions().with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
-        Some(m) => m.rules_for(direction, subgraph).mask_headers_debug(headers),
-        None => default_masking_rules().mask_headers_debug(headers),
-    })
+    context
+        .extensions()
+        .with_lock(|lock| match lock.get::<Arc<MaskingRulesMap>>() {
+            Some(m) => m.rules_for(direction, subgraph).mask_headers_debug(headers),
+            None => default_masking_rules().mask_headers_debug(headers),
+        })
 }
 
 #[cfg(test)]

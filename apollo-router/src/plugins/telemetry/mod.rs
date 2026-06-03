@@ -1898,7 +1898,11 @@ pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
     VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
 }
 
-fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders, context: &Context) -> String {
+fn filter_headers(
+    headers: &HeaderMap,
+    forward_rules: &ForwardHeaders,
+    context: &Context,
+) -> String {
     if let ForwardHeaders::None = forward_rules {
         return String::from("{}");
     }
@@ -3290,8 +3294,7 @@ mod tests {
             HeaderName::from_static("apollo-x-name"),
             HeaderValue::from_static("polaris"),
         );
-        let filtered_headers =
-            super::filter_headers(&headers, &fw_headers, &crate::Context::new());
+        let filtered_headers = super::filter_headers(&headers, &fw_headers, &crate::Context::new());
         assert_eq!(
             filtered_headers.as_str(),
             r#"{"apollo-x-name":["polaris"],"test":["content"]}"#
