@@ -78,8 +78,6 @@ pub(crate) struct QueryAnalysisLayer {
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
     metrics_reference_mode: ApolloMetricsReferenceMode,
-    max_recursive_selections: u32,
-    warn_only: bool,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -93,8 +91,6 @@ impl QueryAnalysisLayer {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
         let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(&configuration);
-        let max_recursive_selections = configuration.limits.router.max_recursive_selections;
-        let warn_only = configuration.limits.router.warn_only;
 
         Self {
             schema,
@@ -109,8 +105,6 @@ impl QueryAnalysisLayer {
             enable_authorization_directives,
             configuration,
             metrics_reference_mode,
-            max_recursive_selections,
-            warn_only,
         }
     }
 
@@ -126,8 +120,8 @@ impl QueryAnalysisLayer {
         let operation_name = operation_name.map(|o| o.to_string());
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
-        let max_recursive_selections = self.max_recursive_selections;
-        let warn_only = self.warn_only;
+        let max_recursive_selections = conf.limits.router.max_recursive_selections;
+        let warn_only = conf.limits.router.warn_only;
 
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
