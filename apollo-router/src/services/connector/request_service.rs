@@ -353,37 +353,18 @@ fn log_request(
     request: &http::Request<String>,
     log_request_level: Option<EventLevel>,
     label: &str,
-    #[cfg_attr(test, allow(unused_variables))] context: &Context,
-    #[cfg_attr(test, allow(unused_variables))] subgraph_name: &str,
+    context: &Context,
+    subgraph_name: &str,
 ) {
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
 
-        let header_string = {
-            #[cfg(test)]
-            {
-                let mut headers: IndexMap<String, http::HeaderValue> = request
-                    .headers()
-                    .clone()
-                    .into_iter()
-                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                    .collect();
-                headers.sort_keys();
-                format!("{headers:?}")
-            }
-            #[cfg(not(test))]
-            {
-                let headers = request.headers();
-                context.extensions().with_lock(|lock| {
-                    lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                        .map(|m| {
-                            m.get_request(Some(subgraph_name))
-                                .mask_headers_debug(headers)
-                        })
-                        .unwrap_or_else(|| format!("{headers:?}"))
-                })
-            }
-        };
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Request,
+            Some(subgraph_name),
+            request.headers(),
+        );
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,

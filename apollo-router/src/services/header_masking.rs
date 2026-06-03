@@ -88,7 +88,11 @@ impl HeaderMaskingRules {
             .collect()
     }
 
-    /// Mask headers in Debug format string for telemetry events
+    /// Mask headers in Debug format string for telemetry events.
+    ///
+    /// Output is sorted by entry so it is deterministic regardless of
+    /// `HeaderMap` iteration order — callers (telemetry events) rely on this
+    /// for stable, snapshot-friendly output.
     pub(crate) fn mask_headers_debug(&self, input: &HeaderMap<HeaderValue>) -> String {
         let mut parts = Vec::with_capacity(input.len());
 
@@ -106,6 +110,7 @@ impl HeaderMaskingRules {
             parts.push(format!("{k_str:?}: {value_str:?}"));
         }
 
+        parts.sort();
         format!("{{{}}}", parts.join(", "))
     }
 }
@@ -427,5 +432,85 @@ mod tests {
         );
         // Unknown subgraph falls back to global response rules.
         assert!(map.get_response(Some("nobody")).should_mask("set-cookie"));
+    }
+
+    #[test]
+    fn masked_headers_for_log_masks_via_default_rules_without_map() {
+        // No MaskingRulesMap in context: fail-secure defaults must still mask.
+        let ctx = Context::new();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("Bearer secret"), // gitleaks:allow
+        );
+        headers.insert(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/json"),
+        );
+
+        let out = masked_headers_for_log(&ctx, Direction::Request, None, &headers);
+        assert!(
+            out.contains(MASKED_VALUE),
+            "authorization should be masked by fail-secure defaults: {out}"
+        );
+        assert!(!out.contains("secret"));
+        assert!(out.contains("application/json"));
+    }
+
+    #[test]
+    fn redact_header_value_precedence() {
+        let ctx = Context::new();
+
+        // `allow` override shows the raw value even for a default-sensitive header.
+        assert_eq!(
+            redact_header_value(
+                &ctx,
+                Direction::Request,
+                None,
+                "authorization",
+                Some("Bearer x".to_string()), // gitleaks:allow
+                Some(&RedactMode::Allow),
+            ),
+            Some("Bearer x".to_string()) // gitleaks:allow
+        );
+
+        // `mask` override masks any header.
+        assert_eq!(
+            redact_header_value(
+                &ctx,
+                Direction::Request,
+                None,
+                "x-custom",
+                Some("v".to_string()),
+                Some(&RedactMode::Mask),
+            ),
+            Some(MASKED_VALUE.to_string())
+        );
+
+        // No override: defer to rules — fail-secure default masks authorization.
+        assert_eq!(
+            redact_header_value(
+                &ctx,
+                Direction::Request,
+                None,
+                "authorization",
+                Some("Bearer x".to_string()), // gitleaks:allow
+                None,
+            ),
+            Some(MASKED_VALUE.to_string())
+        );
+
+        // No override: a non-sensitive header passes through unmasked.
+        assert_eq!(
+            redact_header_value(
+                &ctx,
+                Direction::Request,
+                None,
+                "x-not-sensitive",
+                Some("v".to_string()),
+                None,
+            ),
+            Some("v".to_string())
+        );
     }
 }

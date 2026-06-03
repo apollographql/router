@@ -68,8 +68,13 @@ impl Selector for HttpClientSelector {
                     .get(request_header)
                     .and_then(|h| h.to_str().ok())
                     .map(|h| h.to_string());
-                // HTTP-client layer has no subgraph identity, so use the global
-                // request rules.
+                // The http-client layer is a transport shared across all
+                // subgraphs/connectors and carries no subgraph identity, so
+                // masking here uses the global request rules. Per-subgraph
+                // masking overrides are applied at the subgraph/connector
+                // telemetry layers, which do know the subgraph. The global
+                // rules include the fail-secure defaults, so common secrets are
+                // still masked here.
                 let value = crate::services::header_masking::redact_header_value(
                     &request.context,
                     crate::services::header_masking::Direction::Request,
@@ -104,8 +109,13 @@ impl Selector for HttpClientSelector {
                     .get(response_header)
                     .and_then(|h| h.to_str().ok())
                     .map(|h| h.to_string());
-                // HTTP-client layer has no subgraph identity, so use the global
-                // response rules.
+                // The http-client layer is a transport shared across all
+                // subgraphs/connectors and carries no subgraph identity, so
+                // masking here uses the global response rules. Per-subgraph
+                // masking overrides are applied at the subgraph/connector
+                // telemetry layers, which do know the subgraph. The global
+                // rules include the fail-secure defaults, so common secrets are
+                // still masked here.
                 let value = crate::services::header_masking::redact_header_value(
                     &response.context,
                     crate::services::header_masking::Direction::Response,

@@ -1,4 +1,4 @@
-### Add header masking for sensitive data in logs and telemetry ([Issue #GRAPHOS-85](https://apollographql.atlassian.net/browse/GRAPHOS-85), [Issue #GRAPHOS-86](https://apollographql.atlassian.net/browse/GRAPHOS-86), [PR #9155](https://github.com/apollographql/router/pull/9155))
+### Add header masking for sensitive data in logs and telemetry ([PR #9155](https://github.com/apollographql/router/pull/9155))
 
 Adds header masking configuration to automatically mask sensitive header values in router logs, telemetry events, and coprocessor communications. This prevents accidental exposure of credentials, API keys, session tokens, and other sensitive information in observability data.
 
@@ -14,7 +14,7 @@ Adds header masking configuration to automatically mask sensitive header values 
 
 **Configuration:**
 
-Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections. Both global and per-subgraph `sensitive_headers` lists are **additive**: any entries you provide are added to the built-in fail-secure list (authorization, cookie, set-cookie, x-api-key, …). Set `replace_defaults: true` on a global block to opt out of the built-ins and treat your list as authoritative.
+Masking is configured within the `headers` plugin, nested under `request` and/or `response` sections. By default both global and per-subgraph `sensitive_headers` lists are **additive**: any entries you provide are added to the built-in fail-secure list (authorization, cookie, set-cookie, x-api-key, …). Set `replace_defaults: true` on a global or per-subgraph block to opt out of the built-ins and treat that block's list as authoritative. A subgraph that enables masking always inherits the built-in defaults even when global masking is disabled.
 
 ```yaml
 headers:
@@ -49,6 +49,27 @@ headers:
   #       sensitive_headers:
   #         - x-only-this
 ```
+
+**Per-selector override (telemetry):**
+
+Telemetry header selectors — custom span/event/instrument attributes that read a request or response header — accept an optional `redact` field to override the masking rules for that single attribute:
+
+- `redact: mask` — always mask this header's value, regardless of the masking config.
+- `redact: allow` — always emit the raw value, ignoring the masking rules.
+- omitted (default) — defer to the configured global/per-subgraph masking rules.
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          my.auth.header:
+            request_header: authorization
+            redact: mask
+```
+
+> **Note:** Telemetry emitted at the shared `http_client` transport layer uses the global masking rules, because that layer has no subgraph identity. Per-subgraph overrides still apply at the subgraph and connector telemetry layers, and the global rules include the fail-secure defaults.
 
 When enabled, sensitive header values are replaced with `***MASKED***` in debug logs and telemetry output while preserving header names for debugging purposes.
 

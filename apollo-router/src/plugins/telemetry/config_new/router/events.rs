@@ -1,6 +1,4 @@
 use std::fmt::Debug;
-#[cfg(not(test))]
-use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -60,34 +58,12 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
         {
             let mut attrs = Vec::with_capacity(4);
 
-            let header_string = {
-                #[cfg(test)]
-                {
-                    let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
-                        .response
-                        .headers()
-                        .clone()
-                        .into_iter()
-                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                        .collect();
-                    headers.sort_keys();
-                    // In test mode, use Debug format for deterministic output
-                    format!("{headers:?}")
-                }
-                #[cfg(not(test))]
-                {
-                    let headers = response.response.headers();
-                    response.context.extensions().with_lock(|lock| {
-                        if let Some(m) =
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                        {
-                            m.get_response(None).mask_headers_debug(headers)
-                        } else {
-                            format!("{headers:?}")
-                        }
-                    })
-                }
-            };
+            let header_string = crate::services::header_masking::masked_headers_for_log(
+                &response.context,
+                crate::services::header_masking::Direction::Response,
+                None,
+                response.response.headers(),
+            );
             attrs.push(KeyValue::new(
                 HTTP_RESPONSE_HEADERS,
                 opentelemetry::Value::String(header_string.into()),

@@ -345,31 +345,12 @@ fn log_connectors_event(
     if let Some(level) = log_response_level {
         let mut attrs = Vec::with_capacity(4);
 
-        let header_string = {
-            #[cfg(test)]
-            {
-                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                    .headers
-                    .iter()
-                    .map(|(name, val)| (name.to_string(), val.clone()))
-                    .collect();
-                headers.sort_keys();
-                format!("{headers:?}")
-            }
-            #[cfg(not(test))]
-            {
-                let headers = &parts.headers;
-                let subgraph_name = connector.id.subgraph_name.as_str();
-                context.extensions().with_lock(|lock| {
-                    lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                        .map(|m| {
-                            m.get_response(Some(subgraph_name))
-                                .mask_headers_debug(headers)
-                        })
-                        .unwrap_or_else(|| format!("{headers:?}"))
-                })
-            }
-        };
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Response,
+            Some(connector.id.subgraph_name.as_str()),
+            &parts.headers,
+        );
 
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_HEADERS,

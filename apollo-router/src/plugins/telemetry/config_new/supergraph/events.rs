@@ -45,34 +45,12 @@ impl
             && request_event.condition.evaluate_request(request) == Some(true)
         {
             let mut attrs = Vec::with_capacity(5);
-            let header_string = {
-                #[cfg(test)]
-                {
-                    let mut headers: indexmap::IndexMap<String, http::HeaderValue> = request
-                        .supergraph_request
-                        .headers()
-                        .clone()
-                        .into_iter()
-                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                        .collect();
-                    headers.sort_keys();
-                    // In test mode, use Debug format for deterministic output
-                    format!("{headers:?}")
-                }
-                #[cfg(not(test))]
-                {
-                    let headers = request.supergraph_request.headers();
-                    request.context.extensions().with_lock(|lock| {
-                        if let Some(m) =
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                        {
-                            m.get_request(None).mask_headers_debug(headers)
-                        } else {
-                            format!("{headers:?}")
-                        }
-                    })
-                }
-            };
+            let header_string = crate::services::header_masking::masked_headers_for_log(
+                &request.context,
+                crate::services::header_masking::Direction::Request,
+                None,
+                request.supergraph_request.headers(),
+            );
             attrs.push(KeyValue::new(
                 HTTP_REQUEST_HEADERS,
                 opentelemetry::Value::String(header_string.into()),

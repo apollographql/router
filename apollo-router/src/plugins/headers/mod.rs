@@ -273,47 +273,45 @@ struct Headers {
     masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
 }
 
-/// Per-subgraph masking *extends* (rather than replaces) the global
-/// sensitive-header list, matching the merge semantics of per-subgraph
-/// operations. Users who want a full opt-out for one subgraph set
-/// `masking.enabled: false` at the subgraph level.
+/// Resolve the effective masking config for one subgraph by layering its
+/// `masking` block on top of the global config:
 ///
-/// Default-vs-replace is a *global* concern (controlled by
-/// `headers.all.{request,response}.masking.replace_defaults`); the per-subgraph
-/// block contributes only its raw `sensitive_headers` list on top of whatever
-/// the global side already resolved to.
-/// `replace_defaults` is a global-only concern, but the per-subgraph
-/// `HeaderMaskingConfig` reuses the same struct, so serde accepts the field
-/// silently. Warn so operators don't quietly get the additive merge when they
-/// asked for a replacement list.
-fn warn_if_subgraph_replace_defaults(
-    subgraph: &str,
-    direction: &str,
-    sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
-) {
-    if sg.replace_defaults {
-        tracing::warn!(
-            subgraph = %subgraph,
-            direction = %direction,
-            "headers.subgraphs.{subgraph}.{direction}.masking.replace_defaults is ignored at the per-subgraph level; set it on headers.all.{direction}.masking instead"
-        );
-    }
-}
-
+/// - `enabled: false` fully opts the subgraph out (masks nothing).
+/// - `replace_defaults: true` makes the subgraph's `sensitive_headers` list
+///   authoritative for that subgraph (no inherited headers).
+/// - otherwise (the default) the subgraph's list *extends* the inherited list:
+///   the global effective list when global masking is enabled, or the built-in
+///   sensitive-header defaults when it's disabled — so enabling masking for a
+///   single subgraph stays fail-secure rather than silently masking only the
+///   subgraph's own list.
 fn merge_subgraph_masking(
     global: &crate::configuration::header_masking_config::HeaderMaskingConfig,
     sg: &crate::configuration::header_masking_config::HeaderMaskingConfig,
 ) -> crate::configuration::header_masking_config::HeaderMaskingConfig {
     use crate::configuration::header_masking_config::HeaderMaskingConfig;
+    use crate::configuration::header_masking_config::default_sensitive_headers;
+
+    // A subgraph fully opts out with `enabled: false`.
     if !sg.enabled {
         return sg.clone();
     }
-    let mut sensitive_headers = if global.enabled {
-        global.effective_sensitive_headers()
+
+    let sensitive_headers = if sg.replace_defaults {
+        // Authoritative: mask exactly the subgraph's list for this subgraph.
+        sg.sensitive_headers.clone()
     } else {
-        Vec::new()
+        // Extend the inherited list. Fall back to the built-in defaults when
+        // global masking is disabled so a subgraph that opts *in* still gets
+        // the fail-secure list.
+        let mut headers = if global.enabled {
+            global.effective_sensitive_headers()
+        } else {
+            default_sensitive_headers()
+        };
+        headers.extend(sg.sensitive_headers.iter().cloned());
+        headers
     };
-    sensitive_headers.extend(sg.sensitive_headers.iter().cloned());
+
     HeaderMaskingConfig {
         enabled: true,
         sensitive_headers,
@@ -413,7 +411,6 @@ impl PluginPrivate for Headers {
                     .request
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())?;
-                warn_if_subgraph_replace_defaults(name, "request", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_request_config, sg_masking);
                 Some((
                     name.clone(),
@@ -431,7 +428,6 @@ impl PluginPrivate for Headers {
                     .response
                     .as_ref()
                     .and_then(|r| r.masking.as_ref())?;
-                warn_if_subgraph_replace_defaults(name, "response", sg_masking);
                 let merged = merge_subgraph_masking(&effective_global_response_config, sg_masking);
                 Some((
                     name.clone(),
@@ -1120,11 +1116,14 @@ mod test {
     }
 
     #[test]
-    fn merge_subgraph_masking_disabled_global_uses_subgraph_only() {
+    fn merge_subgraph_masking_disabled_global_falls_back_to_defaults() {
         use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        // Global masking off, but the subgraph opts in: it should still get the
+        // built-in fail-secure defaults, plus its own header — not just its own
+        // list.
         let global = HeaderMaskingConfig {
             enabled: false,
-            sensitive_headers: vec!["authorization".into()],
+            sensitive_headers: vec![],
             replace_defaults: false,
         };
         let sg = HeaderMaskingConfig {
@@ -1134,10 +1133,33 @@ mod test {
         };
         let merged = merge_subgraph_masking(&global, &sg);
         assert!(merged.enabled);
-        assert_eq!(
-            merged.sensitive_headers,
-            vec!["x-products-secret".to_string()]
+        assert!(merged.sensitive_headers.contains(&"authorization".into()));
+        assert!(merged.sensitive_headers.contains(&"cookie".into()));
+        assert!(
+            merged
+                .sensitive_headers
+                .contains(&"x-products-secret".into())
         );
+    }
+
+    #[test]
+    fn merge_subgraph_masking_replace_defaults_is_authoritative() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        // `replace_defaults: true` makes the subgraph's list authoritative — no
+        // inherited global or built-in headers.
+        let global = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".into()],
+            replace_defaults: false,
+        };
+        let sg = HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["x-only-this".into()],
+            replace_defaults: true,
+        };
+        let merged = merge_subgraph_masking(&global, &sg);
+        assert!(merged.enabled);
+        assert_eq!(merged.sensitive_headers, vec!["x-only-this".to_string()]);
     }
 
     #[test]
