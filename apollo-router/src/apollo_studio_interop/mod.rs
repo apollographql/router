@@ -433,55 +433,44 @@ fn extract_enums_from_selection_set(
     selection_response: &Object,
     result_set: &mut ReferencedEnums,
 ) {
-    for selection in selection_set.iter() {
-        match selection {
-            SpecSelection::Field {
-                name,
-                alias,
-                field_type,
-                selection_set,
-                ..
-            } => {
-                let field_name = alias.as_ref().unwrap_or(name).as_str();
-                if let Some(field_value) = selection_response.get(field_name) {
-                    let field_type_def = schema.types.get(field_type.0.inner_named_type());
+    let mut stack: Vec<(&[SpecSelection], &Object)> = vec![(selection_set, selection_response)];
+    let mut visited_fragments: HashSet<(&str, &Object)> = HashSet::new();
 
-                    // If the value is an enum, we want to add all values to the map
-                    if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
-                        add_enum_value_to_map(&enum_type.name, field_value, result_set);
-                    }
-                    // Otherwise if the response value is an object, add any enums from the field's selection set
-                    else if let JsonValue::Object(value_object) = field_value
-                        && let Some(selection_set) = selection_set
-                    {
-                        extract_enums_from_selection_set(
-                            selection_set,
-                            fragments,
-                            schema,
-                            value_object,
-                            result_set,
-                        );
+    while let Some((selections, response)) = stack.pop() {
+        for selection in selections.iter() {
+            match selection {
+                SpecSelection::Field {
+                    name,
+                    alias,
+                    field_type,
+                    selection_set,
+                    ..
+                } => {
+                    let field_name = alias.as_ref().unwrap_or(name).as_str();
+                    if let Some(field_value) = response.get(field_name) {
+                        let field_type_def = schema.types.get(field_type.0.inner_named_type());
+                        // If the value is an enum, we want to add all values to the map
+                        if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
+                            add_enum_value_to_map(&enum_type.name, field_value, result_set);
+                        }
+                        // Otherwise if the response value is an object, add any enums from the field's selection set
+                        else if let JsonValue::Object(value_object) = field_value
+                            && let Some(selection_set) = selection_set
+                        {
+                            stack.push((selection_set, value_object));
+                        }
                     }
                 }
-            }
-            SpecSelection::InlineFragment { selection_set, .. } => {
-                extract_enums_from_selection_set(
-                    selection_set,
-                    fragments,
-                    schema,
-                    selection_response,
-                    result_set,
-                );
-            }
-            SpecSelection::FragmentSpread { name, .. } => {
-                if let Some(fragment) = fragments.get(name) {
-                    extract_enums_from_selection_set(
-                        &fragment.selection_set,
-                        fragments,
-                        schema,
-                        selection_response,
-                        result_set,
-                    );
+                SpecSelection::InlineFragment { selection_set, .. } => {
+                    stack.push((selection_set, response));
+                }
+                SpecSelection::FragmentSpread { name, .. } => {
+                    let key = (name.as_str(), response);
+                    if visited_fragments.insert(key)
+                        && let Some(fragment) = fragments.get(name)
+                    {
+                        stack.push((&fragment.selection_set, response));
+                    }
                 }
             }
         }

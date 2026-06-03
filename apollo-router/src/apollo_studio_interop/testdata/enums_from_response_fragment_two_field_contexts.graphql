@@ -1,0 +1,12 @@
+fragment SharedEnumFragment on EverythingResponse {
+    enumResponse
+}
+
+query FragmentTwoFieldContextsQuery {
+  first: noInputQuery {
+    ...SharedEnumFragment
+  }
+  second: noInputQuery {
+    ...SharedEnumFragment
+  }
+}
