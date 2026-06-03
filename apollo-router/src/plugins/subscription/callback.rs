@@ -444,7 +444,7 @@ pub(crate) fn callback_router(
     let service = CallbackService::new(notify, path, callback_hmac_key);
 
     async fn handle_callback(
-        Extension(mut service): Extension<CallbackService>,
+        Extension(service): Extension<CallbackService>,
         OriginalUri(original_uri): OriginalUri,
         mut req: http::Request<axum::body::Body>,
     ) -> axum::response::Response {
@@ -452,7 +452,7 @@ pub(crate) fn callback_router(
         // but CallbackService expects the full path for sub_id extraction.
         *req.uri_mut() = original_uri;
         let router_req: router::Request = req.into();
-        match tower::Service::call(&mut service, router_req).await {
+        match tower::ServiceExt::oneshot(service, router_req).await {
             Ok(res) => res.response.into_response(),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
