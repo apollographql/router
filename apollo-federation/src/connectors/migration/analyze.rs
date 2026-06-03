@@ -438,7 +438,7 @@ fn handle_connect(
     };
     // Router config expansion converts `$$` → `$` before parsing
     // selections at runtime, so the at-rest form gets normalized here
-    // too. See v04_divergence.rs::compute_verdict for the rationale.
+    // too.
     let normalized = selection_text.replace("$$", "$");
     // The "from" side parses at the schema's actual linked spec, so the
     // diff reflects this schema's real current behavior, not a fixed
