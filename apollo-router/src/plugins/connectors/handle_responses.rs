@@ -1542,4 +1542,242 @@ mod tests {
             errors[0].message
         );
     }
+
+    // Reproduction for CNN-1095: when `isSuccess` returns false and the user has
+    // configured `errors.message` and `errors.extensions`, the resulting GraphQL
+    // error should use the mapped values (sourced from the response body) and
+    // still expose the default `http.status` alongside them.
+    //
+    // Per the public docs at
+    // https://www.apollographql.com/docs/graphos/connectors/responses/error-handling,
+    // the `errors.message` mapping expression yields the error message and
+    // `errors.extensions` is merged into `extensions` (overriding defaults like
+    // `code` when keys collide, preserving defaults like `http.status` when they
+    // don't).
+    #[tokio::test]
+    async fn errors_as_data_maps_message_and_extensions_when_is_success_false() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                connect_extensions: Some(
+                    JSONSelection::parse("code: error.code\nhint: error.hint").unwrap(),
+                ),
+                source_extensions: None,
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(
+                r#"{"error":{"message":"no good","code":"BAD_THING","hint":"try again"}}"#,
+            ))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let error = &errors[0];
+
+        assert_eq!(
+            error.message, "no good",
+            "errors.message should be mapped from the response body"
+        );
+
+        let code = error
+            .extensions
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "BAD_THING",
+            "errors.extensions.code should override default CONNECTOR_FETCH"
+        );
+
+        let hint = error
+            .extensions
+            .get("hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert_eq!(
+            hint, "try again",
+            "errors.extensions.hint should be mapped from the response body"
+        );
+
+        let http_status = error
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.get("status"))
+            .and_then(|v| v.as_i64());
+        assert_eq!(
+            http_status,
+            Some(500),
+            "default extensions.http.status should be preserved alongside the mapped extensions"
+        );
+    }
+
+    // Reproduction for CNN-1095: when `errors.extensions` writes a nested key
+    // that collides with a default extension (e.g. `http`), the public docs at
+    // https://www.apollographql.com/docs/graphos/connectors/responses/error-handling
+    // say the user-supplied values should be merged into the default object
+    // (so `extensions.http.status` is preserved alongside `extensions.http.myField`).
+    //
+    // The current implementation in `runtime/responses.rs::map_error` calls
+    // `error.extension("http", user_value)` after the default `http: { status }`
+    // is set, which replaces the entire `http` object — so `status` is lost.
+    #[tokio::test]
+    async fn errors_as_data_deep_merges_nested_extensions_with_defaults() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: None,
+                connect_extensions: Some(
+                    JSONSelection::parse("http: { myField: $(\"literal Value\") }").unwrap(),
+                ),
+                source_extensions: None,
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let http = errors[0]
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .expect("extensions.http should be an object");
+
+        assert_eq!(
+            http.get("myField").and_then(|v| v.as_str()),
+            Some("literal Value"),
+            "user-supplied extensions.http.myField should appear in the response"
+        );
+        assert_eq!(
+            http.get("status").and_then(|v| v.as_i64()),
+            Some(500),
+            "default extensions.http.status should be preserved when the user sets sibling keys under extensions.http"
+        );
+    }
 }
