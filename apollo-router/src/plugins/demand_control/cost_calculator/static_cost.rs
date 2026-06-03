@@ -2217,6 +2217,62 @@ mod tests {
         );
     }
 
+    #[test]
+    fn count_type_conditions_do_not_sum() {
+        // The same response key (`toys`) is selected under two object type conditions, each a list
+        // of the global `list_size`. The recorded count is that size — the branches are merged
+        // (max), not summed.
+        let schema = r#"
+            type Query { animal: Animal }
+            interface Animal { id: ID! }
+            type Cat implements Animal { id: ID! toys: [Toy] }
+            type Dog implements Animal { id: ID! toys: [Toy] }
+            type Toy { id: ID! }
+        "#;
+        assert_eq!(
+            count_test(
+                schema,
+                "{ animal { ... on Cat { toys { id } } ... on Dog { toys { id } } } }",
+                &["animal", "toys", "@"],
+                10,
+            ),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn count_type_conditions_take_max_size() {
+        // The same response key (`toys`) resolves to a different `@listSize` depending on the
+        // concrete type — `Cat` → 3, `Dog` → 7. The recorded count is the max across the
+        // type-condition branches, regardless of the order they appear in. (Uses a cost-spec
+        // supergraph because `@listSize` needs `@link` resolution that plain SDL can't carry.)
+        let schema_str =
+            include_str!("./fixtures/federated_type_condition_listsize_schema.graphql");
+        let config: Configuration = Default::default();
+        let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+        let supergraph = schema.supergraph_schema();
+
+        assert_eq!(
+            recorded_count_for(
+                supergraph,
+                "{ animal { ... on Cat { toys { id } } ... on Dog { toys { id } } } }",
+                &["animal", "toys", "@"],
+                100,
+            ),
+            Some(7)
+        );
+        // Swapped order: still the max, proving it is neither first- nor last-wins.
+        assert_eq!(
+            recorded_count_for(
+                supergraph,
+                "{ animal { ... on Dog { toys { id } } ... on Cat { toys { id } } } }",
+                &["animal", "toys", "@"],
+                100,
+            ),
+            Some(7)
+        );
+    }
+
     /// Builds a rust query plan for a federated schema and returns the estimated entity count
     /// recorded at `path`, exercising `estimate_entity_counts` directly.
     fn entity_count_at(
