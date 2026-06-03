@@ -28,9 +28,9 @@ fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
 }
 ```
 
-The `axum` crate is now re-exported as `apollo_router::axum`, so you no longer need to add it as a direct dependency. All axum router and handler types are available via this re-export.
+The `axum` crate is now re-exported as `apollo_router::axum`, router and handler types are available via this re-export.
 
-The `plugin::Handler` struct has also been removed. It was an internal type used by `from_router_service` to wrap `BoxCloneService` in an `UnconstrainedBuffer` for thread-safe use from axum handlers. With the move to native axum Routers, `Handler` is no longer needed.
+The `plugin::Handler` struct has also been removed. With the move to native axum Routers, `Handler` is no longer needed.
 
 **Additional fixes included in this change:**
 
