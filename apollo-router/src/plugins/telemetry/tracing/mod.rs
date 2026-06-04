@@ -319,3 +319,124 @@ impl Default for BatchProcessorConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry_sdk::trace::SpanData;
+    use opentelemetry_sdk::trace::SpanLinks;
+    use opentelemetry::trace::Status;
+
+    use super::*;
+
+    fn make_span(trace_id: u128) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from(trace_id),
+                SpanId::from(1u64),
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
+            span_kind: SpanKind::Internal,
+            name: "test".into(),
+            start_time: SystemTime::UNIX_EPOCH,
+            end_time: SystemTime::UNIX_EPOCH,
+            attributes: vec![],
+            events: Default::default(),
+            links: SpanLinks::default(),
+            status: Status::Unset,
+            instrumentation_scope: InstrumentationScope::default(),
+            dropped_attributes_count: 0,
+        }
+    }
+
+    /// A span processor that records every span it receives.
+    #[derive(Clone, Default, Debug)]
+    struct RecordingProcessor(Arc<Mutex<Vec<SpanData>>>);
+
+    impl SpanProcessor for RecordingProcessor {
+        fn on_start(&self, _span: &mut opentelemetry_sdk::trace::Span, _cx: &Context) {}
+        fn on_end(&self, span: SpanData) {
+            self.0.lock().unwrap().push(span);
+        }
+        fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+            Ok(())
+        }
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn always_on_forwards_all_spans() {
+        let recorder = RecordingProcessor::default();
+        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::Always(Sampler::AlwaysOn));
+        for i in 0u128..20 {
+            processor.on_end(make_span(i));
+        }
+        assert_eq!(recorder.0.lock().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn always_off_drops_all_spans() {
+        let recorder = RecordingProcessor::default();
+        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::Always(Sampler::AlwaysOff));
+        for i in 0u128..20 {
+            processor.on_end(make_span(i));
+        }
+        assert_eq!(recorder.0.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ratio_based_is_deterministic() {
+        let sampler = SamplerOption::TraceIdRatioBased(0.5);
+
+        // Same trace ID always produces the same decision
+        let recorder1 = RecordingProcessor::default();
+        let p1 = SamplingSpanProcessor::new(recorder1.clone(), &sampler);
+        p1.on_end(make_span(42));
+
+        let recorder2 = RecordingProcessor::default();
+        let p2 = SamplingSpanProcessor::new(recorder2.clone(), &sampler);
+        p2.on_end(make_span(42));
+
+        assert_eq!(
+            recorder1.0.lock().unwrap().len(),
+            recorder2.0.lock().unwrap().len(),
+            "same trace ID must produce the same sampling decision"
+        );
+    }
+
+    #[test]
+    fn ratio_zero_drops_all_spans() {
+        let recorder = RecordingProcessor::default();
+        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::TraceIdRatioBased(0.0));
+        for i in 0u128..20 {
+            processor.on_end(make_span(i));
+        }
+        assert_eq!(recorder.0.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ratio_one_forwards_all_spans() {
+        let recorder = RecordingProcessor::default();
+        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::TraceIdRatioBased(1.0));
+        for i in 0u128..20 {
+            processor.on_end(make_span(i));
+        }
+        assert_eq!(recorder.0.lock().unwrap().len(), 20);
+    }
+}
