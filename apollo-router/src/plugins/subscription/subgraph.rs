@@ -275,14 +275,24 @@ async fn call_websocket(
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
     // connection drop. Connection lifecycle is managed by the WebSocket infrastructure, so we
     // don't need to handle connection_closed_signal here.
-    // Capture the current span so reconnect handshakes chain to the originating subscription
-    // trace rather than starting a fresh root traceparent.
-    let forwarding_span = tracing::Span::current();
+    // Use a dedicated span for the long-lived forwarding task. `info_span!` parents to the
+    // current (subgraph request) span by default, so reconnect handshakes stay chained to the
+    // originating trace — but because a child holds its parent only by id, the request span is
+    // free to close when `call_websocket` returns rather than being held open (and unexported)
+    // for the entire subscription lifetime.
+    let forwarding_span = tracing::info_span!(
+        "subscription_forwarding",
+        "apollo.subgraph.name" = %service_name,
+    );
     let forwarding_task = tokio::task::spawn(
         async move {
             let mut gql_stream = gql_stream;
             let mut stream_completed_normally = completed_normally;
             let mut attempt = 0u32;
+            // The most recent transport error suppressed during the reconnect window. If all
+            // reconnect attempts are exhausted, this is forwarded to clients so they can tell a
+            // failed subscription from a normal completion (see the exhausted branch below).
+            let mut last_transient_error: Option<graphql::Response> = None;
 
             'retry: loop {
                 let connection_started_at = Instant::now();
@@ -309,6 +319,9 @@ async fn call_websocket(
                                         tracing::debug!(
                                             "suppressing transient subgraph transport error during reconnect window"
                                         );
+                                        // Keep it in case reconnection is ultimately exhausted, so
+                                        // the client receives a real error rather than a silent end.
+                                        last_transient_error = Some(val);
                                         continue;
                                     }
                                     if handle_sink.send_sync(val).is_err() {
@@ -418,11 +431,28 @@ async fn call_websocket(
                             }
                         }
                     } else {
+                        // Reconnection exhausted. Surface the last suppressed transport error to
+                        // clients so a failed subscription is distinguishable from a normal
+                        // completion, then end the stream via handle_sink.close() below.
+                        if let Some(err) = last_transient_error.take() {
+                            let _ = handle_sink.send_sync(err);
+                        }
                         increment_subgraph_ended_counter(&service_name_for_task);
                         break 'retry;
                     }
                 }
             }
+            // Emit a single completion event for the logical subscription. This lives here rather
+            // than in `SubscriptionStream` (which runs once per physical connection) so a
+            // reconnecting subscription is counted once, not once per reconnect.
+            u64_counter!(
+                "apollo.router.operations.subscriptions.events",
+                "Number of subscription events",
+                1,
+                subscriptions.mode = "passthrough",
+                subscriptions.complete = true
+            );
+
             // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
             // and terminates. Without this, the HandleStream waits forever when the subgraph
             // closes the WebSocket and there are no reconnect attempts left.

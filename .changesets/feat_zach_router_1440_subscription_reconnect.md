@@ -16,7 +16,7 @@ subscription:
         path: /subscriptions
 ```
 
-When the WebSocket connection to a subgraph drops and reconnection is configured, the router re-establishes the connection transparently — client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. After all retry attempts are exhausted the subscription is terminated normally.
+When the WebSocket connection to a subgraph drops and reconnection is configured, the router re-establishes the connection transparently — client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. After all retry attempts are exhausted the router forwards the final transport error to the client and terminates the subscription.
 
 Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
 

@@ -3423,6 +3423,83 @@ mod tests {
         .await;
     }
 
+    /// When reconnection is exhausted, the last suppressed transport error must be forwarded to
+    /// the client so a failed subscription is distinguishable from a normal completion. The server
+    /// drops every connection with an abnormal close, so after `max_reconnect_attempts` the
+    /// subscription ends with a terminal `WEBSOCKET_CLOSE_ERROR` rather than a silent stream end.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_exhausted_forwards_terminal_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let spawned_task = tokio::task::spawn(emulate_websocket_server_that_drops(listener));
+
+        let subgraph_service = with_subscription_layer_reconnect(
+            SubgraphService::new(
+                "test",
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+            1,
+        );
+
+        let (tx, rx) = mpsc::channel(2);
+        let mut rx_stream = ReceiverStream::new(rx);
+        let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx_stream.next().await.unwrap();
+
+        // Consume the whole stream. Transport errors are suppressed during the reconnect window;
+        // only the terminal one (after attempts are exhausted) should reach the client.
+        let mut data_events = 0u32;
+        let mut terminal_error = None;
+        while let Some(item) = gql_stream.next().await {
+            if item.errors.is_empty() {
+                data_events += 1;
+            } else {
+                terminal_error = Some(item);
+            }
+        }
+
+        assert!(data_events >= 1, "expected at least the initial data event");
+        let terminal_error =
+            terminal_error.expect("client should receive a terminal error after reconnect exhausted");
+        assert_eq!(terminal_error.subscribed, Some(false));
+        assert!(
+            terminal_error
+                .errors
+                .iter()
+                .any(|e| e.extension_code().as_deref() == Some("WEBSOCKET_CLOSE_ERROR")),
+            "terminal error should carry the WEBSOCKET_CLOSE_ERROR code"
+        );
+
+        spawned_task.abort();
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_status_code_should_not_fail() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

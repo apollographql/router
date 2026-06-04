@@ -469,13 +469,11 @@ where
                 tracing::trace!("cannot shutdown sink: {err:?}");
             };
 
-            u64_counter!(
-                "apollo.router.operations.subscriptions.events",
-                "Number of subscription events",
-                1,
-                subscriptions.mode = "passthrough",
-                subscriptions.complete = true
-            );
+            // Note: the `subscriptions.events{complete=true}` counter is intentionally NOT
+            // emitted here. This task runs once per physical WebSocket connection, and a
+            // reconnecting subscription opens several, which would over-count completions. The
+            // subgraph forwarding loop emits a single completion event per logical subscription
+            // instead (see `call_websocket`).
 
             if let Err(err) = sink.close().await {
                 tracing::trace!("cannot close the websocket stream: {err:?}");
