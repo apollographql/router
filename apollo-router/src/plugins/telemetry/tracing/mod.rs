@@ -16,6 +16,8 @@ use tower::BoxError;
 
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
+use crate::plugins::telemetry::config::Sampler;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
@@ -77,12 +79,80 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
     }
 }
 
+/// A span processor that applies a secondary sampling filter based on the trace ID.
+///
+/// The sampling check uses the low 64 bits of the trace ID (same as OTel's `TraceIdRatioBased`),
+/// ensuring consistent per-trace decisions: either all spans in a trace pass or none do.
+///
+/// The ratio is **absolute** — a fraction of all requests — not a fraction of already-sampled
+/// spans. Setting `sampler: 0.02` means 2% of all requests reach this exporter regardless of
+/// the global sampler, provided the global sampler rate is >= 0.02.
+#[derive(Debug)]
+pub(crate) struct SamplingSpanProcessor<T: SpanProcessor> {
+    delegate: T,
+    /// Precomputed threshold: `(ratio * (1u64 << 63) as f64) as u64`. Spans with
+    /// `(low64(traceId) >> 1) < threshold` are forwarded to the delegate.
+    threshold: u64,
+}
+
+impl<T: SpanProcessor> SamplingSpanProcessor<T> {
+    pub(crate) fn new(delegate: T, sampler: &SamplerOption) -> Self {
+        // Threshold scaled to [0, 2^63) to match OTel's TraceIdRatioBased algorithm.
+        // A span passes if (low64(traceId) >> 1) < threshold.
+        let threshold = match sampler {
+            SamplerOption::Always(Sampler::AlwaysOn) => u64::MAX,
+            SamplerOption::Always(Sampler::AlwaysOff) => 0,
+            SamplerOption::TraceIdRatioBased(ratio) => {
+                (ratio.clamp(0.0, 1.0) * (1u64 << 63) as f64) as u64
+            }
+        };
+        Self { delegate, threshold }
+    }
+}
+
+impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
+    fn on_start(&self, span: &mut Span, cx: &Context) {
+        self.delegate.on_start(span, cx);
+    }
+
+    fn on_end(&self, span: SpanData) {
+        if self.threshold == u64::MAX {
+            self.delegate.on_end(span);
+            return;
+        }
+        if self.threshold == 0 {
+            return;
+        }
+        // Mirrors OTel SDK's TraceIdRatioBased: use the low 64 bits of the trace ID,
+        // right-shifted by 1, compared against a threshold scaled to [0, 2^63).
+        let trace_id_bytes: [u8; 16] = span.span_context.trace_id().to_bytes();
+        let (_, low) = trace_id_bytes.split_at(8);
+        let low_bits = u64::from_be_bytes(low.try_into().unwrap()) >> 1;
+        if low_bits < self.threshold {
+            self.delegate.on_end(span);
+        }
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.delegate.force_flush()
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.delegate.shutdown_with_timeout(timeout)
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource)
+    }
+}
+
 trait SpanProcessorExt
 where
     Self: Sized + SpanProcessor,
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
     fn always_sampled(self) -> DatadogSpanProcessor<Self>;
+    fn with_sampler(self, sampler: &SamplerOption) -> SamplingSpanProcessor<Self>;
 }
 
 impl<T: SpanProcessor> SpanProcessorExt for T
@@ -97,6 +167,10 @@ where
     /// uses spans for metrics.
     fn always_sampled(self) -> DatadogSpanProcessor<Self> {
         DatadogSpanProcessor::new(self)
+    }
+
+    fn with_sampler(self, sampler: &SamplerOption) -> SamplingSpanProcessor<Self> {
+        SamplingSpanProcessor::new(self, sampler)
     }
 }
 
