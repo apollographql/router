@@ -23,6 +23,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
@@ -50,6 +51,12 @@ pub(crate) struct Config {
     /// Batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Per-exporter sampler. When set, only this fraction of globally-sampled spans are
+    /// forwarded to this exporter. The value is an absolute rate (0.0–1.0) or
+    /// `always_on` / `always_off`, and must not exceed `telemetry.exporters.tracing.common.sampler`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 impl Config {
@@ -90,12 +97,17 @@ impl TracingConfigurator for Config {
             .build()?;
 
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
-        builder.with_span_processor(
+        let batch_span_processor =
             BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin-tracing"))
                 .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
                 .build()
-                .filtered(),
-        );
+                .filtered();
+
+        if let Some(sampler) = &self.sampler {
+            builder.with_span_processor(batch_span_processor.with_sampler(sampler))
+        } else {
+            builder.with_span_processor(batch_span_processor)
+        }
         Ok(())
     }
 }
