@@ -2866,12 +2866,17 @@ mod tests {
     async fn emulate_websocket_server_stable_then_drops(
         listener: TcpListener,
         hold: std::time::Duration,
+        max_drops: u32,
         connection_count: Arc<AtomicU32>,
     ) {
         async fn ws_handler(
             ws: WebSocketUpgrade,
             ConnectInfo(_addr): ConnectInfo<SocketAddr>,
-            State((hold, connection_count)): State<(std::time::Duration, Arc<AtomicU32>)>,
+            State((hold, max_drops, connection_count)): State<(
+                std::time::Duration,
+                u32,
+                Arc<AtomicU32>,
+            )>,
         ) -> Result<impl IntoResponse, Infallible> {
             let res = ws
                 .protocols(["graphql-transport-ws"])
@@ -2911,21 +2916,29 @@ mod tests {
                     // Keep the connection open long enough for the router to treat it
                     // as stable (past the grace window).
                     tokio::time::sleep(hold).await;
-                    connection_count.fetch_add(1, Ordering::SeqCst);
-                    socket
-                        .send(Message::Close(Some(CloseFrame {
-                            code: 1011,
-                            reason: "unexpected termination".into(),
-                        })))
-                        .await
-                        .unwrap();
+                    // Drop only the first `max_drops` connections; hold any later connection open
+                    // so the reconnect count is bounded and the test is deterministic (no extra
+                    // reconnect can race the assertion).
+                    let drop_index = connection_count.fetch_add(1, Ordering::SeqCst);
+                    if drop_index < max_drops {
+                        socket
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 1011,
+                                reason: "unexpected termination".into(),
+                            })))
+                            .await
+                            .unwrap();
+                    } else {
+                        // Hold open until the test aborts the task.
+                        std::future::pending::<()>().await;
+                    }
                 });
             Ok(res)
         }
 
         let app = Router::new()
             .route("/ws", get(ws_handler))
-            .with_state((hold, connection_count));
+            .with_state((hold, max_drops, connection_count));
         let server = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -3314,11 +3327,14 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let socket_addr = listener.local_addr().unwrap();
             let connection_count = Arc::new(AtomicU32::new(0));
-            // The grace floor is 500ms (see `stability_grace` in subgraph.rs);
-            // hold each connection 600ms so every drop is past it.
+            // The grace floor is 500ms (see `stability_grace` in subgraph.rs); hold each
+            // connection 600ms so every drop is past it. Drop only the first 2 connections, then
+            // hold the third open — so exactly 2 reconnects happen and no later reconnect can race
+            // the assertion below.
             let spawned_task = tokio::task::spawn(emulate_websocket_server_stable_then_drops(
                 listener,
                 std::time::Duration::from_millis(600),
+                2,
                 connection_count.clone(),
             ));
 
@@ -3379,10 +3395,10 @@ mod tests {
             // Allow the metrics to flush.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            // At least 2 reconnects must have happened to reach 3 data events.
-            // With a hard ceiling on attempts (`max_reconnect_attempts=1`), the
-            // counter would be capped at 1 and the subscription would have
-            // terminated before the third event.
+            // Exactly 2 reconnects happened to reach 3 data events (the third connection is held
+            // open, so no further reconnect occurs). With a hard ceiling on attempts
+            // (`max_reconnect_attempts=1`), the counter would be capped at 1 and the subscription
+            // would have terminated before the third event.
             assert_counter!(
                 "apollo.router.operations.subscriptions.reconnect",
                 2,

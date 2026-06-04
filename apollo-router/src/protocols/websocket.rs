@@ -611,7 +611,7 @@ where
                         }
                         match server_message.into_graphql_response() {
                             (None, true) => {
-                                this.completed_normally.store(true, Ordering::Relaxed);
+                                this.completed_normally.store(true, Ordering::Release);
                                 Poll::Ready(None)
                             }
                             // For ignored message like ACK, Ping, Pong, etc...
@@ -624,7 +624,7 @@ where
                                 // genuine subgraph operation error ends the subscription
                                 // server-side, so exclude the synthetic ones before recording it.
                                 if terminal && !is_transient_transport_error(&resp) {
-                                    this.completed_normally.store(true, Ordering::Relaxed);
+                                    this.completed_normally.store(true, Ordering::Release);
                                 }
                                 Poll::Ready(Some(resp))
                             }

@@ -169,8 +169,6 @@ async fn call_websocket(
         id: subgraph_request_id,
         ..
     } = request;
-    // Clone the request before consuming it so reconnect attempts can reuse it.
-    let retry_subgraph_request = subgraph_request.clone();
     let subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
             service: service_name.to_string(),
@@ -214,6 +212,12 @@ async fn call_websocket(
             .build());
     }
 
+    let max_reconnect_attempts = subscription_config.max_reconnect_attempts.unwrap_or(0);
+    // Clone the inputs needed to re-establish the connection only when reconnection is enabled;
+    // the default (no-reconnect) path must not pay to clone the full request/config on every
+    // subscription. These are all `Some` exactly when `max_reconnect_attempts > 0`.
+    let retry_subgraph_request = (max_reconnect_attempts > 0).then(|| subgraph_request.clone());
+
     let (parts, body) = subgraph_request.into_parts();
 
     // Check context key and Authorization header (context key takes precedence) to set connection params if needed
@@ -228,16 +232,16 @@ async fn call_websocket(
         (None, Some(authorization)) => Some(serde_json_bytes::json!({ "token": authorization })),
         _ => None,
     };
-    // Clone for use in reconnect attempts
-    let retry_connection_params = connection_params.clone();
+    // Clone for use in reconnect attempts (only when reconnection is enabled).
+    let retry_connection_params = (max_reconnect_attempts > 0).then(|| connection_params.clone());
 
     // Extract before passing parts to the helper, which consumes them. Headers
     // are forwarded to the WebSocket upgrade request, extensions are not.
     let signing_params = parts.extensions.get::<Arc<SigningParamsConfig>>().cloned();
-    // Clone for use in reconnect attempts
-    let retry_signing_params = signing_params.clone();
+    // Clone for use in reconnect attempts (only when reconnection is enabled).
+    let retry_signing_params = (max_reconnect_attempts > 0).then(|| signing_params.clone());
 
-    let retry_subscription_hash = subscription_hash.clone();
+    let retry_subscription_hash = (max_reconnect_attempts > 0).then(|| subscription_hash.clone());
     let (gql_stream, completed_normally, resp) = open_ws_gql_stream(
         service_name,
         parts,
@@ -253,7 +257,6 @@ async fn call_websocket(
 
     let (mut handle_sink, handle_stream) = handle.split();
     let service_name_for_task = service_name.to_string();
-    let max_reconnect_attempts = subscription_config.max_reconnect_attempts.unwrap_or(0);
     let reconnect_delay = subscription_config
         .reconnect_delay
         .unwrap_or(Duration::from_secs(1));
@@ -268,7 +271,7 @@ async fn call_websocket(
     let stability_grace = reconnect_delay
         .saturating_mul(5)
         .max(Duration::from_millis(500));
-    let retry_subgraph_cfg = subgraph_cfg.clone();
+    let retry_subgraph_cfg = (max_reconnect_attempts > 0).then(|| subgraph_cfg.clone());
 
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
     // connection drop. Connection lifecycle is managed by the WebSocket infrastructure, so we
@@ -331,7 +334,10 @@ async fn call_websocket(
                                     }
                                 }
                                 None => {
-                                    if stream_completed_normally.load(Ordering::Relaxed) {
+                                    // Acquire pairs with the Release store in `InnerStream::poll_next`
+                                    // so the terminal flag is observed even if the stream is ever
+                                    // polled from a different task than this load.
+                                    if stream_completed_normally.load(Ordering::Acquire) {
                                         // Server sent a protocol-level complete — this is a normal
                                         // subscription end, not a connection drop. Don't reconnect.
                                         tracing::debug!("gql_stream completed normally");
@@ -355,6 +361,10 @@ async fn call_websocket(
                         // mode, passthrough mode maintains persistent connections that require
                         // explicit cleanup. We don't increment any metrics here because the
                         // subscription was ended by all clients disconnecting.
+                        // The signal channel only ever carries a single close `()`, so every
+                        // `recv()` outcome means "stop serving": `Ok` is the close, `Err(Closed)`
+                        // means the sender (topic) is gone, and `Err(Lagged)` means the close was
+                        // sent and missed. Breaking on any of them is correct.
                         _ = subscription_closing_signal.recv() => {
                             tracing::debug!("subscription_closing_signal triggered");
                             break 'retry;
@@ -372,6 +382,27 @@ async fn call_websocket(
                             max_reconnect_attempts,
                             "subscription WebSocket connection dropped, reconnecting"
                         );
+                        // The reconnect inputs are cloned up-front only when reconnection is
+                        // enabled, which is the only way `attempt < max_reconnect_attempts` can be
+                        // true — so they are always present here.
+                        let (
+                            Some(retry_subgraph_request),
+                            Some(retry_connection_params),
+                            Some(retry_signing_params),
+                            Some(retry_subscription_hash),
+                            Some(retry_subgraph_cfg),
+                        ) = (
+                            &retry_subgraph_request,
+                            &retry_connection_params,
+                            &retry_signing_params,
+                            &retry_subscription_hash,
+                            &retry_subgraph_cfg,
+                        )
+                        else {
+                            unreachable!(
+                                "reconnect inputs are populated whenever max_reconnect_attempts > 0"
+                            );
+                        };
                         // Abort the reconnect if all router clients drop during the delay,
                         // otherwise we'd reconnect to the subgraph for nobody.
                         select! {
@@ -399,7 +430,7 @@ async fn call_websocket(
                                 retry_body,
                                 retry_connection_params.clone(),
                                 retry_signing_params.clone(),
-                                &retry_subgraph_cfg,
+                                retry_subgraph_cfg,
                                 retry_subscription_hash.clone(),
                                 log_request_level,
                                 true,
