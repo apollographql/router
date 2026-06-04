@@ -12,6 +12,7 @@ use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
 use crate::plugins::telemetry::tracing::NamedTokioRuntime;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 
 impl TracingConfigurator for Config {
@@ -50,11 +51,16 @@ impl TracingConfigurator for Config {
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");
-        builder.with_span_processor(
+        let batch_span_processor =
             BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo-tracing"))
                 .with_batch_config(self.tracing.batch_processor.clone().into())
-                .build(),
-        );
+                .build();
+
+        if let Some(sampler) = &self.sampler {
+            builder.with_span_processor(batch_span_processor.with_sampler(sampler))
+        } else {
+            builder.with_span_processor(batch_span_processor)
+        }
         Ok(())
     }
 }

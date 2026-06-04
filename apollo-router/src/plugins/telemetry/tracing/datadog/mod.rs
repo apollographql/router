@@ -110,9 +110,12 @@ pub(crate) struct Config {
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
 
-    /// Per-exporter sampler. When set, only this fraction of globally-sampled spans are
-    /// forwarded to this exporter. The value is an absolute rate (0.0–1.0) or
-    /// `always_on` / `always_off`, and must not exceed `telemetry.exporters.tracing.common.sampler`.
+    /// Per-exporter sampler. Uses the same trace-ID-based algorithm as
+    /// `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler; setting it
+    /// higher will not increase the number of spans exported beyond what the common sampler allows.
+    /// Note: when `parent_based_sampler` is enabled (the default), upstream-sampled incoming
+    /// traces may bypass the common threshold, but will still be filtered by this per-exporter value.
+    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
