@@ -29,6 +29,15 @@ pub(crate) enum Error {
         "field level instrumentation sampler must sample less frequently than tracing level sampler"
     )]
     InvalidFieldLevelInstrumentationSampler,
+    #[error(
+        "per-exporter sampler for '{exporter}' ({per_exporter}) must not exceed the common tracing sampler ({common}); \
+         setting it higher cannot increase sampling beyond what the common sampler allows"
+    )]
+    PerExporterSamplerExceedsCommon {
+        exporter: &'static str,
+        per_exporter: f64,
+        common: f64,
+    },
 }
 
 pub(in crate::plugins::telemetry) trait GenericWith<T>
@@ -763,6 +772,14 @@ fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk
     opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
+fn sampler_option_to_ratio(s: &SamplerOption) -> f64 {
+    match s {
+        SamplerOption::TraceIdRatioBased(r) => r.clamp(0.0, 1.0),
+        SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+        SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+    }
+}
+
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         // Because when Datadog is enabled the global sampling is overridden to always_on
@@ -830,6 +847,55 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+
+    /// Validates that no per-exporter sampler exceeds the common tracing sampler.
+    /// Setting a per-exporter sampler higher than the common sampler cannot increase
+    /// the number of exported spans and is almost certainly a misconfiguration.
+    pub(crate) fn validate_per_exporter_samplers(&self) -> Result<(), Error> {
+        // Skip validation in Datadog agent sampling mode — the common sampler is overridden
+        // to always_on there, so per-exporter values are compared against an effective 1.0.
+        if self
+            .exporters
+            .tracing
+            .common
+            .preview_datadog_agent_sampling
+            .unwrap_or_default()
+        {
+            return Ok(());
+        }
+
+        let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
+
+        let exporters: &[(&'static str, Option<&SamplerOption>)] = &[
+            (
+                "telemetry.exporters.tracing.otlp",
+                self.exporters.tracing.otlp.sampler.as_ref(),
+            ),
+            (
+                "telemetry.exporters.tracing.zipkin",
+                self.exporters.tracing.zipkin.sampler.as_ref(),
+            ),
+            (
+                "telemetry.exporters.tracing.datadog",
+                self.exporters.tracing.datadog.sampler.as_ref(),
+            ),
+            ("telemetry.apollo", self.apollo.sampler.as_ref()),
+        ];
+
+        for (name, sampler) in exporters {
+            if let Some(sampler) = sampler {
+                let per_exporter_ratio = sampler_option_to_ratio(sampler);
+                if per_exporter_ratio > common_ratio {
+                    return Err(Error::PerExporterSamplerExceedsCommon {
+                        exporter: name,
+                        per_exporter: per_exporter_ratio,
+                        common: common_ratio,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn metrics_reference_mode(
