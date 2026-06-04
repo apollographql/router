@@ -17,6 +17,14 @@ info:
             condition:
               eq:
                 - response_header: never-true
-                - static: "true"
+                - "true"
 ---
-[]
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: GET

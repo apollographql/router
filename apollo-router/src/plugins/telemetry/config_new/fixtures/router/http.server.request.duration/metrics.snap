@@ -9,9 +9,20 @@ info:
         router:
           http.server.active_requests: false
           http.server.request.duration: true
+          http.server.response.body.size: false
 ---
 - name: http.server.request.duration
   description: Duration of HTTP server requests.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
   unit: s
   data:
     datapoints:

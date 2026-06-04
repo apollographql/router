@@ -1,9 +1,17 @@
 //! Stream combinator that fires a one-shot callback when a `Stream` completes normally
-//! (i.e. `poll_next` returns `Poll::Ready(None)`). Used to drive `on_stream_end` telemetry
-//! hooks — see `crate::plugins::telemetry::config_new::instruments::Instrumented::on_stream_end`.
+//! (i.e. `poll_next` returns `Poll::Ready(None)`). Reusable plumbing for driving
+//! `on_stream_end` telemetry hooks — see
+//! `crate::plugins::telemetry::config_new::instruments::Instrumented::on_stream_end`.
 //!
 //! Drop without normal completion deliberately does not fire the callback: a cancelled
-//! or client-disconnected stream has no well-defined lifecycle duration.
+//! or client-disconnected stream has no well-defined lifecycle duration. For metrics that
+//! *must* also record on drop (e.g. `http.server.request.duration`), see
+//! `crate::plugins::telemetry::config_new::router::instruments::RequestDurationBody`, which
+//! pairs an end-of-body callback with a `Drop`-based guard.
+//!
+//! This combinator is currently only exercised by its own unit tests; it is retained as
+//! reusable infrastructure for future stream-anchored instruments.
+#![allow(dead_code)]
 
 use std::pin::Pin;
 use std::task::Context;

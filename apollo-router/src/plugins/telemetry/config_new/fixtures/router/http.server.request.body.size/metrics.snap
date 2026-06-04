@@ -10,6 +10,7 @@ info:
           http.server.active_requests: false
           http.server.request.duration: false
           http.server.request.body.size: true
+          http.server.response.body.size: false
 ---
 - name: http.server.request.body.size
   description: Size of HTTP server request bodies.
@@ -17,6 +18,16 @@ info:
   data:
     datapoints:
       - sum: 35
+        count: 1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
         count: 1
         attributes:
           http.request.method: GET

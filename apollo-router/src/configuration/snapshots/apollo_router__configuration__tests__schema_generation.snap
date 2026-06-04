@@ -4990,6 +4990,14 @@ expression: "&schema"
           ],
           "description": "Histogram of server request duration"
         },
+        "http.server.request.time_to_first_response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Histogram of time to first response (time from request start to the moment the\nresponse is ready, i.e. the first byte). The metric name is pending confirmation."
+        },
         "http.server.response.body.size": {
           "allOf": [
             {
@@ -6810,16 +6818,6 @@ expression: "&schema"
     "LicenseEnforcementConfig": {
       "description": "The license enforcement plugin has no configuration.",
       "type": "object"
-    },
-    "Lifecycle": {
-      "description": "Lifecycle-anchored instrument values: emit once per request at a specific point in\nthe response-stream lifecycle (currently only stream end). Sibling to `Standard`\n(request-level) and `Event` (per-chunk) value-shapes; future variants would cover\nother stream-anchored emissions (e.g. first-byte, item-count).",
-      "oneOf": [
-        {
-          "const": "stream_duration",
-          "description": "Duration of the full response-stream lifecycle — wall-clock elapsed from the moment\nthe supergraph response is ready until the stream closes. Captures the `@defer`\nor subscription tail that `http.server.request.duration` misses. Recorded once per\nrequest, on normal stream completion.",
-          "type": "string"
-        }
-      ]
     },
     "LimitsConfig": {
       "additionalProperties": false,
@@ -12113,9 +12111,6 @@ expression: "&schema"
         },
         {
           "$ref": "#/definitions/Event5"
-        },
-        {
-          "$ref": "#/definitions/Lifecycle"
         },
         {
           "$ref": "#/definitions/SupergraphSelector"

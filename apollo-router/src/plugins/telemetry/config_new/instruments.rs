@@ -114,6 +114,11 @@ pub(crate) struct InstrumentsConfig {
 }
 
 const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
+// NOTE: the final metric name is pending confirmation. Caroline proposed
+// `http.server.request.time_to_first_response` for parity with
+// `http.server.request.duration`; this is not yet locked.
+const HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC: &str =
+    "http.server.request.time_to_first_response";
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
@@ -196,6 +201,26 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
+                        .build(),
+                ),
+            );
+        }
+
+        if self
+            .router
+            .attributes
+            .http_server_request_time_to_first_response
+            .is_enabled()
+        {
+            static_instruments.insert(
+                HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC)
+                        .with_unit("s")
+                        .with_description(
+                            "Time from HTTP server request start to the first response byte.",
+                        )
                         .build(),
                 ),
             );
@@ -333,6 +358,40 @@ impl InstrumentsConfig {
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            Some(attributes.clone())
+                        }
+                    },
+                    updated: false,
+                    _phantom: PhantomData,
+                }),
+            });
+        let http_server_request_time_to_first_response = self
+            .router
+            .attributes
+            .http_server_request_time_to_first_response
+            .is_enabled()
+            .then(|| CustomHistogram {
+                inner: Mutex::new(CustomHistogramInner {
+                    increment: Increment::Duration(Instant::now(), "s".to_string()),
+                    condition: Condition::True,
+                    histogram: Some(
+                        static_instruments
+                            .get(HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC)
+                            .expect(
+                                "cannot get static instrument for router; this should not happen",
+                            )
+                            .as_histogram()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to histogram for router; this should not happen",
+                            ),
+                    ),
+                    attributes: Vec::new(),
+                    selector: None,
+                    selectors: match &self.router.attributes.http_server_request_time_to_first_response {
                         DefaultedStandardInstrument::Bool(_)
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
@@ -493,6 +552,7 @@ impl InstrumentsConfig {
 
         RouterInstruments {
             http_server_request_duration,
+            http_server_request_time_to_first_response,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
@@ -1430,7 +1490,6 @@ pub(crate) enum InstrumentValue<T> {
     Chunked(Event<T>),
     Field(Field<T>),
     Custom(T),
-    Stream(Lifecycle),
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
@@ -1471,20 +1530,6 @@ pub(crate) enum Field<T> {
     Custom(T),
 }
 
-/// Lifecycle-anchored instrument values: emit once per request at a specific point in
-/// the response-stream lifecycle (currently only stream end). Sibling to `Standard`
-/// (request-level) and `Event` (per-chunk) value-shapes; future variants would cover
-/// other stream-anchored emissions (e.g. first-byte, item-count).
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Lifecycle {
-    /// Duration of the full response-stream lifecycle — wall-clock elapsed from the moment
-    /// the supergraph response is ready until the stream closes. Captures the `@defer`
-    /// or subscription tail that `http.server.request.duration` misses. Recorded once per
-    /// request, on normal stream completion.
-    StreamDuration,
-}
-
 pub(crate) trait Instrumented {
     type Request;
     type Response;
@@ -1502,8 +1547,12 @@ pub(crate) trait Instrumented {
     ) {
     }
     /// Called once when a streamed response fully drains (e.g. the last `@defer` chunk
-    /// emits). Default no-op; instruments whose value is `stream_duration` use this to
-    /// record the elapsed lifecycle.
+    /// emits). Default no-op. Reusable hook for instruments that need to observe the
+    /// normal close of the response stream; see `crate::plugins::telemetry::stream_end`.
+    // Currently only exercised through the test harness `supergraph_stream_end` event; kept
+    // as reusable plumbing alongside `StreamEndObserver` for future stream-anchored
+    // instruments.
+    #[allow(dead_code)]
     fn on_stream_end(&self, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
@@ -1625,12 +1674,6 @@ where
                                 (Some(Arc::new(selector)), Increment::FieldCustom(None))
                             }
                         },
-                        InstrumentValue::Stream(_) => {
-                            failfast_error!(
-                                "stream_duration is only supported on histograms; skipping counter instrument {instrument_name:?}"
-                            );
-                            continue;
-                        }
                     };
                     match static_instruments
                         .get(instrument_name)
@@ -1691,12 +1734,6 @@ where
                             Field::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::FieldCustom(None))
                             }
-                        },
-                        InstrumentValue::Stream(incr) => match incr {
-                            Lifecycle::StreamDuration => (
-                                None,
-                                Increment::StreamDuration(Instant::now(), instrument.unit.clone()),
-                            ),
                         },
                     };
 
@@ -1857,9 +1894,6 @@ pub(crate) enum Increment {
     FieldUnit,
     Duration(Instant, String),
     EventDuration(Instant, String),
-    // Timer started at instrument creation, recorded once when the response stream closes.
-    // Only valid for histograms.
-    StreamDuration(Instant, String),
     Custom(Option<opentelemetry::Value>),
     EventCustom(Option<opentelemetry::Value>),
     FieldCustom(Option<opentelemetry::Value>),
@@ -1879,7 +1913,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
 /// Convert a duration to f64 based on the specified unit.
 /// Supported units: "s" (seconds), "ms" (milliseconds), "us" (microseconds), "ns" (nanoseconds)
 /// Defaults to seconds for any other unit string.
-fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
+pub(crate) fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
     match unit {
         "ms" => duration.as_secs_f64() * 1000.0,
         "us" => duration.as_micros() as f64,
@@ -1989,10 +2023,6 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            // Stream-lifecycle instruments are intentionally NOT in this keep-list:
-            // their condition is evaluated against the response (not per chunk), so a
-            // failed response-level condition should drop the instrument now and
-            // prevent any later on_stream_end emission.
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
@@ -2038,10 +2068,9 @@ where
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
-            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
-                // Nothing to do because we're incrementing on events, fields, or stream end
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         } {
@@ -2124,11 +2153,6 @@ where
             Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
                 duration_to_value(instant.elapsed(), unit)
             }
-            Increment::StreamDuration(_, _) => {
-                // Stream-lifecycle instruments do not emit on error — an errored request
-                // never reached normal stream completion, so no lifecycle duration is defined.
-                return;
-            }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 val.as_ref()
                     .cloned()
@@ -2141,10 +2165,6 @@ where
         {
             counter.add(value, &attrs);
         }
-    }
-
-    fn on_stream_end(&self, _ctx: &Context) {
-        // stream_duration is histogram-only — see CustomInstruments::new. Counters skip.
     }
 
     fn on_response_field(
@@ -2187,7 +2207,6 @@ where
             | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::EventDuration(_, _)
-            | Increment::StreamDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2242,14 +2261,11 @@ where
                     Increment::Custom(val) | Increment::EventCustom(val) => {
                         val.as_ref().and_then(value_to_f64)
                     }
-                    Increment::StreamDuration(_, _)
-                    | Increment::FieldUnit
-                    | Increment::FieldCustom(_) => {
-                        // Stream-lifecycle instruments only emit on normal stream close
-                        // (via on_stream_end); a dropped / cancelled stream does not emit.
-                        // Field instruments likewise cannot emit on drop — we can't
-                        // increment GraphQL field metrics unless we actually processed
-                        // the result.
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
                         return;
                     }
                 }
@@ -2396,6 +2412,50 @@ where
     }
 }
 
+impl<A, T, Request, Response, EventResponse>
+    CustomHistogram<Request, Response, EventResponse, A, T>
+where
+    A: Selectors<Request, Response, EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    /// Compute the response-time attributes for an `Increment::Duration` histogram and hand
+    /// off the histogram handle, attributes and the request-start `Instant` for *deferred*
+    /// recording — without recording the sample now.
+    ///
+    /// Used by `http.server.request.duration`, which must record the full request lifecycle
+    /// (through stream close / drop) rather than at response-ready. The histogram is taken
+    /// out of `self`, so a subsequent `on_response` / `Drop` becomes a no-op and the sample
+    /// is recorded exactly once by the returned payload.
+    ///
+    /// Returns `None` when the response-level condition fails or the histogram is absent, in
+    /// which case no sample should be recorded.
+    pub(crate) fn take_duration_recording(
+        &self,
+        response: &Response,
+    ) -> Option<(Histogram<f64>, Vec<KeyValue>, Instant, String)> {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_response(response) {
+            let _ = inner.histogram.take();
+            return None;
+        }
+        let attrs = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response(response))
+            .unwrap_or_default();
+        extend_attributes(&mut inner.attributes, attrs);
+
+        let (start, unit) = match &inner.increment {
+            Increment::Duration(instant, unit) => (*instant, unit.clone()),
+            _ => return None,
+        };
+        let histogram = inner.histogram.take()?;
+        // Mark as updated so the `Drop` impl does not double-record.
+        inner.updated = true;
+        Some((histogram, inner.attributes.clone(), start, unit))
+    }
+}
+
 impl<A, T, Request, Response, EventResponse> Instrumented
     for CustomHistogram<Request, Response, EventResponse, A, T>
 where
@@ -2434,8 +2494,6 @@ where
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            // See sibling note in CustomCounter::on_response — StreamDuration is gated
-            // here, not in on_stream_end.
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
@@ -2473,25 +2531,16 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match &mut inner.increment {
+        let increment = match &inner.increment {
             Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
             Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
             Increment::Custom(val) => val.clone(),
-            Increment::StreamDuration(instant, _) => {
-                // stream_duration is conceptually "response ready → stream close".
-                // The Instant captured at instrument construction sits at request
-                // start; reset it here so on_stream_end measures only the stream
-                // tail, not the full request-to-stream-close span. The histogram
-                // sample is recorded later in on_stream_end.
-                *instant = Instant::now();
-                return;
-            }
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
-                // Nothing to do because we're incrementing on events, fields, or stream end
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         };
@@ -2546,7 +2595,6 @@ where
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
-            | Increment::StreamDuration(_, _)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events
@@ -2574,10 +2622,6 @@ where
             }
             Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
                 Some(duration_to_value(instant.elapsed(), unit))
-            }
-            Increment::StreamDuration(_, _) => {
-                // Stream-lifecycle instruments do not emit on error — see CustomCounter::on_error.
-                return;
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 val.clone()
@@ -2631,7 +2675,6 @@ where
             | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::EventDuration(_, _)
-            | Increment::StreamDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2660,18 +2703,6 @@ where
             inner.attributes.truncate(original_length);
         }
     }
-
-    fn on_stream_end(&self, _ctx: &Context) {
-        let mut inner = self.inner.lock();
-        let value = match &inner.increment {
-            Increment::StreamDuration(instant, unit) => duration_to_value(instant.elapsed(), unit),
-            _ => return,
-        };
-        if let (Some(histogram), Some(sample)) = (&inner.histogram, value_to_f64(&value)) {
-            histogram.record(sample, &inner.attributes);
-            inner.updated = true;
-        }
-    }
 }
 
 impl<A, T, Request, Response, EventResponse> Drop
@@ -2695,14 +2726,11 @@ where
                         Some(duration_to_value(instant.elapsed(), unit))
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => val.clone(),
-                    Increment::StreamDuration(_, _)
-                    | Increment::FieldUnit
-                    | Increment::FieldCustom(_) => {
-                        // Stream-lifecycle instruments only emit on normal stream close —
-                        // a dropped / cancelled stream does not produce a duration sample.
-                        // Field instruments likewise cannot emit on drop — we can't
-                        // increment GraphQL field metrics unless we actually processed
-                        // the result.
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
                         return;
                     }
                 };

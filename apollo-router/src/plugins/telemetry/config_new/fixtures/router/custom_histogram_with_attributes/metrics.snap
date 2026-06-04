@@ -9,6 +9,7 @@ info:
         router:
           http.server.active_requests: false
           http.server.request.duration: false
+          http.server.response.body.size: false
           custom.histogram:
             description: histogram of requests
             type: histogram
@@ -29,3 +30,13 @@ info:
         attributes:
           custom_attribute: custom_value
           http.request.method: GET
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200

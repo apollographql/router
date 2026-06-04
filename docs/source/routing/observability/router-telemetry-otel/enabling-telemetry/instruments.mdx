@@ -23,7 +23,8 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 
   * `http.server.active_requests` - The number of active requests in flight.
   * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
-  * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
+  * `http.server.request.duration` - A histogram of request durations for requests handled by the router. This measures the **full** request lifecycle, from request start until the client-facing response stream closes — so for `@defer` and subscription responses it includes the streamed tail, not just the time to the first response. If the client disconnects or the stream is cancelled before completion, the duration is recorded using the elapsed time at the moment the stream is dropped. The sample is recorded exactly once per request.
+  * `http.server.request.time_to_first_response` - A histogram of the time from request start until the response is ready (the first response byte). For non-streamed responses this is approximately equal to `http.server.request.duration`; for `@defer` and subscription responses it is shorter, because it excludes the streamed tail. <Note>The final name of this metric is pending confirmation.</Note>
   * `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
 
 + In the [subgraph service](#router-request-lifecycle-services):
@@ -54,6 +55,7 @@ telemetry:
         http.server.active_requests: true # (default false)
         http.server.request.body.size: true # (default false)
         http.server.request.duration: true # (default false)
+        http.server.request.time_to_first_response: true # (default false)
         http.server.response.body.size: true # (default false)
       subgraph:
         http.client.request.body.size: true # (default false)
@@ -351,31 +353,12 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 </tr>
-<tr>
-<td>
-
-##### `stream_duration`
-
-</td>
-<td>The wall-clock duration of the full response-stream lifecycle — from the moment the supergraph response is ready until the response stream closes. Captures the `@defer` or subscription tail that `duration` (which fires on the response object, before streaming) does not. Histogram-only; recorded once per request, on normal stream completion.</td>
-<td>
-
-`supergraph`
-
-</td>
-</tr>
 </tbody>
 </table>
 
 <Note>
 
 `event_*` are mandantory when you want to use a [selector](/router/configuration/telemetry/instrumentation/selectors) on the supergraph response body (`response_data` and `response_errors`).
-
-</Note>
-
-<Note>
-
-Use `stream_duration` to capture how long a streamed response takes to fully drain — for example, the total time between the first and last chunk of a `@defer` query. The built-in `http.server.request.duration` only captures time up to when the router's response object is ready, which excludes the deferred tail. `stream_duration` does not emit on errored or cancelled streams — only on normal completion.
 
 </Note>
 
@@ -434,7 +417,7 @@ telemetry:
 
 ##### Duration unit conversion
 
-For instruments with `value: duration`, `value: event_duration`, or `value: stream_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
+For instruments with `value: duration` or `value: event_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
 
 - `s` - seconds (default, recommended)
 - `ms` - milliseconds
@@ -580,7 +563,7 @@ telemetry:
 | `type`                      | `counter` \| `histogram`                                                         |            | The name of the custom instrument.            |
 | `unit`                      |                                                                                |            | A unit name, for example `By` or `{request}`. |
 | `description`               |                                                                                |            | The description of the custom instrument.     |
-| `value`                     | `unit` \| `duration` \| `<custom>` \| `event_unit` \| `event_duration` \| `event_custom` \| `stream_duration` |            | The value of the instrument.                  |
+| `value`                     | `unit` \| `duration` \| `<custom>` \| `event_unit` \| `event_duration` \| `event_custom` |            | The value of the instrument.                  |
 
 ### Production instrumentation example
 

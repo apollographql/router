@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Test server request body size metrics
+description: Custom counter where the router response does not happen. This should still increment the metric on Drop.
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -22,3 +22,12 @@ info:
     datapoints:
       - value: 1
         attributes: {}
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: GET

@@ -652,6 +652,23 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_response(response);
                             custom_events.on_response(response);
 
+                            // If the duration instrument deferred its recording to stream
+                            // close, also carry a clone of the router span so its lifetime
+                            // extends to stream close (Bryn: spans must cover the entire
+                            // request). The clone is held — never entered — by the response
+                            // body wrapper in the axum layer.
+                            if response.context.extensions().with_lock(|lock| {
+                                lock.contains_key::<config_new::router::instruments::RequestDurationRecording>()
+                            }) {
+                                response.context.extensions().with_lock(|lock| {
+                                    lock.insert(
+                                        config_new::router::instruments::RequestSpanExtension(
+                                            span.clone(),
+                                        ),
+                                    )
+                                });
+                            }
+
                             let mut headers: HashMap<String, Vec<String>> =
                                 HashMap::with_capacity(2);
                             if expose_trace_id.enabled {
@@ -1360,11 +1377,6 @@ impl Telemetry {
         // Wait for the first response of the stream
         let (parts, stream) = response.response.into_parts();
         let config_cloned = config.clone();
-        // Shared between the per-chunk inspect and the end-of-stream hook below; both
-        // dispatch to the same supergraph instruments.
-        let custom_instruments = Arc::new(custom_instruments);
-        let instruments_for_chunk = custom_instruments.clone();
-        let ctx_for_chunk = ctx.clone();
         let stream = stream.inspect(move |resp| {
             let span = Span::current();
             span.set_span_dyn_attributes(
@@ -1373,21 +1385,20 @@ impl Telemetry {
                     .spans
                     .supergraph
                     .attributes
-                    .on_response_event(resp, &ctx_for_chunk),
+                    .on_response_event(resp, &ctx),
             );
-            instruments_for_chunk.on_response_event(resp, &ctx_for_chunk);
-            custom_events.on_response_event(resp, &ctx_for_chunk);
-            custom_graphql_instruments.on_response_event(resp, &ctx_for_chunk);
+            custom_instruments.on_response_event(resp, &ctx);
+            custom_events.on_response_event(resp, &ctx);
+            custom_graphql_instruments.on_response_event(resp, &ctx);
         });
         let (first_response, rest) = StreamExt::into_future(stream).await;
 
-        let chained = once(ready(first_response.unwrap_or_default())).chain(rest);
-        let instruments_for_end = custom_instruments;
-        let observed = stream_end::StreamEndObserver::new(chained, move || {
-            instruments_for_end.on_stream_end(&ctx);
-        });
-
-        let response = http::Response::from_parts(parts, observed.boxed());
+        let response = http::Response::from_parts(
+            parts,
+            once(ready(first_response.unwrap_or_default()))
+                .chain(rest)
+                .boxed(),
+        );
 
         Ok(SupergraphResponse { context, response })
     }
@@ -2557,6 +2568,70 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json"
             );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn router_service_records_time_to_first_response_and_defers_duration() {
+        async {
+            // Enable both the duration and the new time-to-first-response standard
+            // instruments, with everything else off so the assertions are unambiguous.
+            let plugin = create_plugin_with_config(
+                r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      router:
+        http.server.request.duration: true
+        http.server.request.time_to_first_response: true
+"#,
+            )
+            .await;
+
+            let mut mock_service = MockRouterService::new();
+            mock_service
+                .expect_call()
+                .times(1)
+                .returning(move |req: RouterRequest| {
+                    Ok(RouterResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::OK)
+                        .header("content-type", "application/json")
+                        .data(json!({"data": {"field": "value"}}))
+                        .build()
+                        .unwrap())
+                });
+            let mut router_service = plugin.router_service(BoxService::new(mock_service));
+            let mut response = router_service
+                .ready()
+                .await
+                .unwrap()
+                .call(RouterRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap();
+
+            // `time_to_first_response` is recorded at response-ready.
+            assert_histogram_count!("http.server.request.time_to_first_response", 1);
+
+            // `http.server.request.duration` is *deferred* to stream close: at this point a
+            // recording guard is stashed in the context and the histogram has not yet
+            // recorded. (In production the axum layer records it on body close/drop.)
+            assert!(
+                response.context.extensions().with_lock(|lock| {
+                    lock.contains_key::<crate::plugins::telemetry::config_new::router::instruments::RequestDurationRecording>()
+                }),
+                "duration recording should be stashed for deferred recording"
+            );
+            assert_histogram_not_exists!("http.server.request.duration", f64);
+
+            // Draining and dropping the response (and its context) fires the guard's Drop,
+            // recording the full-lifecycle duration exactly once.
+            let _ = response.next_response().await;
+            drop(response);
+            assert_histogram_count!("http.server.request.duration", 1);
         }
         .with_metrics()
         .await;

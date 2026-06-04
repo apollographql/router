@@ -16,12 +16,27 @@ info:
             unit: request
             attributes:
               graphql.operation.name:
-                response_context: operation_name
+                response_context: "apollo::supergraph::operation_name"
             condition:
               eq:
                 - request timed out
                 - error: reason
 ---
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          error.type: Internal Server Error
+          http.request.method: POST
+          http.response.status_code: 500
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: POST
 - name: http.server.request.timeout
   description: request in timeout
   unit: request

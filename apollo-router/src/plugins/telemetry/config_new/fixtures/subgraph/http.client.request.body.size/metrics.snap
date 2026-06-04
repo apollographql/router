@@ -13,6 +13,7 @@ info:
         subgraph:
           http.client.request.duration: false
           http.client.request.body.size: true
+          http.client.response.body.size: false
 ---
 - name: http.client.request.body.size
   description: Size of HTTP client request bodies.
@@ -23,3 +24,13 @@ info:
         count: 1
         attributes:
           subgraph.name: products
+- name: http.server.request.time_to_first_response
+  description: Time from HTTP server request start to the first response byte.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200
