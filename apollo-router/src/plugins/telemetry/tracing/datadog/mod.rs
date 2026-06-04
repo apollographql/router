@@ -30,6 +30,7 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
@@ -108,6 +109,14 @@ pub(crate) struct Config {
     /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
+
+    /// Per-exporter sampler. When set, only this fraction of globally-sampled spans are
+    /// forwarded to this exporter. The value is an absolute rate (0.0–1.0) or
+    /// `always_on` / `always_off`, and must not exceed `telemetry.exporters.tracing.common.sampler`.
+    /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
+    /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 fn default_span_metrics() -> HashMap<String, bool> {
@@ -269,7 +278,18 @@ impl TracingConfigurator for Config {
             .preview_datadog_agent_sampling
             .unwrap_or_default()
         {
+            // In Datadog agent sampling mode all spans must be forwarded so the agent can apply
+            // its own sampling decisions via sampling.priority. A per-exporter sampler would
+            // produce incomplete traces from the agent's perspective, so ignore it with a warning.
+            if self.sampler.is_some() {
+                ::tracing::warn!(
+                    "telemetry.exporters.tracing.datadog.sampler is ignored when \
+                     preview_datadog_agent_sampling is enabled"
+                );
+            }
             builder.with_span_processor(batch_processor.always_sampled())
+        } else if let Some(sampler) = &self.sampler {
+            builder.with_span_processor(batch_processor.with_sampler(sampler))
         } else {
             builder.with_span_processor(batch_processor)
         }
