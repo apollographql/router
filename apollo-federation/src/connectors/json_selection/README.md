@@ -1051,6 +1051,29 @@ The key difference between the operators is how they handle `null` values:
 - `??` treats both `null` and `None` (missing) as "falsy" and uses the fallback
 - `?!` only treats `None` (missing) as "falsy", preserving explicit `null` values
 
+**Using `??` and `?!` in URL template fields**: These operators require the
+`$(...)` grouping syntax. They cannot appear as bare infix expressions directly
+in URL templates because the path parser terminates when it encounters `??` or
+`?!`, leaving the operator as unconsumed input. Wrap the entire expression in
+`$(...)`:
+
+```graphql
+# INVALID: bare ?? in a URL template expression
+@connect(http: { GET: "/offers/{$args.workflow ?? \"default\"}" }, ...)
+
+# Valid: wrap in $(...) grouping
+@connect(http: { GET: "/offers/{$($args.workflow ?? \"default\")}" }, ...)
+
+# Valid: same rule applies to path and queryParams fields
+@connect(http: {
+  GET: "/offers"
+  queryParams: "$($args.filter ?? \"all\")"
+}, ...)
+```
+
+This requirement applies to all three URL fields: HTTP method fields (`GET`,
+`POST`, etc.), `path`, and `queryParams`.
+
 ### `LitOpChain ::= LitExpr (LitOp LitExpr)+`
 
 ![LitOpChain](./grammar/LitOpChain.svg)
