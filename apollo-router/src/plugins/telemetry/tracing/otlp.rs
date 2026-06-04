@@ -46,7 +46,18 @@ impl TracingConfigurator for super::super::otlp::Config {
             .preview_datadog_agent_sampling
             .unwrap_or_default()
         {
+            // In Datadog agent sampling mode all spans are forwarded so the agent can apply
+            // its own sampling decisions. A per-exporter sampler would silently undercut that,
+            // so ignore it and warn if one was configured.
+            if config.sampler.is_some() {
+                ::tracing::warn!(
+                    "telemetry.exporters.tracing.otlp.sampler is ignored when \
+                     preview_datadog_agent_sampling is enabled"
+                );
+            }
             builder.with_span_processor(batch_span_processor.always_sampled())
+        } else if let Some(sampler) = &config.sampler {
+            builder.with_span_processor(batch_span_processor.with_sampler(sampler))
         } else {
             builder.with_span_processor(batch_span_processor)
         }

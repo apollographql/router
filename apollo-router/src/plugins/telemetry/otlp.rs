@@ -13,6 +13,7 @@ use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -46,6 +47,13 @@ pub(crate) struct Config {
     /// Note that when exporting to Datadog agent use `Delta`.
     #[serde(default)]
     pub(crate) temporality: Temporality,
+
+    /// Per-exporter sampler for tracing. When set, only this fraction of globally-sampled
+    /// spans are forwarded to this exporter. The value is an absolute rate (0.0–1.0) or
+    /// `always_on` / `always_off`, and must not exceed `telemetry.exporters.tracing.common.sampler`.
+    /// Has no effect on metrics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 impl Config {
