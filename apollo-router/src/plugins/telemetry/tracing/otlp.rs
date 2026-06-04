@@ -57,7 +57,7 @@ impl TracingConfigurator for super::super::otlp::Config {
             }
             builder.with_span_processor(batch_span_processor.always_sampled())
         } else if let Some(sampler) = &config.sampler {
-            builder.with_span_processor(batch_span_processor.with_sampler(sampler))
+            builder.with_span_processor(batch_span_processor.with_sampler(sampler, builder.global_sampler()))
         } else {
             builder.with_span_processor(batch_span_processor)
         }

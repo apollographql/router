@@ -29,6 +29,7 @@ use tower::BoxError;
 use crate::plugins::telemetry::CustomTraceIdPropagator;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::Propagation;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
@@ -61,6 +62,10 @@ impl<'a> TracingBuilder<'a> {
 
     pub(crate) fn tracing_common(&self) -> &TracingCommon {
         self.common
+    }
+
+    pub(crate) fn global_sampler(&self) -> &SamplerOption {
+        &self.common.sampler
     }
 
     pub(crate) fn spans(&self) -> &Spans {

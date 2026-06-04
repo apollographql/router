@@ -107,7 +107,7 @@ impl TracingConfigurator for Config {
                 .filtered();
 
         if let Some(sampler) = &self.sampler {
-            builder.with_span_processor(batch_span_processor.with_sampler(sampler))
+            builder.with_span_processor(batch_span_processor.with_sampler(sampler, builder.global_sampler()))
         } else {
             builder.with_span_processor(batch_span_processor)
         }

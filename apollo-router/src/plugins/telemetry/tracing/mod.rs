@@ -81,32 +81,52 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
 
 /// A span processor that applies a secondary sampling filter based on the trace ID.
 ///
-/// The sampling check uses the low 64 bits of the trace ID (same as OTel's `TraceIdRatioBased`),
-/// ensuring consistent per-trace decisions: either all spans in a trace pass or none do.
+/// Uses the same algorithm as OTel's `TraceIdRatioBased` sampler (low 64 bits, right-shifted
+/// by 1, compared against a threshold scaled to `[0, 2^63)`), so per-exporter ratios represent
+/// absolute fractions of all requests — not fractions of already-sampled spans.
 ///
-/// The ratio is **absolute** — a fraction of all requests — not a fraction of already-sampled
-/// spans. Setting `sampler: 0.02` means 2% of all requests reach this exporter regardless of
-/// the global sampler, provided the global sampler rate is >= 0.02.
+/// ## Parent-based sampling interaction
+///
+/// When `parent_based_sampler: true` (the default), OTel's `ParentBased` sampler has two paths:
+///
+/// 1. **Root spans / unsampled parent**: delegates to `TraceIdRatioBased` — hash-based decision.
+/// 2. **Upstream-sampled spans** (incoming `traceparent` with the SAMPLED flag set): always
+///    samples, overriding the hash check.
+///
+/// A span arriving via path 2 may have a trace ID whose hash falls outside the per-exporter
+/// threshold, yet it legitimately reached `on_end`. To avoid silently discarding these spans,
+/// `SamplingSpanProcessor` tracks the global threshold and `parent_based` flag: if a span's
+/// hash is outside the global threshold (only possible via a parent-flag override), it is always
+/// forwarded regardless of the per-exporter threshold.
+///
+/// When `parent_based_sampler: false`, the parent-override branch is never taken because the
+/// global sampler drops spans with hash >= global_threshold before they reach `on_end`.
 #[derive(Debug)]
 pub(crate) struct SamplingSpanProcessor<T: SpanProcessor> {
     delegate: T,
-    /// Precomputed threshold: `(ratio * (1u64 << 63) as f64) as u64`. Spans with
-    /// `(low64(traceId) >> 1) < threshold` are forwarded to the delegate.
+    /// Per-exporter threshold: `(per_exporter_ratio * (1u64 << 63)) as u64`.
     threshold: u64,
+    /// Global common-sampler threshold, used to detect parent-flag overrides.
+    global_threshold: u64,
 }
 
 impl<T: SpanProcessor> SamplingSpanProcessor<T> {
-    pub(crate) fn new(delegate: T, sampler: &SamplerOption) -> Self {
-        // Threshold scaled to [0, 2^63) to match OTel's TraceIdRatioBased algorithm.
-        // A span passes if (low64(traceId) >> 1) < threshold.
-        let threshold = match sampler {
-            SamplerOption::Always(Sampler::AlwaysOn) => u64::MAX,
-            SamplerOption::Always(Sampler::AlwaysOff) => 0,
-            SamplerOption::TraceIdRatioBased(ratio) => {
-                (ratio.clamp(0.0, 1.0) * (1u64 << 63) as f64) as u64
-            }
-        };
-        Self { delegate, threshold }
+    pub(crate) fn new(delegate: T, sampler: &SamplerOption, global_sampler: &SamplerOption) -> Self {
+        Self {
+            delegate,
+            threshold: sampler_to_threshold(sampler),
+            global_threshold: sampler_to_threshold(global_sampler),
+        }
+    }
+}
+
+fn sampler_to_threshold(s: &SamplerOption) -> u64 {
+    match s {
+        SamplerOption::Always(Sampler::AlwaysOn) => u64::MAX,
+        SamplerOption::Always(Sampler::AlwaysOff) => 0,
+        SamplerOption::TraceIdRatioBased(ratio) => {
+            (ratio.clamp(0.0, 1.0) * (1u64 << 63) as f64) as u64
+        }
     }
 }
 
@@ -120,17 +140,22 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
             self.delegate.on_end(span);
             return;
         }
-        if self.threshold == 0 {
-            return;
-        }
         // Mirrors OTel SDK's TraceIdRatioBased: use the low 64 bits of the trace ID,
         // right-shifted by 1, compared against a threshold scaled to [0, 2^63).
         let trace_id_bytes: [u8; 16] = span.span_context.trace_id().to_bytes();
         let (_, low) = trace_id_bytes.split_at(8);
         let low_bits = u64::from_be_bytes(low.try_into().unwrap()) >> 1;
+
         if low_bits < self.threshold {
+            // Within per-exporter threshold: forward normally.
+            self.delegate.on_end(span);
+        } else if low_bits >= self.global_threshold {
+            // Outside both the per-exporter and global thresholds, yet the span reached on_end —
+            // this can only happen when ParentBased honored an upstream SAMPLED flag. Forward it
+            // to respect the upstream's sampling decision.
             self.delegate.on_end(span);
         }
+        // else: low_bits is between threshold and global_threshold → legitimately sub-sampled.
     }
 
     fn force_flush(&self) -> OTelSdkResult {
@@ -152,7 +177,11 @@ where
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
     fn always_sampled(self) -> DatadogSpanProcessor<Self>;
-    fn with_sampler(self, sampler: &SamplerOption) -> SamplingSpanProcessor<Self>;
+    fn with_sampler(
+        self,
+        sampler: &SamplerOption,
+        global_sampler: &SamplerOption,
+    ) -> SamplingSpanProcessor<Self>;
 }
 
 impl<T: SpanProcessor> SpanProcessorExt for T
@@ -169,8 +198,12 @@ where
         DatadogSpanProcessor::new(self)
     }
 
-    fn with_sampler(self, sampler: &SamplerOption) -> SamplingSpanProcessor<Self> {
-        SamplingSpanProcessor::new(self, sampler)
+    fn with_sampler(
+        self,
+        sampler: &SamplerOption,
+        global_sampler: &SamplerOption,
+    ) -> SamplingSpanProcessor<Self> {
+        SamplingSpanProcessor::new(self, sampler, global_sampler)
     }
 }
 
@@ -380,10 +413,18 @@ mod tests {
         }
     }
 
+    fn make_processor(
+        recorder: RecordingProcessor,
+        sampler: SamplerOption,
+        global: SamplerOption,
+    ) -> SamplingSpanProcessor<RecordingProcessor> {
+        SamplingSpanProcessor::new(recorder, &sampler, &global)
+    }
+
     #[test]
     fn always_on_forwards_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::Always(Sampler::AlwaysOn));
+        let processor = make_processor(recorder.clone(), SamplerOption::Always(Sampler::AlwaysOn), SamplerOption::Always(Sampler::AlwaysOn));
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -393,7 +434,7 @@ mod tests {
     #[test]
     fn always_off_drops_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::Always(Sampler::AlwaysOff));
+        let processor = make_processor(recorder.clone(), SamplerOption::Always(Sampler::AlwaysOff), SamplerOption::Always(Sampler::AlwaysOn));
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -403,14 +444,15 @@ mod tests {
     #[test]
     fn ratio_based_is_deterministic() {
         let sampler = SamplerOption::TraceIdRatioBased(0.5);
+        let global = SamplerOption::Always(Sampler::AlwaysOn);
 
         // Same trace ID always produces the same decision
         let recorder1 = RecordingProcessor::default();
-        let p1 = SamplingSpanProcessor::new(recorder1.clone(), &sampler);
+        let p1 = make_processor(recorder1.clone(), sampler.clone(), global.clone());
         p1.on_end(make_span(42));
 
         let recorder2 = RecordingProcessor::default();
-        let p2 = SamplingSpanProcessor::new(recorder2.clone(), &sampler);
+        let p2 = make_processor(recorder2.clone(), sampler, global);
         p2.on_end(make_span(42));
 
         assert_eq!(
@@ -423,7 +465,7 @@ mod tests {
     #[test]
     fn ratio_zero_drops_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::TraceIdRatioBased(0.0));
+        let processor = make_processor(recorder.clone(), SamplerOption::TraceIdRatioBased(0.0), SamplerOption::Always(Sampler::AlwaysOn));
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -433,10 +475,34 @@ mod tests {
     #[test]
     fn ratio_one_forwards_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = SamplingSpanProcessor::new(recorder.clone(), &SamplerOption::TraceIdRatioBased(1.0));
+        let processor = make_processor(recorder.clone(), SamplerOption::TraceIdRatioBased(1.0), SamplerOption::Always(Sampler::AlwaysOn));
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
         assert_eq!(recorder.0.lock().unwrap().len(), 20);
+    }
+
+    /// A span whose trace ID hash falls outside the global threshold can only have reached
+    /// on_end because ParentBased honored an upstream SAMPLED flag. It must be forwarded.
+    #[test]
+    fn parent_based_override_forwards_spans_outside_global_threshold() {
+        // global = 0.5, per-exporter = 0.02
+        // global_threshold = (0.5 * 2^63) as u64 ≈ 2^62
+        // We need low_bits >= global_threshold, i.e. (raw_low >> 1) >= 2^62, i.e. raw_low >= 2^63.
+        let global = SamplerOption::TraceIdRatioBased(0.5);
+        let per_exporter = SamplerOption::TraceIdRatioBased(0.02);
+
+        let recorder = RecordingProcessor::default();
+        let processor = make_processor(recorder.clone(), per_exporter, global);
+
+        // raw_low = u64::MAX → low_bits = u64::MAX >> 1 = 2^63 - 1, which is above global_threshold.
+        let span = make_span(u64::MAX as u128);
+        processor.on_end(span);
+
+        assert_eq!(
+            recorder.0.lock().unwrap().len(),
+            1,
+            "span with hash above global threshold must be forwarded — it arrived via parent-flag override"
+        );
     }
 }
