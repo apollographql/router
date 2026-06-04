@@ -76,9 +76,9 @@ pub(crate) struct SubscriptionConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) max_lifetime: Option<Duration>,
-    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. Default is 0 (no reconnection attempts).
+    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. When unset (null) the default is 0 (no reconnection attempts). Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.
     pub(crate) max_reconnect_attempts: Option<u32>,
-    /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. Defaults to 1 second.
+    /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay. Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) reconnect_delay: Option<Duration>,

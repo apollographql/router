@@ -45,10 +45,8 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::protocols::websocket::GraphqlWebSocket;
-use crate::protocols::websocket::INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE;
-use crate::protocols::websocket::WEBSOCKET_CLOSE_ERROR_CODE;
-use crate::protocols::websocket::WEBSOCKET_MESSAGE_ERROR_CODE;
 use crate::protocols::websocket::convert_websocket_stream;
+use crate::protocols::websocket::is_transient_transport_error;
 use crate::services::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -751,33 +749,7 @@ async fn open_ws_gql_stream(
     };
 
     if let Some(level) = log_request_level {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", request.method()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(serde_json::to_string(&body).unwrap_or_default().into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.to_string().into()),
-        ));
-        log_event(
-            level,
-            "subgraph.request",
-            attrs,
-            &format!("Websocket request body to subgraph {service_name:?}"),
-        );
+        log_websocket_request(level, service_name, &request, &body);
     }
 
     let uri = request.uri();
@@ -905,79 +877,42 @@ fn increment_subgraph_ended_counter(service_name: &str) {
     );
 }
 
-/// True if the response is one of the synthetic error items emitted while reading a subgraph
-/// WebSocket stream — an abnormal close, a read failure, or a message that fails to deserialize.
-/// These are transport-level events the reconnect machinery will recover from; forwarding them to
-/// clients would prematurely terminate HTTP-multipart subscriptions. Matching is keyed on the
-/// shared extension-code constants alone (not on `subscribed`): the close/read errors set
-/// `subscribed=false`, but the deserialize error leaves `subscribed=None`, and both must be
-/// suppressed during the reconnect window.
-fn is_transient_transport_error(resp: &graphql::Response) -> bool {
-    resp.errors.iter().any(|e| {
-        matches!(
-            e.extension_code().as_deref(),
-            Some(WEBSOCKET_CLOSE_ERROR_CODE)
-                | Some(WEBSOCKET_MESSAGE_ERROR_CODE)
-                | Some(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
-        )
-    })
+/// Emit a `subgraph.request` log event for a WebSocket subscription request, mirroring the HTTP
+/// subgraph request logging. Kept as a single helper so the WebSocket connect and reconnect paths
+/// (both routed through `open_ws_gql_stream`) log identically.
+fn log_websocket_request(
+    level: EventLevel,
+    service_name: &str,
+    request: &http::Request<()>,
+    body: &graphql::Request,
+) {
+    let attrs = vec![
+        KeyValue::new(
+            Key::from_static_str("http.request.headers"),
+            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
+        ),
+        KeyValue::new(
+            Key::from_static_str("http.request.method"),
+            opentelemetry::Value::String(format!("{}", request.method()).into()),
+        ),
+        KeyValue::new(
+            Key::from_static_str("http.request.version"),
+            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
+        ),
+        KeyValue::new(
+            Key::from_static_str("http.request.body"),
+            opentelemetry::Value::String(serde_json::to_string(body).unwrap_or_default().into()),
+        ),
+        KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.to_string().into()),
+        ),
+    ];
+    log_event(
+        level,
+        "subgraph.request",
+        attrs,
+        &format!("Websocket request body to subgraph {service_name:?}"),
+    );
 }
 
-#[cfg(test)]
-mod tests {
-    use super::INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE;
-    use super::WEBSOCKET_CLOSE_ERROR_CODE;
-    use super::WEBSOCKET_MESSAGE_ERROR_CODE;
-    use super::is_transient_transport_error;
-    use crate::graphql;
-
-    fn error_response(code: &str) -> graphql::Error {
-        graphql::Error::builder()
-            .message("transport error")
-            .extension_code(code)
-            .build()
-    }
-
-    #[test]
-    fn suppresses_websocket_close_and_read_errors() {
-        // Close/read errors carry subscribed=false (set by into_graphql_response).
-        let close = graphql::Response::builder()
-            .subscribed(false)
-            .error(error_response(WEBSOCKET_CLOSE_ERROR_CODE))
-            .build();
-        assert!(is_transient_transport_error(&close));
-
-        let read = graphql::Response::builder()
-            .subscribed(false)
-            .error(error_response(WEBSOCKET_MESSAGE_ERROR_CODE))
-            .build();
-        assert!(is_transient_transport_error(&read));
-    }
-
-    #[test]
-    fn suppresses_deserialize_error_even_though_subscribed_is_none() {
-        // Regression: the deserialize error is built without `subscribed(false)`, so
-        // `subscribed` is None. It must still be suppressed during a reconnect window;
-        // otherwise it reaches HTTP-multipart clients, where `subscribed.unwrap_or(false)`
-        // resolves to false and tears the client stream down before reconnect can recover.
-        let parse = graphql::Response::builder()
-            .error(error_response(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE))
-            .build();
-        assert_eq!(parse.subscribed, None);
-        assert!(is_transient_transport_error(&parse));
-    }
-
-    #[test]
-    fn does_not_suppress_data_or_application_errors() {
-        // Normal data event.
-        let data = graphql::Response::builder().subscribed(true).build();
-        assert!(!is_transient_transport_error(&data));
-
-        // A genuine subgraph application error (different code) must reach the client.
-        let app_err = graphql::Response::builder()
-            .subscribed(false)
-            .error(error_response("SOME_SUBGRAPH_ERROR"))
-            .build();
-        assert!(!is_transient_transport_error(&app_err));
-    }
-}

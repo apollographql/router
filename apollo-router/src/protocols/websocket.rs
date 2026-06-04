@@ -49,6 +49,23 @@ pub(crate) const WEBSOCKET_MESSAGE_ERROR_CODE: &str = "WEBSOCKET_MESSAGE_ERROR";
 pub(crate) const INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE: &str =
     "INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT";
 
+/// True if the response is one of the synthetic error items produced while reading a subgraph
+/// WebSocket stream — an abnormal close, a read failure, or a message that fails to deserialize —
+/// rather than a genuine GraphQL error from the subgraph. These represent transport-level events
+/// the subscription reconnect machinery can recover from. Keyed on the shared extension-code
+/// constants alone (not on `subscribed`): the close/read errors set `subscribed=false`, but the
+/// deserialize error leaves `subscribed=None`.
+pub(crate) fn is_transient_transport_error(resp: &graphql::Response) -> bool {
+    resp.errors.iter().any(|e| {
+        matches!(
+            e.extension_code().as_deref(),
+            Some(WEBSOCKET_CLOSE_ERROR_CODE)
+                | Some(WEBSOCKET_MESSAGE_ERROR_CODE)
+                | Some(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
+        )
+    })
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema, Copy)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WebSocketProtocol {
@@ -529,8 +546,10 @@ pin_project! {
         terminated: bool,
         // When the websocket stream is closed (!= graphql sub protocol)
         closed: bool,
-        // Set to true when the server sends a protocol-level Complete message, as opposed to an
-        // unexpected connection drop. Used by the reconnect logic to avoid spurious reconnects.
+        // Set to true when the server ends the subscription with a terminal message — a
+        // protocol-level Complete or an operation Error — as opposed to an unexpected connection
+        // drop. Used by the reconnect logic to avoid reconnecting after the subscription has
+        // already ended server-side.
         completed_normally: Arc<AtomicBool>,
     }
 }
@@ -597,7 +616,18 @@ where
                             }
                             // For ignored message like ACK, Ping, Pong, etc...
                             (None, false) => self.poll_next(cx),
-                            (Some(resp), _) => Poll::Ready(Some(resp)),
+                            (Some(resp), terminal) => {
+                                // `terminal` is true for any ServerMessage::Error — but that
+                                // includes the *synthetic* transport errors `convert_websocket_stream`
+                                // emits for an abnormal close or read failure, which represent a
+                                // connection drop the reconnect logic should recover from. Only a
+                                // genuine subgraph operation error ends the subscription
+                                // server-side, so exclude the synthetic ones before recording it.
+                                if terminal && !is_transient_transport_error(&resp) {
+                                    this.completed_normally.store(true, Ordering::Relaxed);
+                                }
+                                Poll::Ready(Some(resp))
+                            }
                         }
                     }
                     Err(err) => Poll::Ready(
@@ -1329,5 +1359,55 @@ mod tests {
             non_ascii_value.as_bytes(),
             "Header value should match the original non-ASCII value 'Montréal'"
         );
+    }
+
+    fn transport_error_response(code: &str) -> graphql::Response {
+        graphql::Response::builder()
+            .subscribed(false)
+            .error(
+                graphql::Error::builder()
+                    .message("transport error")
+                    .extension_code(code)
+                    .build(),
+            )
+            .build()
+    }
+
+    #[test]
+    fn transient_transport_error_matches_close_and_read_errors() {
+        assert!(is_transient_transport_error(&transport_error_response(
+            WEBSOCKET_CLOSE_ERROR_CODE
+        )));
+        assert!(is_transient_transport_error(&transport_error_response(
+            WEBSOCKET_MESSAGE_ERROR_CODE
+        )));
+    }
+
+    #[test]
+    fn transient_transport_error_matches_deserialize_error_with_subscribed_none() {
+        // The deserialize error is built without `subscribed(false)`, so `subscribed` is None.
+        // It must still be recognized so it is suppressed during a reconnect window rather than
+        // tearing down HTTP-multipart clients (where `subscribed.unwrap_or(false)` is false).
+        let parse = graphql::Response::builder()
+            .error(
+                graphql::Error::builder()
+                    .message("cannot deserialize")
+                    .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
+                    .build(),
+            )
+            .build();
+        assert_eq!(parse.subscribed, None);
+        assert!(is_transient_transport_error(&parse));
+    }
+
+    #[test]
+    fn transient_transport_error_ignores_data_and_application_errors() {
+        let data = graphql::Response::builder().subscribed(true).build();
+        assert!(!is_transient_transport_error(&data));
+
+        // A genuine subgraph application error (different code) is not a transport error.
+        assert!(!is_transient_transport_error(&transport_error_response(
+            "SOME_SUBGRAPH_ERROR"
+        )));
     }
 }

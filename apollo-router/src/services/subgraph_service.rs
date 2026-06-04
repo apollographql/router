@@ -1238,6 +1238,7 @@ mod tests {
     use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
     use crate::plugins::subscription::subgraph::SubscriptionSubgraphService;
     use crate::protocols::websocket::ClientMessage;
+    use crate::protocols::websocket::ServerError;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
@@ -2932,6 +2933,79 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// Completes the handshake, sends a terminal operation `Error` (application-level, not a
+    /// transport error code), then drops the connection with an abnormal close. The terminal
+    /// Error must prevent the router from reconnecting even though the close is abnormal.
+    async fn emulate_websocket_server_sends_error_then_drops(
+        listener: TcpListener,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        async fn ws_handler(
+            ws: WebSocketUpgrade,
+            ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+            State(count): State<Arc<AtomicU32>>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            count.fetch_add(1, Ordering::SeqCst);
+            let res = ws
+                .protocols(["graphql-transport-ws"])
+                .on_upgrade(move |mut socket| async move {
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    assert!(matches!(
+                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                        ClientMessage::ConnectionInit { .. }
+                    ));
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let client_id = if let ClientMessage::Subscribe { id, .. } =
+                        serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                    {
+                        id
+                    } else {
+                        panic!("expected Subscribe message");
+                    };
+                    // Terminal operation error from the subgraph (not a transport error code).
+                    socket
+                        .send(Message::text(
+                            serde_json::to_string(&ServerMessage::Error {
+                                id: Some(client_id),
+                                payload: ServerError::Error(
+                                    Error::builder()
+                                        .message("boom")
+                                        .extension_code("MY_SUBGRAPH_ERROR")
+                                        .build(),
+                                ),
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    // Abnormal close after the terminal error — must NOT trigger a reconnect.
+                    socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: 1011,
+                            reason: "unexpected termination".into(),
+                        })))
+                        .await
+                        .unwrap();
+                });
+            Ok(res)
+        }
+
+        let app = Router::new()
+            .route("/ws", get(ws_handler))
+            .with_state(connection_count);
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     fn subscription_config_with_reconnect(max_reconnect_attempts: u32) -> SubscriptionConfig {
         SubscriptionConfig {
             max_reconnect_attempts: Some(max_reconnect_attempts),
@@ -3498,6 +3572,101 @@ mod tests {
         );
 
         spawned_task.abort();
+    }
+
+    /// A terminal operation `Error` from the subgraph ends the subscription server-side. Even
+    /// though the subgraph then drops the connection abnormally, the router must NOT reconnect
+    /// (the Error sets `completed_normally`), and the client must receive the application error.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_application_error_does_not_reconnect() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let connection_count = Arc::new(AtomicU32::new(0));
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_sends_error_then_drops(
+                listener,
+                connection_count.clone(),
+            ));
+
+            // Reconnect is configured — the terminal Error must suppress it entirely.
+            let subgraph_service = with_subscription_layer_reconnect(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+                5,
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // The client must receive the application error.
+            let app_error = gql_stream.next().await.unwrap();
+            assert!(
+                app_error
+                    .errors
+                    .iter()
+                    .any(|e| e.extension_code().as_deref() == Some("MY_SUBGRAPH_ERROR")),
+                "client should receive the subgraph application error"
+            );
+
+            // After the terminal error the stream ends; no data from a reconnected stream.
+            loop {
+                match gql_stream.next().await {
+                    Some(item) if !item.errors.is_empty() => continue,
+                    Some(_) => panic!("unexpected data after a terminal application error"),
+                    None => break,
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // Exactly one connection was made — no reconnect was attempted.
+            assert_eq!(connection_count.load(Ordering::SeqCst), 1);
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.subgraph",
+                1,
+                "subgraph.name" = "test"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.reconnect",
+                u64,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
