@@ -132,7 +132,7 @@ pub(crate) trait VarPaths {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct JSONSelection {
-    pub(super) inner: TopLevelSelection,
+    pub(crate) inner: TopLevelSelection,
     pub spec: ConnectSpec,
 }
 
@@ -220,6 +220,15 @@ impl JSONSelection {
             inner: TopLevelSelection::Named(SubSelection::default()),
             spec: ConnectSpec::latest(),
         }
+    }
+
+    /// Compare this selection's top-level structure to another's, ignoring the
+    /// `spec` field. Useful when surveying how the same source text parses
+    /// under different [`ConnectSpec`] versions: PartialEq on `JSONSelection`
+    /// includes `spec`, so two structurally-identical parses for different
+    /// specs would otherwise compare unequal.
+    pub fn structural_eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 
     pub fn is_empty(&self) -> bool {
@@ -583,7 +592,7 @@ pub struct NamedSelection {
     // synthetic wrapping. The field is kept named `path` for continuity
     // with call sites that historically worked with a `PathSelection`,
     // but it now accepts the full `LitExpr` surface.
-    pub(super) path: WithRange<LitExpr>,
+    pub(crate) path: WithRange<LitExpr>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -1018,7 +1027,7 @@ impl VarPaths for NamedSelection {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PathSelection {
-    pub(super) path: WithRange<PathList>,
+    pub(crate) path: WithRange<PathList>,
 }
 
 // Like NamedSelection, PathSelection is an AST structure that takes its range
@@ -1644,7 +1653,7 @@ enum NamedSelectionSeparator {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
-    pub(super) selections: Vec<NamedSelection>,
+    pub(crate) selections: Vec<NamedSelection>,
     pub(super) range: OffsetRange,
 }
 
@@ -2071,7 +2080,7 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub(crate) struct MethodArgs {
-    pub(super) args: Vec<WithRange<LitExpr>>,
+    pub(crate) args: Vec<WithRange<LitExpr>>,
     pub(super) range: OffsetRange,
 }
 
