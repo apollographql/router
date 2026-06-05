@@ -12,7 +12,9 @@ use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing_core::Event;
+use tracing_core::Field;
 use tracing_core::Subscriber;
+use tracing_core::field;
 use tracing_serde::AsSerde;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -261,6 +263,72 @@ where
     }
 }
 
+/// Collects tracing event fields into an ordered buffer so we can filter before serializing.
+///
+/// Needed because `otel_error!` (and similar OTel macros) append a trailing `""` format-string
+/// arg after explicit kv fields, which causes tracing to record both `message = ""` (from the
+/// empty format string) and an explicit `message = kv` field — producing duplicate JSON keys.
+/// By collecting first we can drop the empty-string `message` when a real one is present.
+struct EventFieldCollector {
+    fields: Vec<(String, serde_json::Value)>,
+}
+
+impl EventFieldCollector {
+    fn new() -> Self {
+        Self { fields: Vec::new() }
+    }
+
+    fn serialize_into<M: SerializeMap>(self, map: &mut M) -> Result<(), M::Error> {
+        let has_real_message = self.fields.iter().any(|(k, v)| {
+            k == "message" && !matches!(v, serde_json::Value::String(s) if s.is_empty())
+        });
+        for (key, value) in self.fields {
+            if key == "message"
+                && has_real_message
+                && matches!(&value, serde_json::Value::String(s) if s.is_empty())
+            {
+                continue;
+            }
+            map.serialize_entry(key.as_str(), &value)?;
+        }
+        Ok(())
+    }
+}
+
+impl field::Visit for EventFieldCollector {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields
+            .push((field.name().to_owned(), serde_json::Value::from(value)));
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let name = field.name();
+        let name = name.strip_prefix("r#").unwrap_or(name);
+        self.fields
+            .push((name.to_owned(), serde_json::Value::from(format!("{value:?}"))));
+    }
+}
+
 impl<S> EventFormatter<S> for Json
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -380,10 +448,11 @@ where
                 }
             }
 
-            let mut visitor = tracing_serde::SerdeMapVisitor::new(serializer);
-            event.record(&mut visitor);
-
-            serializer = visitor.take_serializer()?;
+            let mut collector = EventFieldCollector::new();
+            event.record(&mut collector);
+            collector
+                .serialize_into(&mut serializer)
+                .map_err(|e| serde::ser::Error::custom(e))?;
 
             if self.config.display_target {
                 serializer.serialize_entry("target", meta.target())?;
