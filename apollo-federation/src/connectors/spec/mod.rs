@@ -30,12 +30,12 @@ use crate::connectors::validation::Message;
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::link::Purpose;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::link::spec_registry::APOLLO_SPEC_DOMAIN;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const CONNECT_IDENTITY_NAME: Name = name!("connect");

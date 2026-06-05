@@ -1382,8 +1382,8 @@ mod test {
     use apollo_compiler::name;
 
     use super::*;
-    use crate::link::DEFAULT_LINK_NAME;
     use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
+    use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
     use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
     use crate::schema::position::SchemaDefinitionPosition;
     use crate::subgraph::test_utils::BuildOption;
@@ -1392,7 +1392,7 @@ mod test {
     impl JoinSpecDefinition {
         fn link(&self) -> Directive {
             Directive {
-                name: DEFAULT_LINK_NAME,
+                name: LINK_DIRECTIVE_NAME_IN_SPEC,
                 arguments: vec![
                     Node::new(Argument {
                         name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
