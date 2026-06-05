@@ -1,4 +1,4 @@
-# Router Learnings
+# Routerlings
 
 A rustlings-style interactive CLI for learning how Apollo Router works. Built for engineers, managers, and curious non-technical folks — no Rust experience required to *take* the course.
 
@@ -13,7 +13,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 Then, from the repo root:
 
 ```sh
-cargo run -p router-learnings
+cargo run -p routerlings
 ```
 
 That's it. The tool walks you through 12 chapters interactively. Progress is saved between sessions.
@@ -22,16 +22,16 @@ That's it. The tool walks you through 12 chapters interactively. Progress is sav
 
 ```sh
 # Start (or resume) the interactive tour
-cargo run -p router-learnings
+cargo run -p routerlings
 
 # See all chapters and your progress
-cargo run -p router-learnings -- list
+cargo run -p routerlings -- list
 
 # Jump to a specific chapter
-cargo run -p router-learnings -- chapter 5
+cargo run -p routerlings -- chapter 5
 
 # Reset progress and start over
-cargo run -p router-learnings -- reset
+cargo run -p routerlings -- reset
 ```
 
 ## What's covered
