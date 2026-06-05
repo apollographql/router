@@ -543,13 +543,15 @@ Enabling this option will make debugging more difficult, as clients won't receiv
 
 #### Early cancel
 
-Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+When early cancel is enabled, which is done by setting `supergraph.early_cancel: true`, if the client closes the connection without waiting for the response, the entire request will be canceled and not proceed through the pipeline. Early cancel is **enabled by default**. 
 
-To go back to the previous behavior of immediately cancelling the request, the following configuration can be used for `supergraph.early_cancel`:
+Since this causes issues with request monitoring, the router introduced a new behavior in [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1). Instead, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+
+To get this newer behavior of executing the entire pipeline despite a dropped connection, the following configuration can be used for `supergraph.early_cancel`:
 
 ```yaml
 supergraph:
-  early_cancel: true
+  early_cancel: false
 ```
 
 Additionally, since v1.43.1, the router can show a log when it detects that the client canceled the request. This log can be activated with:
