@@ -1,40 +1,23 @@
 ### Remove EndpointHandler and Endpoint::from_router_service ([PR #9215](https://github.com/apollographql/router/pull/9215))
 
-Plugin authors who implement `web_endpoints()` must migrate from `Endpoint::from_router_service` to `Endpoint::from_router`.
+`Endpoint::from_router_service` and `plugin::Handler` are removed. Use `Endpoint::new` with an `EndpointService` built from your own HTTP `BoxCloneService` (or any cloneable Tower service over `http::Request` / `http::Response` with `Error = Infallible`).
 
 **Before:**
 ```rust
-use apollo_router::Endpoint;
-use tower::Service;
-
-fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-    let endpoint = Endpoint::from_router_service(
-        "/my-path".to_string(),
-        my_tower_service.boxed_clone(),
-    );
-    // ...
-}
+Endpoint::from_router_service("/my-path".to_string(), my_router_box_service)
 ```
 
 **After:**
 ```rust
-use apollo_router::{axum, Endpoint};
-use axum::routing::any;
-
-fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-    let router = axum::Router::new().route("/", any(my_axum_handler));
-    let endpoint = Endpoint::from_router("/my-path".to_string(), router);
-    // ...
-}
+Endpoint::new(
+    "/my-path".to_string(),
+    EndpointService::new(my_http_box_clone_service),
+)
 ```
 
-The `axum` crate is now re-exported as `apollo_router::axum`, router and handler types are available via this re-export.
+**Additional fixes:**
 
-The `plugin::Handler` struct has also been removed. With the move to native axum Routers, `Handler` is no longer needed.
-
-**Additional fixes included in this change:**
-
-- Entity cache invalidation endpoint (`entity_cache.invalidation`) now correctly returns `Content-Type: application/json` on all responses (previously returned `text/plain`).
-- Response cache invalidation endpoint (`response_cache.invalidation`) no longer accepts empty-body `POST []` requests as authenticated; an empty invalidation list is now rejected with `401 Unauthorized`.
+- Entity cache invalidation (`entity_cache.invalidation`) returns `Content-Type: application/json` on all responses.
+- Response cache invalidation (`response_cache.invalidation`) rejects empty `POST []` bodies with `401 Unauthorized`.
 
 By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9215

@@ -1533,6 +1533,49 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 }
 
 #[test(tokio::test)]
+async fn it_answers_to_custom_endpoint_via_endpoint_service() -> Result<(), ApolloRouterError> {
+    use crate::router_factory::EndpointService;
+
+    async fn echo_handler(method: http::Method, uri: axum::extract::OriginalUri) -> String {
+        format!("{} + {}", method, uri.path())
+    }
+
+    let router = axum::Router::new().route("/", axum::routing::any(echo_handler));
+    let mut web_endpoints = MultiMap::new();
+    web_endpoints.insert(
+        ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+        Endpoint::new(
+            "/plugin-endpoint".to_string(),
+            EndpointService::from_router(router),
+        ),
+    );
+
+    let conf = Configuration::fake_builder().build().unwrap();
+    let (server, client) = init_with_config(
+        router::service::empty().await,
+        Arc::new(conf),
+        web_endpoints,
+    )
+    .await?;
+
+    let path = "/plugin-endpoint";
+    let response = client
+        .get(format!(
+            "{}{}",
+            server.graphql_listen_address().as_ref().unwrap(),
+            path
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.text().await.unwrap(), format!("GET + {path}"));
+
+    server.shutdown().await
+}
+
+#[test(tokio::test)]
 async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
     let error = Configuration::fake_builder()
         .homepage(crate::configuration::Homepage::fake_builder().build())

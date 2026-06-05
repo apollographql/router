@@ -4,6 +4,7 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::Endpoint;
+use apollo_router::EndpointService;
 use apollo_router::ListenAddr;
 use axum::response::IntoResponse;
 use axum::routing::any;
@@ -53,7 +54,7 @@ impl Plugin for EchoCoProcessor {
             .unwrap();
         endpoints.insert(
             ListenAddr::from(socket_addr),
-            Endpoint::from_router("/".to_string(), router),
+            Endpoint::new("/".to_string(), EndpointService::from_router(router)),
         );
 
         endpoints

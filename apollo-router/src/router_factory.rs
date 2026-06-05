@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::convert::Infallible;
 use std::io;
 use std::sync::Arc;
 
@@ -46,11 +47,72 @@ use crate::uplink::license_enforcement::LicenseState;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
+/// An HTTP handler for use with [`Endpoint::new`].
+///
+/// For [`axum::Router`]s, use [`EndpointService::from_router`]. For other Tower services
+/// that handle raw HTTP, use [`EndpointService::new`].
+#[derive(Clone)]
+pub struct EndpointService(axum::Router);
+
+impl EndpointService {
+    /// Wraps an [`axum::Router`] as an [`EndpointService`].
+    ///
+    /// This is the preferred constructor when you already have a router with routes
+    /// defined. The router is nested at the endpoint path without an extra fallback layer.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use apollo_router::EndpointService;
+    /// use axum::{Router, routing::get};
+    ///
+    /// let service = EndpointService::from_router(
+    ///     Router::new().route("/", get(my_handler)),
+    /// );
+    /// ```
+    pub fn from_router(router: axum::Router) -> Self {
+        Self(router)
+    }
+
+    /// Wraps a fallible-free Tower service as an [`EndpointService`].
+    ///
+    /// Use this for custom `Service` implementations that are not axum routers. The
+    /// service must use raw HTTP types and return [`Infallible`] errors (handle failures
+    /// inside the service and return an HTTP error response instead).
+    ///
+    /// For axum routers, prefer [`Self::from_router`].
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use apollo_router::EndpointService;
+    /// use tower::service_fn;
+    ///
+    /// let service = EndpointService::new(service_fn(|_req| async {
+    ///     Ok::<_, std::convert::Infallible>(http::Response::new(axum::body::Body::empty()))
+    /// }));
+    /// ```
+    pub fn new<S>(service: S) -> Self
+    where
+        S: tower::Service<
+                http::Request<axum::body::Body>,
+                Response = http::Response<axum::body::Body>,
+                Error = Infallible,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        Self(axum::Router::new().fallback_service(service))
+    }
+}
+
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
 pub struct Endpoint {
     pub(crate) path: String,
-    router: axum::Router,
+    service: EndpointService,
 }
 
 impl std::fmt::Debug for Endpoint {
@@ -62,33 +124,36 @@ impl std::fmt::Debug for Endpoint {
 }
 
 impl Endpoint {
-    /// Creates an Endpoint given a path and an axum Router
+    /// Creates an [`Endpoint`] from a path and an [`EndpointService`].
     ///
-    /// This is the preferred method for plugins to expose web endpoints.
-    /// The router will be automatically nested at the specified path, allowing
-    /// it to handle all sub-routes. For example, a router registered at `/diagnostics`
-    /// will handle `/diagnostics/`, `/diagnostics/memory/status`, etc.
+    /// The service will handle all requests under the given path prefix.
+    /// For example, an endpoint at `/diagnostics` handles `/diagnostics/`,
+    /// `/diagnostics/memory/status`, etc.
     ///
     /// # Example
     ///
     /// ```rust,ignore
+    /// use apollo_router::{Endpoint, EndpointService};
     /// use axum::{Router, routing::get};
     ///
-    /// let router = Router::new()
-    ///     .route("/", get(handle_dashboard))
-    ///     .route("/status", get(handle_status));
-    ///
-    /// let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
-    /// // This will handle:
-    /// // - /diagnostics/
-    /// // - /diagnostics/status
+    /// let endpoint = Endpoint::new(
+    ///     "/diagnostics".to_string(),
+    ///     EndpointService::from_router(Router::new().route("/", get(my_handler))),
+    /// );
     /// ```
-    pub fn from_router(path: String, router: axum::Router) -> Self {
-        Self { path, router }
+    pub fn new(path: String, service: EndpointService) -> Self {
+        Self { path, service }
+    }
+
+    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
+        Self {
+            path,
+            service: EndpointService::from_router(router),
+        }
     }
 
     pub(crate) fn into_router(self) -> axum::Router {
-        axum::Router::new().nest(&self.path, self.router)
+        axum::Router::new().nest(&self.path, self.service.0)
     }
 }
 /// Factory for creating a router service instance.
