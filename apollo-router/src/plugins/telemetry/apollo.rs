@@ -151,7 +151,8 @@ pub(crate) struct Config {
     /// algorithm as `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler;
     /// setting it higher will not increase the number of spans exported beyond what the common
     /// sampler allows. Note: when `parent_based_sampler` is enabled (the default), upstream-sampled
-    /// incoming traces may bypass the common threshold, but will still be filtered by this value.
+    /// incoming traces bypass the common threshold and are always forwarded to this exporter,
+    /// regardless of this value.
     /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,

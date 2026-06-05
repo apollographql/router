@@ -111,7 +111,11 @@ pub(crate) struct SamplingSpanProcessor<T: SpanProcessor> {
 }
 
 impl<T: SpanProcessor> SamplingSpanProcessor<T> {
-    pub(crate) fn new(delegate: T, sampler: &SamplerOption, global_sampler: &SamplerOption) -> Self {
+    pub(crate) fn new(
+        delegate: T,
+        sampler: &SamplerOption,
+        global_sampler: &SamplerOption,
+    ) -> Self {
         Self {
             delegate,
             threshold: sampler_to_threshold(sampler),
@@ -363,12 +367,12 @@ mod tests {
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::Status;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanLinks;
-    use opentelemetry::trace::Status;
 
     use super::*;
 
@@ -408,7 +412,10 @@ mod tests {
         fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
             Ok(())
         }
-        fn shutdown_with_timeout(&self, _timeout: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
+        fn shutdown_with_timeout(
+            &self,
+            _timeout: Duration,
+        ) -> opentelemetry_sdk::error::OTelSdkResult {
             Ok(())
         }
     }
@@ -424,7 +431,11 @@ mod tests {
     #[test]
     fn always_on_forwards_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = make_processor(recorder.clone(), SamplerOption::Always(Sampler::AlwaysOn), SamplerOption::Always(Sampler::AlwaysOn));
+        let processor = make_processor(
+            recorder.clone(),
+            SamplerOption::Always(Sampler::AlwaysOn),
+            SamplerOption::Always(Sampler::AlwaysOn),
+        );
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -434,7 +445,11 @@ mod tests {
     #[test]
     fn always_off_drops_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = make_processor(recorder.clone(), SamplerOption::Always(Sampler::AlwaysOff), SamplerOption::Always(Sampler::AlwaysOn));
+        let processor = make_processor(
+            recorder.clone(),
+            SamplerOption::Always(Sampler::AlwaysOff),
+            SamplerOption::Always(Sampler::AlwaysOn),
+        );
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -465,7 +480,11 @@ mod tests {
     #[test]
     fn ratio_zero_drops_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = make_processor(recorder.clone(), SamplerOption::TraceIdRatioBased(0.0), SamplerOption::Always(Sampler::AlwaysOn));
+        let processor = make_processor(
+            recorder.clone(),
+            SamplerOption::TraceIdRatioBased(0.0),
+            SamplerOption::Always(Sampler::AlwaysOn),
+        );
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }
@@ -475,7 +494,11 @@ mod tests {
     #[test]
     fn ratio_one_forwards_all_spans() {
         let recorder = RecordingProcessor::default();
-        let processor = make_processor(recorder.clone(), SamplerOption::TraceIdRatioBased(1.0), SamplerOption::Always(Sampler::AlwaysOn));
+        let processor = make_processor(
+            recorder.clone(),
+            SamplerOption::TraceIdRatioBased(1.0),
+            SamplerOption::Always(Sampler::AlwaysOn),
+        );
         for i in 0u128..20 {
             processor.on_end(make_span(i));
         }

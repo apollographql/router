@@ -114,7 +114,8 @@ pub(crate) struct Config {
     /// `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler; setting it
     /// higher will not increase the number of spans exported beyond what the common sampler allows.
     /// Note: when `parent_based_sampler` is enabled (the default), upstream-sampled incoming
-    /// traces may bypass the common threshold, but will still be filtered by this per-exporter value.
+    /// traces bypass the common threshold and are always forwarded to this exporter,
+    /// regardless of this value.
     /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
@@ -292,7 +293,9 @@ impl TracingConfigurator for Config {
             }
             builder.with_span_processor(batch_processor.always_sampled())
         } else if let Some(sampler) = &self.sampler {
-            builder.with_span_processor(batch_processor.with_sampler(sampler, builder.global_sampler()))
+            builder.with_span_processor(
+                batch_processor.with_sampler(sampler, builder.global_sampler()),
+            )
         } else {
             builder.with_span_processor(batch_processor)
         }

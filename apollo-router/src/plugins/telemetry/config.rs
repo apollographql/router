@@ -30,7 +30,7 @@ pub(crate) enum Error {
     )]
     InvalidFieldLevelInstrumentationSampler,
     #[error(
-        "per-exporter sampler for '{exporter}' ({per_exporter}) must not exceed the common tracing sampler ({common}); \
+        "per-exporter sampler for 'telemetry.{exporter}' ({per_exporter}) must not exceed the common tracing sampler ({common}); \
          setting it higher cannot increase sampling beyond what the common sampler allows"
     )]
     PerExporterSamplerExceedsCommon {
@@ -869,18 +869,18 @@ impl Conf {
 
         let exporters: &[(&'static str, Option<&SamplerOption>)] = &[
             (
-                "telemetry.exporters.tracing.otlp",
+                "exporters.tracing.otlp",
                 self.exporters.tracing.otlp.sampler.as_ref(),
             ),
             (
-                "telemetry.exporters.tracing.zipkin",
+                "exporters.tracing.zipkin",
                 self.exporters.tracing.zipkin.sampler.as_ref(),
             ),
             (
-                "telemetry.exporters.tracing.datadog",
+                "exporters.tracing.datadog",
                 self.exporters.tracing.datadog.sampler.as_ref(),
             ),
-            ("telemetry.apollo", self.apollo.sampler.as_ref()),
+            ("apollo", self.apollo.sampler.as_ref()),
         ];
 
         for (name, sampler) in exporters {
