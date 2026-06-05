@@ -756,7 +756,7 @@ pub(crate) struct Supergraph {
     pub(crate) query_planning: QueryPlanning,
 
     /// abort request handling when the client drops the connection.
-    /// Default: false.
+    /// Default: true.
     /// When set to true, some parts of the request pipeline like telemetry will not work properly,
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
@@ -814,7 +814,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
-            early_cancel: early_cancel.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or(true),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
@@ -852,7 +852,7 @@ impl Supergraph {
             query_planning: query_planning.unwrap_or_default(),
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
-            early_cancel: early_cancel.unwrap_or_default(),
+            early_cancel: early_cancel.unwrap_or(true),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
