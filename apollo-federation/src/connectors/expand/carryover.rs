@@ -13,11 +13,11 @@ use multimap::MultiMap;
 
 use crate::connectors::ConnectSpec;
 use crate::error::FederationError;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
+use crate::link::spec_registry::APOLLO_SPEC_DOMAIN;
 use crate::schema::FederationSchema;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -124,10 +124,7 @@ pub(super) fn carryover_directives(
 
     // @tag
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: TAG_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::tag_identity()) {
         let directive_name = link.directive_name_in_schema(&TAG_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
         if !referencers.is_empty() {
@@ -140,10 +137,7 @@ pub(super) fn carryover_directives(
 
     // @authenticated
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::authenticated_identity()) {
         let directive_name = link.directive_name_in_schema(&AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
         if !referencers.is_empty() {
@@ -156,10 +150,7 @@ pub(super) fn carryover_directives(
 
     // @requiresScopes
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::requires_scopes_identity()) {
         let directive_name = link.directive_name_in_schema(&REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
         if !referencers.is_empty() {
@@ -173,10 +164,7 @@ pub(super) fn carryover_directives(
 
     // @policy
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: POLICY_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::policy_identity()) {
         let directive_name = link.directive_name_in_schema(&POLICY_DIRECTIVE_NAME_IN_SPEC);
         let referencers = from.referencers().get_directive(&directive_name);
         if !referencers.is_empty() {
@@ -190,10 +178,7 @@ pub(super) fn carryover_directives(
 
     // @cost
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: COST_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::cost_identity()) {
         let mut insert_link = false;
 
         let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
@@ -237,7 +222,7 @@ pub(super) fn carryover_directives(
                     .directives
                     .iter()
                     .any(|d| {
-                        d.name == DEFAULT_LINK_NAME
+                        d.name == LINK_DIRECTIVE_NAME_IN_SPEC
                             && d.specified_argument_by_name("url")
                                 .and_then(|url| url.as_str())
                                 .map(|url| link.url.to_string() == *url)
@@ -256,10 +241,7 @@ pub(super) fn carryover_directives(
 
     // @context
 
-    if let Some(link) = metadata.for_identity(&Identity {
-        domain: APOLLO_SPEC_DOMAIN.to_string(),
-        name: CONTEXT_DIRECTIVE_NAME_IN_SPEC,
-    }) {
+    if let Some(link) = metadata.for_identity(&Identity::context_identity()) {
         let mut insert_link = false;
 
         let directive_name = link.directive_name_in_schema(&CONTEXT_DIRECTIVE_NAME_IN_SPEC);
@@ -452,7 +434,7 @@ impl Link {
             arguments.push(
                 Argument {
                     name: name!(for),
-                    value: Value::Enum(purpose.into()).into(),
+                    value: Value::from(purpose).into(),
                 }
                 .into(),
             );
