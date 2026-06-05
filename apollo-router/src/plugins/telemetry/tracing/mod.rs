@@ -126,9 +126,14 @@ impl<T: SpanProcessor> SamplingSpanProcessor<T> {
 
 fn sampler_to_threshold(s: &SamplerOption) -> u64 {
     match s {
+        // u64::MAX is safe as an AlwaysOn sentinel: in on_end, low_bits = raw_low >> 1,
+        // so low_bits ≤ 2^63 - 1 < u64::MAX, meaning the fast-path match arm always fires
+        // before any comparison that could produce a false negative.
         SamplerOption::Always(Sampler::AlwaysOn) => u64::MAX,
         SamplerOption::Always(Sampler::AlwaysOff) => 0,
         SamplerOption::TraceIdRatioBased(ratio) => {
+            // ratio=1.0 → threshold = 2^63; low_bits max = 2^63-1 < threshold → all span forward.
+            // ratio=0.0 → threshold = 0; caught by the `0 => return` arm in on_end.
             (ratio.clamp(0.0, 1.0) * (1u64 << 63) as f64) as u64
         }
     }
@@ -141,7 +146,8 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
 
     fn on_end(&self, span: SpanData) {
         match self.threshold {
-            // AlwaysOn: forward everything.
+            // AlwaysOn: forward everything. Safe because low_bits = raw_low >> 1 ≤ 2^63-1 < u64::MAX,
+            // so no ratio-based threshold can ever equal u64::MAX, and no span can slip past.
             u64::MAX => {
                 self.delegate.on_end(span);
                 return;
