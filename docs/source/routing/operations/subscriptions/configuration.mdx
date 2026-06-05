@@ -510,6 +510,14 @@ Reconnection re-establishes the _subgraph_ WebSocket connection. Client connecti
 
 </Note>
 
+#### Retry budget
+
+`max_reconnect_attempts` is a **per-disconnect budget, not a lifetime total**. When a reconnected connection stays open long enough to be considered stable and then drops again, the budget refreshes and the subscription gets a fresh set of attempts. This means a long-lived subscription against a subgraph that periodically drops a healthy connection can be reconnected to more than `max_reconnect_attempts` times over its lifetime. Only rapid flapping — a subgraph that drops faster than the stability window on each attempt — exhausts the budget and ends the subscription. If you need a hard ceiling on how long a subscription can run, use `max_lifetime`.
+
+#### Authentication and reconnection
+
+When reconnecting, the router reuses the `connectionParams` (including any propagated `Authorization` token) captured when the subscription **first started** — it does not re-run header propagation per attempt. If your subgraph requires short-lived, per-connection credentials, a reconnect made after the original token has expired may be rejected by the subgraph, and the subscription will end once attempts are exhausted. Request signing such as [AWS SigV4](#websocket-auth-support) is re-applied on each reconnect, so signed requests always use freshly resolved credentials.
+
 ### WebSocket auth support
 
 By default, if you've configured your router to [propagate](/graphos/routing/header-propagation/) HTTP `Authorization` headers to your subgraph, then the router automatically sets corresponding `connectionParams` when initiating a WebSocket connection to that subgraph.
