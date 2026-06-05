@@ -517,6 +517,9 @@ impl Merger {
             self.merge_implements(interface_type)?;
         }
 
+        trace!("Validating interface object disjointness");
+        self.validate_interface_object_disjointness()?;
+
         // Merge union types
         trace!("Merging union types");
         for union_type in &union_types {
