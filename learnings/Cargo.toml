@@ -1,0 +1,9 @@
+[package]
+name = "router-learnings"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive learning tool for Apollo Router — for engineers, managers, and everyone in between"
+
+[[bin]]
+name = "router-learnings"
+path = "src/main.rs"

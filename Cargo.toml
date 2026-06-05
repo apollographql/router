@@ -28,6 +28,7 @@ members = [
     "fuzz",
     "fuzz/subgraph",
     "xtask",
+    "learnings",
 ]
 
 # this makes build scripts and proc macros faster to compile
