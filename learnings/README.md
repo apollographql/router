@@ -4,6 +4,14 @@ A rustlings-style interactive CLI for learning how Apollo Router works. Built fo
 
 ## Quick start
 
+You need Rust installed. If you don't have it:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then, from the repo root:
+
 ```sh
 cargo run -p router-learnings
 ```
@@ -48,6 +56,11 @@ Each chapter has 2–5 exercises mixing concept explanations, multiple-choice qu
 ## Duration
 
 ~3–4 hours straight through. Most people split it over a few days.
+
+## Known limitations
+
+- To repeat a specific exercise, use `reset` — there's no per-exercise replay yet.
+- Progress is tied to the `learnings/.progress` file in this repo. Deleting the repo loses your place.
 
 ## Adding or improving exercises
 
