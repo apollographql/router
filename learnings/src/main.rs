@@ -518,6 +518,22 @@ fn main() {
     let completed = load_progress().min(total_exercises);
 
     match args.get(1).map(String::as_str) {
+        Some("help") | Some("--help") | Some("-h") => {
+            println!();
+            println!("  {}  routerlings", bold("◑"));
+            println!("  {}", dim("Interactive learning tool for Apollo Router"));
+            println!();
+            println!("  {}  cargo run -p routerlings", bold("USAGE"));
+            println!("  {}  cargo run -p routerlings -- <COMMAND>", bold("      "));
+            println!();
+            println!("  {}:", bold("COMMANDS"));
+            println!("    {}        start (or resume) the interactive tour", bold("(none)"));
+            println!("    {}            list all chapters and your progress", bold("list"));
+            println!("    {}       N  jump to chapter N", bold("chapter"));
+            println!("    {}           reset progress and start over", bold("reset"));
+            println!("    {}            show this message", bold("help"));
+            println!();
+        }
         Some("reset") => {
             reset_progress();
         }
