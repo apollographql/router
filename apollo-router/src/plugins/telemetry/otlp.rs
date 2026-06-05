@@ -58,10 +58,11 @@ pub(crate) struct Config {
     /// header already marked as sampled by the calling service will be passed through to this
     /// exporter regardless of this sampler's value — including when set to `always_off`.
     ///
-    /// When `preview_datadog_agent_sampling` is enabled, this sampler is still applied, but a
-    /// warning is emitted at startup. If this OTLP endpoint targets the Datadog agent, the agent
-    /// may receive incomplete traces; if it targets a different backend (e.g. Jaeger or Grafana
-    /// Tempo), subsampling independently is safe.
+    /// When `preview_datadog_agent_sampling` is enabled, this sampler is still applied (including
+    /// to `RecordOnly` spans that would not normally be exported), but a warning is emitted at
+    /// startup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete
+    /// traces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling
+    /// independently is safe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }

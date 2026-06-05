@@ -62,7 +62,7 @@ impl<'a> TracingBuilder<'a> {
     pub(crate) fn tracing_common(&self) -> &TracingCommon {
         self.common
     }
-    
+
     pub(crate) fn spans(&self) -> &Spans {
         self.spans
     }

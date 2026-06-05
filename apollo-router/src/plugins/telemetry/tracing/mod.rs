@@ -2,7 +2,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-use opentelemetry::{Context, TraceId};
+use opentelemetry::Context;
+use opentelemetry::TraceId;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::BatchConfig;
@@ -124,7 +125,6 @@ fn threshold_from_sampler_option(sampler_option: &SamplerOption) -> u64 {
             let threshold = ratio * (1u64 << 63) as f64;
             threshold as u64
         }
-
     }
 }
 
@@ -138,7 +138,8 @@ impl<T: SpanProcessor> SamplingSpanProcessor<T> {
         Self {
             delegate,
             threshold: threshold_from_sampler_option(sampler),
-            global_threshold: parent_based_sampler.then_some(threshold_from_sampler_option(global_sampler))
+            global_threshold: parent_based_sampler
+                .then_some(threshold_from_sampler_option(global_sampler)),
         }
     }
 }
@@ -478,11 +479,11 @@ mod tests {
         // threshold(0.5) = (0.5 * 2^63) ≈ 4.6e18. 21 < threshold → this span is FORWARDED.
         // The assertion below pins both processors making the same forward decision.
         let recorder1 = RecordingProcessor::default();
-        let p1 = make_processor(recorder1.clone(), sampler.clone(), true,global.clone());
+        let p1 = make_processor(recorder1.clone(), sampler.clone(), true, global.clone());
         p1.on_end(make_span(42));
 
         let recorder2 = RecordingProcessor::default();
-        let p2 = make_processor(recorder2.clone(), sampler,true, global);
+        let p2 = make_processor(recorder2.clone(), sampler, true, global);
         p2.on_end(make_span(42));
 
         assert_eq!(

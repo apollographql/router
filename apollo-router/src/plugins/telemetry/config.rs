@@ -856,9 +856,7 @@ impl Conf {
         let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
 
         let mut exporters = Vec::with_capacity(4);
-        exporters.push((
-            "apollo", self.apollo.sampler.as_ref()
-        ));
+        exporters.push(("apollo", self.apollo.sampler.as_ref()));
         exporters.push((
             "exporters.tracing.zipkin",
             self.exporters.tracing.zipkin.sampler.as_ref(),
