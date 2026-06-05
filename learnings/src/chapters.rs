@@ -470,9 +470,9 @@ The answer is Context.
 
 Every request carries a `Context` object from the
 moment it arrives until the response leaves. Think
-of it as a typed key-value map attached to the
-request — a scratchpad that any plugin at any stage
-can read from or write to.
+of it as a map of arbitrary JSON values attached to
+the request — a scratchpad that any plugin at any
+stage can read from or write to.
 
     // Write something at the Router stage:
     context.insert("user_id", user_id)?;
@@ -556,12 +556,17 @@ Each major capability gets its own top-level key:
           common:
             service_name: my-router
 
-Plugins (custom or built-in) live under a plugins key,
-each namespaced by their plugin identifier:
+Custom (external) plugins live under the `plugins:` key,
+namespaced by their plugin identifier:
 
     plugins:
-      apollo.telemetry:
-        ...
+      myorg.my_plugin:
+        some_option: true
+
+Built-in plugins like telemetry, cors, and authentication
+each have their own top-level YAML key. They do NOT
+appear under `plugins:` — that key is reserved for
+custom plugins you build and load externally.
 
 ## Strongly Typed and Validated Early
 
@@ -1037,14 +1042,7 @@ with an early response (ControlFlow::Break).
 If forbid is false, the plugin returns the service
 unchanged — exactly the same as the default impl.
 
-## activate()
-
-The Plugin trait also has an activate() hook (default:
-no-op). It is called after all plugins finish new()
-and are about to go live. It's useful for side effects
-that must happen only once the full set of plugins is
-ready — for example, starting a background task that
-depends on another plugin being initialized."#,
+"#,
                 questions: vec![
                     Question::MultipleChoice {
                         stem: "The forbid_mutations plugin only overrides `execution_service`, not `supergraph_service`. Why is `execution_service` the right stage for this check?",
@@ -1057,16 +1055,14 @@ depends on another plugin being initialized."#,
                         answer: 1,
                         explanation: "By the time execution_service runs, the router has parsed the operation and built a query plan. The ExecutionRequest exposes query_plan.contains_mutations(), making it trivial to detect mutation operations. At the supergraph_service stage the query plan doesn't exist yet. Options C and D are incorrect — supergraph_service can return errors, and mutations are a property of the incoming request, not the merged response.",
                     },
-                    Question::MultipleChoice {
-                        stem: "What does the `activate()` hook let a plugin do that `new()` cannot?",
-                        options: [
-                            "Read the supergraph SDL",
-                            "Deserialize its YAML config",
-                            "Take action only after all plugins have finished initializing",
-                            "Register additional HTTP endpoints",
+                    Question::Reflection {
+                        prompt: "The public Plugin trait only exposes the four service hooks (router_service, supergraph_service, execution_service, subgraph_service) plus new() and web_endpoints(). Why would it be valuable for a plugin author to also have a hook that fires after ALL plugins are initialized — and where in the codebase would you look if you wanted to add one?",
+                        key_points: &[
+                            "A post-init hook lets a plugin start background work that depends on other plugins being ready",
+                            "The Plugin trait is defined in apollo-router/src/plugin/mod.rs",
+                            "Internal lifecycle hooks exist on private traits (DynPlugin/PluginPrivate) but aren't exposed publicly",
+                            "Adding such a hook would require changes to both the trait and the plugin registration infrastructure",
                         ],
-                        answer: 2,
-                        explanation: "activate() is called after every plugin's new() has completed successfully, signaling that the full plugin set is live. This is useful when a plugin needs to interact with another plugin or start background work that assumes all plugins are ready. new() runs per-plugin during the initialization phase, before any other plugin is guaranteed to be ready. SDL and config are both available in new() already. HTTP endpoints are registered via web_endpoints(), not activate().",
                     },
                 ],
                 engineer_note: None,
@@ -1344,7 +1340,11 @@ router.yaml:
             endpoint: http://jaeger:4317
 
 The router ships with exporters for OTLP (the OpenTelemetry
-standard), Prometheus, Datadog, Jaeger, and Zipkin.
+standard), Prometheus, and Datadog. Jaeger is a propagation
+format only — it tells the router how to forward trace
+context to Jaeger-compatible collectors, but OTLP is the
+actual export protocol. The Zipkin exporter exists but is
+deprecated.
 
 ## Why It Matters
 
@@ -1549,7 +1549,7 @@ run out of supplies, and fail to deliver any coffee.
 
 The router gives you several tools for this:
 
-- Traffic shaping: rate limits, timeouts, retries,
+- Traffic shaping: rate limits, timeouts, compression,
   deduplication — all per subgraph
 - Demand control: reject expensive queries before
   they touch subgraphs
@@ -1569,7 +1569,7 @@ under load without changing your subgraph code."#,
                             "Subgraphs receive the requests but respond with cached data instead",
                         ],
                         answer: 1,
-                        explanation: "The router sits in front of all subgraphs, so rate limiting at the router multiplies the protection — one rejection at the edge prevents 8 subgraph calls. Options A and D describe subgraph-side behaviour, not the router's role. Option C (automatic retry) is a separate traffic-shaping feature, not the benefit of rejection.",
+                        explanation: "The router sits in front of all subgraphs, so rate limiting at the router multiplies the protection — one rejection at the edge prevents 8 subgraph calls. Options A and D describe subgraph-side behaviour, not the router's role. Option C is incorrect — the router does not have an automatic retry feature.",
                     },
                     Question::MultipleChoice {
                         stem: "Which statement best describes why GraphQL federation makes backpressure more important than in a single REST API?",
@@ -1766,13 +1766,7 @@ Downstream plugins and subgraphs can read these claims.
 On failure, the router returns a 401 Unauthorized and
 the request never reaches query planning.
 
-## API Key Auth
-
-For simpler cases, the router also supports API key
-authentication: compare a header value against a list
-of allowed keys. No cryptography required — just a
-fast lookup. Useful for machine-to-machine traffic
-where full JWT infrastructure is overkill."#,
+"#,
                 questions: vec![
                     Question::MultipleChoice {
                         stem: "At which stage of the router pipeline does JWT authentication run?",
@@ -1979,7 +1973,7 @@ channel delivers:
 
 - The composed supergraph SDL
 - Persisted query manifests
-- License status and feature gates
+- License JWTs
 
 The response includes a `min_delay_seconds`
 field that tells the router how long to wait
@@ -2019,7 +2013,7 @@ apollo-router/src/uplink/mod.rs."#,
                         explanation: "The router ships with GCP (uplink.api.apollographql.com) and AWS (aws.uplink.api.apollographql.com) fallback endpoints. If the primary endpoint is unreachable, the router automatically tries the secondary, giving resilience against regional outages.",
                     },
                 ],
-                engineer_note: Some("apollo-router/src/uplink/schema_stream.rs contains the SupergraphSdlQuery GraphQL client and the From impl that maps UplinkResponse variants (New / Unchanged / Error) into schema state changes. The min_delay_seconds field in the response is the key to understanding how Apollo controls poll frequency remotely."),
+                engineer_note: Some("apollo-router/src/uplink/mod.rs contains the main polling loop and the stream plumbing that drives continuous uplink updates. apollo-router/src/uplink/schema_stream.rs contains the SupergraphSdlQuery GraphQL client and the From impl that maps UplinkResponse variants (New / Unchanged / Error) into schema state changes. The min_delay_seconds field in the response is how Apollo controls poll frequency remotely."),
             },
             Exercise {
                 title: "Persisted Queries",
@@ -2123,30 +2117,30 @@ Requires a valid license from Apollo:
 - Demand control (cost limiting)
 - Managed federation with GraphOS
 
-## Graceful Degradation
+## License Expiry Behaviour
 
-If a router running enterprise features loses
-its license (e.g., subscription lapses), it
-does not crash. Enterprise features are
-quietly disabled and the router continues
-serving traffic with community capabilities.
+The license is a signed JWT delivered via the uplink.
+The router periodically re-validates it. When a license
+approaches expiry, the router logs warnings (controlled
+by a `warnAt` timestamp in the JWT).
 
-The license itself is a signed JWT delivered
-via the uplink, not a local file. The router
-periodically re-validates it. The enforcement
-logic lives in
+If the license fully expires (past the `haltAt`
+timestamp), the router does NOT quietly continue — it
+returns HTTP 500 or 503 for ALL requests until a valid
+license is restored. This is a hard stop, not a soft
+degradation. The enforcement logic lives in
 apollo-router/src/uplink/license_enforcement.rs."#,
                 questions: vec![
                     Question::MultipleChoice {
-                        stem: "If a router's enterprise license expires, what does the router do?",
+                        stem: "After a router's enterprise license passes the `haltAt` timestamp, what does the router do?",
                         options: [
-                            "It shuts down immediately to prevent unlicensed use",
-                            "It continues running but disables enterprise-only features",
-                            "It switches to a read-only mode, returning cached responses only",
-                            "It sends an alert to GraphOS and waits for license renewal before resuming",
+                            "It shuts down the process entirely",
+                            "It logs a warning but continues serving traffic normally",
+                            "It returns HTTP 500/503 for ALL requests until a valid license is restored",
+                            "It disables only enterprise features and routes remaining traffic normally",
                         ],
-                        answer: 1,
-                        explanation: "The router is designed for graceful degradation. When the license expires, enterprise features like safelisting and @requiresScopes authorization are disabled, but core query routing continues uninterrupted. This avoids an expired subscription causing a production outage.",
+                        answer: 2,
+                        explanation: "Past the haltAt timestamp the router enters a hard stop: every request returns HTTP 500 or 503. This is not a soft degradation — it affects all traffic, not just enterprise features. Before haltAt there is a warnAt grace period where the router logs warnings but keeps serving normally. This design ensures operators notice and respond to license issues promptly.",
                     },
                     Question::CodeFind {
                         prompt: "The license enforcement logic lives in the uplink module. Which file specifically handles checking whether the current license permits a given feature?",
@@ -2764,10 +2758,10 @@ to the router repo, and a redeploy for every change.
                         file_hint: "apollo-router/src/plugins/connectors/plugin.rs",
                         accepted: &["Connectors", "connectors"],
                         hint: "Look for a struct definition followed by `impl Plugin for ...`.",
-                        explanation: "The `Connectors` struct implements the Plugin trait. It intercepts the execution_service hook to inject connector plan execution — replacing what would normally be subgraph HTTP calls with direct REST calls driven by the @connect directive annotations in the query plan.",
+                        explanation: "The `Connectors` struct implements the Plugin trait. It implements both supergraph_service() (the primary hook — sets up per-request debug context and request limits) and execution_service() (a secondary hook — optionally exposes connector source info in the request context). REST calls for @connect fields are dispatched through the standard FetchNode path, not a separate plan node type.",
                     },
                 ],
-                engineer_note: Some("The connectors plugin intercepts at the execution stage via execution_service(). When the query planner encounters a @connect-annotated field, it generates a ConnectorPlanNode rather than a FetchNode. The connectors plugin recognizes these nodes and dispatches HTTP requests directly, bypassing the normal SubgraphService pipeline."),
+                engineer_note: Some("The connectors plugin implements both supergraph_service() (primary: sets up debug context and request limits) and execution_service() (secondary: optionally writes connector source info to context). There is no ConnectorPlanNode — @connect fields use standard FetchNode entries in the query plan. Actual HTTP dispatch goes through the connector service infrastructure, not by swapping out plan node types."),
             },
         ],
     }
