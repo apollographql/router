@@ -121,31 +121,6 @@ async fn config(
     (task, config)
 }
 
-async fn get_router_service(
-    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
-    mocked: bool,
-) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
-
-    let builder = TestHarness::builder()
-        .try_log_level("INFO")
-        .configuration_json(config)
-        .expect("test harness had config errors")
-        .schema(include_str!("fixtures/supergraph.graphql"));
-    let builder = if mocked {
-        builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
-    } else {
-        builder.with_subgraph_network_requests()
-    };
-    (
-        task,
-        builder
-            .build_router()
-            .await
-            .expect("could create router test harness"),
-    )
-}
 
 /// Spin up a localhost wiremock server that mimics the subset of the
 /// `https://jsonplaceholder.typicode.com/` REST surface that
@@ -314,12 +289,10 @@ async fn start_demo_subgraphs_mock_server() -> MockServer {
     server
 }
 
-/// Variant of `get_router_service` that points the three demo subgraph URLs
-/// at a localhost wiremock instead of the public
-/// `https://*.demo.starstuff.dev/` hosts. The wiremock returns canned
-/// federation responses (including valid FTV1 traces) captured from the
-/// live demo subgraphs so the resulting OTel trace shape matches what the
-/// existing snapshots expect, but without any off-box network egress.
+/// Routes the three demo subgraph URLs to a localhost wiremock instead of
+/// the public `https://*.demo.starstuff.dev/` hosts. Returns canned
+/// federation responses (including valid FTV1 traces) so the OTel trace
+/// shape matches existing snapshots without off-box network egress.
 ///
 /// Introduced to fix ROUTER-1814: `test_send_variable_value` flaked on
 /// Linux CI when the accounts demo subgraph reset the TLS connection
