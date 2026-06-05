@@ -121,7 +121,6 @@ async fn config(
     (task, config)
 }
 
-
 /// Spin up a localhost wiremock server that mimics the subset of the
 /// `https://jsonplaceholder.typicode.com/` REST surface that
 /// `tests/fixtures/supergraph_connect.graphql` exercises:
