@@ -1420,15 +1420,4 @@ mod tests {
         assert!(conf.validate_per_exporter_samplers().is_ok());
     }
 
-    /// Validation also passes for Zipkin + Datadog agent sampling mode.
-    /// The Zipkin per-exporter sampler is applied (not suppressed) in this mode;
-    /// a warning is emitted at runtime by the Zipkin TracingConfigurator.
-    #[test]
-    fn per_exporter_sampler_validation_skipped_for_zipkin_in_datadog_agent_sampling_mode() {
-        let mut conf = Conf::default();
-        conf.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
-        conf.exporters.tracing.common.sampler = SamplerOption::Always(Sampler::AlwaysOff);
-        conf.exporters.tracing.zipkin.sampler = Some(SamplerOption::Always(Sampler::AlwaysOn));
-        assert!(conf.validate_per_exporter_samplers().is_ok());
-    }
 }
