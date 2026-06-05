@@ -1,31 +1,11 @@
-//! Representation of Apollo `@link` specifications.
+//! Representation of spec identities, versions, and URLs.
 use std::fmt;
 use std::str;
 
 use apollo_compiler::Name;
-use apollo_compiler::name;
-use thiserror::Error;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-
-pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
-
-#[derive(Error, Debug, PartialEq)]
-pub enum SpecError {
-    #[error("Parse error: {0}")]
-    ParseError(String),
-}
-
-// TODO: Replace SpecError usages with FederationError.
-impl From<SpecError> for FederationError {
-    fn from(value: SpecError) -> Self {
-        SingleFederationError::InvalidLinkIdentifier {
-            message: value.to_string(),
-        }
-        .into()
-    }
-}
 
 /// Represents the identity of a `@link` specification, which uniquely identify a specification.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -53,106 +33,6 @@ impl fmt::Display for Identity {
     }
 }
 
-impl Identity {
-    pub fn core_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("core"),
-        }
-    }
-
-    pub fn link_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("link"),
-        }
-    }
-
-    pub fn federation_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("federation"),
-        }
-    }
-
-    pub fn join_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("join"),
-        }
-    }
-
-    pub fn inaccessible_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("inaccessible"),
-        }
-    }
-
-    pub fn cost_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("cost"),
-        }
-    }
-
-    pub fn context_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("context"),
-        }
-    }
-
-    pub fn tag_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("tag"),
-        }
-    }
-
-    pub fn requires_scopes_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("requiresScopes"),
-        }
-    }
-
-    pub fn authenticated_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("authenticated"),
-        }
-    }
-
-    pub fn policy_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("policy"),
-        }
-    }
-
-    pub fn source_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("source"),
-        }
-    }
-
-    pub fn connect_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("connect"),
-        }
-    }
-
-    pub fn cache_tag_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("cacheTag"),
-        }
-    }
-}
-
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Version {
@@ -174,19 +54,33 @@ impl fmt::Display for Version {
 }
 
 impl str::FromStr for Version {
-    type Err = SpecError;
+    type Err = FederationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (major, minor) = s.split_once('.').ok_or(SpecError::ParseError(
-            "version number is missing a dot (.)".to_string(),
-        ))?;
+        let (major, minor) =
+            s.split_once('.')
+                .ok_or(SingleFederationError::InvalidLinkIdentifier {
+                    message: format!(
+                        r#"Version number `{s}` in @link(url:) argument is missing a period (.)"#
+                    ),
+                })?;
 
-        let major = major.parse::<u32>().map_err(|_| {
-            SpecError::ParseError(format!("invalid major version number '{major}'"))
-        })?;
-        let minor = minor.parse::<u32>().map_err(|_| {
-            SpecError::ParseError(format!("invalid minor version number '{minor}'"))
-        })?;
+        let major =
+            major
+                .parse::<u32>()
+                .map_err(|_| SingleFederationError::InvalidLinkIdentifier {
+                    message: format!(
+                        r#"Major version `{major}` in @link(url:) argument is not a valid number"#
+                    ),
+                })?;
+        let minor =
+            minor
+                .parse::<u32>()
+                .map_err(|_| SingleFederationError::InvalidLinkIdentifier {
+                    message: format!(
+                        r#"Minor version `{minor}` in @link(url:) argument is not a valid number"#
+                    ),
+                })?;
 
         Ok(Version { major, minor })
     }
@@ -257,26 +151,39 @@ impl fmt::Display for Url {
 }
 
 impl str::FromStr for Url {
-    type Err = SpecError;
+    type Err = FederationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match url::Url::parse(s) {
             Ok(url) => {
-                let mut segments = url.path_segments().ok_or(SpecError::ParseError(
-                    "invalid `@link` specification url".to_string(),
-                ))?;
-                let version = segments.next_back().ok_or(SpecError::ParseError(
-                    "invalid `@link` specification url: missing specification version".to_string(),
-                ))?;
+                let mut segments =
+                    url.path_segments()
+                        .ok_or(SingleFederationError::InvalidLinkIdentifier {
+                            message: format!(
+                                r#"@link(url:) argument `"{s}"` missing leading slash after scheme"#
+                            ),
+                        })?;
+                let version =
+                    segments
+                        .next_back()
+                        .ok_or(SingleFederationError::InvalidLinkIdentifier {
+                            message: format!(
+                                r#"@link(url:) argument `"{s}"` missing specification version"#
+                            ),
+                        })?;
                 if !version.starts_with('v') {
-                    return Err(SpecError::ParseError("invalid `@link` specification url: the last element of the path should be the version starting with a 'v'".to_string()));
+                    return Err(SingleFederationError::InvalidLinkIdentifier {
+                        message: format!(r#"Last path segment of @link(url:) argument `"{s}"` should start with 'v' to indicate version"#),
+                    }.into());
                 }
                 let version = version.strip_prefix('v').unwrap().parse::<Version>()?;
                 let name = segments
                     .next_back()
-                    .ok_or(SpecError::ParseError(
-                        "invalid `@link` specification url: missing specification name".to_string(),
-                    ))
+                    .ok_or(SingleFederationError::InvalidLinkIdentifier {
+                        message: format!(
+                            r#"@link(url:) argument `"{s}"` missing specification name"#
+                        ),
+                    })
                     // Note this is SUPER wrong, but the JS federation implementation didn't check
                     // if the name was valid, and customers are actively using URLs with for example dashes.
                     // So we pretend that it's fine. You can't reference an imported element by the
@@ -284,13 +191,19 @@ impl str::FromStr for Url {
                     // explicitly import elements from a spec with an invalid name.
                     .map(Name::new_unchecked)?;
                 if !url.scheme().starts_with("http") {
-                    return Err(SpecError::ParseError("invalid `@link` specification url: only http(s) urls are supported currently".to_string()));
+                    return Err(SingleFederationError::InvalidLinkIdentifier {
+                        message: format!(
+                            r#"@link(url:) argument `"{s}"` must use the HTTP(S) scheme"#
+                        ),
+                    }
+                    .into());
                 }
                 let origin = url.origin();
                 if !origin.is_tuple() {
-                    return Err(SpecError::ParseError(
-                        "invalid `@link` specification url: missing host".to_string(),
-                    ));
+                    return Err(SingleFederationError::InvalidLinkIdentifier {
+                        message: format!(r#"@link(url:) argument `"{s}"` must have a host"#),
+                    }
+                    .into());
                 }
                 let origin = origin.ascii_serialization();
                 let path_remainder = segments.collect::<Vec<&str>>();
@@ -304,9 +217,10 @@ impl str::FromStr for Url {
                     version,
                 })
             }
-            Err(e) => Err(SpecError::ParseError(format!(
-                "invalid specification url: {e}"
-            ))),
+            Err(e) => Err(SingleFederationError::InvalidLinkIdentifier {
+                message: format!(r#"@link(url:) argument `"{s}"` is not a valid URL: {e}"#),
+            }
+            .into()),
         }
     }
 }
@@ -354,36 +268,21 @@ mod tests {
 
     #[test]
     fn invalid_versions_strings_return_menaingful_errors() {
-        assert_eq!(
-            "foo".parse::<Version>(),
-            Err(SpecError::ParseError(
-                "version number is missing a dot (.)".to_string()
-            ))
-        );
-        assert_eq!(
-            "foo.bar".parse::<Version>(),
-            Err(SpecError::ParseError(
-                "invalid major version number 'foo'".to_string()
-            ))
-        );
-        assert_eq!(
-            "0.bar".parse::<Version>(),
-            Err(SpecError::ParseError(
-                "invalid minor version number 'bar'".to_string()
-            ))
-        );
-        assert_eq!(
-            "0.12-foo".parse::<Version>(),
-            Err(SpecError::ParseError(
-                "invalid minor version number '12-foo'".to_string()
-            ))
-        );
-        assert_eq!(
-            "0.12.2".parse::<Version>(),
-            Err(SpecError::ParseError(
-                "invalid minor version number '12.2'".to_string()
-            ))
-        );
+        "foo"
+            .parse::<Version>()
+            .expect_err(r#"Version number `foo` in @link(url:) argument is missing a period (.)"#);
+        "foo.bar"
+            .parse::<Version>()
+            .expect_err(r#"Major version `foo` in @link(url:) argument is not a valid number"#);
+        "0.bar"
+            .parse::<Version>()
+            .expect_err(r#"Minor version `bar` in @link(url:) argument is not a valid number"#);
+        "0.12-foo"
+            .parse::<Version>()
+            .expect_err(r#"Minor version `12-foo` in @link(url:) argument is not a valid number"#);
+        "0.12.2"
+            .parse::<Version>()
+            .expect_err(r#"Minor version `12.2` in @link(url:) argument is not a valid number"#);
     }
 
     #[test]
