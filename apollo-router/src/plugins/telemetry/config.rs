@@ -1,6 +1,7 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 
 use derivative::Derivative;
 use http::HeaderName;
@@ -117,6 +118,10 @@ pub(crate) struct MetricsCommon {
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
+    /// Maximum number of distinct attribute combinations (cardinality)
+    ///
+    /// If not set, the OTel SDK default of 2000 applies.
+    pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
 
 impl Default for MetricsCommon {
@@ -129,6 +134,7 @@ impl Default for MetricsCommon {
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
+            cardinality_limit: None,
         }
     }
 }
@@ -156,26 +162,36 @@ pub(crate) struct MetricView {
     /// dropped. If the set is empty, all attributes will be dropped, if `None` all
     /// attributes will be kept.
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
+    /// Maximum number of distinct attribute combinations (cardinality) for this instrument.
+    ///
+    /// Overrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.
+    /// If neither this nor the global limit is set, the OTel SDK default of 2000 applies.
+    pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
 
 impl MetricView {
-    /// Creates a default view for a named instrument with histogram aggregation.
-    pub(crate) fn default_histogram(name: String, boundaries: Vec<f64>) -> Self {
+    /// Creates a default view for a named instrument with the given parameters.
+    /// Pass `Some(buckets)` only for histogram instruments; the constructor
+    /// stores them as a `Histogram` aggregation default.
+    pub(crate) fn default_view(
+        name: &str,
+        histogram_buckets: Option<Vec<f64>>,
+        cardinality_limit: Option<NonZeroU32>,
+    ) -> Self {
         Self {
-            name,
+            name: name.to_string(),
             rename: None,
             description: None,
             unit: None,
-            aggregation: Some(MetricAggregation::Histogram {
-                buckets: boundaries,
-            }),
+            aggregation: histogram_buckets.map(|buckets| MetricAggregation::Histogram { buckets }),
             allowed_attribute_keys: None,
+            cardinality_limit,
         }
     }
 
     /// Merges user-provided overrides into this view configuration.
-    /// User-specified (`Some`) fields take precedence; unspecified (`None`) fields
-    /// retain the values from `self`.
+    /// User-specified (`Some`) fields take precedence; unspecified (`None`)
+    /// fields retain the values from `self`.
     pub(crate) fn merge(self, user: Self) -> Self {
         Self {
             name: self.name,
@@ -184,12 +200,14 @@ impl MetricView {
             unit: user.unit.or(self.unit),
             aggregation: user.aggregation.or(self.aggregation),
             allowed_attribute_keys: user.allowed_attribute_keys.or(self.allowed_attribute_keys),
+            cardinality_limit: user.cardinality_limit.or(self.cardinality_limit),
         }
     }
 
     /// Builds a Stream from this view configuration.
     /// Use this when you've already matched the instrument by name.
     pub(crate) fn into_stream(self) -> Stream {
+        let name = self.name.clone();
         let mut stream = Stream::builder();
         if let Some(new_name) = self.rename {
             stream = stream.with_name(new_name);
@@ -213,7 +231,12 @@ impl MetricView {
         if let Some(keys) = self.allowed_attribute_keys {
             stream = stream.with_allowed_attribute_keys(keys.into_iter().map(Key::new));
         }
-        stream.build().expect("Failed to build metric view")
+        if let Some(limit) = self.cardinality_limit {
+            stream = stream.with_cardinality_limit(limit.get() as usize);
+        }
+        stream
+            .build()
+            .unwrap_or_else(|e| panic!("failed to build view for {name}: {e}"))
     }
 
     /// Converts this MetricView into a view function for OTel SDK 0.31+
@@ -988,27 +1011,8 @@ mod tests {
     }
 
     #[test]
-    fn test_default_histogram_creates_view_with_buckets() {
-        let boundaries = vec![0.1, 0.5, 1.0, 5.0];
-        let view = MetricView::default_histogram("my.metric".to_string(), boundaries.clone());
-
-        assert_eq!(view.name, "my.metric");
-        assert_eq!(view.rename, None);
-        assert_eq!(view.description, None);
-        assert_eq!(view.unit, None);
-        assert_eq!(
-            view.aggregation,
-            Some(MetricAggregation::Histogram {
-                buckets: boundaries
-            })
-        );
-        assert_eq!(view.allowed_attribute_keys, None);
-    }
-
-    #[test]
     fn test_merge_user_overrides_all_fields() {
-        let default =
-            MetricView::default_histogram("my.histogram".to_string(), vec![0.1, 0.5, 1.0]);
+        let default = MetricView::default_view("my.histogram", Some(vec![0.1, 0.5, 1.0]), None);
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: Some("renamed.histogram".to_string()),
@@ -1018,6 +1022,7 @@ mod tests {
                 buckets: vec![1.0, 5.0, 10.0],
             }),
             allowed_attribute_keys: Some(HashSet::from(["key1".to_string()])),
+            cardinality_limit: NonZeroU32::new(5000),
         };
 
         let merged = default.merge(user);
@@ -1035,13 +1040,13 @@ mod tests {
             merged.allowed_attribute_keys,
             Some(HashSet::from(["key1".to_string()]))
         );
+        assert_eq!(merged.cardinality_limit, NonZeroU32::new(5000));
     }
 
     #[test]
     fn test_merge_user_specifies_nothing_preserves_defaults() {
         let default_buckets = vec![0.1, 0.5, 1.0];
-        let default =
-            MetricView::default_histogram("my.histogram".to_string(), default_buckets.clone());
+        let default = MetricView::default_view("my.histogram", Some(default_buckets.clone()), None);
         let user = MetricView {
             name: "my.histogram".to_string(),
             rename: None,
@@ -1049,6 +1054,7 @@ mod tests {
             unit: None,
             aggregation: None,
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1064,14 +1070,16 @@ mod tests {
             "default histogram aggregation should be preserved when user specifies none"
         );
         assert_eq!(merged.allowed_attribute_keys, None);
+        assert_eq!(merged.cardinality_limit, None);
     }
 
     #[test]
     fn test_merge_partial_override_preserves_default_aggregation() {
         let default_buckets = vec![0.001, 0.005, 0.015, 0.05, 0.1];
-        let default = MetricView::default_histogram(
-            "http.server.request.duration".to_string(),
-            default_buckets.clone(),
+        let default = MetricView::default_view(
+            "http.server.request.duration",
+            Some(default_buckets.clone()),
+            None,
         );
         let user = MetricView {
             name: "http.server.request.duration".to_string(),
@@ -1083,6 +1091,7 @@ mod tests {
                 "http.method".to_string(),
                 "http.status_code".to_string(),
             ])),
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1105,8 +1114,7 @@ mod tests {
 
     #[test]
     fn test_merge_user_drop_overrides_default_histogram() {
-        let default =
-            MetricView::default_histogram("noisy.metric".to_string(), vec![0.1, 0.5, 1.0]);
+        let default = MetricView::default_view("noisy.metric", Some(vec![0.1, 0.5, 1.0]), None);
         let user = MetricView {
             name: "noisy.metric".to_string(),
             rename: None,
@@ -1114,6 +1122,7 @@ mod tests {
             unit: None,
             aggregation: Some(MetricAggregation::Drop),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let merged = default.merge(user);
@@ -1174,6 +1183,7 @@ mod tests {
                 buckets: custom_buckets.clone(),
             }),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let meter_provider = MeterProviderBuilder::default()
@@ -1203,7 +1213,7 @@ mod tests {
 
         // Create a default view with histogram buckets
         let default_view =
-            MetricView::default_histogram("test.histogram".to_string(), default_buckets.clone());
+            MetricView::default_view("test.histogram", Some(default_buckets.clone()), None);
 
         // User view specifies only description, not aggregation
         let user_view = MetricView {
@@ -1213,6 +1223,7 @@ mod tests {
             unit: None,
             aggregation: None, // No aggregation specified - should inherit defaults
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         // Merge views - user view should inherit default buckets
@@ -1249,6 +1260,7 @@ mod tests {
             unit: None,
             aggregation: Some(MetricAggregation::Drop),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         let meter_provider = MeterProviderBuilder::default()
@@ -1275,8 +1287,7 @@ mod tests {
         let user_buckets = vec![1.0, 5.0, 10.0, 50.0];
 
         // Create a default view with histogram buckets
-        let default_view =
-            MetricView::default_histogram("test.histogram".to_string(), default_buckets);
+        let default_view = MetricView::default_view("test.histogram", Some(default_buckets), None);
 
         // User view specifies custom aggregation - should override defaults
         let user_view = MetricView {
@@ -1288,6 +1299,7 @@ mod tests {
                 buckets: user_buckets.clone(),
             }),
             allowed_attribute_keys: None,
+            cardinality_limit: None,
         };
 
         // Merge views - user aggregation should take precedence
@@ -1309,6 +1321,18 @@ mod tests {
         assert_eq!(
             bounds, user_buckets,
             "user-specified buckets should override default buckets in merged view"
+        );
+    }
+
+    #[test]
+    fn test_metric_view_cardinality_limit_rejects_zero() {
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "cardinality_limit": 0
+        });
+        assert!(
+            serde_json::from_value::<MetricView>(json_config).is_err(),
+            "cardinality_limit: 0 should be rejected"
         );
     }
 }
