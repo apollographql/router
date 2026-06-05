@@ -776,37 +776,10 @@ async fn traces_handler(
     Ok(Json(()))
 }
 
-async fn get_trace_report(
-    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    request: router::Request,
-    use_legacy_request_span: bool,
-) -> ExportTraceServiceRequest {
-    get_traces(
-        get_router_service,
-        reports,
-        use_legacy_request_span,
-        false,
-        request,
-        |r| {
-            !r.resource_spans
-                .first()
-                .expect("resource spans required")
-                .scope_spans
-                .first()
-                .expect("scope spans required")
-                .spans
-                .is_empty()
-        },
-    )
-    .await
-}
-
-/// Variant of `get_trace_report` that swaps the real
-/// `https://*.demo.starstuff.dev/` subgraph egress for a localhost
-/// wiremock. Used by `test_send_variable_value` to make the test
-/// hermetic on Linux CI runners where the public demo subgraphs
-/// occasionally reset the TLS connection. See `ROUTER-1814` for the
-/// failure that motivated this.
+/// Routes all subgraph traffic through a localhost wiremock instead of
+/// the public `https://*.demo.starstuff.dev/` hosts, making every caller
+/// hermetic against live-network flakes (ECONNRESET / os error 104/10054).
+/// See `start_demo_subgraphs_mock_server` and `ROUTER-1878`.
 async fn get_trace_report_with_subgraph_mock(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
@@ -1189,18 +1162,6 @@ async fn test_batch_send_header() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
-    // Uses the wiremock-backed `get_trace_report_with_subgraph_mock`
-    // rather than `get_trace_report`. The latter routes through
-    // `with_subgraph_network_requests()` against the live
-    // `https://*.demo.starstuff.dev/` subgraphs hardcoded in
-    // `fixtures/supergraph.graphql`; on Linux CI those hosts sporadically
-    // reset the TLS connection (`ECONNRESET` / `os error 104`), which
-    // turns the `apollo.subgraph.name=accounts` `http_request` span's
-    // status from OK to ERROR and the snapshot then drifts (see
-    // ROUTER-1814 for the CircleCI failure). The mock returns canned
-    // federation responses with valid FTV1 trace blobs captured from
-    // the live demo deployment so the resulting OTel trace shape still
-    // matches the existing snapshot.
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
