@@ -108,8 +108,21 @@ impl TracingConfigurator for Config {
                 .filtered();
 
         // Zipkin has no always_sampled() path, so it only ever receives RecordAndSample spans
-        // regardless of preview_datadog_agent_sampling. The per-exporter sampler applies in
-        // all modes (unlike OTLP/Datadog where it is suppressed in Datadog agent sampling mode).
+        // regardless of preview_datadog_agent_sampling. Unlike OTLP and Datadog — where the
+        // per-exporter sampler is suppressed in Datadog agent sampling mode — the Zipkin sampler
+        // applies in all modes. Warn if the combination may be unexpected.
+        if builder
+            .tracing_common()
+            .preview_datadog_agent_sampling
+            .unwrap_or_default()
+            && self.sampler.is_some()
+        {
+            ::tracing::warn!(
+                "telemetry.exporters.tracing.zipkin.sampler is set alongside \
+                 preview_datadog_agent_sampling; unlike OTLP and Datadog, the Zipkin \
+                 per-exporter sampler is applied in this mode"
+            );
+        }
         if let Some(sampler) = &self.sampler {
             builder.with_span_processor(
                 batch_span_processor.with_sampler(sampler, builder.global_sampler()),

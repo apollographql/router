@@ -1412,8 +1412,8 @@ mod tests {
     fn per_exporter_sampler_validation_skipped_in_datadog_agent_sampling_mode() {
         let mut conf = Conf::default();
         conf.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
-        // Set a per-exporter sampler that would normally fail (0.5 > default common 1.0 would
-        // pass, so use always_on > always_off scenario)
+        // Use always_off for common and always_on for the per-exporter: a clear case that
+        // would error if validation ran (always_on > always_off).
         conf.exporters.tracing.common.sampler = SamplerOption::Always(Sampler::AlwaysOff);
         conf.exporters.tracing.otlp.sampler = Some(SamplerOption::Always(Sampler::AlwaysOn));
         // Should not error in Datadog agent sampling mode

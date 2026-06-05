@@ -158,16 +158,12 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
         let (_, low) = trace_id_bytes.split_at(8);
         let low_bits = u64::from_be_bytes(low.try_into().unwrap()) >> 1;
 
-        if low_bits < self.threshold {
-            // Within per-exporter threshold: forward normally.
-            self.delegate.on_end(span);
-        } else if low_bits >= self.global_threshold {
-            // Outside both the per-exporter and global thresholds, yet the span reached on_end —
-            // this can only happen when ParentBased honored an upstream SAMPLED flag. Forward it
-            // to respect the upstream's sampling decision.
+        // Forward if within per-exporter threshold (normal sub-sampling), OR if above the global
+        // threshold (only reachable when ParentBased honored an upstream SAMPLED flag — preserve
+        // that decision). Spans between the two thresholds are legitimately sub-sampled: drop.
+        if low_bits < self.threshold || low_bits >= self.global_threshold {
             self.delegate.on_end(span);
         }
-        // else: low_bits is between threshold and global_threshold → legitimately sub-sampled.
     }
 
     fn force_flush(&self) -> OTelSdkResult {
