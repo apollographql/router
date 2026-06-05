@@ -60,7 +60,7 @@ pub(crate) struct Config {
     ///
     /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
     /// header already marked as sampled by the calling service will be passed through to this
-    /// exporter regardless of this sampler's value.
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }

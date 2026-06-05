@@ -179,10 +179,8 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
 /// exactly representable as f64, whereas `u64::MAX` is not (it rounds up to `2^64`, causing
 /// overflow when cast back). The threshold is precomputed as `ratio * 2^63`.
 fn trace_id_to_low_bits(trace_id: TraceId) -> u64 {
-    let trace_id_bytes: [u8; 16] = trace_id.to_bytes();
-    let (_, low) = trace_id_bytes.split_at(8);
-    let low_bits = u64::from_be_bytes(low.try_into().unwrap()) >> 1;
-    low_bits
+    let bytes: [u8; 16] = trace_id.to_bytes();
+    u64::from_be_bytes(bytes[8..].try_into().unwrap()) >> 1
 }
 
 trait SpanProcessorExt
@@ -570,5 +568,26 @@ mod tests {
         );
     }
 
-    // TODO: add tests for when parent_based is off
+    /// When `parent_based_sampler` is false, `global_threshold` is `None` and the parent-flag
+    /// override branch is never taken. A span whose hash falls above the per-exporter threshold
+    /// must be dropped even if it would have been a parent-flag override in parent-based mode.
+    #[test]
+    fn parent_based_off_does_not_forward_spans_outside_threshold() {
+        // per-exporter = 0.02; parent_based_sampler = false → global_threshold = None
+        let per_exporter = SamplerOption::TraceIdRatioBased(0.02);
+        let global = SamplerOption::TraceIdRatioBased(0.5);
+
+        let recorder = RecordingProcessor::default();
+        let processor = make_processor(recorder.clone(), per_exporter, false, global);
+
+        // Same trace ID that would be a parent-flag override when parent_based_sampler=true.
+        let span = make_span(u64::MAX as u128);
+        processor.on_end(span);
+
+        assert_eq!(
+            recorder.0.lock().unwrap().len(),
+            0,
+            "with parent_based_sampler disabled, no override path exists — span must be dropped"
+        );
+    }
 }

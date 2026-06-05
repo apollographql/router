@@ -118,7 +118,7 @@ pub(crate) struct Config {
     ///
     /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
     /// header already marked as sampled by the calling service will be passed through to this
-    /// exporter regardless of this sampler's value.
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
     ///
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.

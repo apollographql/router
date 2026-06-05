@@ -56,7 +56,7 @@ pub(crate) struct Config {
     ///
     /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
     /// header already marked as sampled by the calling service will be passed through to this
-    /// exporter regardless of this sampler's value.
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
     ///
     /// When `preview_datadog_agent_sampling` is enabled, this sampler is still applied, but a
     /// warning is emitted at startup. If this OTLP endpoint targets the Datadog agent, the agent

@@ -30,7 +30,7 @@ pub(crate) enum Error {
     )]
     InvalidFieldLevelInstrumentationSampler,
     #[error(
-        "per-exporter sampler for 'telemetry.{exporter}' ({per_exporter}) must not exceed the common tracing sampler ({common}); \
+        "per-exporter sampler for 'telemetry.{exporter}' ({per_exporter:.4}) must not exceed the common tracing sampler ({common:.4}); \
          setting it higher cannot increase sampling beyond what the common sampler allows"
     )]
     PerExporterSamplerExceedsCommon {
