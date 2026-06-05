@@ -946,4 +946,3 @@ fn log_websocket_request(
         &format!("Websocket request body to subgraph {service_name:?}"),
     );
 }
-

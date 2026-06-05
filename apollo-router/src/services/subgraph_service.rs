@@ -2936,9 +2936,11 @@ mod tests {
             Ok(res)
         }
 
-        let app = Router::new()
-            .route("/ws", get(ws_handler))
-            .with_state((hold, max_drops, connection_count));
+        let app = Router::new().route("/ws", get(ws_handler)).with_state((
+            hold,
+            max_drops,
+            connection_count,
+        ));
         let server = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -2959,53 +2961,53 @@ mod tests {
             State(count): State<Arc<AtomicU32>>,
         ) -> Result<impl IntoResponse, Infallible> {
             count.fetch_add(1, Ordering::SeqCst);
-            let res = ws
-                .protocols(["graphql-transport-ws"])
-                .on_upgrade(move |mut socket| async move {
-                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                    assert!(matches!(
-                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
-                        ClientMessage::ConnectionInit { .. }
-                    ));
-                    socket
-                        .send(Message::text(
-                            serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
-                        ))
-                        .await
-                        .unwrap();
-                    let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                    let client_id = if let ClientMessage::Subscribe { id, .. } =
-                        serde_json::from_str::<ClientMessage>(&msg).unwrap()
-                    {
-                        id
-                    } else {
-                        panic!("expected Subscribe message");
-                    };
-                    // Terminal operation error from the subgraph (not a transport error code).
-                    socket
-                        .send(Message::text(
-                            serde_json::to_string(&ServerMessage::Error {
-                                id: Some(client_id),
-                                payload: ServerError::Error(
-                                    Error::builder()
-                                        .message("boom")
-                                        .extension_code("MY_SUBGRAPH_ERROR")
-                                        .build(),
-                                ),
-                            })
-                            .unwrap(),
-                        ))
-                        .await
-                        .unwrap();
-                    // Abnormal close after the terminal error — must NOT trigger a reconnect.
-                    socket
-                        .send(Message::Close(Some(CloseFrame {
-                            code: 1011,
-                            reason: "unexpected termination".into(),
-                        })))
-                        .await
-                        .unwrap();
-                });
+            let res =
+                ws.protocols(["graphql-transport-ws"])
+                    .on_upgrade(move |mut socket| async move {
+                        let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        assert!(matches!(
+                            serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                            ClientMessage::ConnectionInit { .. }
+                        ));
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let client_id = if let ClientMessage::Subscribe { id, .. } =
+                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                        {
+                            id
+                        } else {
+                            panic!("expected Subscribe message");
+                        };
+                        // Terminal operation error from the subgraph (not a transport error code).
+                        socket
+                            .send(Message::text(
+                                serde_json::to_string(&ServerMessage::Error {
+                                    id: Some(client_id),
+                                    payload: ServerError::Error(
+                                        Error::builder()
+                                            .message("boom")
+                                            .extension_code("MY_SUBGRAPH_ERROR")
+                                            .build(),
+                                    ),
+                                })
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        // Abnormal close after the terminal error — must NOT trigger a reconnect.
+                        socket
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 1011,
+                                reason: "unexpected termination".into(),
+                            })))
+                            .await
+                            .unwrap();
+                    });
             Ok(res)
         }
 
@@ -3576,8 +3578,8 @@ mod tests {
         }
 
         assert!(data_events >= 1, "expected at least the initial data event");
-        let terminal_error =
-            terminal_error.expect("client should receive a terminal error after reconnect exhausted");
+        let terminal_error = terminal_error
+            .expect("client should receive a terminal error after reconnect exhausted");
         assert_eq!(terminal_error.subscribed, Some(false));
         assert!(
             terminal_error
