@@ -110,13 +110,16 @@ pub(crate) struct Config {
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
 
-    /// Per-exporter sampler. Uses the same trace-ID-based algorithm as
-    /// `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler; setting it
-    /// higher will not increase the number of spans exported beyond what the common sampler allows.
-    /// Note: when `parent_based_sampler` is enabled (the default), traces arriving with a
-    /// `traceparent` header already marked as sampled by the calling service will be passed
-    /// through to this exporter, unless this is set to `always_off` or `0.0`.
+    /// Per-exporter sampler.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
     /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value.
+    ///
     /// Ignored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent
     /// controls sampling via `sampling.priority` and all spans must be forwarded unfiltered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -277,28 +280,30 @@ impl TracingConfigurator for Config {
                 .build()
                 .filtered();
 
-        if builder
-            .tracing_common()
-            .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            // In Datadog agent sampling mode all spans must be forwarded so the agent can apply
-            // its own sampling decisions via sampling.priority. A per-exporter sampler would
-            // produce incomplete traces from the agent's perspective, so ignore it with a warning.
+        let common = builder.tracing_common();
+
+        // In Datadog agent sampling mode all spans must be forwarded so the agent can apply
+        // its own sampling decisions via sampling.priority. A per-exporter sampler would
+        // produce incomplete traces from the agent's perspective, so ignore it with a warning.
+        if common.preview_datadog_agent_sampling.unwrap_or(false) {
             if self.sampler.is_some() {
                 ::tracing::warn!(
                     "telemetry.exporters.tracing.datadog.sampler is ignored when \
                      preview_datadog_agent_sampling is enabled"
                 );
             }
-            builder.with_span_processor(batch_processor.always_sampled())
-        } else if let Some(sampler) = &self.sampler {
-            builder.with_span_processor(
-                batch_processor.with_sampler(sampler, builder.global_sampler()),
-            )
+            builder.with_span_processor(batch_processor.always_sampled());
+        } else if let Some(ref sampler) = self.sampler {
+            let sampled_batch_span_processor = batch_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
-            builder.with_span_processor(batch_processor)
+            builder.with_span_processor(batch_processor);
         }
+
         Ok(())
     }
 }

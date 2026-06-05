@@ -25,6 +25,6 @@ telemetry:
 
 The per-exporter `sampler` must not exceed `telemetry.exporters.tracing.common.sampler`; Router returns an error at startup if it does.
 
-The `sampler` field is ignored on the Datadog exporter when `preview_datadog_agent_sampling` is enabled, because in that mode the Datadog agent controls sampling decisions and all spans must be forwarded unfiltered.
+The `sampler` field is ignored on the Datadog exporter when `preview_datadog_agent_sampling` is enabled, because in that mode the Datadog agent controls sampling decisions and all spans must be forwarded unfiltered. The OTLP sampler is still respected in that mode (since OTLP typically targets a different backend), but a warning is emitted at startup — if the OTLP endpoint is also the Datadog agent, it may receive incomplete traces.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9582

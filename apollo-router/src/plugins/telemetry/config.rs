@@ -853,35 +853,38 @@ impl Conf {
     /// Setting a per-exporter sampler higher than the common sampler cannot increase
     /// the number of exported spans and is almost certainly a misconfiguration.
     pub(crate) fn validate_per_exporter_samplers(&self) -> Result<(), Error> {
-        // Skip validation in Datadog agent sampling mode — the common sampler is overridden
-        // to always_on there, so per-exporter values are compared against an effective 1.0.
-        if self
+        let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
+
+        let mut exporters = Vec::with_capacity(4);
+        exporters.push((
+            "apollo", self.apollo.sampler.as_ref()
+        ));
+        exporters.push((
+            "exporters.tracing.zipkin",
+            self.exporters.tracing.zipkin.sampler.as_ref(),
+        ));
+
+        // OTLP sampler is always applied (even in Datadog agent sampling mode), so always validate.
+        exporters.push((
+            "exporters.tracing.otlp",
+            self.exporters.tracing.otlp.sampler.as_ref(),
+        ));
+
+        // In Datadog agent sampling mode the Datadog exporter ignores its per-exporter sampler
+        // (it must forward all spans unfiltered so the agent can make its own decisions).
+        // Validation is skipped for Datadog in that mode since the sampler has no effect.
+        let datadog_agent_sampling = self
             .exporters
             .tracing
             .common
             .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            return Ok(());
-        }
-
-        let common_ratio = sampler_option_to_ratio(&self.exporters.tracing.common.sampler);
-
-        let exporters: &[(&'static str, Option<&SamplerOption>)] = &[
-            (
-                "exporters.tracing.otlp",
-                self.exporters.tracing.otlp.sampler.as_ref(),
-            ),
-            (
-                "exporters.tracing.zipkin",
-                self.exporters.tracing.zipkin.sampler.as_ref(),
-            ),
-            (
+            .unwrap_or_default();
+        if !datadog_agent_sampling {
+            exporters.push((
                 "exporters.tracing.datadog",
                 self.exporters.tracing.datadog.sampler.as_ref(),
-            ),
-            ("apollo", self.apollo.sampler.as_ref()),
-        ];
+            ));
+        }
 
         for (name, sampler) in exporters {
             if let Some(sampler) = sampler {
@@ -895,6 +898,7 @@ impl Conf {
                 }
             }
         }
+
         Ok(())
     }
 
@@ -1409,15 +1413,29 @@ mod tests {
     }
 
     #[test]
-    fn per_exporter_sampler_validation_skipped_in_datadog_agent_sampling_mode() {
+    fn per_exporter_sampler_validation_skipped_for_datadog_in_agent_sampling_mode() {
         let mut conf = Conf::default();
+        conf.exporters.tracing.common.sampler = SamplerOption::TraceIdRatioBased(0.1);
         conf.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
-        // Use always_off for common and always_on for the per-exporter: a clear case that
-        // would error if validation ran (always_on > always_off).
-        conf.exporters.tracing.common.sampler = SamplerOption::Always(Sampler::AlwaysOff);
-        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::Always(Sampler::AlwaysOn));
-        // Should not error in Datadog agent sampling mode
+        // In Datadog agent sampling mode the Datadog exporter ignores its sampler, so a value
+        // exceeding the common sampler should not produce a validation error.
+        conf.exporters.tracing.datadog.sampler = Some(SamplerOption::TraceIdRatioBased(0.5));
         assert!(conf.validate_per_exporter_samplers().is_ok());
     }
 
+    #[test]
+    fn per_exporter_sampler_validation_still_applies_to_otlp_in_datadog_agent_sampling_mode() {
+        let mut conf = Conf::default();
+        conf.exporters.tracing.common.sampler = SamplerOption::TraceIdRatioBased(0.1);
+        conf.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
+        // OTLP sampler is still applied in Datadog agent sampling mode, so it must not exceed
+        // the common sampler.
+        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::TraceIdRatioBased(0.5));
+        let err = conf.validate_per_exporter_samplers().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("telemetry.exporters.tracing.otlp"),
+            "error should name the offending exporter: {msg}"
+        );
+    }
 }

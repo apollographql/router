@@ -52,13 +52,15 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
-    /// Per-exporter sampler. Uses the same trace-ID-based algorithm as
-    /// `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler; setting it
-    /// higher will not increase the number of spans exported beyond what the common sampler allows.
-    /// Note: when `parent_based_sampler` is enabled (the default), traces arriving with a
-    /// `traceparent` header already marked as sampled by the calling service will be passed
-    /// through to this exporter, unless this is set to `always_off` or `0.0`.
+    /// Per-exporter sampler.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
     /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
@@ -107,12 +109,15 @@ impl TracingConfigurator for Config {
                 .build()
                 .filtered();
 
-        // Zipkin is unrelated to Datadog agent sampling — it doesn't use sampling.priority
-        // and never needs always_sampled(). The per-exporter sampler applies unconditionally.
         if let Some(sampler) = &self.sampler {
-            builder.with_span_processor(
-                batch_span_processor.with_sampler(sampler, builder.global_sampler()),
-            )
+            let common = builder.tracing_common();
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+
+            builder.with_span_processor(sampled_batch_span_processor)
         } else {
             builder.with_span_processor(batch_span_processor)
         }

@@ -147,13 +147,15 @@ pub(crate) struct Config {
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
     pub(crate) subgraph_metrics: bool,
 
-    /// Per-exporter sampler for traces sent to Apollo Studio. Uses the same trace-ID-based
-    /// algorithm as `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler;
-    /// setting it higher will not increase the number of spans exported beyond what the common
-    /// sampler allows. Note: when `parent_based_sampler` is enabled (the default), traces arriving
-    /// with a `traceparent` header already marked as sampled by the calling service will be passed
-    /// through to this exporter, unless this is set to `always_off` or `0.0`.
+    /// Per-exporter sampler for traces sent to Apollo Studio.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
     /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }

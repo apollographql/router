@@ -41,27 +41,37 @@ impl TracingConfigurator for super::super::otlp::Config {
                 .build()
                 .filtered();
 
-        if builder
-            .tracing_common()
-            .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            // In Datadog agent sampling mode all spans are forwarded so the agent can apply
-            // its own sampling decisions. A per-exporter sampler would silently undercut that,
-            // so ignore it and warn if one was configured.
-            if config.sampler.is_some() {
-                ::tracing::warn!(
-                    "telemetry.exporters.tracing.otlp.sampler is ignored when \
-                     preview_datadog_agent_sampling is enabled"
-                );
-            }
-            builder.with_span_processor(batch_span_processor.always_sampled())
-        } else if let Some(sampler) = &config.sampler {
-            builder.with_span_processor(
-                batch_span_processor.with_sampler(sampler, builder.global_sampler()),
-            )
-        } else {
-            builder.with_span_processor(batch_span_processor)
+        let common = builder.tracing_common();
+        let datadog_agent_sampling = common.preview_datadog_agent_sampling.unwrap_or(false);
+
+        // In Datadog agent sampling mode all spans are forwarded (including RecordOnly spans)
+        // so the agent can apply its own sampling decisions via sampling.priority.
+        // Unlike the Datadog exporter, OTLP typically targets a different backend, so a
+        // per-exporter sampler is respected — but warn if one is set, since if this OTLP
+        // endpoint also points at the Datadog agent it would receive incomplete traces.
+        if datadog_agent_sampling && config.sampler.is_some() {
+            ::tracing::warn!(
+                "telemetry.exporters.tracing.otlp.sampler is configured alongside \
+                 preview_datadog_agent_sampling. If this OTLP endpoint is the Datadog agent, \
+                 the agent may receive incomplete traces."
+            );
+        }
+
+        match (datadog_agent_sampling, &config.sampler) {
+            (true, Some(sampler)) => builder.with_span_processor(
+                batch_span_processor
+                    .always_sampled()
+                    .with_sampler(sampler, common.parent_based_sampler, &common.sampler),
+            ),
+            (true, None) => builder.with_span_processor(batch_span_processor.always_sampled()),
+            (false, Some(sampler)) => builder.with_span_processor(
+                batch_span_processor.with_sampler(
+                    sampler,
+                    common.parent_based_sampler,
+                    &common.sampler,
+                ),
+            ),
+            (false, None) => builder.with_span_processor(batch_span_processor),
         }
 
         Ok(())

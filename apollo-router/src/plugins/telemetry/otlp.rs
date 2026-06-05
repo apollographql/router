@@ -48,13 +48,20 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) temporality: Temporality,
 
-    /// Per-exporter sampler for tracing. Uses the same trace-ID-based algorithm as
-    /// `telemetry.exporters.tracing.common.sampler`. Should be ≤ the common sampler; setting it
-    /// higher will not increase the number of spans exported beyond what the common sampler allows.
-    /// Note: when `parent_based_sampler` is enabled (the default), traces arriving with a
-    /// `traceparent` header already marked as sampled by the calling service will be passed
-    /// through to this exporter, unless this is set to `always_off` or `0.0`.
-    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`. Has no effect on metrics.
+    /// Per-exporter sampler for tracing.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
+    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect. Has no effect on metrics.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value.
+    ///
+    /// When `preview_datadog_agent_sampling` is enabled, this sampler is still applied, but a
+    /// warning is emitted at startup. If this OTLP endpoint targets the Datadog agent, the agent
+    /// may receive incomplete traces; if it targets a different backend (e.g. Jaeger or Grafana
+    /// Tempo), subsampling independently is safe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
