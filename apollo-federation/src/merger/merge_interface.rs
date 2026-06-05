@@ -168,9 +168,8 @@ impl Merger {
 
             impls_to_intf_objects.iter()
                 .filter(|(_, intf_objects)| intf_objects.len() > 1)
-                .fold(HashMap::<BTreeSet<Name>, IndexSet<Name>>::default(),
-                      |mut acc, (impl_, intf_objects)| {
-                          let key: BTreeSet<Name> = BTreeSet::from_iter(intf_objects.iter().map(|i| i.type_name.clone()));
+                .fold(HashMap::<BTreeSet<Name>, IndexSet<Name>>::default(), |mut acc, (impl_, intf_objects)| {
+                    let key: BTreeSet<Name> = BTreeSet::from_iter(intf_objects.iter().map(|i| i.type_name.clone()));
                     acc.entry(key)
                         .or_default()
                         .insert(impl_.type_name.clone());
