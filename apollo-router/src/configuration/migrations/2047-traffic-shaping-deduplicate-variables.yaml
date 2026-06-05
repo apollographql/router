@@ -3,4 +3,4 @@ actions:
   - type: log
     level: warn
     path: traffic_shaping.deduplicate_variables
-    log: This field is deprecated because it is now unconditionally enabled. Please remove the field from your config.
+    log: The `traffic_shaping.deduplicate_variables` config field is now deprecated because it is unconditionally enabled. Please remove the field from your config.
