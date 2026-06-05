@@ -1045,7 +1045,7 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1061,7 +1061,7 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1077,7 +1077,7 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1091,7 +1091,7 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1124,7 +1124,7 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1139,7 +1139,7 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -1155,7 +1155,7 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
