@@ -6010,7 +6010,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "router-learnings"
+name = "routerlings"
 version = "0.1.0"
 
 [[package]]
