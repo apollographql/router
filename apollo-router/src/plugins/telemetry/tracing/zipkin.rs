@@ -107,6 +107,8 @@ impl TracingConfigurator for Config {
                 .build()
                 .filtered();
 
+        // Note: Zipkin has no always_sampled() path and is not affected by
+        // preview_datadog_agent_sampling, so no guard is needed here.
         if let Some(sampler) = &self.sampler {
             builder.with_span_processor(
                 batch_span_processor.with_sampler(sampler, builder.global_sampler()),

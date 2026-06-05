@@ -886,7 +886,7 @@ impl Conf {
         for (name, sampler) in exporters {
             if let Some(sampler) = sampler {
                 let per_exporter_ratio = sampler_option_to_ratio(sampler);
-                if per_exporter_ratio > common_ratio {
+                if per_exporter_ratio > common_ratio + f64::EPSILON {
                     return Err(Error::PerExporterSamplerExceedsCommon {
                         exporter: name,
                         per_exporter: per_exporter_ratio,
@@ -1376,5 +1376,47 @@ mod tests {
             bounds, user_buckets,
             "user-specified buckets should override default buckets in merged view"
         );
+    }
+
+    #[test]
+    fn per_exporter_sampler_validation_passes_when_below_common() {
+        let mut conf = Conf::default();
+        conf.exporters.tracing.common.sampler = SamplerOption::TraceIdRatioBased(0.1);
+        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::TraceIdRatioBased(0.02));
+        conf.apollo.sampler = Some(SamplerOption::TraceIdRatioBased(0.05));
+        assert!(conf.validate_per_exporter_samplers().is_ok());
+    }
+
+    #[test]
+    fn per_exporter_sampler_validation_passes_when_equal_to_common() {
+        let mut conf = Conf::default();
+        conf.exporters.tracing.common.sampler = SamplerOption::TraceIdRatioBased(0.1);
+        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::TraceIdRatioBased(0.1));
+        assert!(conf.validate_per_exporter_samplers().is_ok());
+    }
+
+    #[test]
+    fn per_exporter_sampler_validation_errors_when_exceeds_common() {
+        let mut conf = Conf::default();
+        conf.exporters.tracing.common.sampler = SamplerOption::TraceIdRatioBased(0.1);
+        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::TraceIdRatioBased(0.5));
+        let err = conf.validate_per_exporter_samplers().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("telemetry.exporters.tracing.otlp"),
+            "error should name the offending exporter: {msg}"
+        );
+    }
+
+    #[test]
+    fn per_exporter_sampler_validation_skipped_in_datadog_agent_sampling_mode() {
+        let mut conf = Conf::default();
+        conf.exporters.tracing.common.preview_datadog_agent_sampling = Some(true);
+        // Set a per-exporter sampler that would normally fail (0.5 > default common 1.0 would
+        // pass, so use always_on > always_off scenario)
+        conf.exporters.tracing.common.sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        conf.exporters.tracing.otlp.sampler = Some(SamplerOption::Always(Sampler::AlwaysOn));
+        // Should not error in Datadog agent sampling mode
+        assert!(conf.validate_per_exporter_samplers().is_ok());
     }
 }

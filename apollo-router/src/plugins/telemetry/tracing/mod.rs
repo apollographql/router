@@ -140,9 +140,16 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
     }
 
     fn on_end(&self, span: SpanData) {
-        if self.threshold == u64::MAX {
-            self.delegate.on_end(span);
-            return;
+        match self.threshold {
+            // AlwaysOn: forward everything.
+            u64::MAX => {
+                self.delegate.on_end(span);
+                return;
+            }
+            // AlwaysOff: hard no — don't forward even for parent-flag overrides.
+            // A user who sets sampler: always_off expects zero exports from this exporter.
+            0 => return,
+            _ => {}
         }
         // Mirrors OTel SDK's TraceIdRatioBased: use the low 64 bits of the trace ID,
         // right-shifted by 1, compared against a threshold scaled to [0, 2^63).
@@ -503,6 +510,27 @@ mod tests {
             processor.on_end(make_span(i));
         }
         assert_eq!(recorder.0.lock().unwrap().len(), 20);
+    }
+
+    /// AlwaysOff is a hard no: even spans that arrived via a parent-flag override are dropped.
+    /// A user setting sampler: always_off expects zero exports from this exporter.
+    #[test]
+    fn always_off_drops_parent_based_override_spans() {
+        let global = SamplerOption::TraceIdRatioBased(0.5);
+        let per_exporter = SamplerOption::Always(Sampler::AlwaysOff);
+
+        let recorder = RecordingProcessor::default();
+        let processor = make_processor(recorder.clone(), per_exporter, global);
+
+        // Span with hash above global_threshold (would normally be a parent-flag override).
+        let span = make_span(u64::MAX as u128);
+        processor.on_end(span);
+
+        assert_eq!(
+            recorder.0.lock().unwrap().len(),
+            0,
+            "AlwaysOff must suppress even parent-flag override spans"
+        );
     }
 
     /// A span whose trace ID hash falls outside the global threshold can only have reached
