@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use apollo_compiler::Name;
-use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use tracing::trace;
 
@@ -146,10 +146,10 @@ impl Merger {
             }
 
             // collect all @interfaceObject types in this subgraph and their implementations
-            let mut impls_to_intf_objects: HashMap<
+            let mut impls_to_intf_objects: IndexMap<
                 ObjectTypeDefinitionPosition,
                 IndexSet<InterfaceTypeDefinitionPosition>,
-            > = HashMap::default();
+            > = IndexMap::default();
             for intf_object in subgraph.metadata().interface_object_types() {
                 let itf_pos = InterfaceTypeDefinitionPosition {
                     type_name: intf_object.clone(),
@@ -168,7 +168,7 @@ impl Merger {
 
             impls_to_intf_objects.iter()
                 .filter(|(_, intf_objects)| intf_objects.len() > 1)
-                .fold(HashMap::<BTreeSet<Name>, IndexSet<Name>>::default(), |mut acc, (impl_, intf_objects)| {
+                .fold(IndexMap::<BTreeSet<Name>, IndexSet<Name>>::default(), |mut acc, (impl_, intf_objects)| {
                     let key: BTreeSet<Name> = BTreeSet::from_iter(intf_objects.iter().map(|i| i.type_name.clone()));
                     acc.entry(key)
                         .or_default()
