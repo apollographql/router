@@ -146,8 +146,9 @@ impl<T: SpanProcessor> SpanProcessor for SamplingSpanProcessor<T> {
                 self.delegate.on_end(span);
                 return;
             }
-            // AlwaysOff: hard no — don't forward even for parent-flag overrides.
-            // A user who sets sampler: always_off expects zero exports from this exporter.
+            // AlwaysOff or TraceIdRatioBased(0.0): hard no — don't forward even for
+            // parent-flag overrides. A user who sets sampler: always_off (or 0.0) expects
+            // zero exports from this exporter.
             0 => return,
             _ => {}
         }
@@ -468,7 +469,9 @@ mod tests {
         let sampler = SamplerOption::TraceIdRatioBased(0.5);
         let global = SamplerOption::Always(Sampler::AlwaysOn);
 
-        // Same trace ID always produces the same decision
+        // Trace ID 42: low 8 bytes = [0,0,0,0,0,0,0,42], raw_low=42, low_bits=21.
+        // threshold(0.5) = (0.5 * 2^63) ≈ 4.6e18. 21 < threshold → this span is FORWARDED.
+        // The assertion below pins both processors making the same forward decision.
         let recorder1 = RecordingProcessor::default();
         let p1 = make_processor(recorder1.clone(), sampler.clone(), global.clone());
         p1.on_end(make_span(42));
