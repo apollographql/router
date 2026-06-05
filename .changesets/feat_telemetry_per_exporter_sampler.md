@@ -1,4 +1,4 @@
-### Configure independent sampling rates per tracing exporter ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Configure independent sampling rates per tracing exporter ([PR #9582](https://github.com/apollographql/router/pull/9582))
 
 You can now set a `sampler` on individual tracing exporters so that each exporter receives a different fraction of traces. Previously, `telemetry.exporters.tracing.common.sampler` applied globally and all exporters received the same set of spans.
 
@@ -27,4 +27,4 @@ The per-exporter `sampler` must not exceed `telemetry.exporters.tracing.common.s
 
 The `sampler` field is ignored on the Datadog exporter when `preview_datadog_agent_sampling` is enabled, because in that mode the Datadog agent controls sampling decisions and all spans must be forwarded unfiltered.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/XXXX
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9582
