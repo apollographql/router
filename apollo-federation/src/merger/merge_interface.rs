@@ -180,7 +180,7 @@ impl Merger {
                   self.error_reporter.add_error(
                       CompositionError::InterfaceObjectUsageError {
                           message: format!(
-                              "[{}] @interfaceObject {} in subgraph \"{}\" share implementation type(s) {}. Each @interfaceObject type in a subgraph must have a disjoint set of implementations.",
+                              "[{}] @interfaceObject {} in subgraph \"{}\" share implementation {}. Each @interfaceObject type in a subgraph must have a disjoint set of implementations.",
                               subgraph.name,
                               human_readable_types(intf_objects.iter()),
                               subgraph.name,

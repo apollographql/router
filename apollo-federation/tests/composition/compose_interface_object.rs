@@ -1033,7 +1033,7 @@ fn validate_multiple_overlapping_interface_object_types_in_same_subgraph() {
         &result,
         &[(
             "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type(s) type "T". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
+            r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type "T". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
         )],
     );
 }
