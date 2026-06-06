@@ -3518,7 +3518,7 @@ mod tests {
     /// When reconnection is exhausted, the last suppressed transport error must be forwarded to
     /// the client so a failed subscription is distinguishable from a normal completion. The server
     /// drops every connection with an abnormal close, so after `max_reconnect_attempts` the
-    /// subscription ends with a terminal `WEBSOCKET_CLOSE_ERROR` rather than a silent stream end.
+    /// subscription ends with a terminal transport error rather than a silent stream end.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_websocket_reconnect_exhausted_forwards_terminal_error() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3581,12 +3581,16 @@ mod tests {
         let terminal_error = terminal_error
             .expect("client should receive a terminal error after reconnect exhausted");
         assert_eq!(terminal_error.subscribed, Some(false));
+        // The terminal error is whatever transport error ended the last connection. An abnormal
+        // close surfaces as WEBSOCKET_CLOSE_ERROR on most platforms, but can arrive as a read
+        // failure (WEBSOCKET_MESSAGE_ERROR) depending on socket timing (e.g. on Windows).
         assert!(
-            terminal_error
-                .errors
-                .iter()
-                .any(|e| e.extension_code().as_deref() == Some("WEBSOCKET_CLOSE_ERROR")),
-            "terminal error should carry the WEBSOCKET_CLOSE_ERROR code"
+            terminal_error.errors.iter().any(|e| matches!(
+                e.extension_code().as_deref(),
+                Some("WEBSOCKET_CLOSE_ERROR") | Some("WEBSOCKET_MESSAGE_ERROR")
+            )),
+            "terminal error should carry a transport error code, got: {:?}",
+            terminal_error.errors
         );
 
         spawned_task.abort();
