@@ -10,6 +10,7 @@ rust = { version = "1.95.0", profile = "default" }
 "cargo:htmlq" = "0.4.0"
 "cargo:cargo-watch" = "8.5.3"
 "cargo:cargo-machete" = "0.9.0"
+"cargo:cargo-llvm-cov" = "0.8.7"
 "cargo:typos-cli" = "1.31.1"
 protoc = "35.0"
 gh = "2.92.0"
