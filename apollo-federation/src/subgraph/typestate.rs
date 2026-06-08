@@ -27,7 +27,6 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::error::SubgraphLocation;
 use crate::internal_error;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -41,6 +40,7 @@ use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
@@ -931,7 +931,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
         .schema_definition
         .directives
         .iter()
-        .find(|d| d.name == DEFAULT_LINK_NAME)
+        .find(|d| d.name == LINK_DIRECTIVE_NAME_IN_SPEC)
         .cloned()
     {
         // only try to add it if there is no directive definition for it
@@ -1002,7 +1002,7 @@ pub(crate) fn has_federation_spec_link(schema: &Schema) -> bool {
 }
 
 fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
-    if directive.name != DEFAULT_LINK_NAME {
+    if directive.name != LINK_DIRECTIVE_NAME_IN_SPEC {
         return false;
     }
     let Ok(url_arg) = directive.argument_by_name(&LINK_DIRECTIVE_URL_ARGUMENT_NAME, schema) else {

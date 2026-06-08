@@ -1104,10 +1104,9 @@ pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
 pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
-        definitions.add(FederationSpecDefinition::new(Version {
-            major: 1,
-            minor: 0,
-        }));
+        // Note that we explicitly do not add the Fed 1 spec version here, as we don't want user
+        // Fed 1 subgraphs to actually use it. The Fed 1 spec exists purely to make certain
+        // functionality on Fed 1 subgraphs easier to code.
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 0,

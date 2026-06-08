@@ -6044,6 +6044,74 @@ fn skip_and_include() {
             },
         }})
         .test();
+
+    // same fragment name with complementary @skip/@include on each spread;
+    // a skipped spread must not prevent the active spread from executing
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": true
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": false
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
 }
 
 #[test]
@@ -7440,6 +7508,221 @@ fn reformat_response_data_fragment_semantic_null_not_overwritten() {
             "thing": {
                 "collection": null
             }
+        }))
+        .test();
+}
+
+// ---------------------------------------------------------------------------
+// Fragment-caching tests for `apply_root_selection_set`
+//
+// These validate that the named-fragment deduplication cache in
+// `apply_root_selection_set_cached` produces correct results.
+// ---------------------------------------------------------------------------
+
+const FRAGMENT_CACHE_SCHEMA: &str = "
+    type Query {
+        a: T  b: T  c: T
+    }
+    type T {
+        x: String  y: String
+    }
+";
+
+#[test]
+fn reformat_response_root_fragment_spread_twice_is_idempotent() {
+    // Spreading the same fragment twice at the root must produce the same
+    // result as spreading it once — the cache short-circuits the second
+    // application.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                ...F ...F
+            }
+            fragment F on Query { a { x y } b { x y } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "b": {"x": "3", "y": "4"}
+        }))
+        .expected(json!({
+            "a": {"x": "1", "y": "2"},
+            "b": {"x": "3", "y": "4"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_distinct_root_fragments_both_applied() {
+    // Two *different* named fragments must both be applied — the cache only
+    // deduplicates by fragment name.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                ...FA ...FB
+            }
+            fragment FA on Query { a { x } }
+            fragment FB on Query { b { y } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "b": {"x": "3", "y": "4"}
+        }))
+        .expected(json!({
+            "a": {"x": "1"},
+            "b": {"y": "4"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_fragment_inside_inline_fragment_deduplicated() {
+    // A named fragment spread inside an inline fragment wrapper at the root
+    // shares the same deduplication cache. The second `...F` inside a
+    // different `... on Query` must be skipped.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                ...F
+                ... on Query { ...F }
+                ... on Query { ...F }
+            }
+            fragment F on Query { a { x y } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"}
+        }))
+        .expected(json!({
+            "a": {"x": "1", "y": "2"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_exponential_fragment_chain_correct_output() {
+    // Chains like L0, L1 = ...L0 ...L0, L2 = ...L1 ...L1, etc. cause
+    // exponential expansion without caching. This test verifies the output
+    // is correct with the cache in place.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment L0 on Query { a { x y } b { x y } }
+            fragment L1 on Query { ...L0 ...L0 }
+            fragment L2 on Query { ...L1 ...L1 }
+            fragment L3 on Query { ...L2 ...L2 }
+            fragment L4 on Query { ...L3 ...L3 }
+            query { ...L4 }",
+        )
+        .response(json!({
+            "a": {"x": "ax", "y": "ay"},
+            "b": {"x": "bx", "y": "by"}
+        }))
+        .expected(json!({
+            "a": {"x": "ax", "y": "ay"},
+            "b": {"x": "bx", "y": "by"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_fragment_with_typename() {
+    // Fragments that select __typename at the root level should work
+    // correctly with caching — the first spread writes the typename,
+    // and the second is skipped.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                ...F ...F
+            }
+            fragment F on Query { __typename a { x } }",
+        )
+        .response(json!({
+            "a": {"x": "1"}
+        }))
+        .expected(json!({
+            "__typename": "Query",
+            "a": {"x": "1"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_fragment_chain_with_distinct_leaves() {
+    // Two chain-of-fragment paths that converge on the same leaf fragment.
+    // Both chains should still produce correct output — the leaf fragment
+    // is applied once.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "fragment Leaf on Query { a { x y } }
+            fragment ChainA on Query { ...Leaf }
+            fragment ChainB on Query { ...Leaf }
+            query { ...ChainA ...ChainB c { x } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .expected(json!({
+            "a": {"x": "1", "y": "2"},
+            "c": {"x": "3"}
+        }))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_fragment_non_null_field_missing() {
+    // When a cached fragment selects a non-null field that is missing from
+    // the response, the error propagation must still happen correctly.
+    let schema = "
+        type Query {
+            a: T!
+        }
+        type T {
+            x: String!
+        }
+    ";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query { ...F ...F }
+            fragment F on Query { a { x } }",
+        )
+        .response(json!({
+            "a": {}
+        }))
+        .expected(json!(null))
+        .test();
+}
+
+#[test]
+fn reformat_response_root_fragment_mixed_with_direct_fields() {
+    // A query that mixes direct field selections with fragment spreads.
+    // The direct field must appear in output even though the fragment
+    // is deduplicated.
+    FormatTest::builder()
+        .schema(FRAGMENT_CACHE_SCHEMA)
+        .query(
+            "query {
+                c { x }
+                ...F
+                ...F
+            }
+            fragment F on Query { a { x y } b { x } }",
+        )
+        .response(json!({
+            "a": {"x": "1", "y": "2"},
+            "b": {"x": "3"},
+            "c": {"x": "4"}
+        }))
+        .expected(json!({
+            "c": {"x": "4"},
+            "a": {"x": "1", "y": "2"},
+            "b": {"x": "3"}
         }))
         .test();
 }

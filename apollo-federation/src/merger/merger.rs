@@ -40,7 +40,6 @@ use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::internal_error;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
@@ -51,13 +50,14 @@ use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
-use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
@@ -517,6 +517,9 @@ impl Merger {
             self.merge_implements(interface_type)?;
         }
 
+        trace!("Validating interface object disjointness");
+        self.validate_interface_object_disjointness()?;
+
         // Merge union types
         trace!("Merging union types");
         for union_type in &union_types {
@@ -715,7 +718,10 @@ impl Merger {
                     directive.arguments.push(Node::new(Argument {
                         name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
                         value: Node::new(Value::List(
-                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                            imports
+                                .into_iter()
+                                .map(|i| Node::new(Value::from(&i)))
+                                .collect(),
                         )),
                     }));
                 }
@@ -2427,7 +2433,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
         let Some(link_directive_name) = self
             .link_spec_definition
-            .directive_name_in_schema(&self.merged, &DEFAULT_LINK_NAME)
+            .directive_name_in_schema(&self.merged, &LINK_DIRECTIVE_NAME_IN_SPEC)
         else {
             bail!(
                 "Link directive must exist in the supergraph schema in order to apply join directives"
