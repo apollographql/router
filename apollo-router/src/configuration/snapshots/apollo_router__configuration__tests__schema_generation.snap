@@ -281,6 +281,17 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+        },
         "send_headers": {
           "allOf": [
             {
@@ -3212,6 +3223,17 @@ expression: "&schema"
           "default": {},
           "description": "Custom mapping to be used as the resource field in spans, defaults to:\nrouter -> http.route\nsupergraph -> graphql.operation.name\nquery_planning -> graphql.operation.name\nsubgraph -> subgraph.name\nsubgraph_request -> subgraph.name\nhttp_request -> http.route",
           "type": "object"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nIgnored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent\ncontrols sampling via `sampling.priority` and all spans must be forwarded unfiltered."
         },
         "span_metrics": {
           "additionalProperties": {
@@ -7414,6 +7436,17 @@ expression: "&schema"
           ],
           "default": "grpc",
           "description": "The protocol to use when sending data"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for tracing.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect. Has no effect on metrics.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhen `preview_datadog_agent_sampling` is enabled, this sampler is still applied (including\nto `RecordOnly` spans that would not normally be exported), but a warning is emitted at\nstartup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete\ntraces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling\nindependently is safe."
         },
         "temporality": {
           "allOf": [
@@ -12708,6 +12741,17 @@ expression: "&schema"
             }
           ],
           "description": "The endpoint to send to"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
         }
       },
       "required": [
