@@ -30,6 +30,7 @@ Common metrics configuration contains global settings for all exporters:
 * [Resource attributes](#resource)
 * [Custom default histogram buckets](#buckets)
 * [OpenTelemetry views](#views)
+* [Metric cardinality limit](#cardinality_limit)
 
 ### `service_name`
 
@@ -145,6 +146,12 @@ When customizing buckets, set your highest bucket value greater than or equal to
 
 OpenTelemetry views enable you to customize metrics behavior, including renaming metrics, overriding attributes, changing default buckets, or dropping metrics entirely.
 
+<Note>
+
+A `views[]` entry without an explicit `aggregation` preserves the instrument's native kind. Before router v2.16.0, such entries converted counters and gauges into histograms; if your dashboards depend on those `_bucket`/`_sum`/`_count` series, add `aggregation: histogram` with your buckets.
+
+</Note>
+
 #### Renaming metrics
 
 You can rename metrics to match your organization's naming conventions or to align with existing monitoring infrastructure. This is particularly useful for customizing OTLP semantic convention metrics.
@@ -237,6 +244,25 @@ telemetry:
 
 ```
 
+### `cardinality_limit`
+
+OpenTelemetry metrics support up to 2000 distinct attribute combinations by default. When this limit is reached, additional attribute combinations are grouped into a single overflow series tagged `otel_metric_overflow="true"` to maintain system stability.
+
+Use `cardinality_limit` to adjust this cap globally, or override it for a specific metric:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        cardinality_limit: 5000 # Applies to every metric without a per-view override
+        views:
+          - name: http.server.request.duration
+            cardinality_limit: 20000 # Per-view value wins over the global setting
+```
+
+Raising the limit increases memory usage proportionally, since each allowed attribute combination consumes memory. Monitor [`apollo.router.telemetry.metrics.cardinality_overflow`](/router/configuration/telemetry/instrumentation/standard-instruments#telemetry) to detect when a metric is hitting its limit.
+
 ## Metrics common reference
 
 | Attribute           | Default                  | Description                                                                                                                      |
@@ -245,6 +271,7 @@ telemetry:
 | `service_namespace` |                          | The OpenTelemetry namespace.                                                                                                     |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.                                                                                 |
 | `views`             |                          | Customizes metrics using OpenTelemetry views: rename metrics, override default buckets and attributes, or drop metrics entirely. |
+| `cardinality_limit` | `2000`                   | Maximum number of distinct attribute combinations per metric. Per-metric overrides available via `views[].cardinality_limit`. For details, see [Metric cardinality limit](#cardinality_limit). |
 
 
 ## Related topics
