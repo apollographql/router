@@ -55,10 +55,6 @@ pub(crate) enum RouterSelector {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -66,10 +62,6 @@ pub(crate) enum RouterSelector {
     Env {
         /// The name of the environment variable
         env: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -88,10 +80,6 @@ pub(crate) enum RouterSelector {
     OperationName {
         /// The operation name from the query.
         operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -108,10 +96,6 @@ pub(crate) enum RouterSelector {
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -162,10 +146,6 @@ pub(crate) enum RouterSelector {
     ResponseContext {
         /// The response context key.
         response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },

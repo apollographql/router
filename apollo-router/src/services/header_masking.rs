@@ -43,11 +43,21 @@ impl HeaderMaskingRules {
         if !config.enabled {
             return Self::default();
         }
-        let sensitive_headers = config
+        let sensitive_headers: HashSet<String> = config
             .effective_sensitive_headers()
             .into_iter()
             .map(|h| h.to_lowercase())
             .collect();
+
+        if sensitive_headers.is_empty() {
+            tracing::warn!(
+                "Header masking is enabled but the effective sensitive-headers list is empty \
+                 (replace_defaults: true with no sensitive_headers). No headers will be masked \
+                 in logs or telemetry, including authorization and cookie. Add entries to \
+                 sensitive_headers or remove replace_defaults: true to restore the built-in \
+                 fail-secure defaults."
+            );
+        }
 
         Self { sensitive_headers }
     }
@@ -205,7 +215,7 @@ pub(crate) enum Direction {
 /// (authorization, cookie, set-cookie, ...) rather than logging them in the
 /// clear. The headers plugin is mandatory, so in the normal pipeline a map is
 /// always present and this fallback only guards stray/synthesized requests.
-fn default_masking_rules() -> &'static HeaderMaskingRules {
+pub(crate) fn default_masking_rules() -> &'static HeaderMaskingRules {
     static DEFAULT: OnceLock<HeaderMaskingRules> = OnceLock::new();
     DEFAULT.get_or_init(|| HeaderMaskingRules::from_config(&HeaderMaskingConfig::default()))
 }

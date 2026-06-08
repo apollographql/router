@@ -8155,7 +8155,7 @@ mod tests {
             let request = router::Request::fake_builder()
                 .header("x-internal-token", "internal-secret") // gitleaks:allow
                 .header("x-secret-key", "secret-key-value") // gitleaks:allow
-                .header("authorization", "Bearer public-token") // Not in custom list
+                .header("authorization", "Bearer public-token") // in built-in defaults (replace_defaults: false)
                 .build()
                 .unwrap();
             request
@@ -8165,7 +8165,9 @@ mod tests {
 
             let _response = service.oneshot(request).await.unwrap();
 
-            // Verify all headers sent unmasked (including custom ones and non-configured ones)
+            // Coprocessors always receive raw header values — masking applies to logs/telemetry
+            // only, not to the externalized payload. All three headers arrive unmasked regardless
+            // of whether they appear in the sensitive list.
             let headers = received_headers.lock().unwrap();
             let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
@@ -8185,7 +8187,9 @@ mod tests {
                     .unwrap(),
                 "secret-key-value" // gitleaks:allow
             );
-            // Authorization is not in the custom list, so it's treated as non-sensitive
+            // `authorization` is in the effective sensitive list (built-in default, since
+            // `replace_defaults: false` merges user headers with the built-ins). It still arrives
+            // unmasked here because coprocessors receive raw headers by design.
             assert_eq!(
                 headers_obj
                     .get("authorization")

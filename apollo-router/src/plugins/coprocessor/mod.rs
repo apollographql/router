@@ -84,8 +84,12 @@ where
     F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
 {
     let mut clone = payload.clone();
-    if let (Some(rules), Some(headers)) = (masking_rules, clone.headers.as_mut()) {
-        *headers = rule_for_direction(rules).mask_externalized_headers(headers);
+    if let Some(headers) = clone.headers.as_mut() {
+        *headers = match masking_rules {
+            Some(rules) => rule_for_direction(rules).mask_externalized_headers(headers),
+            None => crate::services::header_masking::default_masking_rules()
+                .mask_externalized_headers(headers),
+        };
     }
     clone
 }

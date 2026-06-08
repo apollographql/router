@@ -319,11 +319,12 @@ where
                     }
                     #[cfg(not(test))]
                     {
-                        context.extensions().with_lock(|lock| {
-                            lock.get::<Arc<crate::services::header_masking::MaskingRulesMap>>()
-                                .map(|m| m.get_request(None).mask_headers_debug(headers))
-                                .unwrap_or_else(|| format!("{:?}", headers))
-                        })
+                        crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Request,
+                            None,
+                            headers,
+                        )
                     }
                 };
                 attrs.push(KeyValue::new(
