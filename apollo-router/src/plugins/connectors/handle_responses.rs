@@ -1780,4 +1780,114 @@ mod tests {
             "default extensions.http.status should be preserved when the user sets sibling keys under extensions.http"
         );
     }
+
+    // Covers the nested-collision case across all three contributors to
+    // `extensions`: the default (`http: { status }`), the source-level
+    // `errors.extensions` mapping, and the connect-level `errors.extensions`
+    // mapping. With deep-merge, sibling keys under a shared nested object
+    // (`http`) from each layer should all survive — last-writer-wins only at
+    // a leaf collision, not at the parent object level.
+    #[tokio::test]
+    async fn errors_as_data_deep_merges_nested_extensions_across_source_and_connect() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: None,
+                source_extensions: Some(
+                    JSONSelection::parse("http: { fromSource: $(\"a\") }").unwrap(),
+                ),
+                connect_extensions: Some(
+                    JSONSelection::parse("http: { fromConnect: $(\"b\") }").unwrap(),
+                ),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let http = errors[0]
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .expect("extensions.http should be an object");
+
+        assert_eq!(
+            http.get("status").and_then(|v| v.as_i64()),
+            Some(500),
+            "default extensions.http.status should be preserved alongside source- and connect-supplied siblings"
+        );
+        assert_eq!(
+            http.get("fromSource").and_then(|v| v.as_str()),
+            Some("a"),
+            "source_extensions sibling under extensions.http should survive the connect_extensions merge"
+        );
+        assert_eq!(
+            http.get("fromConnect").and_then(|v| v.as_str()),
+            Some("b"),
+            "connect_extensions sibling under extensions.http should appear alongside the source sibling"
+        );
+    }
 }
