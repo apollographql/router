@@ -117,9 +117,9 @@ impl TracingConfigurator for Config {
                 &common.sampler,
             );
 
-            builder.with_span_processor(sampled_batch_span_processor)
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
-            builder.with_span_processor(batch_span_processor)
+            builder.with_span_processor(batch_span_processor);
         }
         Ok(())
     }

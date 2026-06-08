@@ -477,7 +477,6 @@ mod tests {
 
         // Trace ID 42: low 8 bytes = [0,0,0,0,0,0,0,42], raw_low=42, low_bits=21.
         // threshold(0.5) = (0.5 * 2^63) ≈ 4.6e18. 21 < threshold → this span is FORWARDED.
-        // The assertion below pins both processors making the same forward decision.
         let recorder1 = RecordingProcessor::default();
         let p1 = make_processor(recorder1.clone(), sampler.clone(), true, global.clone());
         p1.on_end(make_span(42));
@@ -486,6 +485,11 @@ mod tests {
         let p2 = make_processor(recorder2.clone(), sampler, true, global);
         p2.on_end(make_span(42));
 
+        assert_eq!(
+            recorder1.0.lock().unwrap().len(),
+            1,
+            "trace ID 42 should be forwarded at ratio 0.5"
+        );
         assert_eq!(
             recorder1.0.lock().unwrap().len(),
             recorder2.0.lock().unwrap().len(),
@@ -589,6 +593,31 @@ mod tests {
             recorder.0.lock().unwrap().len(),
             0,
             "with parent_based_sampler disabled, no override path exists — span must be dropped"
+        );
+    }
+
+    /// When `common.sampler = always_off` (or `ratio = 0.0`) with `parent_based_sampler = true`,
+    /// `global_threshold = Some(0)` so `low_bits >= 0` is always true. This means every span that
+    /// reaches `on_end` is treated as a parent-flag override and forwarded. This is correct:
+    /// with a zero common sampler, the *only* spans that can reach `on_end` are those whose
+    /// parent set the SAMPLED flag, and those should always be preserved.
+    #[test]
+    fn common_always_off_with_parent_based_forwards_all_on_end_spans() {
+        // global = always_off → global_threshold = Some(0); per-exporter = 0.02
+        let global = SamplerOption::Always(Sampler::AlwaysOff);
+        let per_exporter = SamplerOption::TraceIdRatioBased(0.02);
+
+        let recorder = RecordingProcessor::default();
+        let processor = make_processor(recorder.clone(), per_exporter, true, global);
+
+        // Any span reaching on_end here must be a parent-flag override; it should be forwarded.
+        let span = make_span(42);
+        processor.on_end(span);
+
+        assert_eq!(
+            recorder.0.lock().unwrap().len(),
+            1,
+            "with global = always_off + parent_based, every on_end span is a parent-flag override and must be forwarded"
         );
     }
 }
