@@ -882,7 +882,24 @@ impl Merger {
                         directive_name: name.clone(),
                     };
                     pos.pre_insert(&mut self.merged)?;
-                    pos.insert(&mut self.merged, definition.clone())?;
+                    // Insert a definition with only the name, mirroring JS `addDirectivesShallow`
+                    // (`new DirectiveDefinition(directive.name)`). Arguments, locations,
+                    // repeatability, and description are all populated later by the per-directive
+                    // merge step (`merge_custom_core_directive` /
+                    // `merge_executable_directive_definition`) from the selected source definition.
+                    // Copying them here from the first subgraph that happens to define the
+                    // directive would leak them into the merged definition (e.g. producing a union
+                    // of arguments across subgraphs), diverging from JS.
+                    pos.insert(
+                        &mut self.merged,
+                        Node::new(DirectiveDefinition {
+                            description: None,
+                            name: name.clone(),
+                            arguments: Vec::new(),
+                            repeatable: false,
+                            locations: Vec::new(),
+                        }),
+                    )?;
                 }
             }
         }
