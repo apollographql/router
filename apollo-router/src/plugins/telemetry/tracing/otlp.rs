@@ -60,20 +60,23 @@ impl TracingConfigurator for super::super::otlp::Config {
         if datadog_agent_sampling {
             let processor = batch_span_processor.always_sampled();
             if let Some(ref sampler) = config.sampler {
-                builder.with_span_processor(
-                    processor.with_sampler(sampler, common.parent_based_sampler, &common.sampler),
+                let sampled_batch_span_processor = processor.with_sampler(
+                    sampler,
+                    common.parent_based_sampler,
+                    &common.sampler,
                 );
+                builder.with_span_processor(sampled_batch_span_processor);
             } else {
                 builder.with_span_processor(processor);
             }
         } else if let Some(ref sampler) = config.sampler {
-            builder.with_span_processor(
-                batch_span_processor.with_sampler(
-                    sampler,
-                    common.parent_based_sampler,
-                    &common.sampler,
-                ),
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
             );
+
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
             builder.with_span_processor(batch_span_processor);
         }
