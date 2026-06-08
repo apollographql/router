@@ -1,0 +1,51 @@
+name: Claude Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    # Only fire with the trigger command "/claude-review"
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/claude-review')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
+      - name: Check team membership
+        id: team-check
+        env:
+          # TODO: get org read pat
+          GH_TOKEN: ${{ secrets.ORG_READ_PAT }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          STATE=$(gh api \
+            /orgs/apollographql/teams/graphos/memberships/$COMMENTER \
+            --jq '.state' 2>/dev/null || echo "not-member")
+          if [[ "$STATE" == "active" ]]; then
+            echo "is_member=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_member=false" >> $GITHUB_OUTPUT
+            echo "::notice::$COMMENTER is not an active member of the team — skipping review."
+          fi
+
+      - name: Checkout PR code
+        if: steps.team-check.outputs.is_member == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Run Claude review
+        if: steps.team-check.outputs.is_member == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          # todo: get anthropic api key
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # todo: doublecheck github token
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_number: ${{ github.event.issue.number }}
