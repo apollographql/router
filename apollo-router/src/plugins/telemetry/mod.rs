@@ -3251,6 +3251,30 @@ mod tests {
         .await;
     }
 
+    /// End-to-end: a per-view `cardinality_limit: 2` is wired through the
+    /// Prometheus exporter. Recording three distinct attribute sets on the
+    /// instrument should overflow on the third, producing an
+    /// `otel_metric_overflow="true"` series in the scraped output.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_cardinality_limit.router.yaml"
+            ))
+            .await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            make_supergraph_request(plugin.as_ref()).await;
+            assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_units_are_included() {
         let _guard = TEST.lock().await;
