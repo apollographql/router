@@ -251,23 +251,21 @@ fn reset_checks_for_licenses(
     let halt_at = to_positive_instant(claims.halt_at);
     let now_system = SystemTime::now();
 
-    // If both deadlines exceed MAX_TIMER_DURATION they would collapse to the same
-    // clamped instant, losing the soft-then-hard grace window. Detect this and
-    // anchor warn_at 28 days before the clamped halt_at to restore staged ordering.
+    // If halt_at was clamped, ensure warn_at is anchored at least WARN_BEFORE_HALT_GRACE
+    // before it. This covers two cases: (1) both deadlines exceed the cap (warn_at_raw and
+    // halt_at collapse to the same clamped instant), and (2) only halt_at is clamped but
+    // warn_at is close enough to MAX_TIMER_DURATION that the remaining gap is shorter than
+    // the documented grace window.
     let halt_exceeds_cap = claims
         .halt_at
         .duration_since(now_system)
         .map(|d| d > MAX_TIMER_DURATION)
         .unwrap_or(false);
-    let warn_exceeds_cap = claims
-        .warn_at
-        .duration_since(now_system)
-        .map(|d| d > MAX_TIMER_DURATION)
-        .unwrap_or(false);
-    let warn_at = if halt_exceeds_cap && warn_exceeds_cap {
+    let warn_at_raw = to_positive_instant(claims.warn_at);
+    let warn_at = if halt_exceeds_cap && warn_at_raw + WARN_BEFORE_HALT_GRACE > halt_at {
         halt_at - WARN_BEFORE_HALT_GRACE
     } else {
-        to_positive_instant(claims.warn_at)
+        warn_at_raw
     };
 
     // Capture `now` after all to_positive_instant calls so that a past warn_at
@@ -515,6 +513,33 @@ mod test {
         // When both deadlines exceed MAX_TIMER_DURATION, warn_at is anchored
         // WARN_BEFORE_HALT_GRACE before the clamped halt_at, so staged ordering
         // is preserved even for far-future licenses.
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_halt_clamped_warn_close_to_cap() {
+        // warn_at is 14 days before MAX_TIMER_DURATION — under the cap on its own, but
+        // within WARN_BEFORE_HALT_GRACE (28 days) of the clamped halt_at. The old code
+        // only adjusted warn_at when both deadlines exceeded the cap, leaving a < 28-day
+        // gap here. The new code anchors warn_at to halt_at - WARN_BEFORE_HALT_GRACE.
+        let half_grace_ms = (super::HALT_GRACE_PERIOD_DAYS / 2) * super::SECS_PER_DAY * 1000;
+        let warn_delta_ms = super::MAX_TIMER_DURATION_SECS * 1000 - half_grace_ms;
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+
+        let license = license_with_claim(warn_delta_ms, three_years_ms);
+
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
             &[
