@@ -3263,7 +3263,10 @@ mod tests {
             assert!(response.response.body().errors.is_empty());
 
             let gql_stream = rx_stream.next().await;
-            assert!(gql_stream.is_some(), "expected subscription stream from channel");
+            assert!(
+                gql_stream.is_some(),
+                "expected subscription stream from channel"
+            );
             let mut gql_stream = gql_stream.unwrap();
 
             // Event from the initial connection.
@@ -3799,11 +3802,10 @@ mod tests {
             // Server stalls on the second connection; if the router incorrectly attempts
             // a reconnect the stall will hold the test open and the counter assertion below
             // will fail.
-            let spawned_task =
-                tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
-                    listener,
-                    connection_count.clone(),
-                ));
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
+                listener,
+                connection_count.clone(),
+            ));
 
             // Use a long reconnect delay (200 ms) so the test can reliably drop the client
             // stream before the delay expires and the reconnect handshake starts.
@@ -3900,11 +3902,10 @@ mod tests {
             let connection_count = Arc::new(AtomicU32::new(0));
             // Server stalls on the second connection's HTTP upgrade so that the reconnect
             // handshake hangs long enough for the test to drop the client stream.
-            let spawned_task =
-                tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
-                    listener,
-                    connection_count.clone(),
-                ));
+            let spawned_task = tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
+                listener,
+                connection_count.clone(),
+            ));
 
             // Use a very short reconnect delay so the handshake starts almost immediately
             // after the connection drops; the test then drops the client stream while the
