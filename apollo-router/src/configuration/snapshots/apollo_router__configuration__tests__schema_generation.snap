@@ -11459,8 +11459,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "early_cancel": {
-          "default": false,
-          "description": "abort request handling when the client drops the connection.\nDefault: false.\nWhen set to true, some parts of the request pipeline like telemetry will not work properly,\nbut request handling will stop immediately when the client connection is closed.",
+          "default": true,
+          "description": "Abort request handling when the client drops the connection.\nDefault: true.\nWhen set to false, telemetry will be recorded for canceled requests, but request\nhandling will continue running until completion even after the client disconnects.",
           "type": "boolean"
         },
         "enable_result_coercion_errors": {
@@ -13118,7 +13118,7 @@ expression: "&schema"
           "secs": 60
         },
         "defer_support": true,
-        "early_cancel": false,
+        "early_cancel": true,
         "enable_result_coercion_errors": false,
         "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
