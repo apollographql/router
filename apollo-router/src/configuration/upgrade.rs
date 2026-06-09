@@ -51,7 +51,21 @@ enum Action {
         path: String,
         level: String,
         log: String,
+        #[serde(default)]
+        condition: LogCondition,
     },
+}
+
+/// Filter applied to values selected by the JSONPath in a `Log` action.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+enum LogCondition {
+    /// Log when the path returns any results (default).
+    #[default]
+    NonEmpty,
+    /// Only log when at least one matched value is a plain string.
+    /// Used to detect deprecated untagged-string selector variants (e.g. `Static(String)`).
+    IsString,
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
@@ -176,13 +190,20 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
                 }
             }
-            Action::Log { path, level, log } => {
+            Action::Log {
+                path,
+                level,
+                log,
+                condition,
+            } => {
                 let level = Level::from_str(level).map_err(migration_failure_error)?;
 
-                if !jsonpath_lib::select(config, &format!("$.{path}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                {
+                let values = jsonpath_lib::select(config, &format!("$.{path}")).unwrap_or_default();
+                let should_log = match condition {
+                    LogCondition::NonEmpty => !values.is_empty(),
+                    LogCondition::IsString => values.iter().any(|v| v.is_string()),
+                };
+                if should_log {
                     match level {
                         Level::INFO => tracing::info!("{log}"),
                         Level::ERROR => tracing::error!("{log}"),
