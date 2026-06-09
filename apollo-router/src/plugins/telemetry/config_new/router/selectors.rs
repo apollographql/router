@@ -184,8 +184,6 @@ pub(crate) enum RouterSelector {
         /// The mode for extracting active subgraph request information
         active_subgraph_requests: ActiveSubgraphRequests,
     },
-    /// Deprecated, should not be used anymore, use static field instead
-    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -266,7 +264,6 @@ impl Selector for RouterSelector {
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::ResponseBody { response_body } if *response_body => {
                 insert_display_router_response(request);
@@ -411,7 +408,6 @@ impl Selector for RouterSelector {
                     .unwrap_or_default();
                 Some(opentelemetry::Value::Bool(contains_error))
             }
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::StudioOperationId {
                 studio_operation_id,
@@ -431,7 +427,6 @@ impl Selector for RouterSelector {
     fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(ctx.id.clone()))
@@ -468,7 +463,6 @@ impl Selector for RouterSelector {
 
     fn on_drop(&self) -> Option<opentelemetry::Value> {
         match self {
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -485,7 +479,6 @@ impl Selector for RouterSelector {
                         | RouterSelector::TraceId { .. }
                         | RouterSelector::StudioOperationId { .. }
                         | RouterSelector::Baggage { .. }
-                        | RouterSelector::Static(_)
                         | RouterSelector::Env { .. }
                         | RouterSelector::StaticField { .. }
                         | RouterSelector::ContextId { .. }
@@ -497,7 +490,6 @@ impl Selector for RouterSelector {
                     | RouterSelector::StudioOperationId { .. }
                     | RouterSelector::OperationName { .. }
                     | RouterSelector::Baggage { .. }
-                    | RouterSelector::Static(_)
                     | RouterSelector::Env { .. }
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseHeader { .. }
@@ -517,17 +509,13 @@ impl Selector for RouterSelector {
                     | RouterSelector::StudioOperationId { .. }
                     | RouterSelector::OperationName { .. }
                     | RouterSelector::Baggage { .. }
-                    | RouterSelector::Static(_)
                     | RouterSelector::Env { .. }
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::Error { .. }
                     | RouterSelector::ContextId { .. }
             ),
-            Stage::Drop => matches!(
-                self,
-                RouterSelector::Static(_) | RouterSelector::StaticField { .. }
-            ),
+            Stage::Drop => matches!(self, RouterSelector::StaticField { .. }),
         }
     }
 }
@@ -563,22 +551,6 @@ mod test {
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
-
-    #[test]
-    fn router_static() {
-        let selector = RouterSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::RouterRequest::fake_builder()
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
 
     #[test]
     fn router_static_field() {

@@ -262,8 +262,6 @@ pub(crate) enum SubgraphSelector {
         #[serde(skip)]
         mocked_env_var: Option<String>,
     },
-    /// Deprecated, should not be used anymore, use static field instead
-    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -476,7 +474,6 @@ impl Selector for SubgraphSelector {
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(request.context.id.clone()))
@@ -612,7 +609,6 @@ impl Selector for SubgraphSelector {
                     .map(|v| opentelemetry::Value::from(v as i64))
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::Cache { cache, entity_type } => {
                 let cache_info: CacheSubgraph = response
@@ -801,7 +797,6 @@ impl Selector for SubgraphSelector {
                 .map(opentelemetry::Value::from)
             }
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             SubgraphSelector::ResponseContext {
                 response_context,
@@ -821,7 +816,6 @@ impl Selector for SubgraphSelector {
 
     fn on_drop(&self) -> Option<Value> {
         match self {
-            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -845,7 +839,6 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::RequestContext { .. }
                     | SubgraphSelector::Baggage { .. }
                     | SubgraphSelector::Env { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ContextId { .. }
             ),
@@ -861,7 +854,6 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::SubgraphResponseErrors { .. }
                     | SubgraphSelector::ResponseContext { .. }
                     | SubgraphSelector::OnGraphQLError { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
@@ -876,15 +868,11 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::SupergraphOperationKind { .. }
                     | SubgraphSelector::SupergraphOperationName { .. }
                     | SubgraphSelector::Error { .. }
-                    | SubgraphSelector::Static(_)
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::ResponseContext { .. }
                     | SubgraphSelector::ContextId { .. }
             ),
-            Stage::Drop => matches!(
-                self,
-                SubgraphSelector::Static(_) | SubgraphSelector::StaticField { .. }
-            ),
+            Stage::Drop => matches!(self, SubgraphSelector::StaticField { .. }),
         }
     }
 }
@@ -942,26 +930,6 @@ mod test {
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::subgraph::SubgraphRequestId;
-
-    #[test]
-    fn subgraph_static() {
-        let selector = SubgraphSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .supergraph_request(Arc::new(
-                            http::Request::builder()
-                                .body(graphql::Request::builder().build())
-                                .unwrap()
-                        ))
-                        .build()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
 
     #[test]
     fn subgraph_static_field() {
