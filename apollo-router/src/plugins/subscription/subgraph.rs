@@ -312,6 +312,10 @@ async fn call_websocket(
             // reconnect attempts are exhausted, this is forwarded to clients so they can tell a
             // failed subscription from a normal completion (see the exhausted branch below).
             let mut last_transient_error: Option<graphql::Response> = None;
+            // Only true when the subgraph ended the subscription (normal complete or reconnect
+            // exhausted). Client-disconnect paths leave this false so the completion counter is
+            // not inflated with client-initiated teardowns.
+            let mut subgraph_terminated = false;
 
             'retry: loop {
                 let connection_started_at = Instant::now();
@@ -360,6 +364,7 @@ async fn call_websocket(
                                         // subscription end, not a connection drop. Don't reconnect.
                                         tracing::debug!("gql_stream completed normally");
                                         increment_subgraph_ended_counter(&service_name_for_task);
+                                        subgraph_terminated = true;
                                         break 'retry;
                                     }
                                     // If the just-ended connection stayed open past the grace
@@ -474,20 +479,26 @@ async fn call_websocket(
                             let _ = handle_sink.send_sync(err);
                         }
                         increment_subgraph_ended_counter(&service_name_for_task);
+                        subgraph_terminated = true;
                         break 'retry;
                     }
                 }
             }
-            // Emit a single completion event for the logical subscription. This lives here rather
-            // than in `SubscriptionStream` (which runs once per physical connection) so a
-            // reconnecting subscription is counted once, not once per reconnect.
-            u64_counter!(
-                "apollo.router.operations.subscriptions.events",
-                "Number of subscription events",
-                1,
-                subscriptions.mode = "passthrough",
-                subscriptions.complete = true
-            );
+            // Emit a single completion event for the logical subscription only when the subgraph
+            // ended it (normal complete or reconnect exhausted). Client-disconnect paths set
+            // subgraph_terminated=false, which suppresses this counter — matching the old
+            // behaviour: "We only record metrics for subgraphs ending subscriptions, not for
+            // clients disconnecting." This lives here (not in SubscriptionStream, which runs once
+            // per physical connection) so a reconnecting subscription is counted once total.
+            if subgraph_terminated {
+                u64_counter!(
+                    "apollo.router.operations.subscriptions.events",
+                    "Number of subscription events",
+                    1,
+                    subscriptions.mode = "passthrough",
+                    subscriptions.complete = true
+                );
+            }
 
             // Send ForceDelete to the pubsub so the client-facing HandleStream receives None
             // and terminates. Without this, the HandleStream waits forever when the subgraph
