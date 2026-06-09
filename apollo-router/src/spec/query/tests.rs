@@ -7726,3 +7726,175 @@ fn reformat_response_root_fragment_mixed_with_direct_fields() {
         }))
         .test();
 }
+
+// ---------------------------------------------------------------------------
+// `apply_selection_set` fragment type check (`does_fragment_type_apply` in
+// `spec/query.rs`) tests.
+//
+// We have three type variables to consider -- two static and one runtime.
+// - current_type: the parent type of fragment
+// - type_condition: the type condition of the fragment
+// - runtime_type: the __typename field value of the current response object
+//
+// When current_type is concrete, the type check can be done statically without
+// consulting __typename. Otherwise, we need to consult __typename value.
+// Here we test the cases where the runtime type is abstract or wrong outright.
+// ---------------------------------------------------------------------------
+
+// Abstract × abstract — positive: runtime `__typename` is an abstract type
+// that declaredly extends the fragment's type condition. The cheap inclusion
+// check (`is_subtype(type_condition, runtime_type)`) detects this via the
+// declared `interface X implements Y` edge.
+//
+//   interface Item                         { id }
+//   interface Likeable implements Item     { id, liked }     # declared extends
+//   type Photo implements Likeable         { id, liked, url }
+//
+//   query:    { item { id ... on Item { id } ... on Likeable { liked } } }
+//   response: { item: { __typename: "Likeable", id: "p1", liked: true } }
+//
+// At the `... on Likeable` fragment: `current_type = Item` (the field's
+// declared type), `type_condition = Likeable`. Both abstract → `runtime_type
+// = "Likeable"`, `is_subtype("Likeable", "Likeable")` matches via identity
+// (the runtime-includes path also catches strict declared subtypes).
+#[test]
+fn does_fragment_type_apply_abstract_runtime_typename_via_declared_extends() {
+    FormatTest::builder()
+        .fed2()
+        .schema(
+            "type Query { item: Item }
+             interface Item { id: ID! }
+             interface Likeable implements Item { id: ID!  liked: Boolean }
+             type Photo implements Likeable & Item { id: ID!  liked: Boolean  url: String }",
+        )
+        .query("{ item { id ... on Likeable { liked } } }")
+        .response(serde_json_bytes::json! {{
+            "item": { "__typename": "Likeable", "id": "p1", "liked": true }
+        }})
+        .expected(serde_json_bytes::json! {{
+            "item": { "id": "p1", "liked": true }
+        }})
+        .test();
+}
+
+// Abstract × abstract — TRUE negative: runtime `__typename` and the fragment
+// type condition are both abstract, and `possible_types(runtime)` is NOT a
+// subset of `possible_types(type_condition)`. The cheap `is_subtype` check
+// rejects and the rejection is semantically correct — the runtime value
+// might be an object outside the fragment's type, so applying the fragment
+// would leak fields that aren't valid for that object.
+//
+//   interface Item                     { id }
+//   interface Liked                    { liked }
+//   type Photo implements Item & Liked { id, url, liked }
+//   type Doc   implements Item         { id, content }
+//
+// possible_types:  Item = {Photo, Doc};  Liked = {Photo}
+//
+//   query:    { item { id ... on Liked { liked } } }
+//   response: { item: { __typename: "Item", id: "p1", liked: true } }
+//
+// `possible_types("Item") = {Photo, Doc}` is NOT `⊆ {Photo} = possible_types("Liked")` —
+// at runtime the value could be a `Doc`, which doesn't carry `liked`. Rejecting is
+// the correct conservative behavior; the cheap `is_subtype("Liked", "Item")` reject
+// also agrees with it.
+#[test]
+fn does_fragment_type_apply_abstract_true_negative_runtime_not_a_subset() {
+    FormatTest::builder()
+        .fed2()
+        .schema(
+            "type Query { item: Item }
+             interface Item  { id: ID! }
+             interface Liked { liked: Boolean }
+             type Photo implements Item & Liked { id: ID!  url: String  liked: Boolean }
+             type Doc   implements Item         { id: ID!  content: String }",
+        )
+        .query("{ item { id ... on Liked { liked } } }")
+        .response(serde_json_bytes::json! {{
+            "item": { "__typename": "Item", "id": "p1", "liked": true }
+        }})
+        .expected(serde_json_bytes::json! {{
+            "item": { "id": "p1" }
+        }})
+        .test();
+}
+
+// Abstract × abstract — FALSE negative: runtime `__typename` and the fragment
+// type condition are both abstract, and `possible_types(runtime)` IS a
+// subset of `possible_types(type_condition)` via shared implementers — but
+// with no declared `interface X implements Y` edge between them. The cheap
+// `is_subtype` check only inspects declared edges, misses the inclusion, and
+// rejects even though the fragment ought to apply. `itemDesc` is stripped.
+//
+//   interface Container                            { id }
+//   interface Item                                 { id, itemDesc }
+//   interface Liked                                { id, liked }     # sole impl: Photo
+//   type Photo implements Container & Item & Liked { id, itemDesc, liked, url }
+//   type Audio implements Container & Item         { id, itemDesc, source }
+//
+// possible_types:  Container = {Photo, Audio};  Item = {Photo, Audio};  Liked = {Photo}
+//
+//   query:    { container { id ... on Item { itemDesc } } }
+//   response: { container: { __typename: "Liked", id: "p1", itemDesc: "x" } }
+//
+// `possible_types("Liked") = {Photo}` IS `⊆ {Photo, Audio} = possible_types("Item")` —
+// every Liked value is a Photo, and every Photo is an Item, so the fragment SHOULD
+// apply. The cheap `is_subtype("Item", "Liked")` reject is wrong here. A tighter
+// inclusion check that walks `possible_types` directly would catch this — see the
+// TODO in `does_fragment_type_apply`.
+#[test]
+fn does_fragment_type_apply_abstract_false_negative_runtime_subset_via_shared_implementer() {
+    FormatTest::builder()
+        .fed2()
+        .schema(
+            "type Query { container: Container }
+             interface Container { id: ID! }
+             interface Item  { id: ID!  itemDesc: String }
+             interface Liked { id: ID!  liked: Boolean }
+             type Photo implements Container & Item & Liked
+                 { id: ID!  itemDesc: String  liked: Boolean  url: String }
+             type Audio implements Container & Item
+                 { id: ID!  itemDesc: String  source: String }",
+        )
+        .query("{ container { id ... on Item { itemDesc } } }")
+        .response(serde_json_bytes::json! {{
+            "container": { "__typename": "Liked", "id": "p1", "itemDesc": "the description" }
+        }})
+        .expected(serde_json_bytes::json! {{
+            "container": { "id": "p1" }
+        }})
+        .test();
+}
+
+// Concrete runtime `__typename` differs from the fragment's type condition. Both Object types
+// implement the field's declared interface, so the static intersection is non-empty — but the
+// runtime is `Doc`, not `Photo`, and `url` (a Photo-only field) must not leak through.
+//
+//   interface Item                 { id: ID! }
+//   type Photo implements Item     { id, url }
+//   type Doc   implements Item     { id, content }
+//
+//   query: { item { id ... on Photo { url } } }
+//   response: { item: { __typename: "Doc", id: "d1", url: "should-be-filtered" } }
+//
+// The subgraph's `url` value is intentionally included in the response to prove the router — not
+// the subgraph — is the one filtering.
+#[test]
+fn does_fragment_type_apply_excludes_when_runtime_typename_differs() {
+    FormatTest::builder()
+        .fed2()
+        .schema(
+            "type Query { item: Item }
+             interface Item { id: ID! }
+             type Photo implements Item { id: ID!  url: String }
+             type Doc   implements Item { id: ID!  content: String }",
+        )
+        .query("{ item { id ... on Photo { url } } }")
+        .response(serde_json_bytes::json! {{
+            "item": { "__typename": "Doc", "id": "d1", "url": "should-be-filtered" }
+        }})
+        .expected(serde_json_bytes::json! {{
+            "item": { "id": "d1" }
+        }})
+        .test();
+}

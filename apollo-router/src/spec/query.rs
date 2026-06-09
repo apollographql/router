@@ -816,30 +816,14 @@ impl Query {
                         continue;
                     }
 
-                    // NOTE: The subtype logic is strange. We are trying to determine if a fragment
-                    // should be applied, but we don't have the __typename of the selection set
-                    // (otherwise, we would be on a different branch). Consider the following query
-                    // for a union Thing = Foo | Bar:
-                    // { thing { ... on Foo { foo }, ... on Bar { bar } } }
-                    //
-                    // As we process the `... on Foo` fragment, `Foo` is `type_condition` and
-                    // `Thing` is `current_type`, we *could* reverse the order in calling
-                    // `is_subtype` and apply the fragment; however, the same is true for the `Bar`
-                    // fragment. Without the type info of the data we have in our response, we
-                    // can't know which to apply (or if both should apply in the case of
-                    // interfaces).
-                    //
-                    // Without that information, this is the best we can do without construction a
-                    // much more complicated reformatting heuristic.
-                    //
-                    // This formatter processes fragments sequentially rather than pre-merging them
-                    // via CollectFields (as the GraphQL spec prescribes) — root cause of several
-                    // correctness bugs, tracked in ROUTER-740.
-                    let is_apply = current_type.inner_named_type().as_str()
-                        == type_condition.as_str()
-                        || parameters
-                            .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
+                    // Fragments are still processed sequentially rather than
+                    // pre-merged via CollectFields (see ROUTER-740).
+                    let is_apply = does_fragment_type_apply(
+                        parameters.schema,
+                        current_type.inner_named_type().as_str(),
+                        type_condition.as_str(),
+                        input,
+                    );
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -875,14 +859,12 @@ impl Query {
                         selection_set,
                     }) = self.fragments.get(name)
                     {
-                        // NOTE: This subtype logic is a bit strange. See the InlineFragment
-                        // branch for why its done this way.
-                        let is_apply = current_type.inner_named_type().as_str()
-                            == type_condition.as_str()
-                            || parameters.schema.is_subtype(
-                                type_condition,
-                                current_type.inner_named_type().as_str(),
-                            );
+                        let is_apply = does_fragment_type_apply(
+                            parameters.schema,
+                            current_type.inner_named_type().as_str(),
+                            type_condition.as_str(),
+                            input,
+                        );
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -1240,6 +1222,76 @@ impl Query {
 
     pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
+    }
+}
+
+/// Decide whether a fragment with `type_condition` applies to a value of static field type
+/// `current_type`. Evaluated per-arm of the (current_kind × condition_kind) matrix:
+///
+/// **Concrete `current_type`** — `current_type` IS the runtime type. The static schema check is
+/// authoritative; `__typename` doesn't matter.
+///
+/// **Abstract `current_type` + concrete `type_condition`** — cheap static prune: reject when the
+/// Object is not in `current_type`'s possible types (no declared `implements` / not a union
+/// member). Otherwise the static check is inconclusive (the runtime value might be a different
+/// object also in `current_type`'s possible types) and we defer to the same `__typename` check
+/// as the abstract × abstract arm below.
+///
+/// **Abstract `current_type` + abstract `type_condition`** — Avoid the static intersection check
+/// that would cost an O(n_object_types) schema scan; defer entirely to `__typename`, with a cheap
+/// inclusion check of "runtime type (__typename value) is a subtype of type_condition".
+///
+/// TODO: We currently have false negative cases with shared-implementer subsets (e.g. an interface
+/// whose possible types are a subset of a union type condition.) A more accurate & optimized
+/// abstract-vs-abstract inclusion check is desirable without scanning the whole `possible_types`
+/// every time.
+///
+/// TODO: Currently, __typename can't be trusted entirely since query could alias it with something
+/// else like `{ __typename: foo }`. We plan to fix it with something like `__apollo_typename:
+/// __typename` private subgraph alias (so we always have a trustworthy concrete runtime type).
+fn does_fragment_type_apply(
+    schema: &ApiSchema,
+    current_type: &str,
+    type_condition: &str,
+    input: &Object,
+) -> bool {
+    use apollo_compiler::schema::ExtendedType::*;
+
+    if current_type == type_condition {
+        return true;
+    }
+
+    let Some(current_kind) = schema.types.get(current_type) else {
+        return false;
+    };
+    let Some(condition_kind) = schema.types.get(type_condition) else {
+        return false;
+    };
+
+    // Cheap (incomplete) inclusion check if runtime `__typename` is a subset of `type_condition`.
+    let runtime_type_apply = || match input.get(TYPENAME).and_then(|v| v.as_str()) {
+        Some(rt) => rt == type_condition || schema.is_subtype(type_condition, rt),
+        None => false,
+    };
+
+    match (current_kind, condition_kind) {
+        // Two distinct concrete Objects: disjoint possible-types (the identity case was already
+        // short-circuited above).
+        (Object(_), Object(_)) => false,
+
+        // Concrete current_type: current_type IS the runtime type. Static is authoritative.
+        (Object(_), Interface(_)) => schema.is_subtype(type_condition, current_type),
+        (Object(_), Union(union)) => union.members.contains(current_type),
+
+        // Abstract current_type, concrete type_condition: cheap static prune, then defer to
+        // runtime `__typename` check.
+        (Interface(_), Object(_)) => {
+            schema.is_subtype(current_type, type_condition) && runtime_type_apply()
+        }
+        (Union(union), Object(_)) => union.members.contains(type_condition) && runtime_type_apply(),
+
+        // Abstract × abstract: skip the costly static intersection. Defer entirely to runtime.
+        _ => runtime_type_apply(),
     }
 }
 
