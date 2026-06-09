@@ -1430,6 +1430,81 @@ mod composition {
     }
 }
 
+mod inconsistent_definitions {
+    use super::*;
+
+    // Both subgraphs compose the same custom directive (`@foo`) from the same custom spec version,
+    // but declare it with different argument sets. The merged directive definition must be derived
+    // solely from the selected source definition (matching JS), not from a union of arguments
+    // across subgraphs.
+    //
+    // Regression guard: `Merger::add_directives_shallow` previously seeded the merged schema with
+    // the first subgraph's full definition (arguments included); since the per-directive merge step
+    // only inserts missing arguments and never removes them, the merged definition accumulated
+    // arguments from multiple subgraphs. The shallow seed is now name-only (mirroring JS's
+    // `new DirectiveDefinition(name)`), so the merge step is the sole authority on arguments.
+
+    const FOO_LINK: &str = r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#;
+    const FOO_COMPOSE: &str = r#"@composeDirective(name: "@foo")"#;
+
+    /// Each subgraph contributes a disjoint extra argument. The merged definition must contain only
+    /// the selected subgraph's arguments (the alphabetically-last definer, `subgraphB`), proving the
+    /// behavior is selection of a single source definition rather than an argument union.
+    #[test]
+    fn does_not_union_arguments_across_subgraphs() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, fromA: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, fromB: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+
+        // `subgraphB` is the selected definition; `fromA` must NOT leak in from `subgraphA`.
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!, fromB: Int) on FIELD_DEFINITION",
+        );
+    }
+
+    /// The alphabetically-first subgraph declares the fuller definition while the selected
+    /// (alphabetically-last) subgraph declares the minimal one. The merged definition must be the
+    /// minimal (selected) one — the first subgraph's extra argument must not leak in.
+    #[test]
+    fn uses_selected_definition_when_first_subgraph_is_fuller() {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!, extra: Int) on FIELD_DEFINITION",
+            r#"@foo(name: "a")"#,
+        );
+        let subgraph_b = generate_subgraph(
+            "subgraphB",
+            FOO_LINK,
+            FOO_COMPOSE,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+            r#"@foo(name: "b")"#,
+        );
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
+
+        assert_has_directive_definition(
+            &result,
+            "directive @foo(name: String!) on FIELD_DEFINITION",
+        );
+    }
+}
+
 fn generate_subgraph(
     name: &str,
     link_text: &str,
