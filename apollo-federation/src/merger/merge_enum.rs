@@ -133,7 +133,17 @@ impl Merger {
             directives: Default::default(),
         });
         value_pos.insert(&mut self.merged, dest)?;
-        let pos_sources = map_sources(sources, |source| source.as_ref().map(|_| value_pos.clone()));
+        // Only treat a subgraph as a source for this value's description/directives if it actually
+        // *defines* the value. Mapping over every subgraph that merely declares the enum type would
+        // make subgraphs that omit this value look like they apply the value's directives with empty
+        // arguments, polluting mismatch hints (e.g. INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS
+        // listing subgraphs that don't define the value at all).
+        let pos_sources = map_sources(sources, |source| {
+            source
+                .as_ref()
+                .filter(|enum_type| enum_type.values.contains_key(&value_pos.value_name))
+                .map(|_| value_pos.clone())
+        });
         self.merge_description(&pos_sources, value_pos)?;
         self.record_applied_directives_to_merge(&pos_sources, value_pos)?;
         self.add_join_enum_value(&value_sources, value_pos)?;
