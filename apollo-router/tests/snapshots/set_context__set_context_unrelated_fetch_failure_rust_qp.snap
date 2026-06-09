@@ -25,25 +25,6 @@ expression: response
       "extensions": {
         "code": "RESPONSE_VALIDATION_FAILED"
       }
-    },
-    {
-      "message": "Null value found for non-nullable type U",
-      "path": [
-        "t",
-        "u"
-      ],
-      "extensions": {
-        "code": "RESPONSE_VALIDATION_FAILED"
-      }
-    },
-    {
-      "message": "Null value found for non-nullable type T",
-      "path": [
-        "t"
-      ],
-      "extensions": {
-        "code": "RESPONSE_VALIDATION_FAILED"
-      }
     }
   ],
   "extensions": {
@@ -181,19 +162,6 @@ expression: response
         "path": [
           "t",
           "u"
-        ]
-      },
-      {
-        "message": "Null value found for non-nullable type U",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Null value found for non-nullable type T",
-        "path": [
-          "t"
         ]
       }
     ]
