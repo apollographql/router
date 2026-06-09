@@ -41,6 +41,8 @@ use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
 use crate::metrics;
+use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
+use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
@@ -468,14 +470,22 @@ impl InstrumentsConfig {
             .subscriptions_terminated
             .is_enabled()
             .then(|| {
-                let attrs = match &self.router.attributes.subscriptions_terminated {
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        attributes.attributes.clone()
-                    }
-                    _ => SubscriptionsTerminatedAttributes::default(),
-                };
-                SubscriptionsTerminatedCounter {
-                    counter: static_instruments
+                let (selectors, reason_enabled) =
+                    match &self.router.attributes.subscriptions_terminated {
+                        DefaultedStandardInstrument::Extendable { attributes } => (
+                            attributes.clone(),
+                            attributes.attributes.reason(),
+                        ),
+                        _ => (
+                            Arc::new(Extendable {
+                                attributes: SubscriptionsTerminatedAttributes::default(),
+                                custom: HashMap::new(),
+                            }),
+                            SubscriptionsTerminatedAttributes::default().reason(),
+                        ),
+                    };
+                SubscriptionsTerminatedCounter::new(
+                    static_instruments
                         .get(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
                         .expect(
                             "cannot get static instrument for subscriptions terminated; this should not happen",
@@ -485,10 +495,9 @@ impl InstrumentsConfig {
                         .expect(
                             "cannot convert instrument to counter for subscriptions terminated; this should not happen",
                         ),
-                    reason_enabled: attrs.reason(),
-                    subgraph_name_enabled: attrs.subgraph_name(),
-                    client_name_enabled: attrs.client_name(),
-                }
+                    selectors,
+                    reason_enabled,
+                )
             });
 
         RouterInstruments {
@@ -1191,11 +1200,67 @@ impl SubscriptionsTerminatedAttributes {
     fn reason(&self) -> bool {
         self.reason.unwrap_or(false)
     }
-    fn subgraph_name(&self) -> bool {
-        self.subgraph_name.unwrap_or(false)
+}
+
+impl Selectors<router::Request, router::Response, ()> for SubscriptionsTerminatedAttributes {
+    fn on_request(&self, _request: &router::Request) -> Vec<KeyValue> {
+        Vec::new()
     }
-    fn client_name(&self) -> bool {
-        self.client_name.unwrap_or(false)
+
+    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        if self.subgraph_name.unwrap_or(false) {
+            let name = response
+                .context
+                .get::<_, String>(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("subgraph.name", name));
+        }
+        if self.client_name.unwrap_or(false) {
+            let client_name = response
+                .context
+                .get::<_, String>(CLIENT_NAME)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    response
+                        .context
+                        .get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("client.name", client_name));
+        }
+        attrs
+    }
+
+    fn on_error(&self, _error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        if self.subgraph_name.unwrap_or(false) {
+            let name = ctx
+                .get::<_, String>(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("subgraph.name", name));
+        }
+        if self.client_name.unwrap_or(false) {
+            let client_name = ctx
+                .get::<_, String>(CLIENT_NAME)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    ctx.get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
+                        .ok()
+                        .flatten()
+                })
+                .unwrap_or_default();
+            attrs.push(KeyValue::new("client.name", client_name));
+        }
+        attrs
     }
 }
 
@@ -1218,40 +1283,69 @@ impl DefaultForLevel for SubscriptionsTerminatedAttributes {
 
 /// Handle stashed in the request context so that
 /// [`Multipart`](crate::protocols::multipart::Multipart) can record the
-/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time
-/// with only the attributes that are enabled in config.
+/// `apollo.router.operations.subscriptions.terminated.client` counter at drop time.
+///
+/// Selector-based attributes are collected during `on_response` and stored in
+/// `stashed_attributes` (shared via `Arc` across clones). The termination `reason`
+/// is added when the subscription stream is dropped.
 #[derive(Clone, Debug)]
 pub(crate) struct SubscriptionsTerminatedCounter {
-    pub(crate) counter: Counter<f64>,
-    pub(crate) reason_enabled: bool,
-    pub(crate) subgraph_name_enabled: bool,
-    pub(crate) client_name_enabled: bool,
+    counter: Counter<f64>,
+    selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
+    reason_enabled: bool,
+    stashed_attributes: Arc<Mutex<Vec<KeyValue>>>,
 }
 
 impl SubscriptionsTerminatedCounter {
-    pub(crate) fn record(
-        &self,
-        reason: &str,
-        subgraph_name: Option<&str>,
-        client_name: Option<&str>,
-    ) {
-        let mut attrs = Vec::with_capacity(3);
+    pub(crate) fn new(
+        counter: Counter<f64>,
+        selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
+        reason_enabled: bool,
+    ) -> Self {
+        Self {
+            counter,
+            selectors,
+            reason_enabled,
+            stashed_attributes: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub(crate) fn record(&self, reason: &str) {
+        let mut attrs = self.stashed_attributes.lock().clone();
         if self.reason_enabled {
-            attrs.push(opentelemetry::KeyValue::new("reason", reason.to_string()));
-        }
-        if self.subgraph_name_enabled {
-            attrs.push(opentelemetry::KeyValue::new(
-                "subgraph.name",
-                subgraph_name.unwrap_or_default().to_string(),
-            ));
-        }
-        if self.client_name_enabled {
-            attrs.push(opentelemetry::KeyValue::new(
-                "client.name",
-                client_name.unwrap_or_default().to_string(),
-            ));
+            attrs.push(KeyValue::new("reason", reason.to_string()));
         }
         self.counter.add(1.0, &attrs);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_stashed_attributes(self, attributes: Vec<KeyValue>) -> Self {
+        *self.stashed_attributes.lock() = attributes;
+        self
+    }
+}
+
+impl Instrumented for SubscriptionsTerminatedCounter {
+    type Request = router::Request;
+    type Response = router::Response;
+    type EventResponse = ();
+
+    fn on_request(&self, request: &Self::Request) {
+        *self.stashed_attributes.lock() = self.selectors.on_request(request);
+        request
+            .context
+            .extensions()
+            .with_lock(|ext| ext.insert(self.clone()));
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        let mut attrs = self.stashed_attributes.lock();
+        extend_attributes(&mut attrs, self.selectors.on_response(response));
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        let mut attrs = self.stashed_attributes.lock();
+        extend_attributes(&mut attrs, self.selectors.on_error(error, ctx));
     }
 }
 

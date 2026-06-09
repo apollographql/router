@@ -69,10 +69,6 @@ pub(crate) struct Multipart {
     /// The end reason determined during polling, written to the span on Drop.
     /// If `None` when dropped and `!is_terminated`, an abnormal reason is inferred.
     end_reason: Option<EndReason>,
-    /// The subgraph name for subscription streams, used in terminated metric attribution.
-    subgraph_name: Option<String>,
-    /// The client name for subscription streams, used in terminated metric attribution.
-    client_name: Option<String>,
     /// The telemetry counter stashed from context, used to record termination with
     /// configurable attributes.
     terminated_counter: Option<SubscriptionsTerminatedCounter>,
@@ -103,22 +99,8 @@ impl Multipart {
             // Capture the current span so we can record attributes later
             creation_span: Span::current(),
             end_reason: None,
-            subgraph_name: None,
-            client_name: None,
             terminated_counter: None,
         }
-    }
-
-    /// Set the subgraph name for terminated metric attribution.
-    pub(crate) fn with_subgraph_name(mut self, name: Option<String>) -> Self {
-        self.subgraph_name = name;
-        self
-    }
-
-    /// Set the client name for terminated metric attribution.
-    pub(crate) fn with_client_name(mut self, name: Option<String>) -> Self {
-        self.client_name = name;
-        self
     }
 
     /// Set the telemetry counter for subscription termination metrics.
@@ -273,11 +255,7 @@ impl Multipart {
     /// Emit a counter metric for subscription termination events.
     fn emit_subscription_termination_metric(&self, reason: SubscriptionEndReason) {
         if let Some(counter) = &self.terminated_counter {
-            counter.record(
-                reason.as_str(),
-                self.subgraph_name.as_deref(),
-                self.client_name.as_deref(),
-            );
+            counter.record(reason.as_str());
         }
     }
 }
@@ -505,21 +483,41 @@ mod tests {
         (guard, layer)
     }
 
-    /// Create a test `SubscriptionsTerminatedCounter` with all attributes enabled,
-    /// backed by the task-local test meter provider (must be called inside `.with_metrics()`).
-    fn test_terminated_counter() -> SubscriptionsTerminatedCounter {
+    fn test_terminated_counter_with_attrs(
+        attrs: Vec<opentelemetry::KeyValue>,
+    ) -> SubscriptionsTerminatedCounter {
+        use std::sync::Arc;
+
         use opentelemetry::metrics::MeterProvider;
+
+        use crate::plugins::telemetry::config_new::extendable::Extendable;
+        use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedAttributes;
+        use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+
         let counter = crate::metrics::meter_provider()
             .meter("test")
             .f64_counter("apollo.router.operations.subscriptions.terminated.client")
             .with_description("Subscription terminated")
             .build();
-        SubscriptionsTerminatedCounter {
-            counter,
-            reason_enabled: true,
-            subgraph_name_enabled: true,
-            client_name_enabled: true,
-        }
+        let selectors =
+            Arc::new(Extendable::<SubscriptionsTerminatedAttributes, RouterSelector>::default());
+        SubscriptionsTerminatedCounter::new(counter, selectors, true).with_stashed_attributes(attrs)
+    }
+
+    /// Create a test counter with `subgraph.name` = `test_subgraph` and empty `client.name`.
+    fn test_terminated_counter() -> SubscriptionsTerminatedCounter {
+        test_terminated_counter_with_attrs(vec![
+            opentelemetry::KeyValue::new("subgraph.name", "test_subgraph"),
+            opentelemetry::KeyValue::new("client.name", ""),
+        ])
+    }
+
+    /// Create a test counter with empty `subgraph.name` and `client.name`.
+    fn test_terminated_counter_empty() -> SubscriptionsTerminatedCounter {
+        test_terminated_counter_with_attrs(vec![
+            opentelemetry::KeyValue::new("subgraph.name", ""),
+            opentelemetry::KeyValue::new("client.name", ""),
+        ])
     }
 
     #[tokio::test]
@@ -540,7 +538,6 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_subgraph_name(Some("test_subgraph".to_string()))
                 .with_terminated_counter(Some(test_terminated_counter()));
 
             // Consume all messages
@@ -590,7 +587,6 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_subgraph_name(Some("test_subgraph".to_string()))
                 .with_terminated_counter(Some(test_terminated_counter()));
 
             // Consume all messages
@@ -632,7 +628,6 @@ mod tests {
             let responses: Vec<graphql::Response> = vec![];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_subgraph_name(Some("test_subgraph".to_string()))
                 .with_terminated_counter(Some(test_terminated_counter()));
 
             // Consume all messages (will get EOF)
@@ -675,8 +670,10 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel::<graphql::Response>(1);
             let gql_responses = tokio_stream::wrappers::ReceiverStream::new(rx);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_client_name(Some("test_client".to_string()))
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_with_attrs(vec![
+                    opentelemetry::KeyValue::new("subgraph.name", ""),
+                    opentelemetry::KeyValue::new("client.name", "test_client"),
+                ])));
 
             // Spawn a task that never sends anything, then drops the sender
             tokio::spawn(async move {
@@ -739,8 +736,10 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_client_name(Some("test_client".to_string()))
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_with_attrs(vec![
+                    opentelemetry::KeyValue::new("subgraph.name", ""),
+                    opentelemetry::KeyValue::new("client.name", "test_client"),
+                ])));
 
             // Get the first message
             let resp = protocol.next().await;
@@ -799,7 +798,7 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_empty()));
 
             // Consume all messages
             while protocol.next().await.is_some() {}
@@ -852,7 +851,7 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_empty()));
 
             // Consume all messages
             while protocol.next().await.is_some() {}
@@ -906,7 +905,7 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_empty()));
 
             // Consume all messages
             while protocol.next().await.is_some() {}
@@ -1432,8 +1431,10 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_subgraph_name(Some("flaky_subgraph".to_string()))
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_with_attrs(vec![
+                    opentelemetry::KeyValue::new("subgraph.name", "flaky_subgraph"),
+                    opentelemetry::KeyValue::new("client.name", ""),
+                ])));
 
             while protocol.next().await.is_some() {}
 
@@ -1484,8 +1485,10 @@ mod tests {
                 .build()];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_subgraph_name(Some("error_subgraph".to_string()))
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_with_attrs(vec![
+                    opentelemetry::KeyValue::new("subgraph.name", "error_subgraph"),
+                    opentelemetry::KeyValue::new("client.name", ""),
+                ])));
 
             while protocol.next().await.is_some() {}
 
@@ -1524,7 +1527,7 @@ mod tests {
             let responses: Vec<graphql::Response> = vec![];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_empty()));
 
             while protocol.next().await.is_some() {}
 
@@ -1559,7 +1562,7 @@ mod tests {
             ];
             let gql_responses = stream::iter(responses);
             let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
-                .with_terminated_counter(Some(test_terminated_counter()));
+                .with_terminated_counter(Some(test_terminated_counter_empty()));
 
             let resp = protocol.next().await;
             assert!(resp.is_some());
