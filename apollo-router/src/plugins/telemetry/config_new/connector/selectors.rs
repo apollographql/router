@@ -713,6 +713,7 @@ mod tests {
     fn connector_on_request_header_defaulted() {
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
             default: Some("defaulted".into()),
         };
         assert_eq!(
@@ -725,6 +726,7 @@ mod tests {
     fn connector_on_request_header_with_value() {
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
             default: None,
         };
         assert_eq!(
@@ -767,6 +769,7 @@ mod tests {
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
