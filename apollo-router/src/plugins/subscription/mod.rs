@@ -76,8 +76,10 @@ pub(crate) struct SubscriptionConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) max_lifetime: Option<Duration>,
-    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. When unset (null) the default is 0 (no reconnection attempts). Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.
-    pub(crate) max_reconnect_attempts: Option<u32>,
+    /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.
+    /// The default is 0 (no reconnection attempts). Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.
+    #[serde(default)]
+    pub(crate) max_reconnect_attempts: u32,
     /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay. Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
@@ -125,7 +127,7 @@ impl Default for SubscriptionConfig {
             max_opened_subscriptions: None,
             queue_capacity: None,
             max_lifetime: None,
-            max_reconnect_attempts: None,
+            max_reconnect_attempts: 0,
             reconnect_delay: None,
         }
     }
@@ -1086,7 +1088,7 @@ mod tests {
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
         assert!(sub_config.max_lifetime.is_none());
-        assert!(sub_config.max_reconnect_attempts.is_none());
+        assert_eq!(sub_config.max_reconnect_attempts, 0);
         assert!(sub_config.reconnect_delay.is_none());
 
         // ignore_auth_context: explicit true via global all
@@ -1180,7 +1182,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(config.max_reconnect_attempts, Some(5));
+        assert_eq!(config.max_reconnect_attempts, 5);
         assert_eq!(config.reconnect_delay, Some(Duration::from_secs(2)));
 
         let config_no_reconnect: SubscriptionConfig = serde_json::from_value(serde_json::json!({
@@ -1195,12 +1197,9 @@ mod tests {
         }))
         .unwrap();
 
-        assert!(config_no_reconnect.max_reconnect_attempts.is_none());
+        assert_eq!(config_no_reconnect.max_reconnect_attempts, 0);
         assert!(config_no_reconnect.reconnect_delay.is_none());
 
-        // Explicit `0` is the documented default and must deserialize as `Some(0)` so that an
-        // operator can pin "no reconnect" in config — subgraph.rs treats `Some(0)` and `None`
-        // identically via `unwrap_or(0)`.
         let config_zero_reconnect: SubscriptionConfig = serde_json::from_value(serde_json::json!({
             "enabled": true,
             "mode": {
@@ -1214,7 +1213,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(config_zero_reconnect.max_reconnect_attempts, Some(0));
+        assert_eq!(config_zero_reconnect.max_reconnect_attempts, 0);
         assert!(config_zero_reconnect.reconnect_delay.is_none());
     }
 }

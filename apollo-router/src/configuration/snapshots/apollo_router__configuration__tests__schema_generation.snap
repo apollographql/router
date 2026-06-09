@@ -11477,14 +11477,11 @@ expression: "&schema"
           ]
         },
         "max_reconnect_attempts": {
-          "default": null,
-          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection. When unset (null) the default is 0 (no reconnection attempts). Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.",
+          "default": 0,
+          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.\nThe default is 0 (no reconnection attempts). Only applies to WebSocket passthrough mode; ignored for callback-mode subscriptions.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "mode": {
           "allOf": [

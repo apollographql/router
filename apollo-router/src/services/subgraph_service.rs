@@ -1974,7 +1974,7 @@ mod tests {
             max_opened_subscriptions: None,
             queue_capacity: None,
             max_lifetime: None,
-            max_reconnect_attempts: None,
+            max_reconnect_attempts: 0,
             reconnect_delay: None,
         }
     }
@@ -2859,6 +2859,97 @@ mod tests {
         server.await.unwrap();
     }
 
+    /// First connection: completes the full graphql-ws handshake, sends one event, then
+    /// drops with an abnormal close frame (triggering reconnect logic). Every subsequent
+    /// connection stalls — the axum handler returns `pending` forever so the TCP connection
+    /// is established but the HTTP upgrade response never arrives. Used to verify that the
+    /// `subscription_closing_signal` select! arms abort the reconnect before the handshake
+    /// completes (or even before the delay expires).
+    async fn emulate_websocket_server_drops_then_stalls(
+        listener: TcpListener,
+        connection_count: Arc<AtomicU32>,
+    ) {
+        let app = Router::new()
+            .route(
+                "/ws",
+                get(
+                    |ws: WebSocketUpgrade,
+                     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+                     State(count): State<Arc<AtomicU32>>| async move {
+                        let conn_num = count.fetch_add(1, Ordering::SeqCst);
+                        if conn_num > 0 {
+                            // Stall: never send an HTTP response, so connect_async hangs.
+                            std::future::pending::<axum::response::Response>().await
+                        } else {
+                            ws.protocols(["graphql-transport-ws"])
+                                .on_upgrade(move |mut socket| async move {
+                                    let msg = socket
+                                        .recv()
+                                        .await
+                                        .unwrap()
+                                        .unwrap()
+                                        .into_text()
+                                        .unwrap();
+                                    assert!(matches!(
+                                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                        ClientMessage::ConnectionInit { .. }
+                                    ));
+                                    socket
+                                        .send(Message::text(
+                                            serde_json::to_string(&ServerMessage::ConnectionAck)
+                                                .unwrap(),
+                                        ))
+                                        .await
+                                        .unwrap();
+                                    let msg = socket
+                                        .recv()
+                                        .await
+                                        .unwrap()
+                                        .unwrap()
+                                        .into_text()
+                                        .unwrap();
+                                    let client_id =
+                                        if let ClientMessage::Subscribe { id, .. } =
+                                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                        {
+                                            id
+                                        } else {
+                                            panic!("expected Subscribe message");
+                                        };
+                                    socket
+                                        .send(Message::text(
+                                            serde_json::to_string(&ServerMessage::Next {
+                                                id: client_id,
+                                                payload: graphql::Response::builder()
+                                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                                    .build(),
+                                            })
+                                            .unwrap(),
+                                        ))
+                                        .await
+                                        .unwrap();
+                                    socket
+                                        .send(Message::Close(Some(CloseFrame {
+                                            code: 1011,
+                                            reason: "unexpected termination".into(),
+                                        })))
+                                        .await
+                                        .unwrap();
+                                })
+                                .into_response()
+                        }
+                    },
+                ),
+            )
+            .with_state(connection_count);
+
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
+        server.await.unwrap();
+    }
+
     /// Like `emulate_websocket_server_that_drops` but holds each connection open for
     /// `hold` after sending its single event, then drops with an abnormal close. The
     /// connection count is reported back so the test can stop the server once it has
@@ -3023,7 +3114,7 @@ mod tests {
 
     fn subscription_config_with_reconnect(max_reconnect_attempts: u32) -> SubscriptionConfig {
         SubscriptionConfig {
-            max_reconnect_attempts: Some(max_reconnect_attempts),
+            max_reconnect_attempts,
             reconnect_delay: Some(std::time::Duration::from_millis(1)),
             ..subscription_config()
         }
@@ -3171,12 +3262,15 @@ mod tests {
                 .unwrap();
             assert!(response.response.body().errors.is_empty());
 
-            let mut gql_stream = rx_stream.next().await.unwrap();
+            let gql_stream = rx_stream.next().await;
+            assert!(gql_stream.is_some(), "expected subscription stream from channel");
+            let mut gql_stream = gql_stream.unwrap();
 
             // Event from the initial connection.
-            let first = gql_stream.next().await.unwrap();
+            let first = gql_stream.next().await;
+            assert!(first.is_some(), "stream ended before initial data event");
             assert_eq!(
-                first,
+                first.unwrap(),
                 graphql::Response::builder()
                     .subscribed(true)
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
@@ -3186,7 +3280,9 @@ mod tests {
             // Errors from the first abnormal close are suppressed during the reconnect
             // window; the next item should be data from the reconnected stream.
             let second = loop {
-                let item = gql_stream.next().await.unwrap();
+                let item = gql_stream.next().await;
+                assert!(item.is_some(), "stream ended before second data event");
+                let item = item.unwrap();
                 if item.errors.is_empty() {
                     break item;
                 }
@@ -3679,6 +3775,204 @@ mod tests {
                 1,
                 "subgraph.name" = "test"
             );
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.reconnect",
+                u64,
+                "subgraph.name" = "test"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// When all clients drop while the router is sleeping during the reconnect delay, the
+    /// router must abort without attempting the reconnect handshake at all. This exercises
+    /// the `biased select!` arm on `subscription_closing_signal` inside the delay sleep.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_closing_signal_during_delay() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let connection_count = Arc::new(AtomicU32::new(0));
+            // Server stalls on the second connection; if the router incorrectly attempts
+            // a reconnect the stall will hold the test open and the counter assertion below
+            // will fail.
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
+                    listener,
+                    connection_count.clone(),
+                ));
+
+            // Use a long reconnect delay (200 ms) so the test can reliably drop the client
+            // stream before the delay expires and the reconnect handshake starts.
+            let subgraph_service = SubscriptionSubgraphLayer::new(
+                crate::plugins::subscription::notification::Notify::builder().build(),
+                Some(Arc::new(SubscriptionConfig {
+                    max_reconnect_attempts: 3,
+                    reconnect_delay: Some(std::time::Duration::from_millis(200)),
+                    ..subscription_config()
+                })),
+                Arc::from("test"),
+            )
+            .layer(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Receive the first (and only) event from the initial connection.
+            let first = gql_stream.next().await;
+            assert!(first.is_some(), "stream ended before initial data event");
+
+            // Drop the stream — simulates all clients disconnecting.
+            // The router is now sleeping in the 200 ms reconnect delay; the closing signal
+            // should interrupt it before the delay expires.
+            drop(gql_stream);
+
+            // Wait long enough for the closing signal to propagate (a few ms) but well
+            // short of the 200 ms reconnect delay.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            // The closing signal must have fired during the delay sleep — no reconnect
+            // handshake should have been issued.
+            assert_counter_not_exists!(
+                "apollo.router.operations.subscriptions.reconnect",
+                u64,
+                "subgraph.name" = "test"
+            );
+            // The server should never have seen a second connection.
+            assert_eq!(
+                connection_count.load(Ordering::SeqCst),
+                1,
+                "router must not attempt a reconnect after all clients disconnect"
+            );
+
+            spawned_task.abort();
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// When all clients drop while the reconnect handshake is in progress (TCP connected,
+    /// waiting for the HTTP upgrade response), the router must abort without completing
+    /// the handshake and must NOT increment the reconnect counter. This exercises the
+    /// `biased select!` arm on `subscription_closing_signal` inside `open_ws_gql_stream`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_websocket_reconnect_closing_signal_during_handshake() {
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = listener.local_addr().unwrap();
+            let connection_count = Arc::new(AtomicU32::new(0));
+            // Server stalls on the second connection's HTTP upgrade so that the reconnect
+            // handshake hangs long enough for the test to drop the client stream.
+            let spawned_task =
+                tokio::task::spawn(emulate_websocket_server_drops_then_stalls(
+                    listener,
+                    connection_count.clone(),
+                ));
+
+            // Use a very short reconnect delay so the handshake starts almost immediately
+            // after the connection drops; the test then drops the client stream while the
+            // handshake is in progress.
+            let subgraph_service = SubscriptionSubgraphLayer::new(
+                crate::plugins::subscription::notification::Notify::builder().build(),
+                Some(Arc::new(SubscriptionConfig {
+                    max_reconnect_attempts: 3,
+                    reconnect_delay: Some(std::time::Duration::from_millis(1)),
+                    ..subscription_config()
+                })),
+                Arc::from("test"),
+            )
+            .layer(
+                SubgraphService::new(
+                    "test",
+                    true,
+                    HttpClientServiceFactory::from_config(
+                        "test",
+                        &Configuration::default(),
+                        crate::configuration::shared::Client::default(),
+                    ),
+                )
+                .expect("can create a SubgraphService"),
+            );
+
+            let (tx, rx) = mpsc::channel(2);
+            let mut rx_stream = ReceiverStream::new(rx);
+            let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
+
+            let response = subgraph_service
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request(
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .subgraph_request(subgraph_http_request(
+                            url,
+                            "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                        ))
+                        .operation_kind(OperationKind::Subscription)
+                        .subscription_stream(tx)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap();
+            assert!(response.response.body().errors.is_empty());
+
+            let mut gql_stream = rx_stream.next().await.unwrap();
+
+            // Receive the first event from the initial connection.
+            let first = gql_stream.next().await;
+            assert!(first.is_some(), "stream ended before initial data event");
+
+            // Wait long enough for the 1 ms reconnect delay to expire and for
+            // `open_ws_gql_stream` to initiate a TCP connection to the stalling server,
+            // then drop the stream to fire the closing signal mid-handshake.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            drop(gql_stream);
+
+            // Give the closing signal time to propagate through the notification task and
+            // be picked up by the biased select! inside open_ws_gql_stream.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            // The handshake was aborted by the closing signal — the counter must NOT have
+            // been incremented (it only fires after open_ws_gql_stream returns).
             assert_counter_not_exists!(
                 "apollo.router.operations.subscriptions.reconnect",
                 u64,

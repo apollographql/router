@@ -142,6 +142,18 @@ pub(crate) struct SubscriptionExtension {
     pub(crate) heartbeat_interval_ms: u64,
 }
 
+/// Clones of the initial-connection inputs needed to re-establish a dropped WebSocket
+/// subscription. Bundled as a single `Option<ReconnectInputs>` so all five values are
+/// conditionally present together — adding a new reconnect input in the future only requires
+/// updating this struct, not adding another `Option<T>` with its own `unreachable!`.
+struct ReconnectInputs {
+    subgraph_request: http::Request<graphql::Request>,
+    connection_params: Option<serde_json_bytes::Value>,
+    signing_params: Option<Arc<SigningParamsConfig>>,
+    subscription_hash: String,
+    subgraph_cfg: WebSocketConfiguration,
+}
+
 /// Set up a subscription with the subgraph over a WebSocket protocol
 async fn call_websocket(
     mut notify: Notify<String, graphql::Response>,
@@ -212,10 +224,9 @@ async fn call_websocket(
             .build());
     }
 
-    let max_reconnect_attempts = subscription_config.max_reconnect_attempts.unwrap_or(0);
-    // Clone the inputs needed to re-establish the connection only when reconnection is enabled;
-    // the default (no-reconnect) path must not pay to clone the full request/config on every
-    // subscription. These are all `Some` exactly when `max_reconnect_attempts > 0`.
+    let max_reconnect_attempts = subscription_config.max_reconnect_attempts;
+    // Clone the request before consuming it via into_parts; only pay the cost when reconnection
+    // is enabled. The cloned request is later bundled with the other reconnect inputs below.
     let retry_subgraph_request = (max_reconnect_attempts > 0).then(|| subgraph_request.clone());
 
     let (parts, body) = subgraph_request.into_parts();
@@ -232,16 +243,22 @@ async fn call_websocket(
         (None, Some(authorization)) => Some(serde_json_bytes::json!({ "token": authorization })),
         _ => None,
     };
-    // Clone for use in reconnect attempts (only when reconnection is enabled).
-    let retry_connection_params = (max_reconnect_attempts > 0).then(|| connection_params.clone());
 
     // Extract before passing parts to the helper, which consumes them. Headers
     // are forwarded to the WebSocket upgrade request, extensions are not.
     let signing_params = parts.extensions.get::<Arc<SigningParamsConfig>>().cloned();
-    // Clone for use in reconnect attempts (only when reconnection is enabled).
-    let retry_signing_params = (max_reconnect_attempts > 0).then(|| signing_params.clone());
 
-    let retry_subscription_hash = (max_reconnect_attempts > 0).then(|| subscription_hash.clone());
+    // Bundle all reconnect inputs into a single Option. All fields are populated together,
+    // so adding a new reconnect input in the future only requires updating ReconnectInputs —
+    // not a separate Option<T> with its own unreachable!.
+    let retry_inputs = retry_subgraph_request.map(|req| ReconnectInputs {
+        subgraph_request: req,
+        connection_params: connection_params.clone(),
+        signing_params: signing_params.clone(),
+        subscription_hash: subscription_hash.clone(),
+        subgraph_cfg: subgraph_cfg.clone(),
+    });
+
     let (gql_stream, completed_normally, resp) = open_ws_gql_stream(
         service_name,
         parts,
@@ -264,14 +281,15 @@ async fn call_websocket(
     // stable, and the per-disconnect retry budget refreshes. A subgraph that
     // flaps (accepts the handshake then drops faster than this) keeps burning
     // through the current budget and eventually terminates the subscription.
-    // The minimum floor guards against `reconnect_delay: 0s` collapsing the
-    // grace window to zero (every elapsed >= 0 → every drop resets the budget
-    // → unbounded reconnect loop, which is exactly the failure mode the grace
-    // window is designed to prevent).
+    // Formula: 5 × reconnect_delay, floored at 500 ms. The 5× multiplier is
+    // intentionally undocumented in user-facing config because it scales with
+    // whatever delay an operator chose — the stability check always requires the
+    // connection to have survived at least a few retry cycles. The 500 ms floor
+    // guards against `reconnect_delay: 0s` collapsing the grace window to zero
+    // (every elapsed >= 0 → every drop resets the budget → unbounded loop).
     let stability_grace = reconnect_delay
         .saturating_mul(5)
         .max(Duration::from_millis(500));
-    let retry_subgraph_cfg = (max_reconnect_attempts > 0).then(|| subgraph_cfg.clone());
 
     // Forward GraphQL subscription stream to WebSocket handle, with optional reconnection on
     // connection drop. Connection lifecycle is managed by the WebSocket infrastructure, so we
@@ -382,23 +400,9 @@ async fn call_websocket(
                             max_reconnect_attempts,
                             "subscription WebSocket connection dropped, reconnecting"
                         );
-                        // The reconnect inputs are cloned up-front only when reconnection is
-                        // enabled, which is the only way `attempt < max_reconnect_attempts` can be
-                        // true — so they are always present here.
-                        let (
-                            Some(retry_subgraph_request),
-                            Some(retry_connection_params),
-                            Some(retry_signing_params),
-                            Some(retry_subscription_hash),
-                            Some(retry_subgraph_cfg),
-                        ) = (
-                            &retry_subgraph_request,
-                            &retry_connection_params,
-                            &retry_signing_params,
-                            &retry_subscription_hash,
-                            &retry_subgraph_cfg,
-                        )
-                        else {
+                        // Reconnect inputs are populated whenever max_reconnect_attempts > 0,
+                        // which is the only way `attempt < max_reconnect_attempts` can be true.
+                        let Some(inputs) = &retry_inputs else {
                             unreachable!(
                                 "reconnect inputs are populated whenever max_reconnect_attempts > 0"
                             );
@@ -414,7 +418,7 @@ async fn call_websocket(
                             _ = tokio::time::sleep(reconnect_delay) => {},
                         }
                         let (retry_parts, retry_body) =
-                            retry_subgraph_request.clone().into_parts();
+                            inputs.subgraph_request.clone().into_parts();
                         // The handshake (TCP + TLS + ConnectionAck) can take seconds. If all
                         // clients drop during it, abort rather than completing a fresh subgraph
                         // subscription that will immediately need to be torn down.
@@ -428,10 +432,10 @@ async fn call_websocket(
                                 &service_name_for_task,
                                 retry_parts,
                                 retry_body,
-                                retry_connection_params.clone(),
-                                retry_signing_params.clone(),
-                                retry_subgraph_cfg,
-                                retry_subscription_hash.clone(),
+                                inputs.connection_params.clone(),
+                                inputs.signing_params.clone(),
+                                &inputs.subgraph_cfg,
+                                inputs.subscription_hash.clone(),
                                 log_request_level,
                                 true,
                             ) => res,
@@ -450,6 +454,9 @@ async fn call_websocket(
                             Ok((new_stream, new_completed_normally, _resp)) => {
                                 gql_stream = new_stream;
                                 stream_completed_normally = new_completed_normally;
+                                // `last_transient_error` is intentionally left stale — a
+                                // subsequent abnormal drop overwrites it before it's ever
+                                // forwarded, so this edge case is benign in practice.
                                 break 'reconnect;
                             }
                             Err(err) => {
