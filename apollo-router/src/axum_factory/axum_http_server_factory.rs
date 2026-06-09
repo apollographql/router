@@ -211,6 +211,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
+            let sm = span_mode(&configuration);
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 all_routers.main.1,
                 pipeline_ref.clone(),
@@ -218,6 +219,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 configuration.clone(),
                 all_connections_stopped_sender.clone(),
+                sm,
             );
 
             tracing::info!(
@@ -258,6 +260,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             listener,
                             configuration.clone(),
                             all_connections_stopped_sender.clone(),
+                            sm,
                         );
                         (
                             server.map(|listener| (listen_addr, listener)),

@@ -37,6 +37,7 @@ use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
+use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::services::router::pipeline_handle::PipelineRef;
@@ -210,6 +211,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
     connection_shutdown_timeout: Duration,
     received_first_request: Arc<AtomicBool>,
     connection_start: Instant,
+    span_mode: SpanMode,
 ) where
     C: Future<Output = Result<(), E>>,
     C: GracefulConnection<Error = E>,
@@ -224,7 +226,7 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
             // emit metrics manually so they remain observable.
             if let Err(ref err) = res &&
                  let Some(status_code) = classify_hyper_rejection(err.as_ref()) {
-                    emit_connection_rejection_metrics(status_code, connection_start);
+                    emit_connection_rejection_metrics(status_code, connection_start, span_mode);
                 }
         }
         // the shutdown receiver was triggered first,
@@ -328,6 +330,7 @@ pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
+    span_mode: SpanMode,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let opt_max_http1_headers = configuration.limits.router.http1_max_request_headers;
     let opt_max_http1_buf_size = configuration.limits.router.http1_max_request_buf_size;
@@ -412,7 +415,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection_start = Instant::now();
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -426,7 +429,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection_start = Instant::now();
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
@@ -471,7 +474,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
                                     }
                                 }
                             });
@@ -534,20 +537,33 @@ fn configure_connection(
     builder
 }
 
-/// Walk the error source chain to find hyper HTTP parse rejections that cause automatic
-/// 4xx responses to be sent before the request reaches the service layer.
-/// Returns the HTTP status code (431 or 414) if one is detected, otherwise `None`.
-fn classify_hyper_rejection(err: &dyn std::error::Error) -> Option<u16> {
-    let mut current: Option<&dyn std::error::Error> = Some(err);
-    while let Some(e) = current {
-        match e.to_string().as_str() {
-            // hyper::Error Display for Parse::TooLarge (too many headers → 431)
-            "message head is too large" => return Some(431),
-            // hyper::Error Display for Parse::UriTooLong (URI too long → 414)
-            "URI too long" => return Some(414),
-            _ => {}
+/// Walk the error source chain to find a [`hyper::Error`] indicating that hyper rejected
+/// the request with a 431 or 414 before it reached the service layer.
+///
+/// Uses `is_parse_too_large()` (stable public API) as the primary gate. The Display string
+/// is used only to discriminate between the two variants that `is_parse_too_large` bundles
+/// together: `Parse::TooLarge` (431) and `Parse::UriTooLong` (414). If hyper ever changes
+/// that string we default to 431, the more common case.
+fn classify_hyper_rejection(err: &(dyn std::error::Error + Send + Sync + 'static)) -> Option<u16> {
+    fn check(hyper_err: &hyper::Error) -> Option<u16> {
+        hyper_err.is_parse_too_large().then(|| {
+            if hyper_err.to_string() == "URI too long" {
+                414
+            } else {
+                431
+            }
+        })
+    }
+
+    if let Some(code) = err.downcast_ref::<hyper::Error>().and_then(check) {
+        return Some(code);
+    }
+    let mut source = err.source();
+    while let Some(e) = source {
+        if let Some(code) = e.downcast_ref::<hyper::Error>().and_then(check) {
+            return Some(code);
         }
-        current = e.source();
+        source = e.source();
     }
     None
 }
@@ -559,8 +575,10 @@ fn classify_hyper_rejection(err: &dyn std::error::Error) -> Option<u16> {
 /// called. Because it is per-connection rather than per-request, the recorded duration will be
 /// inflated on keep-alive connections that served prior valid requests. In practice these
 /// rejections almost always occur on the first request of a connection.
-fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
-    let elapsed_s = start.elapsed().as_secs_f64();
+fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode: SpanMode) {
+    let elapsed = start.elapsed();
+    let elapsed_s = elapsed.as_secs_f64();
+    let elapsed_ns = elapsed.as_nanos() as i64;
 
     u64_counter!(
         "apollo.router.operations",
@@ -579,13 +597,12 @@ fn emit_connection_rejection_metrics(status_code: u16, start: Instant) {
         "http.response.status_code" = status_code as i64
     );
 
-    // Create a minimal trace span so APM tools can see the rejected request.
-    // No distributed trace context is available because the headers were not successfully parsed.
-    let span = tracing::info_span!(
-        "router",
-        "otel.kind" = "SERVER",
-        "http.response.status_code" = status_code as i64,
-    );
+    // Create a trace span matching the shape of a normal router span so APM tools and Apollo
+    // Studio can see the rejected request alongside normal requests. No distributed trace context
+    // is available because the headers were not successfully parsed.
+    let span = span_mode.create_router_rejection();
+    span.record("http.response.status_code", status_code as i64);
+    span.record("apollo_private.duration_ns", elapsed_ns);
     drop(span.entered());
 }
 
@@ -825,52 +842,14 @@ mod tests {
 
     // --- Tests for HTTP 431 / 414 metric and trace emission ---
 
-    #[test]
-    fn classify_hyper_rejection_detects_431() {
-        // Simulate the Display string hyper uses for Parse::TooLarge
-        let err = std::io::Error::other("message head is too large");
-        assert_eq!(classify_hyper_rejection(&err), Some(431));
-    }
-
-    #[test]
-    fn classify_hyper_rejection_detects_414() {
-        // Simulate the Display string hyper uses for Parse::UriTooLong
-        let err = std::io::Error::other("URI too long");
-        assert_eq!(classify_hyper_rejection(&err), Some(414));
-    }
-
-    #[test]
-    fn classify_hyper_rejection_ignores_other_errors() {
-        let err = std::io::Error::other("connection reset");
-        assert_eq!(classify_hyper_rejection(&err), None);
-    }
-
-    #[test]
-    fn classify_hyper_rejection_walks_source_chain() {
-        use std::fmt;
-
-        #[derive(Debug)]
-        struct Outer(std::io::Error);
-        impl fmt::Display for Outer {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "outer error")
-            }
-        }
-        impl std::error::Error for Outer {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                Some(&self.0)
-            }
-        }
-
-        let inner = std::io::Error::other("message head is too large");
-        let outer = Outer(inner);
-        assert_eq!(classify_hyper_rejection(&outer), Some(431));
-    }
+    // Note: classify_hyper_rejection is covered by the integration test
+    // `it_returns_431_when_too_many_headers` below, which generates real hyper::Error
+    // values. Unit tests using fake std::io::Error don't work with the downcast approach.
 
     #[tokio::test]
     async fn emit_connection_rejection_metrics_records_431() {
         async {
-            emit_connection_rejection_metrics(431, Instant::now());
+            emit_connection_rejection_metrics(431, Instant::now(), SpanMode::default());
             assert_counter!(
                 "apollo.router.operations",
                 1,
@@ -889,7 +868,7 @@ mod tests {
     #[tokio::test]
     async fn emit_connection_rejection_metrics_records_414() {
         async {
-            emit_connection_rejection_metrics(414, Instant::now());
+            emit_connection_rejection_metrics(414, Instant::now(), SpanMode::default());
             assert_counter!(
                 "apollo.router.operations",
                 1,
@@ -941,5 +920,47 @@ mod tests {
             StatusCode::from_u16(431).unwrap(),
             "expected 431 Request Header Fields Too Large"
         );
+    }
+
+    #[tokio::test]
+    async fn it_returns_414_when_uri_too_long() {
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpStream;
+
+        // hyper's MAX_URI_LEN is hardcoded at 65534 bytes (u16::MAX - 1) and is not
+        // configurable. Exceeding it triggers Parse::UriTooLong → 414. No special router
+        // config is needed; the default configuration is sufficient.
+        //
+        // reqwest rejects URLs this long before even connecting, so we use a raw TCP
+        // stream and write the HTTP request manually.
+        let router_service = router::service::empty().await;
+        let (server, _) = init_with_config(
+            router_service,
+            Arc::new(Configuration::fake_builder().build().unwrap()),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
+
+        let listen_addr = server.graphql_listen_address().as_ref().unwrap();
+        let (ip, port) = listen_addr.ip_and_port().unwrap();
+        let mut stream = TcpStream::connect((ip, port)).await.unwrap();
+
+        // Path is 65535 bytes — one over MAX_URI_LEN (65534) — triggering UriTooLong.
+        let long_path = format!("/{}", "a".repeat(65534));
+        let request = format!("GET {} HTTP/1.1\r\nHost: localhost\r\n\r\n", long_path);
+        stream.write_all(request.as_bytes()).await.unwrap();
+
+        // Read just enough to verify the status line.
+        let mut buf = [0u8; 32];
+        let n = stream.read(&mut buf).await.unwrap();
+        assert!(
+            buf[..n].starts_with(b"HTTP/1.1 414"),
+            "expected 414 URI Too Long, got: {}",
+            String::from_utf8_lossy(&buf[..n])
+        );
+
+        server.shutdown().await.unwrap();
     }
 }
