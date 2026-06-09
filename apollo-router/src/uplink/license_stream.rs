@@ -9,7 +9,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+<<<<<<< HEAD
 use std::time::Instant;
+=======
+use std::time::Duration;
+>>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
 use std::time::SystemTime;
 
 use futures::Stream;
@@ -39,6 +43,42 @@ use crate::uplink::license_stream::license_query::FetchErrorCode;
 use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
+
+/// The documented grace window between `warn_at` and `halt_at` (days).
+/// Used both to define the maximum documented halt offset and to restore
+/// the grace window when both deadlines are clamped.
+const HALT_GRACE_PERIOD_DAYS: u64 = 28;
+
+/// Maximum span from "now" to `halt_at` for offline licenses in
+/// `docs/source/routing/license.mdx`: at most one year of validity plus a
+/// 28-day grace period (~393 days).
+const DOCUMENTED_MAX_HALT_OFFSET_DAYS: u64 = 365 + HALT_GRACE_PERIOD_DAYS;
+
+/// Slack above the documented span so legitimate `warn_at` / `halt_at` values are
+/// not truncated if validity or grace windows change.
+const LICENSE_SCHEDULE_HEADROOM_DAYS: u64 = 90;
+
+const SECS_PER_DAY: u64 = 24 * 60 * 60;
+
+/// Tokio's timer wheel rejects deadlines beyond `(1 << 36) - 1` ms (~795 days).
+const TOKIO_TIMER_WHEEL_MAX_MILLIS: u64 = (1 << 36) - 1;
+
+const MAX_TIMER_DURATION_SECS: u64 =
+    (DOCUMENTED_MAX_HALT_OFFSET_DAYS + LICENSE_SCHEDULE_HEADROOM_DAYS) * SECS_PER_DAY;
+
+const _: () = assert!(MAX_TIMER_DURATION_SECS * 1000 < TOKIO_TIMER_WHEEL_MAX_MILLIS);
+
+/// Upper bound for scheduling `warn_at` / `halt_at` in `DelayQueue`.
+///
+/// Derived from the documented license timeline plus headroom, and kept below
+/// Tokio's timer wheel maximum so `insert_at` cannot panic. When both deadlines
+/// exceed this cap, `warn_at` is anchored `WARN_BEFORE_HALT_GRACE` before the
+/// clamped `halt_at` so the soft-then-hard grace ordering is preserved.
+const MAX_TIMER_DURATION: Duration = Duration::from_secs(MAX_TIMER_DURATION_SECS);
+
+/// How far before the clamped `halt_at` to schedule `warn_at` when both deadlines
+/// exceed [`MAX_TIMER_DURATION`]. Matches the documented [`HALT_GRACE_PERIOD_DAYS`]-day grace window.
+const WARN_BEFORE_HALT_GRACE: Duration = Duration::from_secs(HALT_GRACE_PERIOD_DAYS * SECS_PER_DAY);
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -212,7 +252,27 @@ fn reset_checks_for_licenses(
     };
 
     let halt_at = to_positive_instant(claims.halt_at);
-    let warn_at = to_positive_instant(claims.warn_at);
+    let now_system = SystemTime::now();
+
+    // If halt_at was clamped, ensure warn_at is anchored at least WARN_BEFORE_HALT_GRACE
+    // before it. This covers two cases: (1) both deadlines exceed the cap (warn_at_raw and
+    // halt_at collapse to the same clamped instant), and (2) only halt_at is clamped but
+    // warn_at is close enough to MAX_TIMER_DURATION that the remaining gap is shorter than
+    // the documented grace window.
+    let halt_exceeds_cap = claims
+        .halt_at
+        .duration_since(now_system)
+        .map(|d| d > MAX_TIMER_DURATION)
+        .unwrap_or(false);
+    let warn_at_raw = to_positive_instant(claims.warn_at);
+    let warn_at = if halt_exceeds_cap && warn_at_raw + WARN_BEFORE_HALT_GRACE > halt_at {
+        halt_at - WARN_BEFORE_HALT_GRACE
+    } else {
+        warn_at_raw
+    };
+
+    // Capture `now` after all to_positive_instant calls so that a past warn_at
+    // (returned as Instant::now() inside that function) correctly compares as <= now.
     let now = Instant::now();
     // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
     if halt_at > now {
@@ -254,20 +314,36 @@ fn reset_checks_for_licenses(
     ))))
 }
 
+<<<<<<< HEAD
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
 /// The generated instant is only approximate.
 /// Subtracting from instants is not supported on all platforms, so if the calculated instant was in the past we just return now as we don't care about how long ago the instant was, just that it happened already.
 fn to_positive_instant(system_time: SystemTime) -> Instant {
     // This is approximate as there is no real conversion between SystemTime and Instant
+=======
+/// Converts an externally generated `SystemTime` (e.g. JWT `warn_at` / `halt_at`) into a
+/// `tokio::time::Instant` for scheduling license state transitions in a `DelayQueue`.
+///
+/// The result is approximate: there is no exact conversion between `SystemTime` and
+/// `Instant`. If `system_time` is in the past, returns `Instant::now()` — we only need to
+/// know the event already happened, not how far in the past. (Subtracting from instants is
+/// not supported on all platforms, which motivates treating past times as "now".)
+///
+/// Uses `tokio::time::Instant` (not `std::time::Instant`) so scheduling respects
+/// `tokio::time::pause()` / `tokio::time::advance()` in tests and stays consistent with the
+/// queue's clock.
+///
+/// Future times are clamped to [`MAX_TIMER_DURATION`] so `DelayQueue::insert_at` cannot
+/// overflow Tokio's timer wheel. When both `warn_at` and `halt_at` exceed the cap,
+/// `reset_checks_for_licenses` anchors `warn_at` to [`WARN_BEFORE_HALT_GRACE`] before the
+/// clamped `halt_at` so the soft-then-hard grace ordering is preserved.
+fn to_positive_instant(system_time: SystemTime) -> Instant {
+>>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
-    // system_time is likely to be a time in the future, but may be in the past.
     match system_time.duration_since(now_system_time) {
-        // system_time was in the future.
-        Ok(duration) => now_instant + duration,
-
-        // system_time was in the past.
+        Ok(duration) => now_instant + duration.min(MAX_TIMER_DURATION),
         Err(_) => now_instant,
     }
 }
@@ -393,11 +469,122 @@ mod test {
         assert!(future_instant < now_instant + Duration::from_secs(1025));
         assert!(future_instant > now_instant + Duration::from_secs(1023));
 
+<<<<<<< HEAD
         // An instant in the past will return something greater than the original now_instant, but less than a new instant.
+=======
+        // One day below the scheduling cap: a realistic license halt window must not be clamped.
+        let one_day_before_cap =
+            super::MAX_TIMER_DURATION - Duration::from_secs(super::SECS_PER_DAY);
+        let near_cap_system_time = now_system_time + one_day_before_cap;
+        let near_cap_instant = to_positive_instant(near_cap_system_time);
+        assert!(
+            near_cap_instant > now_instant + one_day_before_cap - Duration::from_secs(1),
+            "deadline one day below MAX_TIMER_DURATION must not be clamped"
+        );
+        assert!(
+            near_cap_instant < now_instant + one_day_before_cap + Duration::from_secs(1),
+            "deadline one day below MAX_TIMER_DURATION must not be clamped"
+        );
+
+        // An instant in the past will return something greater than the original
+        // now_instant, and at most equal to a new instant. The upper bound is
+        // inclusive because on low-resolution monotonic clocks (Windows ticks at
+        // ~16ms) the `Instant::now()` here can read the same value
+        // `to_positive_instant` did during the same tick.
+>>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
         let past_system_time = now_system_time - Duration::from_secs(1024);
         let past_instant = to_positive_instant(past_system_time);
         assert!(past_instant > now_instant);
         assert!(past_instant < Instant::now());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_to_instant_far_future_is_clamped() {
+        let now_instant = Instant::now();
+        let three_years = Duration::from_secs(3 * 365 * 24 * 3600);
+        let far_future = SystemTime::now() + three_years;
+
+        let result = to_positive_instant(far_future);
+
+        assert_eq!(
+            result,
+            now_instant + super::MAX_TIMER_DURATION,
+            "far-future SystemTime must clamp to MAX_TIMER_DURATION from the current Instant"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_far_future_does_not_panic() {
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        let license = license_with_claim(three_years_ms - 1_000_000, three_years_ms);
+
+        // Before the clamp fix this would panic with "invalid deadline; err=Invalid"
+        // because the deadline exceeded tokio's timer wheel maximum of ~2^36 ms.
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        // When both deadlines exceed MAX_TIMER_DURATION, warn_at is anchored
+        // WARN_BEFORE_HALT_GRACE before the clamped halt_at, so staged ordering
+        // is preserved even for far-future licenses.
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_halt_clamped_warn_close_to_cap() {
+        // warn_at is 14 days before MAX_TIMER_DURATION — under the cap on its own, but
+        // within WARN_BEFORE_HALT_GRACE (28 days) of the clamped halt_at. The old code
+        // only adjusted warn_at when both deadlines exceeded the cap, leaving a < 28-day
+        // gap here. The new code anchors warn_at to halt_at - WARN_BEFORE_HALT_GRACE.
+        let half_grace_ms = (super::HALT_GRACE_PERIOD_DAYS / 2) * super::SECS_PER_DAY * 1000;
+        let warn_delta_ms = super::MAX_TIMER_DURATION_SECS * 1000 - half_grace_ms;
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+
+        let license = license_with_claim(warn_delta_ms, three_years_ms);
+
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn license_expander_far_future_halt_only_clamped() {
+        let three_years_ms: u64 = 3 * 365 * 24 * 3600 * 1000;
+        // warn_at stays under the cap; only halt_at is clamped. This is the more likely
+        // real-world shape and must preserve warn-before-halt ordering.
+        let license = license_with_claim(15_000, three_years_ms);
+
+        let events_stream = futures::stream::iter(vec![license])
+            .expand_licenses()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(
+            events,
+            &[
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense,
+            ]
+        );
     }
 
     #[tokio::test]
