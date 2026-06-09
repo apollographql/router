@@ -20,8 +20,7 @@ jobs:
       - name: Check team membership
         id: team-check
         env:
-          # TODO: get org read pat
-          GH_TOKEN: ${{ secrets.ORG_READ_PAT }}
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
           COMMENTER: ${{ github.event.comment.user.login }}
         run: |
           STATE=$(gh api \
@@ -44,8 +43,10 @@ jobs:
         if: steps.team-check.outputs.is_member == 'true'
         uses: anthropics/claude-code-action@v1
         with:
-          # todo: get anthropic api key
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # todo: doublecheck github token
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.issue.number }}
+          model: claude-opus-4-8
+          prompt: |
+            Review this PR for correctness, security, and performance issues.
+            Ignore formatting and style.
