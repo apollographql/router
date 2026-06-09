@@ -713,7 +713,6 @@ mod tests {
     fn connector_on_request_header_defaulted() {
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         assert_eq!(
@@ -726,7 +725,6 @@ mod tests {
     fn connector_on_request_header_with_value() {
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
             default: None,
         };
         assert_eq!(
@@ -769,7 +767,6 @@ mod tests {
 
         let selector = ConnectorSelector::HttpRequestHeader {
             connector_http_request_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
             default: None,
         };
         let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
@@ -1079,7 +1076,6 @@ mod tests {
     fn connector_request_context() {
         let selector = ConnectorSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = Context::new();
@@ -1103,7 +1099,6 @@ mod tests {
     fn connector_supergraph_operation_name_string() {
         let selector = ConnectorSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = Context::new();
@@ -1123,7 +1118,6 @@ mod tests {
     fn connector_supergraph_operation_name_hash() {
         let selector = ConnectorSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = Context::new();

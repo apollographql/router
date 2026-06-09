@@ -803,7 +803,6 @@ mod test {
     fn supergraph_request_context() {
         let selector = SupergraphSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -871,7 +870,6 @@ mod test {
     fn supergraph_response_context() {
         let selector = SupergraphSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -922,7 +920,6 @@ mod test {
         subscriber::with_default(subscriber, || {
             let selector = SupergraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -967,7 +964,6 @@ mod test {
     fn supergraph_env() {
         let mut selector = SupergraphSelector::Env {
             env: "SELECTOR_SUPERGRAPH_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1016,7 +1012,6 @@ mod test {
     fn supergraph_operation_name_string() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1046,7 +1041,6 @@ mod test {
     fn supergraph_operation_name_hash() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1076,7 +1070,6 @@ mod test {
     fn supergraph_query() {
         let selector = SupergraphSelector::Query {
             query: Query::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -1102,7 +1095,6 @@ mod test {
     fn create_select_and_context(query: Query) -> (SupergraphSelector, crate::Context) {
         let selector = SupergraphSelector::Query {
             query,
-            redact: None,
             default: Some("default".to_string()),
         };
         let limits = OperationLimits {
@@ -1186,7 +1178,6 @@ mod test {
     fn supergraph_query_variable() {
         let selector = SupergraphSelector::QueryVariable {
             query_variable: "key".to_string(),
-            redact: None,
             default: Some(AttributeValue::String("default".to_string())),
         };
         assert_eq!(

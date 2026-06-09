@@ -1291,7 +1291,6 @@ mod test {
     fn subgraph_request_context() {
         let selector = SubgraphSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -1328,7 +1327,6 @@ mod test {
     fn subgraph_response_context() {
         let selector = SubgraphSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -1414,7 +1412,6 @@ mod test {
         subscriber::with_default(subscriber, || {
             let selector = SubgraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -1452,7 +1449,6 @@ mod test {
     fn subgraph_env() {
         let mut selector = SubgraphSelector::Env {
             env: "SELECTOR_SUBGRAPH_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1960,7 +1956,6 @@ mod test {
     fn subgraph_supergraph_operation_name_string() {
         let selector = SubgraphSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1996,7 +1991,6 @@ mod test {
     fn subgraph_subgraph_operation_name_string() {
         let selector = SubgraphSelector::SubgraphOperationName {
             subgraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         assert_eq!(
@@ -2026,7 +2020,6 @@ mod test {
     fn subgraph_supergraph_operation_name_hash() {
         let selector = SubgraphSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -2054,7 +2047,6 @@ mod test {
     fn subgraph_subgraph_operation_name_hash() {
         let selector = SubgraphSelector::SubgraphOperationName {
             subgraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         assert_eq!(
@@ -2085,7 +2077,6 @@ mod test {
     fn subgraph_supergraph_query() {
         let selector = SubgraphSelector::SupergraphQuery {
             supergraph_query: Query::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -2115,7 +2106,6 @@ mod test {
     fn subgraph_subgraph_query() {
         let selector = SubgraphSelector::SubgraphQuery {
             subgraph_query: SubgraphQuery::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -2162,7 +2152,6 @@ mod test {
     fn subgraph_subgraph_response_data() {
         let selector = SubgraphSelector::SubgraphResponseData {
             subgraph_response_data: JsonPathInst::from_str("$.hello").unwrap(),
-            redact: None,
             default: None,
         };
         assert_eq!(
@@ -2212,7 +2201,6 @@ mod test {
 
         let selector = SubgraphSelector::SubgraphResponseData {
             subgraph_response_data: JsonPathInst::from_str("$.hello.*.greeting").unwrap(),
-            redact: None,
             default: None,
         };
         assert_eq!(
@@ -2308,7 +2296,6 @@ mod test {
     fn subgraph_supergraph_query_variable() {
         let selector = SubgraphSelector::SupergraphQueryVariable {
             supergraph_query_variable: "key".to_string(),
-            redact: None,
             default: Some(AttributeValue::String("default".to_string())),
         };
         assert_eq!(
@@ -2338,7 +2325,6 @@ mod test {
     fn subgraph_subgraph_query_variable() {
         let selector = SubgraphSelector::SubgraphQueryVariable {
             subgraph_query_variable: "key".to_string(),
-            redact: None,
             default: Some("default".into()),
         };
         assert_eq!(

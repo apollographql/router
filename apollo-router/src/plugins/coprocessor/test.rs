@@ -1713,7 +1713,6 @@ mod tests {
                 // Will be satisfied
                 condition: Condition::Exists(SubgraphSelector::ResponseContext {
                     response_context: String::from("context_value"),
-                    redact: None,
                     default: None,
                 }),
                 body: BodyConf::All(true),

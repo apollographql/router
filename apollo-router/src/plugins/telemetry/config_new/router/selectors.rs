@@ -757,7 +757,6 @@ mod test {
     fn router_request_context() {
         let selector = RouterSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -799,7 +798,6 @@ mod test {
     fn router_response_context() {
         let selector = RouterSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -1049,7 +1047,6 @@ mod test {
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -1202,7 +1199,6 @@ mod test {
     fn router_env() {
         let mut selector = RouterSelector::Env {
             env: "SELECTOR_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1232,7 +1228,6 @@ mod test {
     fn router_operation_name_string() {
         let selector = RouterSelector::OperationName {
             operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
