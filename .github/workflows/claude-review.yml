@@ -47,6 +47,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.issue.number }}
           model: claude-opus-4-8
-          prompt: |
-            Review this PR for correctness, security, and performance issues.
-            Ignore formatting and style.
+          prompt_file: review-prompt.md
