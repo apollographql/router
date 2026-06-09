@@ -11460,7 +11460,7 @@ expression: "&schema"
         },
         "early_cancel": {
           "default": true,
-          "description": "Abort request handling when the client drops the connection.\nDefault: true.\nWhen set to false, telemetry will be recorded for canceled requests, but request\nhandling will continue running (holding buffer permits) until completion even after\nthe client disconnects.",
+          "description": "Abort request handling when the client drops the connection.\nDefault: true.\nWhen set to false, telemetry will be recorded for canceled requests, but request\nhandling will continue running until completion even after the client disconnects.",
           "type": "boolean"
         },
         "enable_result_coercion_errors": {
