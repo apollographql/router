@@ -13,4 +13,4 @@ attributes:
     static: "my-value"
 ```
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/XXXX
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9602
