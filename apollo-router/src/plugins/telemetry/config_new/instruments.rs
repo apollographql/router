@@ -470,20 +470,13 @@ impl InstrumentsConfig {
             .subscriptions_terminated
             .is_enabled()
             .then(|| {
-                let (selectors, reason_enabled) =
-                    match &self.router.attributes.subscriptions_terminated {
-                        DefaultedStandardInstrument::Extendable { attributes } => (
-                            attributes.clone(),
-                            attributes.attributes.reason(),
-                        ),
-                        _ => (
-                            Arc::new(Extendable {
-                                attributes: SubscriptionsTerminatedAttributes::default(),
-                                custom: HashMap::new(),
-                            }),
-                            SubscriptionsTerminatedAttributes::default().reason(),
-                        ),
-                    };
+                let selectors = match &self.router.attributes.subscriptions_terminated {
+                    DefaultedStandardInstrument::Extendable { attributes } => attributes.clone(),
+                    _ => Arc::new(Extendable {
+                        attributes: SubscriptionsTerminatedAttributes::default(),
+                        custom: HashMap::new(),
+                    }),
+                };
                 SubscriptionsTerminatedCounter::new(
                     static_instruments
                         .get(APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED)
@@ -496,7 +489,6 @@ impl InstrumentsConfig {
                             "cannot convert instrument to counter for subscriptions terminated; this should not happen",
                         ),
                     selectors,
-                    reason_enabled,
                 )
             });
 
@@ -1202,42 +1194,8 @@ impl SubscriptionsTerminatedAttributes {
     }
 }
 
-impl Selectors<router::Request, router::Response, ()> for SubscriptionsTerminatedAttributes {
-    fn on_request(&self, _request: &router::Request) -> Vec<KeyValue> {
-        Vec::new()
-    }
-
-    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        if self.subgraph_name.unwrap_or(false) {
-            let name = response
-                .context
-                .get::<_, String>(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            attrs.push(KeyValue::new("subgraph.name", name));
-        }
-        if self.client_name.unwrap_or(false) {
-            let client_name = response
-                .context
-                .get::<_, String>(CLIENT_NAME)
-                .ok()
-                .flatten()
-                .or_else(|| {
-                    response
-                        .context
-                        .get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
-                        .ok()
-                        .flatten()
-                })
-                .unwrap_or_default();
-            attrs.push(KeyValue::new("client.name", client_name));
-        }
-        attrs
-    }
-
-    fn on_error(&self, _error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+impl SubscriptionsTerminatedAttributes {
+    fn collect_attrs(&self, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if self.subgraph_name.unwrap_or(false) {
             let name = ctx
@@ -1261,6 +1219,20 @@ impl Selectors<router::Request, router::Response, ()> for SubscriptionsTerminate
             attrs.push(KeyValue::new("client.name", client_name));
         }
         attrs
+    }
+}
+
+impl Selectors<router::Request, router::Response, ()> for SubscriptionsTerminatedAttributes {
+    fn on_request(&self, _request: &router::Request) -> Vec<KeyValue> {
+        Vec::new()
+    }
+
+    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
+        self.collect_attrs(&response.context)
+    }
+
+    fn on_error(&self, _error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        self.collect_attrs(ctx)
     }
 }
 
@@ -1292,7 +1264,6 @@ impl DefaultForLevel for SubscriptionsTerminatedAttributes {
 pub(crate) struct SubscriptionsTerminatedCounter {
     counter: Counter<f64>,
     selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
-    reason_enabled: bool,
     stashed_attributes: Arc<Mutex<Vec<KeyValue>>>,
 }
 
@@ -1300,19 +1271,17 @@ impl SubscriptionsTerminatedCounter {
     pub(crate) fn new(
         counter: Counter<f64>,
         selectors: Arc<Extendable<SubscriptionsTerminatedAttributes, RouterSelector>>,
-        reason_enabled: bool,
     ) -> Self {
         Self {
             counter,
             selectors,
-            reason_enabled,
             stashed_attributes: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub(crate) fn record(&self, reason: &str) {
         let mut attrs = self.stashed_attributes.lock().clone();
-        if self.reason_enabled {
+        if self.selectors.attributes.reason() {
             attrs.push(KeyValue::new("reason", reason.to_string()));
         }
         self.counter.add(1.0, &attrs);
@@ -1339,13 +1308,13 @@ impl Instrumented for SubscriptionsTerminatedCounter {
     }
 
     fn on_response(&self, response: &Self::Response) {
-        let mut attrs = self.stashed_attributes.lock();
-        extend_attributes(&mut attrs, self.selectors.on_response(response));
+        let new_attrs = self.selectors.on_response(response);
+        extend_attributes(&mut self.stashed_attributes.lock(), new_attrs);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
-        let mut attrs = self.stashed_attributes.lock();
-        extend_attributes(&mut attrs, self.selectors.on_error(error, ctx));
+        let new_attrs = self.selectors.on_error(error, ctx);
+        extend_attributes(&mut self.stashed_attributes.lock(), new_attrs);
     }
 }
 

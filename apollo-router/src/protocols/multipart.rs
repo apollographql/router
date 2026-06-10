@@ -486,6 +486,7 @@ mod tests {
     fn test_terminated_counter_with_attrs(
         attrs: Vec<opentelemetry::KeyValue>,
     ) -> SubscriptionsTerminatedCounter {
+        use std::collections::HashMap;
         use std::sync::Arc;
 
         use opentelemetry::metrics::MeterProvider;
@@ -499,9 +500,15 @@ mod tests {
             .f64_counter("apollo.router.operations.subscriptions.terminated.client")
             .with_description("Subscription terminated")
             .build();
-        let selectors =
-            Arc::new(Extendable::<SubscriptionsTerminatedAttributes, RouterSelector>::default());
-        SubscriptionsTerminatedCounter::new(counter, selectors, true).with_stashed_attributes(attrs)
+        let attributes: SubscriptionsTerminatedAttributes =
+            serde_json::from_str(r#"{"reason": true}"#).unwrap();
+        let selectors = Arc::new(
+            Extendable::<SubscriptionsTerminatedAttributes, RouterSelector> {
+                attributes,
+                custom: HashMap::new(),
+            },
+        );
+        SubscriptionsTerminatedCounter::new(counter, selectors).with_stashed_attributes(attrs)
     }
 
     /// Create a test counter with `subgraph.name` = `test_subgraph` and empty `client.name`.
