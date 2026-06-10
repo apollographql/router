@@ -170,7 +170,7 @@ jobs:
       - name: Run release new (execute)
         if: steps.vars.outputs.dry_run != 'true'
         env:
-          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
@@ -178,11 +178,15 @@ jobs:
             echo "  Configure it (Settings → Secrets and variables → Actions) and re-run."
             exit 1
           fi
-          # Identify pushes as apollo-bot2.  The checkout step already set
-          # the http extraheader to use this PAT — git config below just
-          # makes sure commits made by the xtask carry the right author.
-          git config user.name "apollo-bot2"
-          git config user.email "apollo-bot2@users.noreply.github.com"
+          # Identify pushes as apollo-bot2 when the PAT is available; fall
+          # back to github-actions[bot] when using the workflow token.
+          if [ "$GH_TOKEN" = "${{ github.token }}" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          else
+            git config user.name "apollo-bot2"
+            git config user.email "apollo-bot2@users.noreply.github.com"
+          fi
           cargo xtask release new \
             --non-interactive \
             --line '${{ steps.vars.outputs.line }}' \
