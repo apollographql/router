@@ -848,16 +848,17 @@ pub(crate) async fn create_plugins(
     // 2. telemetry (has hooks at router, supergraph, and subgraph services)
     // 3. rate limiting (has a hook at the router service)
     // The order here means that header propagation happens before telemetry *at the subgraph
-    // service*. Depending on the requirements of plugins, it may have to be in this order. The
-    // *router service* hook for telemetry still happens well before header propagation. Similarly,
-    // header propagation being first does not mean that it's exempt from rate limiting, for the
-    // same reason. Rate limiting must be after telemetry, though, because telemetry and rate
-    // limiting both work at the router service, and requests rejected from the router service must
-    // flow through telemetry so we can record errors.
+    // service*. Depending on the requirements of plugins, it may have to be in this order.
+    // Similarly, header propagation being first does not mean that it's exempt from rate
+    // limiting, for the same reason. Rate limiting must be after telemetry, though, because
+    // telemetry and rate limiting both work at the router service, and requests rejected from
+    // the router service must flow through telemetry so we can record errors.
     //
-    // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
-    // plugin in this list *that adds a router service hook*. Other plugins can be before the
-    // telemetry plugin if they must do work *before* telemetry at specific services.
+    // Broadly, for telemetry to record errors, we must make sure the telemetry plugin runs
+    // before any plugin that can *reject* a request at the router service. Plugins whose
+    // router-service hook is an infallible `map_request` (eg `headers`, which only injects
+    // `MaskingRulesMap` into context) may appear before telemetry without breaking this
+    // invariant — they can't short-circuit a request away from telemetry.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
