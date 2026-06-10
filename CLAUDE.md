@@ -1,8 +1,6 @@
-Review this PR for correctness, performance, and security issues. Use your full knowledge of Rust, async programming, and distributed systems — the patterns below are a starting point drawn from known bugs in this codebase, not an exhaustive checklist. Flag anything that looks wrong or fragile, regardless of whether it matches a named pattern.
+# Apollo Router — Code Review Guidelines
 
-For each finding, report: the pattern name (if applicable), the file and line, and one sentence explaining the concern.
-
----
+The following patterns are known sources of bugs in this codebase. During code review, check for all of them in addition to general correctness, performance, and security concerns.
 
 ## Known patterns to check
 
