@@ -170,7 +170,7 @@ jobs:
       - name: Run release new (execute)
         if: steps.vars.outputs.dry_run != 'true'
         env:
-          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
