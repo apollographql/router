@@ -712,7 +712,7 @@ fn directive_argument_merger(
                 } else {
                     let arg_strategy_strings: Vec<String> = arg_strategies_capture2
                         .iter()
-                        .map(|(arg_name, strategy)| format!("{arg_name}: {}", strategy.name()))
+                        .map(|(arg_name, strategy)| format!("\"{arg_name}\": {}", strategy.name()))
                         .collect();
                     format!("{{ {} }}", arg_strategy_strings.join(", "))
                 }

@@ -76,6 +76,12 @@ pub struct Error {
     /// A unique identifier for this error
     #[serde(skip_serializing)]
     apollo_id: Uuid,
+
+    /// Set when an upstream site (connectors, demand_control) has already emitted a span
+    /// event for this error. Read by the centralized emit so traces carry exactly one event
+    /// per error. Never serialized — must not leak into the user-facing response.
+    #[serde(skip)]
+    span_event_emitted: bool,
 }
 
 impl Default for Error {
@@ -86,6 +92,7 @@ impl Default for Error {
             path: None,
             extensions: Object::new(),
             apollo_id: generate_uuid(),
+            span_event_emitted: false,
         }
     }
 }
@@ -155,6 +162,7 @@ impl Error {
             path,
             extensions,
             apollo_id: apollo_id.unwrap_or_else(Uuid::new_v4),
+            span_event_emitted: false,
         }
     }
 
@@ -268,6 +276,14 @@ impl Error {
         new_err
     }
 
+    pub(crate) fn span_event_emitted(&self) -> bool {
+        self.span_event_emitted
+    }
+
+    pub(crate) fn set_span_event_emitted(&mut self, value: bool) {
+        self.span_event_emitted = value;
+    }
+
     #[cfg(test)]
     /// Returns a duplicate of the error where [`self.apollo_id`] is `Uuid::nil()`. Used for
     /// comparing errors in tests where you cannot control the randomly generated Uuid
@@ -360,6 +376,7 @@ impl From<CompilerExecutionError> for Error {
             path,
             extensions,
             apollo_id: Uuid::new_v4(),
+            span_event_emitted: false,
         }
     }
 }

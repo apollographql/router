@@ -38,10 +38,14 @@ pub(crate) struct RouterAttributes {
     pub(crate) baggage: Option<bool>,
 
     /// Optional client name populated from the request headers.
+    // x-allow-selector is used to allow overriding this with a custom selector.
     #[serde(rename = "client.name")]
+    #[schemars(extend("x-allow-selector" = true))]
     pub(crate) client_name: Option<StandardAttribute>,
     /// Optional client version populated from the request headers.
+    // x-allow-selector is used to allow overriding this with a custom selector.
     #[serde(rename = "client.version")]
+    #[schemars(extend("x-allow-selector" = true))]
     pub(crate) client_version: Option<StandardAttribute>,
 
     /// Http attributes from Open Telemetry semantic conventions.

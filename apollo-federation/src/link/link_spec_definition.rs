@@ -3,8 +3,10 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
@@ -18,8 +20,6 @@ use crate::error::FederationError;
 use crate::error::MultiTry;
 use crate::error::MultiTryAll;
 use crate::error::SingleFederationError;
-use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
-use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::Purpose;
@@ -41,11 +41,309 @@ use crate::schema::type_and_directive_specification::EnumValueSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+pub(crate) const LINK_DIRECTIVE_NAME_IN_SPEC: Name = name!("link");
 pub(crate) const LINK_DIRECTIVE_AS_ARGUMENT_NAME: Name = name!("as");
 pub(crate) const LINK_DIRECTIVE_URL_ARGUMENT_NAME: Name = name!("url");
 pub(crate) const LINK_DIRECTIVE_FOR_ARGUMENT_NAME: Name = name!("for");
 pub(crate) const LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME: Name = name!("import");
 pub(crate) const LINK_DIRECTIVE_FEATURE_ARGUMENT_NAME: Name = name!("feature"); // Fed 1's `url` argument
+
+pub(crate) const IMPORT_TYPE_NAME_IN_SPEC: Name = name!("Import");
+pub(crate) const IMPORT_TYPE_NAME_FIELD_NAME: Name = name!("name");
+pub(crate) const IMPORT_TYPE_AS_FIELD_NAME: Name = name!("as");
+
+pub(crate) const PURPOSE_TYPE_NAME_IN_SPEC: Name = name!("Purpose");
+
+impl TryFrom<&Value> for Purpose {
+    type Error = FederationError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let Some(purpose) = value.as_enum() else {
+            return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(
+                    r#"@link(for:) argument `{}` must be an enum value"#,
+                    value.serialize().no_indent()
+                ),
+            }
+            .into());
+        };
+        match purpose.as_str() {
+            "SECURITY" => Ok(Purpose::SECURITY),
+            "EXECUTION" => Ok(Purpose::EXECUTION),
+            _ => Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(
+                    r#"@link(for:) argument `{}` is not a known enum value"#,
+                    value.serialize().no_indent()
+                ),
+            }
+            .into()),
+        }
+    }
+}
+
+impl From<&Purpose> for Value {
+    fn from(value: &Purpose) -> Self {
+        match value {
+            Purpose::SECURITY => Value::Enum(name!("SECURITY")),
+            Purpose::EXECUTION => Value::Enum(name!("EXECUTION")),
+        }
+    }
+}
+
+impl TryFrom<&Value> for Import {
+    type Error = FederationError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(str) => {
+                if let Some(directive_name) = str.strip_prefix('@') {
+                    Ok(Import {
+                        element: Name::new(directive_name).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"`{}` in @link(import:) argument is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })?,
+                        is_directive: true,
+                        alias: None,
+                    })
+                } else {
+                    Ok(Import {
+                        element: Name::new(str).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"`{}` in @link(import:) argument is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })?,
+                        is_directive: false,
+                        alias: None,
+                    })
+                }
+            }
+            Value::Object(fields) => {
+                let mut name: Option<&str> = None;
+                let mut alias: Option<&str> = None;
+                for (k, v) in fields {
+                    match k.as_str() {
+                        "name" => {
+                            name = Some(v.as_str().ok_or_else(|| SingleFederationError::InvalidLinkDirectiveUsage {
+                                message: format!(r#"For `{}` in @link(import:) argument, value for field "name" must be a string"#, value.serialize().no_indent()),
+                            })?)
+                        },
+                        "as" => {
+                            alias = Some(v.as_str().ok_or_else(|| SingleFederationError::InvalidLinkDirectiveUsage {
+                                message: format!(r#"For `{}` in @link(import:) argument, value for field "as" must be a string"#, value.serialize().no_indent()),
+                            })?)
+                        },
+                        _ => {
+                            return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                                message: format!(r#"For `{}` in @link(import:) argument, field "{k}" is not a known field"#, value.serialize().no_indent()),
+                            }.into());
+                        }
+                    }
+                }
+                let Some(element) = name else {
+                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: format!(r#"For `{}` in @link(import:) argument, missing required field "name""#, value.serialize().no_indent()),
+                    }.into());
+                };
+                if let Some(directive_name) = element.strip_prefix('@') {
+                    if let Some(alias_str) = alias.as_ref() {
+                        let Some(alias_str) = alias_str.strip_prefix('@') else {
+                            return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                                message: format!(r#"For `{}` in @link(import:) argument, value for field "as" must start with "@" since value for field "name" does ("@" indicates a directive import)"#, value.serialize().no_indent()),
+                            }.into());
+                        };
+                        alias = Some(alias_str);
+                    }
+                    Ok(Import {
+                        element: Name::new(directive_name).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"For `{}` in @link(import:) argument, value for field "name" is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })?,
+                        is_directive: true,
+                        alias: alias.map(|alias| Name::new(alias).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"For `{}` in @link(import:) argument, value for field "as" is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })).transpose()?,
+                    })
+                } else {
+                    if let Some(alias) = &alias
+                        && alias.starts_with('@')
+                    {
+                        return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"For `{}` in @link(import:) argument, value for field "as" must not start with "@" since value for field "name" does not ("@" indicates a directive import)"#, value.serialize().no_indent()),
+                        }.into());
+                    }
+                    Ok(Import {
+                        element: Name::new(element).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"For `{}` in @link(import:) argument, value for field "name" is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })?,
+                        is_directive: false,
+                        alias: alias.map(|alias| Name::new(alias).map_err(|_| SingleFederationError::InvalidLinkDirectiveUsage {
+                            message: format!(r#"For `{}` in @link(import:) argument, value for field "as" is not a valid GraphQL name"#, value.serialize().no_indent()),
+                        })).transpose()?,
+                    })
+                }
+            }
+            _ => Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(r#"`{}` in @link(import:) argument must either be a string `"<importedElement>"` or an object `{{ name: "<importedElement>", as: "<alias>" }}`"#, value.serialize().no_indent()),
+            }.into()),
+        }
+    }
+}
+
+impl From<&Import> for Value {
+    fn from(value: &Import) -> Self {
+        let element_string = if value.is_directive {
+            format!("@{}", value.element)
+        } else {
+            value.element.to_string()
+        };
+
+        if let Some(alias) = &value.alias {
+            let alias_string = if value.is_directive {
+                format!("@{}", alias)
+            } else {
+                alias.to_string()
+            };
+            Value::Object(vec![
+                (
+                    IMPORT_TYPE_NAME_FIELD_NAME,
+                    Node::new(Value::String(element_string)),
+                ),
+                (
+                    IMPORT_TYPE_AS_FIELD_NAME,
+                    Node::new(Value::String(alias_string)),
+                ),
+            ])
+        } else {
+            Value::String(element_string)
+        }
+    }
+}
+
+/// Note that the generated [Link] won't contain `line_column_range` data, as that requires the
+/// schema the directive originated from along with the `Node` wrapping the `Directive`. Use
+/// [Link::from_directive_application] to also populate that data.
+impl TryFrom<&Directive> for Link {
+    type Error = FederationError;
+
+    fn try_from(value: &Directive) -> Result<Self, Self::Error> {
+        let (url, is_link) = if let Some(value) = value.specified_argument_by_name("url") {
+            (value, true)
+        } else if let Some(value) = value.specified_argument_by_name("feature") {
+            // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+            // removed when those are updated.
+            (value, false)
+        } else {
+            return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(
+                    r#"`{}` missing required argument "url""#,
+                    value.serialize().no_indent()
+                ),
+            }
+            .into());
+        };
+
+        let (directive_name, arg_name) = if is_link {
+            ("link", "url")
+        } else {
+            ("core", "feature")
+        };
+
+        let url = url
+            .as_str()
+            .ok_or_else(|| SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(
+                    r#"@{directive_name}({arg_name}:) argument `{}` must be a string"#,
+                    url.serialize().no_indent()
+                ),
+            })?;
+        let url: Url = url.parse::<Url>()?;
+
+        let spec_alias = value
+            .specified_argument_by_name("as")
+            .take_if(|arg| !arg.is_null())
+            .map(|arg| {
+                arg.as_str()
+                    .ok_or_else(|| SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: format!(
+                            r#"@{directive_name}(as:) argument `{}` must be a string or null"#,
+                            arg.serialize().no_indent()
+                        ),
+                    })
+            })
+            .transpose()?
+            .map(Name::new)
+            .transpose()?;
+        let purpose = value
+            .specified_argument_by_name("for")
+            .take_if(|arg| !arg.is_null())
+            .map(|arg| Purpose::try_from(arg.as_ref()))
+            .transpose()?;
+
+        let imports = if is_link {
+            value
+                .specified_argument_by_name("import")
+                .take_if(|arg| !arg.is_null())
+                .map(|arg| {
+                    // Note that list input coercion rules mandate that when the value is not
+                    // a list and not null then it is wrapped into a list of size one.
+                    if let Value::List(value) = arg.as_ref() {
+                        value
+                    } else {
+                        std::slice::from_ref(arg)
+                    }
+                })
+                .unwrap_or(&[])
+                .iter()
+                .map(|value| Ok(Arc::new(Import::try_from(value.as_ref())?)))
+                .collect::<Result<Vec<Arc<Import>>, FederationError>>()?
+        } else {
+            Default::default()
+        };
+
+        Ok(Link {
+            url,
+            spec_alias,
+            imports,
+            purpose,
+            line_column_range: None,
+        })
+    }
+}
+
+/// Note that the generated directive assumes the default directive name of @link.
+impl From<&Link> for Directive {
+    fn from(value: &Link) -> Self {
+        let mut arguments = Vec::new();
+        arguments.push(Node::new(Argument {
+            name: LINK_DIRECTIVE_URL_ARGUMENT_NAME.clone(),
+            value: Node::new(Value::String(value.url.to_string())),
+        }));
+        if let Some(spec_alias) = &value.spec_alias {
+            arguments.push(Node::new(Argument {
+                name: LINK_DIRECTIVE_AS_ARGUMENT_NAME.clone(),
+                value: Node::new(Value::String(spec_alias.to_string())),
+            }));
+        }
+        if !value.imports.is_empty() {
+            arguments.push(Node::new(Argument {
+                name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME.clone(),
+                value: Node::new(Value::List(
+                    value
+                        .imports
+                        .iter()
+                        .map(|import| Node::new(Value::from(import.as_ref())))
+                        .collect(),
+                )),
+            }));
+        }
+        if let Some(purpose) = &value.purpose {
+            arguments.push(Node::new(Argument {
+                name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME.clone(),
+                value: Node::new(Value::from(purpose)),
+            }));
+        }
+        Directive {
+            name: Identity::link_identity().name.clone(),
+            arguments,
+        }
+    }
+}
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
@@ -90,10 +388,10 @@ impl LinkSpecDefinition {
                     get_type: |_schema, link| {
                         let Some(link) = link else {
                             bail!(
-                                "Type {DEFAULT_PURPOSE_ENUM_NAME} shouldn't be added without being attached to a @link spec"
+                                "Type {PURPOSE_TYPE_NAME_IN_SPEC} shouldn't be added without being attached to a @link spec"
                             )
                         };
-                        Ok(Type::Named(link.type_name_in_schema(&DEFAULT_PURPOSE_ENUM_NAME)))
+                        Ok(Type::Named(link.type_name_in_schema(&PURPOSE_TYPE_NAME_IN_SPEC)))
                     },
                     default_value: None,
                 },
@@ -107,11 +405,11 @@ impl LinkSpecDefinition {
                     get_type: |_, link| {
                         let Some(link) = link else {
                             bail!(
-                                "Type {DEFAULT_IMPORT_SCALAR_NAME} shouldn't be added without being attached to a @link spec"
+                                "Type {IMPORT_TYPE_NAME_IN_SPEC} shouldn't be added without being attached to a @link spec"
                             )
                         };
                         Ok(Type::List(Box::new(Type::Named(
-                            link.type_name_in_schema(&DEFAULT_IMPORT_SCALAR_NAME),
+                            link.type_name_in_schema(&IMPORT_TYPE_NAME_IN_SPEC),
                         ))))
                     },
                     default_value: None,
@@ -136,6 +434,101 @@ impl LinkSpecDefinition {
         } else {
             LINK_DIRECTIVE_URL_ARGUMENT_NAME
         }
+    }
+
+    /// Returns whether a given directive is the @link or @core directive that imports the @link or
+    /// @core spec.
+    pub(super) fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
+        let Some(definition) = schema.directive_definitions.get(&directive.name) else {
+            return false;
+        };
+        if Self::is_link_directive_definition(definition) {
+            if let Some(url) = directive
+                .specified_argument_by_name("url")
+                .and_then(|value| value.as_str())
+            {
+                let url = url.parse::<Url>();
+                let default_link_name = LINK_DIRECTIVE_NAME_IN_SPEC;
+                let expected_name = directive
+                    .specified_argument_by_name("as")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(default_link_name.as_str());
+                return url.is_ok_and(|url| {
+                    url.identity == Identity::link_identity() && directive.name == expected_name
+                });
+            }
+        } else if Self::is_core_directive_definition(definition) {
+            // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+            // removed when those are updated.
+            if let Some(url) = directive
+                .specified_argument_by_name("feature")
+                .and_then(|value| value.as_str())
+            {
+                let url = url.parse::<Url>();
+                let expected_name = directive
+                    .specified_argument_by_name("as")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("core");
+                return url.is_ok_and(|url| {
+                    url.identity == Identity::core_identity() && directive.name == expected_name
+                });
+            }
+        };
+        false
+    }
+
+    /// Returns true if the given definition matches the @link definition.
+    ///
+    /// Either of these definitions are accepted:
+    /// ```graphql
+    /// directive @_ANY_NAME_(url: String!, as: String) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(url: String, as: String) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(url: String!) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(url: String) repeatable on SCHEMA
+    /// ```
+    fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
+        definition.repeatable
+            && definition.locations == [DirectiveLocation::Schema]
+            && definition.argument_by_name("url").is_some_and(|argument| {
+                // The "true" type of `url` in the @link spec is actually `String` (nullable), and this
+                // for future-proofing reasons (the idea was that we may introduce later other
+                // ways to identify specs that are not urls). But we allow the definition to
+                // have a non-nullable type both for convenience and because some early
+                // federation previews actually generated that.
+                *argument.ty == ty!(String!) || *argument.ty == ty!(String)
+            })
+            && definition
+                .argument_by_name("as")
+                .is_none_or(|argument| *argument.ty == ty!(String))
+    }
+
+    /// Returns true if the given definition matches the @core definition.
+    ///
+    /// Either of these definitions are accepted:
+    /// ```graphql
+    /// directive @_ANY_NAME_(feature: String!, as: String) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(feature: String, as: String) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(feature: String!) repeatable on SCHEMA
+    /// directive @_ANY_NAME_(feature: String) repeatable on SCHEMA
+    /// ```
+    fn is_core_directive_definition(definition: &DirectiveDefinition) -> bool {
+        // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+        // removed when those are updated.
+        definition.repeatable
+            && definition.locations == [DirectiveLocation::Schema]
+            && definition
+                .argument_by_name("feature")
+                .is_some_and(|argument| {
+                    // The "true" type of `url` in the @core spec is actually `String` (nullable), and this
+                    // for future-proofing reasons (the idea was that we may introduce later other
+                    // ways to identify specs that are not urls). But we allow the definition to
+                    // have a non-nullable type both for convenience and because some early
+                    // federation previews actually generated that.
+                    *argument.ty == ty!(String!) || *argument.ty == ty!(String)
+                })
+            && definition
+                .argument_by_name("as")
+                .is_none_or(|argument| *argument.ty == ty!(String))
     }
 
     /// Add `self` (the @link spec definition) and a directive application of it to the schema.
@@ -223,7 +616,7 @@ impl LinkSpecDefinition {
             )?
             .into_iter()
             .flatten()
-            .map(|value| Ok::<_, FederationError>(Arc::new(Import::from_value(value)?)))
+            .map(|value| Ok::<_, FederationError>(Arc::new(Import::try_from(value.as_ref())?)))
             .process_results(|r| r.collect::<Vec<_>>())?;
             return Ok((alias, imports));
         }
@@ -299,7 +692,7 @@ impl LinkSpecDefinition {
             if self.supports_purpose() {
                 directive.arguments.push(Node::new(Argument {
                     name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
-                    value: Node::new(Value::Enum(purpose.into())),
+                    value: Node::new(purpose.into()),
                 }));
             } else {
                 return Err(SingleFederationError::InvalidLinkDirectiveUsage {
@@ -316,7 +709,10 @@ impl LinkSpecDefinition {
                 directive.arguments.push(Node::new(Argument {
                     name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
                     value: Node::new(Value::List(
-                        imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                        imports
+                            .into_iter()
+                            .map(|i| Node::new((&i).into()))
+                            .collect(),
                     )),
                 }))
             } else {
@@ -396,7 +792,7 @@ impl SpecDefinition for LinkSpecDefinition {
 
 fn create_link_purpose_type_spec() -> EnumTypeSpecification {
     EnumTypeSpecification {
-        name: DEFAULT_PURPOSE_ENUM_NAME,
+        name: PURPOSE_TYPE_NAME_IN_SPEC,
         values: vec![
             EnumValueSpecification {
                 name: name!("SECURITY"),
@@ -418,7 +814,7 @@ fn create_link_purpose_type_spec() -> EnumTypeSpecification {
 
 fn create_link_import_type_spec() -> ScalarTypeSpecification {
     ScalarTypeSpecification {
-        name: DEFAULT_IMPORT_SCALAR_NAME,
+        name: IMPORT_TYPE_NAME_IN_SPEC,
     }
 }
 
