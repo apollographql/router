@@ -27,10 +27,13 @@ jobs:
           git checkout -b "$BRANCH" origin/dev-v3.x
 
           if git merge --no-edit origin/dev; then
-            echo "merge_ok=true" >> "$GITHUB_OUTPUT"
+            echo "merge_conflicts=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Merge conflict between dev and dev-v3.x — resolve manually."
-            exit 1
+            # Stage conflicted files as-is (with conflict markers) so we can commit
+            # and create a PR that shows the diff needing manual resolution.
+            git diff --name-only --diff-filter=U | xargs git add
+            git commit -m "chore: forward-port dev into dev-v3.x"
+            echo "merge_conflicts=true" >> "$GITHUB_OUTPUT"
           fi
 
           if git diff --quiet origin/dev-v3.x..HEAD; then
@@ -43,8 +46,6 @@ jobs:
 
       - name: Push forward-port branch
         if: steps.merge.outputs.has_changes == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
         run: |
           git push --force-with-lease origin "${{ steps.merge.outputs.branch }}"
 
@@ -64,13 +65,27 @@ jobs:
           if [[ -n "$EXISTING" ]]; then
             echo "PR #$EXISTING already open — branch updated, no new PR needed."
           else
+            if [[ "${{ steps.merge.outputs.merge_conflicts }}" == "true" ]]; then
+              {
+                echo '> [!CAUTION]'
+                echo '> This PR contains merge conflicts that must be resolved manually before merging.'
+                echo "> Check out the \`$BRANCH\` branch, resolve the conflict markers, commit, and push."
+                echo ''
+                echo 'Automated weekly forward-port of changes from `dev` into `dev-v3.x`.'
+              } > /tmp/pr-body.md
+            else
+              {
+                echo 'Automated weekly forward-port of changes from `dev` into `dev-v3.x`.'
+                echo ''
+                echo 'Merge this once CI passes.'
+              } > /tmp/pr-body.md
+            fi
+
             gh pr create \
               --base dev-v3.x \
               --head "$BRANCH" \
               --title "chore: forward-port dev into dev-v3.x" \
-              --body "Automated weekly forward-port of changes from \`dev\` into \`dev-v3.x\`.
-
-Merge this once CI passes and any conflicts have been resolved."
+              --body-file /tmp/pr-body.md
           fi
 
       - name: Nothing to forward-port
