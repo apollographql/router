@@ -6,8 +6,6 @@ subscription:
   enabled: true
   max_lifetime: null
   max_opened_subscriptions: null
-  max_reconnect_attempts: null
-  reconnect_delay: null
   mode:
     callback:
       heartbeat_interval: disabled
@@ -18,8 +16,10 @@ subscription:
     passthrough:
       all:
         heartbeat_interval: disabled
+        max_reconnect_attempts: 0
         path: null
         protocol: graphql_ws
+        reconnect_delay: null
       subgraphs: {}
   queue_capacity: null
 ```

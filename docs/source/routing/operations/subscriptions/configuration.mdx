@@ -487,15 +487,23 @@ subscription are closed when the lifetime expires, not just the first client to 
 
 ### Reconnect on subgraph connection drop
 
-By default, if the WebSocket connection between the router and a subgraph drops unexpectedly, the subscription ends and the client receives no further events. You can configure Apollo Router to automatically reconnect to the subgraph and resume forwarding events using `max_reconnect_attempts` and `reconnect_delay`:
+By default, if the WebSocket connection between the router and a subgraph drops unexpectedly, the subscription ends and the client receives no further events. You can configure Apollo Router to automatically reconnect to the subgraph and resume forwarding events using `max_reconnect_attempts` and `reconnect_delay`. These are part of the per-subgraph passthrough WebSocket configuration: set them under `all` to apply to every subgraph, or under a specific entry in `subgraphs` to override per subgraph.
 
 ```yaml title="router.yaml"
 subscription:
   enabled: true
-  #highlight-start
-  max_reconnect_attempts: 5   # retry up to 5 times on connection drop. Default: 0 (no reconnection)
-  reconnect_delay: 2s         # wait between each attempt. Default: 1s
-  #highlight-end
+  mode:
+    passthrough:
+      all:
+        #highlight-start
+        max_reconnect_attempts: 5   # retry up to 5 times on connection drop. Default: 0 (no reconnection)
+        reconnect_delay: 2s         # wait between each attempt. Default: 1s
+        #highlight-end
+      subgraphs:
+        # Override for a single subgraph
+        products:
+          max_reconnect_attempts: 10
+          reconnect_delay: 500ms
 ```
 
 When the subgraph WebSocket connection drops and reconnection is configured, the router re-establishes the connection and re-sends the original subscription request transparently, client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. Each reconnect attempt increments the `apollo.router.operations.subscriptions.reconnect` counter (labeled with `subgraph.name`). If all retry attempts are exhausted, the router forwards the final transport error to the client (so a failed subscription is distinguishable from a normal completion), terminates the subscription, and increments the `apollo.router.operations.subscriptions.terminated.subgraph` metric.
@@ -514,7 +522,7 @@ Reconnection re-establishes the _subgraph_ WebSocket connection. Client connecti
 
 `max_reconnect_attempts` is a **per-disconnect budget, not a lifetime total**. When a reconnected connection stays open long enough to be considered stable and then drops again, the budget refreshes and the subscription gets a fresh set of attempts. This means a long-lived subscription against a subgraph that periodically drops a healthy connection can be reconnected to more than `max_reconnect_attempts` times over its lifetime. Only rapid flapping — a subgraph that drops faster than the stability window on each attempt — exhausts the budget and ends the subscription. If you need a hard ceiling on how long a subscription can run, use `max_lifetime`.
 
-The stability threshold is `5 × reconnect_delay` with a minimum of 500 ms. For example, with the default `reconnect_delay: 1s`, a connection must stay open at least 5 seconds to be considered stable and reset the budget. With `reconnect_delay: 10s`, the threshold rises to 50 seconds. A subgraph that accepts the handshake but drops the connection more quickly than this threshold is treated as flapping and continues to consume the current budget.
+The stability threshold is `5 × reconnect_delay`, clamped to between 500 ms and 60 seconds. For example, with the default `reconnect_delay: 1s`, a connection must stay open at least 5 seconds to be considered stable and reset the budget. With `reconnect_delay: 10s`, the threshold rises to 50 seconds. Beyond `reconnect_delay: 12s` the threshold is capped at 60 seconds, so a large reconnect delay never demands an impractically long stable period before the budget can refresh. A subgraph that accepts the handshake but drops the connection more quickly than this threshold is treated as flapping and continues to consume the current budget.
 
 #### Authentication and reconnection
 

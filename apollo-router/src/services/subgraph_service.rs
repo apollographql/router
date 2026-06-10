@@ -64,6 +64,7 @@ use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::events::log_subgraph_request_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphRequestBodySize;
@@ -825,32 +826,13 @@ pub(crate) async fn call_single_http(
     let request = file_uploads::http_request_wrapper(request).await;
 
     if let Some(level) = log_request_level {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", request.method()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(format!("{:?}", request.body()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.to_string().into()),
-        ));
-
-        log_event(
+        log_subgraph_request_event(
             level,
-            "subgraph.request",
-            attrs,
+            service_name,
+            request.headers(),
+            request.method(),
+            request.version(),
+            format!("{:?}", request.body()),
             &format!("Request to subgraph {service_name:?}"),
         );
     }
@@ -1965,6 +1947,8 @@ mod tests {
                             path: Some(String::from("/ws")),
                             protocol: WebSocketProtocol::default(),
                             heartbeat_interval: HeartbeatInterval::new_disabled(),
+                            max_reconnect_attempts: 0,
+                            reconnect_delay: None,
                         },
                     )]
                     .into(),
@@ -1974,8 +1958,6 @@ mod tests {
             max_opened_subscriptions: None,
             queue_capacity: None,
             max_lifetime: None,
-            max_reconnect_attempts: 0,
-            reconnect_delay: None,
         }
     }
 
@@ -2543,7 +2525,8 @@ mod tests {
     }
 
     /// Verifies that a server-sent Complete message does NOT trigger reconnection, even when
-    /// max_reconnect_attempts > 0. The completed_normally flag prevents spurious reconnects.
+    /// max_reconnect_attempts > 0. A Complete ends the stream with a terminal `None`, which is
+    /// never treated as a recoverable drop.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_websocket_complete_does_not_reconnect() {
         async {
@@ -2612,6 +2595,14 @@ mod tests {
                 "apollo.router.operations.subscriptions.terminated.subgraph",
                 1,
                 "subgraph.name" = "test"
+            );
+            // Exactly one completion event for the logical subscription, even across the (here,
+            // single) physical connection.
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                1,
+                subscriptions.mode = "passthrough",
+                subscriptions.complete = true
             );
             // Reconnect counter must remain zero.
             assert_counter_not_exists!(
@@ -2694,8 +2685,9 @@ mod tests {
 
                                 if conn_num == 0 {
                                     // Simulate unexpected connection drop with an abnormal close
-                                    // frame (code 1011). A Normal close or Complete would set
-                                    // completed_normally=true and suppress reconnection.
+                                    // frame (code 1011), which surfaces as a `Disconnected` event.
+                                    // A Normal close or Complete would end the stream with a
+                                    // terminal `None` and suppress reconnection.
                                     socket
                                         .send(Message::Close(Some(CloseFrame {
                                             code: 1011,
@@ -2797,8 +2789,8 @@ mod tests {
     }
 
     /// Like `emulate_websocket_server_that_completes` but simulates an unexpected connection drop
-    /// (abnormal close frame) instead of a protocol-level Complete. Used to test reconnect logic
-    /// without triggering the completed_normally guard.
+    /// (abnormal close frame) instead of a protocol-level Complete. Used to test reconnect logic:
+    /// the drop surfaces as a `Disconnected` event rather than a terminal `None`.
     async fn emulate_websocket_server_that_drops(listener: TcpListener) {
         async fn ws_handler(
             ws: WebSocketUpgrade,
@@ -2839,7 +2831,7 @@ mod tests {
                         ))
                         .await
                         .unwrap();
-                    // Abnormal close — triggers reconnect logic, does not set completed_normally.
+                    // Abnormal close — surfaces as a `Disconnected` event, triggering reconnect.
                     socket
                         .send(Message::Close(Some(CloseFrame {
                             code: 1011,
@@ -3113,11 +3105,26 @@ mod tests {
     }
 
     fn subscription_config_with_reconnect(max_reconnect_attempts: u32) -> SubscriptionConfig {
-        SubscriptionConfig {
+        subscription_config_with_reconnect_delay(
             max_reconnect_attempts,
-            reconnect_delay: Some(std::time::Duration::from_millis(1)),
-            ..subscription_config()
+            std::time::Duration::from_millis(1),
+        )
+    }
+
+    fn subscription_config_with_reconnect_delay(
+        max_reconnect_attempts: u32,
+        reconnect_delay: std::time::Duration,
+    ) -> SubscriptionConfig {
+        // Reconnect policy now lives on the per-subgraph WebSocketConfiguration; set it on the
+        // "test" subgraph's passthrough config.
+        let mut config = subscription_config();
+        if let Some(passthrough) = &mut config.mode.passthrough
+            && let Some(ws) = passthrough.subgraphs.get_mut("test")
+        {
+            ws.max_reconnect_attempts = max_reconnect_attempts;
+            ws.reconnect_delay = Some(reconnect_delay);
         }
+        config
     }
 
     fn with_subscription_layer_reconnect(
@@ -3697,7 +3704,8 @@ mod tests {
 
     /// A terminal operation `Error` from the subgraph ends the subscription server-side. Even
     /// though the subgraph then drops the connection abnormally, the router must NOT reconnect
-    /// (the Error sets `completed_normally`), and the client must receive the application error.
+    /// (the Error marks the stream server-ended, so the following close is the expected teardown),
+    /// and the client must receive the application error.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_websocket_application_error_does_not_reconnect() {
         async {
@@ -3811,11 +3819,10 @@ mod tests {
             // stream before the delay expires and the reconnect handshake starts.
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 crate::plugins::subscription::notification::Notify::builder().build(),
-                Some(Arc::new(SubscriptionConfig {
-                    max_reconnect_attempts: 3,
-                    reconnect_delay: Some(std::time::Duration::from_millis(200)),
-                    ..subscription_config()
-                })),
+                Some(Arc::new(subscription_config_with_reconnect_delay(
+                    3,
+                    std::time::Duration::from_millis(200),
+                ))),
                 Arc::from("test"),
             )
             .layer(
@@ -3883,6 +3890,14 @@ mod tests {
                 1,
                 "router must not attempt a reconnect after all clients disconnect"
             );
+            // A client-initiated teardown still emits exactly one completion event for the
+            // logical subscription (it is not gated on the subgraph being the one to end it).
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                1,
+                subscriptions.mode = "passthrough",
+                subscriptions.complete = true
+            );
 
             spawned_task.abort();
         }
@@ -3912,11 +3927,10 @@ mod tests {
             // handshake is in progress.
             let subgraph_service = SubscriptionSubgraphLayer::new(
                 crate::plugins::subscription::notification::Notify::builder().build(),
-                Some(Arc::new(SubscriptionConfig {
-                    max_reconnect_attempts: 3,
-                    reconnect_delay: Some(std::time::Duration::from_millis(1)),
-                    ..subscription_config()
-                })),
+                Some(Arc::new(subscription_config_with_reconnect_delay(
+                    3,
+                    std::time::Duration::from_millis(1),
+                ))),
                 Arc::from("test"),
             )
             .layer(
