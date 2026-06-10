@@ -1,0 +1,40 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+headers:
+  all:
+    request:
+      operations:
+        - propagate:
+            matching: ".*"
+        - propagate:
+            named: x-request-id
+  subgraphs:
+    products:
+      request:
+        operations:
+          - insert:
+              name: x-internal
+              value: "true"
+          - propagate:
+              named: authorization
+    reviews:
+      request:
+        operations:
+          - propagate:
+              named: x-user-id
+  connector:
+    all:
+      request:
+        operations:
+          - propagate:
+              named: x-tenant-id
+    sources:
+      products.api:
+        request:
+          operations:
+            - insert:
+                name: x-source
+                value: api

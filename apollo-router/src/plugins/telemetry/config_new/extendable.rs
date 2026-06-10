@@ -340,7 +340,6 @@ mod test {
             extendable_conf.custom.get("custom_1"),
             Some(&SupergraphSelector::OperationName {
                 operation_name: OperationName::String,
-                redact: None,
                 default: None
             })
         );
@@ -348,7 +347,6 @@ mod test {
             extendable_conf.custom.get("custom_2"),
             Some(&SupergraphSelector::OperationName {
                 operation_name: OperationName::String,
-                redact: None,
                 default: None
             })
         );

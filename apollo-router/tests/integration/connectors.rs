@@ -744,10 +744,11 @@ mod headers {
             headers:
               all:
                 request:
-                  - propagate:
-                      matching: ^upstream-header-.*
-                  - remove:
-                      named: "x-legacy-account-id"
+                  operations:
+                    - propagate:
+                        matching: ^upstream-header-.*
+                    - remove:
+                        named: "x-legacy-account-id"
         "#,
             )
             .supergraph(PathBuf::from_iter([
@@ -783,10 +784,11 @@ mod headers {
               subgraphs:
                 connectors:
                   request:
-                    - propagate:
-                        matching: ^upstream-header-.*
-                    - remove:
-                        named: "x-legacy-account-id"
+                    operations:
+                      - propagate:
+                          matching: ^upstream-header-.*
+                      - remove:
+                          named: "x-legacy-account-id"
         "#,
             )
             .supergraph(PathBuf::from_iter([

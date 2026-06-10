@@ -1371,7 +1371,7 @@ async fn no_cache_from_request() {
             "include_subgraph_errors": { "all": true },
             "headers": {
                 "all": {
-                    "request": [{"propagate": {"named": "cache-control"}}]
+                    "request": {"operations": [{"propagate": {"named": "cache-control"}}]}
                 }
             }
         }))
@@ -1482,7 +1482,7 @@ async fn no_store_from_request() {
             "include_subgraph_errors": { "all": true },
             "headers": {
                 "all": {
-                    "request": [{"propagate": {"named": "cache-control"}}]
+                    "request": {"operations": [{"propagate": {"named": "cache-control"}}]}
                 }
             }
         }))

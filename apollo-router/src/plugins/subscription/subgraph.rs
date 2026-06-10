@@ -264,6 +264,7 @@ async fn call_websocket(
 
     let (gql_stream, resp) = open_ws_gql_stream(
         service_name,
+        &context,
         parts.uri,
         parts.headers,
         body,
@@ -312,6 +313,9 @@ async fn call_websocket(
         "subscription_forwarding",
         "apollo.subgraph.name" = %service_name,
     );
+    // The forwarding task outlives `call_websocket`, so it needs its own handle to the context for
+    // masking request headers on each reconnect's `subgraph.request` log event.
+    let task_context = context.clone();
     let forwarding_task = tokio::task::spawn(
         async move {
             let mut gql_stream = gql_stream;
@@ -455,6 +459,7 @@ async fn call_websocket(
                             },
                             res = open_ws_gql_stream(
                                 &service_name_for_task,
+                                &task_context,
                                 inputs.uri.clone(),
                                 inputs.headers.clone(),
                                 inputs.body.clone(),
@@ -784,6 +789,7 @@ async fn subgraph_request(
 #[allow(clippy::too_many_arguments)]
 async fn open_ws_gql_stream(
     service_name: &str,
+    context: &Context,
     uri: http::Uri,
     headers: http::HeaderMap,
     body: graphql::Request,
@@ -810,7 +816,12 @@ async fn open_ws_gql_stream(
         log_subgraph_request_event(
             level,
             service_name,
-            request.headers(),
+            crate::services::header_masking::masked_headers_for_log(
+                context,
+                crate::services::header_masking::Direction::Request,
+                Some(service_name),
+                request.headers(),
+            ),
             request.method(),
             request.version(),
             serde_json::to_string(&body).unwrap_or_default(),

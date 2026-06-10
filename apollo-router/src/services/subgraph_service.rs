@@ -453,6 +453,16 @@ pub(crate) async fn process_batch(
         }
     };
 
+    // Mask sensitive response headers once, for reuse in both the telemetry
+    // event and the debug log below. Logging the raw `parts` would otherwise
+    // leak the very header values this masking redacts.
+    let headers_str = crate::services::header_masking::masked_headers_for_log(
+        &batch_context,
+        crate::services::header_masking::Direction::Response,
+        Some(&service),
+        &parts.headers,
+    );
+
     let subgraph_response_event = batch_context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
@@ -460,7 +470,7 @@ pub(crate) async fn process_batch(
         let mut attrs = Vec::with_capacity(5);
         attrs.push(KeyValue::new(
             Key::from_static_str("http.response.headers"),
-            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+            opentelemetry::Value::String(headers_str.clone().into()),
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("http.response.status"),
@@ -488,7 +498,11 @@ pub(crate) async fn process_batch(
         );
     }
 
-    tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
+    tracing::debug!(
+        "parts status: {:?}, version: {:?}, headers: {headers_str}, content_type: {content_type:?}, body: {body:?}",
+        parts.status,
+        parts.version,
+    );
     let value =
         serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
             service: service.to_string(),
@@ -563,7 +577,14 @@ pub(crate) async fn process_batch(
                     let resp =
                         SubgraphResponse::new_from_response(http_res, context, subgraph_name, id);
 
-                    tracing::debug!("we have a resp: {resp:?}");
+                    // Avoid `{resp:?}`: SubgraphResponse's derived Debug prints
+                    // the response HeaderMap unmasked. Log the non-header parts.
+                    tracing::debug!(
+                        "built subgraph response for {}: status={:?}, body={:?}",
+                        resp.subgraph_name,
+                        resp.response.status(),
+                        resp.response.body(),
+                    );
                     resp
                 })
                 .map_err(|e| FetchError::MalformedResponse {
@@ -572,7 +593,12 @@ pub(crate) async fn process_batch(
         })
         .collect();
 
-    tracing::debug!("we have a vec of subgraph_responses: {subgraph_responses:?}");
+    // Avoid `{subgraph_responses:?}`: each SubgraphResponse's derived Debug
+    // prints the response HeaderMap unmasked. Log a count (or the error).
+    match &subgraph_responses {
+        Ok(responses) => tracing::debug!("built {} subgraph responses", responses.len()),
+        Err(error) => tracing::debug!("failed to build subgraph responses: {error}"),
+    }
     subgraph_responses
 }
 
@@ -582,10 +608,19 @@ pub(crate) async fn notify_batch_query(
     senders: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     responses: Result<Vec<SubgraphResponse>, FetchError>,
 ) -> Result<(), BoxError> {
-    tracing::debug!(
-        "handling response for service '{service}' with {} listeners: {responses:#?}",
-        senders.len()
-    );
+    // Avoid `{responses:#?}`: SubgraphResponse's derived Debug prints the
+    // response HeaderMap unmasked. Log the listener count and a result summary.
+    match &responses {
+        Ok(responses) => tracing::debug!(
+            "handling response for service '{service}' with {} listeners: {} responses",
+            senders.len(),
+            responses.len(),
+        ),
+        Err(error) => tracing::debug!(
+            "handling response for service '{service}' with {} listeners: error: {error}",
+            senders.len(),
+        ),
+    }
 
     match responses {
         // If we had an error processing the batch, then pipe that error to all of the listeners
@@ -829,7 +864,12 @@ pub(crate) async fn call_single_http(
         log_subgraph_request_event(
             level,
             service_name,
-            request.headers(),
+            crate::services::header_masking::masked_headers_for_log(
+                &context,
+                crate::services::header_masking::Direction::Request,
+                Some(service_name),
+                request.headers(),
+            ),
             request.method(),
             request.version(),
             format!("{:?}", request.body()),
@@ -889,9 +929,15 @@ pub(crate) async fn call_single_http(
             .evaluate_response(&subgraph_response);
         if should_log {
             let mut attrs = Vec::with_capacity(5);
+            let headers_str = crate::services::header_masking::masked_headers_for_log(
+                &context,
+                crate::services::header_masking::Direction::Response,
+                Some(service_name),
+                &parts.headers,
+            );
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.response.headers"),
-                opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                opentelemetry::Value::String(headers_str.into()),
             ));
             attrs.push(KeyValue::new(
                 Key::from_static_str("http.response.status"),

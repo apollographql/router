@@ -403,12 +403,13 @@ where
 #[inline]
 /// Emit a `subgraph.request` log event with the standard attribute set, shared by the HTTP
 /// subgraph-request path and the WebSocket subscription path so the two log shapes stay in sync.
-/// The caller supplies the already-formatted request `body` (the two paths format it differently —
-/// JSON for WebSocket, debug for HTTP) and the human-readable `message`.
+/// The caller supplies the already-formatted `headers` and `body` strings (the two paths format
+/// them differently — and `headers` is masked per the request's masking rules before being passed
+/// in) plus the human-readable `message`.
 pub(crate) fn log_subgraph_request_event(
     level: EventLevel,
     service_name: &str,
-    headers: &http::HeaderMap,
+    headers: String,
     method: &http::Method,
     version: http::Version,
     body: String,
@@ -417,7 +418,7 @@ pub(crate) fn log_subgraph_request_event(
     let attributes = vec![
         KeyValue::new(
             opentelemetry::Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(headers.into()),
         ),
         KeyValue::new(
             opentelemetry::Key::from_static_str("http.request.method"),
