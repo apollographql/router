@@ -942,4 +942,3 @@ fn increment_subgraph_ended_counter(service_name: &str) {
         subgraph.name = service_name.to_string()
     );
 }
-
