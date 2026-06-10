@@ -600,10 +600,13 @@ fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode
     // Create a trace span matching the shape of a normal router span so APM tools and Apollo
     // Studio can see the rejected request alongside normal requests. No distributed trace context
     // is available because the headers were not successfully parsed.
-    let span = span_mode.create_router_rejection();
-    span.record("http.response.status_code", status_code as i64);
-    span.record("apollo_private.duration_ns", elapsed_ns);
-    drop(span.entered());
+    //
+    // Enter the span before recording so that OTel-layer exporters (Datadog, OTLP, Zipkin, …)
+    // derive a non-zero wall-clock duration from on_enter/on_close. The entered guard is held
+    // until end of function, then dropped implicitly, which closes the span.
+    let entered = span_mode.create_router_rejection().entered();
+    entered.record("http.response.status_code", status_code as i64);
+    entered.record("apollo_private.duration_ns", elapsed_ns);
 }
 
 #[derive(Clone)]
