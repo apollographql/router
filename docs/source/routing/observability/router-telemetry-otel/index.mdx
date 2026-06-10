@@ -278,20 +278,26 @@ telemetry:
       mode: spec_compliant
       router:
         attributes:
-          otel.name: router
-          operation.name: "router"
+          otel.name:
+            static: router
+          operation.name:
+            static: "router"
           resource.name:
             request_method: true
       supergraph:
         attributes:
-          otel.name: supergraph
-          operation.name: "supergraph"
+          otel.name:
+            static: supergraph
+          operation.name:
+            static: "supergraph"
           resource.name:
             operation_name: string
       subgraph:
         attributes:
-          otel.name: subgraph
-          operation.name: "subgraph"
+          otel.name:
+            static: subgraph
+          operation.name:
+            static: "subgraph"
           resource.name:
             subgraph_operation_name: string
   exporters:
