@@ -725,6 +725,23 @@ impl<'schema> SelectionValidator<'schema> {
                     })
                 }
             }
+            ShapeCase::Array { prefix, tail } => {
+                // A list-valued shape — e.g. produced by methods with statically known
+                // list outputs like `->entries` — validates each item shape against the
+                // same type: the caller already unwrapped GraphQL list types to their
+                // inner named type via `inner_named_type()`. Without this arm, fields
+                // selected beneath such methods were never marked as seen, producing
+                // spurious CONNECTORS_UNRESOLVED_FIELD errors (e.g. `->entries { key value }`
+                // against `[FooEntry]` left `FooEntry.key`/`FooEntry.value` unresolved).
+                let mut all_seen_fields = Vec::new();
+                for item_shape in prefix {
+                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, item_shape)?);
+                }
+                if !tail.is_none() {
+                    all_seen_fields.extend(self.walk_selection_with_shape(type_ref, tail)?);
+                }
+                Ok(all_seen_fields)
+            }
             _ => Ok(Vec::new()), // Handle other shape cases
         }
     }
