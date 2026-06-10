@@ -27,7 +27,7 @@ use tower_service::Service;
 use tracing::Instrument;
 use tracing::Level;
 
-use super::cache_control::CacheControl;
+use super::CacheControl;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
@@ -389,7 +389,7 @@ impl PluginPrivate for EntityCache {
                     .extensions()
                     .with_lock(|lock| lock.get::<CacheControl>().cloned())
                 {
-                    let _ = cache_control.to_headers(response.response.headers_mut());
+                    let _ = cache_control.update_response_headers(response.response.headers_mut());
                 }
 
                 response
@@ -410,9 +410,8 @@ impl PluginPrivate for EntityCache {
                     .map_response(move |response: subgraph::Response| {
                         update_cache_control(
                             &response.context,
-                            &CacheControl::new(response.response.headers(), None)
-                                .ok()
-                                .unwrap_or_else(CacheControl::no_store),
+                            &CacheControl::try_from(response.response.headers())
+                                .unwrap_or_else(|_| CacheControl::default_no_store()),
                         );
 
                         response
@@ -443,9 +442,8 @@ impl PluginPrivate for EntityCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
-                            .ok()
-                            .unwrap_or_else(CacheControl::no_store),
+                        &CacheControl::try_from(response.response.headers())
+                            .unwrap_or_else(|_| CacheControl::default_no_store()),
                     );
 
                     response
@@ -472,9 +470,8 @@ impl PluginPrivate for EntityCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
-                            .ok()
-                            .unwrap_or_else(CacheControl::no_store),
+                        &CacheControl::try_from(response.response.headers())
+                            .unwrap_or_else(|_| CacheControl::default_no_store()),
                     );
 
                     response
@@ -700,7 +697,7 @@ impl CacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            CacheControl::new(request.subgraph_request.headers(), None).ok()
+            CacheControl::try_from(request.subgraph_request.headers()).ok()
         } else {
             None
         };
@@ -742,12 +739,8 @@ impl CacheService {
                         );
 
                         let mut response = self.service.call(request).await?;
-                        let cache_control =
-                            if response.response.headers().contains_key(CACHE_CONTROL) {
-                                CacheControl::new(response.response.headers(), self.storage.ttl)?
-                            } else {
-                                CacheControl::no_store()
-                            };
+                        let cache_control = CacheControl::try_from(response.response.headers())?
+                            .with_default_ttl(self.storage.ttl);
 
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
@@ -780,7 +773,7 @@ impl CacheService {
                         }
 
                         if cache_control.should_store()
-                            && request_cache_control.is_none_or(|c| !c.is_no_store())
+                            && request_cache_control.is_none_or(|c| !c.no_store())
                         {
                             cache_store_root_from_response(
                                 self.storage,
@@ -882,18 +875,15 @@ impl CacheService {
                                 .subgraph_name(self.name)
                                 .extensions(Object::new())
                                 .build();
-                            CacheControl::no_store().to_headers(response.response.headers_mut())?;
+                            CacheControl::default_no_store()
+                                .update_response_headers(response.response.headers_mut())?;
 
                             return Ok(response);
                         }
                     };
 
-                    let mut cache_control =
-                        if response.response.headers().contains_key(CACHE_CONTROL) {
-                            CacheControl::new(response.response.headers(), self.storage.ttl)?
-                        } else {
-                            CacheControl::no_store()
-                        };
+                    let mut cache_control = CacheControl::try_from(response.response.headers())?
+                        .with_default_ttl(self.storage.ttl);
 
                     if let Some(control_from_cached) = cache_result.1 {
                         cache_control = cache_control.merge(&control_from_cached);
@@ -901,7 +891,7 @@ impl CacheService {
                     if self.expose_keys_in_context {
                         // Update cache keys needed for surrogate cache key when it's new data and not data from the cache
                         let response_id = response.id.clone();
-                        let cache_control_str = cache_control.to_cache_control_header()?;
+                        let cache_control_str = cache_control.to_response_header_value();
                         response.context.upsert::<_, CacheKeysContext>(
                             CONTEXT_CACHE_KEYS,
                             |mut value| {
@@ -947,7 +937,7 @@ impl CacheService {
                     )
                     .await?;
 
-                    cache_control.to_headers(response.response.headers_mut())?;
+                    cache_control.update_response_headers(response.response.headers_mut())?;
 
                     Ok(response)
                 }
@@ -1006,7 +996,7 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    if request_cache_control.is_some_and(|c| c.is_no_cache()) {
+    if request_cache_control.is_some_and(|c| c.no_cache()) {
         return Ok(ControlFlow::Continue((request, key)));
     }
 
@@ -1019,7 +1009,7 @@ async fn cache_lookup_root(
                 update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
-                    let cache_control_header = value.0.control.to_cache_control_header()?;
+                    let cache_control_header = value.0.control.to_response_header_value();
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_CACHE_KEYS,
                         |mut val| {
@@ -1058,7 +1048,7 @@ async fn cache_lookup_root(
                 value
                     .0
                     .control
-                    .to_headers(response.response.headers_mut())?;
+                    .update_response_headers(response.response.headers_mut())?;
                 Ok(ControlFlow::Break(response))
             } else {
                 Ok(ControlFlow::Continue((request, key)))
@@ -1082,7 +1072,7 @@ async fn cache_lookup_entities(
     expose_keys_in_context: bool,
     request_cache_control: Option<&CacheControl>,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
-    let is_no_cache = request_cache_control.is_some_and(|c| c.is_no_cache());
+    let is_no_cache = request_cache_control.is_some_and(|c| c.no_cache());
 
     let body = request.subgraph_request.body_mut();
     let keys = extract_cache_keys(
@@ -1152,7 +1142,7 @@ async fn cache_lookup_entities(
                     cache_entries.push(CacheKeyContext {
                         key: intermediate_result.key.clone(),
                         status: CacheKeyStatus::Cached,
-                        cache_control: cache_entry.control.to_cache_control_header()?,
+                        cache_control: cache_entry.control.to_response_header_value(),
                     });
                 }
                 None => {
@@ -1160,8 +1150,8 @@ async fn cache_lookup_entities(
                         key: intermediate_result.key.clone(),
                         status: CacheKeyStatus::New,
                         cache_control: match &cache_control {
-                            Some(cc) => cc.to_cache_control_header()?,
-                            None => CacheControl::default().to_cache_control_header()?,
+                            Some(cc) => cc.to_response_header_value(),
+                            None => CacheControl::default().to_response_header_value(),
                         },
                     });
                 }
@@ -1210,7 +1200,7 @@ async fn cache_lookup_entities(
 
         cache_control
             .unwrap_or_default()
-            .to_headers(response.response.headers_mut())?;
+            .update_response_headers(response.response.headers_mut())?;
 
         Ok(ControlFlow::Break(response))
     }
@@ -1260,7 +1250,7 @@ async fn cache_store_root_from_response(
             let data = data.clone();
             if expose_keys_in_context {
                 let response_id = response.id.clone();
-                let cache_control_header = cache_control.to_cache_control_header()?;
+                let cache_control_header = cache_control.to_response_header_value();
 
                 response
                     .context
@@ -1808,9 +1798,7 @@ async fn insert_entities_in_result(
                 if !has_errors
                     && cache_control.should_store()
                     && should_cache_private
-                    && request_cache_control
-                        .as_ref()
-                        .is_none_or(|c| !c.is_no_store())
+                    && request_cache_control.as_ref().is_none_or(|c| !c.no_store())
                 {
                     to_insert.push((
                         RedisKey(key),

@@ -1306,7 +1306,7 @@ fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
                 let cc_value = HeaderValue::from_str(first_value).ok();
                 if let Some(cc_value) = cc_value {
                     cache_control =
-                        CacheControl::new(&HeaderMap::from_iter([(CACHE_CONTROL, cc_value)]), None)
+                        CacheControl::try_from(&HeaderMap::from_iter([(CACHE_CONTROL, cc_value)]))
                             .ok();
                 }
             }
