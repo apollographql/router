@@ -326,6 +326,7 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        config.validate_per_exporter_samplers()?;
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
 

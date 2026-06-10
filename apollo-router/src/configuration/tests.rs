@@ -477,6 +477,7 @@ fn validate_project_config_files() {
                         "INVALIDATION_SHARED_KEY_PRODUCTS",
                         "invalidation-for-products",
                     )
+                    .mocked_env_var("DISTRIBUTED_TRACING_ENDPOINT", "http://example.com")
                     .build()
                     .unwrap();
 
