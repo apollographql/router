@@ -45,4 +45,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.issue.number }}
           model: claude-opus-4-8
-          prompt_file: review-prompt.md
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review apollographql/router/pull/${{ github.event.issue.number }}'
