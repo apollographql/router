@@ -105,24 +105,27 @@ fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysCo
         .ok()??;
     cache_keys.iter_mut().for_each(|ck| {
         ck.invalidation_keys.sort();
-        ck.cache_control.set_created(0);
+        ck.cache_control.zero_out_created();
     });
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
     Some(cache_keys)
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
-    Some(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)?
-            .to_str()
-            .ok()?
-            .split(',')
-            .map(ToString::to_string)
-            .collect(),
-    )
+    let cache_control_headers: Vec<String> = response
+        .response
+        .headers()
+        .get_all(CACHE_CONTROL)
+        .iter()
+        .flat_map(|header| header.to_str().unwrap().split(','))
+        .map(ToString::to_string)
+        .collect();
+
+    if cache_control_headers.is_empty() {
+        return None;
+    }
+
+    Some(cache_control_headers)
 }
 
 fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {
