@@ -8711,7 +8711,7 @@ expression: "&schema"
         },
         "http2_max_headers_list_bytes": {
           "default": null,
-          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
           "type": [
             "string",
             "null"
