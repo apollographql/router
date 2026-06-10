@@ -48,6 +48,5 @@ jobs:
           claude_args: '--model claude-opus-4-8'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review apollographql/router/pull/${{ github.event.issue.number }}'
-          additional_permissions: |
-            actions: read
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }}'
+          show_full_output: true
