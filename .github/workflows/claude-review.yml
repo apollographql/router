@@ -17,7 +17,7 @@ jobs:
 
     steps:
       # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
-      # NOTE: hardcoded because APOLLO_BOT2_GITHUB_PAT lacks read:org scope; update this list as team membership changes
+      # NOTE: hardcoded due to an issue with the GitHub PAT; update this list as team membership changes
       - name: Check team membership
         id: team-check
         env:
