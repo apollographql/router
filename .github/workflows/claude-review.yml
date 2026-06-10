@@ -17,16 +17,14 @@ jobs:
 
     steps:
       # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
+      # NOTE: hardcoded due to an issue with the GitHub PAT; update this list as team membership changes
       - name: Check team membership
         id: team-check
         env:
-          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
           COMMENTER: ${{ github.event.comment.user.login }}
         run: |
-          STATE=$(gh api \
-            /orgs/apollographql/teams/graphos/memberships/$COMMENTER \
-            --jq '.state' 2>/dev/null || echo "not-member")
-          if [[ "$STATE" == "active" ]]; then
+          GRAPHOS_TEAM=(morriswchris BoD abernix Jephuff phryneas BobaFetters conwuegb alyssahursh carodewig aaronArinder rohan-b99 tayrrible jasmine-fernandes-apollo)
+          if [[ " ${GRAPHOS_TEAM[*]} " == *" $COMMENTER "* ]]; then
             echo "is_member=true" >> $GITHUB_OUTPUT
           else
             echo "is_member=false" >> $GITHUB_OUTPUT
@@ -47,4 +45,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.issue.number }}
           model: claude-opus-4-8
-          prompt_file: review-prompt.md
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review apollographql/router/pull/${{ github.event.issue.number }}'
