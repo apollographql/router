@@ -9,11 +9,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
-<<<<<<< HEAD
-use std::time::Instant;
-=======
 use std::time::Duration;
->>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
+use std::time::Instant;
 use std::time::SystemTime;
 
 use futures::Stream;
@@ -314,13 +311,6 @@ fn reset_checks_for_licenses(
     ))))
 }
 
-<<<<<<< HEAD
-/// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
-/// The generated instant is only approximate.
-/// Subtracting from instants is not supported on all platforms, so if the calculated instant was in the past we just return now as we don't care about how long ago the instant was, just that it happened already.
-fn to_positive_instant(system_time: SystemTime) -> Instant {
-    // This is approximate as there is no real conversion between SystemTime and Instant
-=======
 /// Converts an externally generated `SystemTime` (e.g. JWT `warn_at` / `halt_at`) into a
 /// `tokio::time::Instant` for scheduling license state transitions in a `DelayQueue`.
 ///
@@ -338,7 +328,6 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
 /// `reset_checks_for_licenses` anchors `warn_at` to [`WARN_BEFORE_HALT_GRACE`] before the
 /// clamped `halt_at` so the soft-then-hard grace ordering is preserved.
 fn to_positive_instant(system_time: SystemTime) -> Instant {
->>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
@@ -469,9 +458,6 @@ mod test {
         assert!(future_instant < now_instant + Duration::from_secs(1025));
         assert!(future_instant > now_instant + Duration::from_secs(1023));
 
-<<<<<<< HEAD
-        // An instant in the past will return something greater than the original now_instant, but less than a new instant.
-=======
         // One day below the scheduling cap: a realistic license halt window must not be clamped.
         let one_day_before_cap =
             super::MAX_TIMER_DURATION - Duration::from_secs(super::SECS_PER_DAY);
@@ -491,7 +477,6 @@ mod test {
         // inclusive because on low-resolution monotonic clocks (Windows ticks at
         // ~16ms) the `Instant::now()` here can read the same value
         // `to_positive_instant` did during the same tick.
->>>>>>> 2feb7ba0f (fix: clamp license timers to a safe limit (#9561))
         let past_system_time = now_system_time - Duration::from_secs(1024);
         let past_instant = to_positive_instant(past_system_time);
         assert!(past_instant > now_instant);
@@ -506,10 +491,15 @@ mod test {
 
         let result = to_positive_instant(far_future);
 
-        assert_eq!(
-            result,
-            now_instant + super::MAX_TIMER_DURATION,
-            "far-future SystemTime must clamp to MAX_TIMER_DURATION from the current Instant"
+        // `to_positive_instant` samples its own `Instant::now()`; the test's
+        // `now_instant` is captured slightly earlier, so exact equality is flaky.
+        assert!(
+            result >= now_instant + super::MAX_TIMER_DURATION,
+            "far-future SystemTime must clamp to at least MAX_TIMER_DURATION from the test's Instant"
+        );
+        assert!(
+            result <= Instant::now() + super::MAX_TIMER_DURATION,
+            "far-future SystemTime must clamp to at most MAX_TIMER_DURATION from the current Instant"
         );
     }
 
