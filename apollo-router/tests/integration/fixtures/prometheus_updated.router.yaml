@@ -10,6 +10,7 @@ telemetry:
 headers:
   all:
     request:
-      - insert:
-          name: test
-          value: test
+      operations:
+        - insert:
+            name: test
+            value: test

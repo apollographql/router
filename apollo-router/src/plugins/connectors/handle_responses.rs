@@ -256,6 +256,7 @@ where
 
     connector::request_service::Response {
         context: context.clone(),
+        subgraph_name: connector.id.subgraph_name.to_string(),
         transport_result: result,
         mapped_response,
     }
@@ -324,6 +325,7 @@ fn log_connectors_event(
 
             let response = connector::request_service::Response {
                 context: context.clone(),
+                subgraph_name: connector.id.subgraph_name.to_string(),
                 transport_result: Ok(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
                 })),
@@ -342,22 +344,17 @@ fn log_connectors_event(
 
     if let Some(level) = log_response_level {
         let mut attrs = Vec::with_capacity(4);
-        #[cfg(test)]
-        let headers = {
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                .headers
-                .iter()
-                .map(|(name, val)| (name.to_string(), val.clone()))
-                .collect();
-            headers.sort_keys();
-            headers
-        };
-        #[cfg(not(test))]
-        let headers = &parts.headers;
+
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Response,
+            Some(connector.id.subgraph_name.as_str()),
+            &parts.headers,
+        );
 
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_HEADERS,
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(header_string.into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_STATUS,

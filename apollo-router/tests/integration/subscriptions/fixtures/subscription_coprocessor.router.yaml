@@ -56,5 +56,6 @@ coprocessor:
 headers:
   all: # Header rules for all subgraphs
     request:
-      - propagate:
-          named: custom_id
+      operations:
+        - propagate:
+            named: custom_id

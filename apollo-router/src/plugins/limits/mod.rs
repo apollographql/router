@@ -832,6 +832,7 @@ mod test {
         let (parts, _) = http::Response::builder().body(()).unwrap().into_parts();
         crate::services::connector::request_service::Response {
             context: req.context.clone(),
+            subgraph_name: req.connector.id.subgraph_name.to_string(),
             transport_result: Ok(TransportResponse::Http(HttpResponse { inner: parts })),
             mapped_response: MappedResponse::Data {
                 data: Value::Null,
