@@ -102,8 +102,11 @@ enum APQError {
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub(crate) struct SubgraphService {
-    // we hold a HTTP client service factory here because a service with plugins applied
-    // cannot be cloned
+    /// Pre-built HTTP client service with all plugin layers already folded in.
+    /// Used on the hot (non-batching) path to avoid re-folding plugins per request.
+    http_client: crate::services::http::BoxCloneService,
+    /// Kept only for the batching path, where a single factory may be used to
+    /// `.create()` clients for different subgraph names.
     pub(crate) client_factory: HttpClientServiceFactory,
     service: Arc<String>,
 
@@ -140,9 +143,12 @@ impl SubgraphService {
         enable_apq: bool,
         client_factory: crate::services::http::HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
+        let name = service.into();
+        let http_client = client_factory.create(&name);
         Ok(Self {
+            http_client,
             client_factory,
-            service: Arc::new(service.into()),
+            service: Arc::new(name),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
         })
     }
@@ -186,6 +192,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         let client_factory = self.client_factory.clone();
+        let http_client = self.http_client.clone();
 
         let arc_apq_enabled = self.apq.clone();
 
@@ -194,7 +201,13 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_http(request, client_factory.clone(), &service_name).await;
+                return call_http(
+                    request,
+                    client_factory.clone(),
+                    http_client.clone(),
+                    &service_name,
+                )
+                .await;
             }
 
             // APQ works by sending the query hash via extensions with an empty query body.
@@ -212,8 +225,13 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }),
             );
 
-            let response =
-                call_http(request.clone(), client_factory.clone(), &service_name).await?;
+            let response = call_http(
+                request.clone(),
+                client_factory.clone(),
+                http_client.clone(),
+                &service_name,
+            )
+            .await?;
 
             // Check the error for the request with only persistedQuery.
             // If PersistedQueryNotSupported, disable APQ for this subgraph
@@ -227,11 +245,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     body.query = original_query;
                     // Remove the persistedQuery extension we added for the APQ attempt.
                     body.extensions.remove(PERSISTED_QUERY_KEY);
-                    call_http(request, client_factory.clone(), &service_name).await
+                    call_http(request, client_factory.clone(), http_client, &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
                     request.subgraph_request.body_mut().query = original_query;
-                    call_http(request, client_factory.clone(), &service_name).await
+                    call_http(request, client_factory.clone(), http_client, &service_name).await
                 }
                 _ => Ok(response),
             }
@@ -714,6 +732,7 @@ pub(crate) async fn process_batches(
 async fn call_http(
     request: SubgraphRequest,
     client_factory: HttpClientServiceFactory,
+    http_client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     // We use configuration to determine if calls may be batched. If we have Batching
@@ -732,8 +751,8 @@ async fn call_http(
 
     // If we have a batch query, then it's time for batching
     if let Some(query) = opt_batch_query {
-        // Let the owning batch know that this query is ready to process, getting back the channel
-        // from which we'll eventually receive our response.
+        // The batch path needs the factory because a single batch handler may
+        // create clients for different subgraph names.
         let response_rx = query.signal_progress(client_factory, request).await?;
 
         // Park this query until we have our response and pass it back up
@@ -745,8 +764,7 @@ async fn call_http(
             })?
     } else {
         tracing::debug!("we called http");
-        let client = client_factory.create(service_name);
-        call_single_http(request, client, service_name).await
+        call_single_http(request, http_client, service_name).await
     }
 }
 
@@ -1128,13 +1146,13 @@ pub(crate) struct SubgraphServiceFactory {
 
 impl SubgraphServiceFactory {
     pub(crate) fn new(
-        services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+        services: Vec<(String, subgraph::BoxCloneService)>,
         plugins: Arc<Plugins>,
         notify: Notify<String, graphql::Response>,
         subscription_config: Option<Arc<SubscriptionConfig>>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
-        for (name, maker) in services.into_iter() {
+        for (name, service) in services.into_iter() {
             // We have to do a little dance here to insert the subscription layer at the right
             // place: *after* all user plugins, but *before* the subgraph service proper.
             let inner_service = ServiceBuilder::new()
@@ -1143,8 +1161,11 @@ impl SubgraphServiceFactory {
                     subscription_config.clone(),
                     Arc::from(name.clone()),
                 ))
-                .service(maker.make())
+                .service(service.clone())
                 .boxed_clone();
+            // One buffer per named subgraph provides per-subgraph backpressure and is
+            // required for correct LoadShed / RateLimit behaviour from traffic-shaping
+            // plugins (see ServiceBuilderExt::buffered).
             let service = ServiceBuilder::new()
                 .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
                 .service(
@@ -1162,29 +1183,7 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxCloneService> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services.get(name).map(|svc| svc.clone().boxed_clone())
-    }
-}
-
-/// make new instances of the subgraph service
-///
-/// there can be multiple instances of that service executing at any given time
-pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxCloneService;
-}
-
-impl<S> MakeSubgraphService for S
-where
-    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<SubgraphRequest>>::Future: Send,
-{
-    fn make(&self) -> subgraph::BoxCloneService {
-        self.clone().boxed_clone()
     }
 }
 

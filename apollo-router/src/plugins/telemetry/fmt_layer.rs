@@ -1033,7 +1033,8 @@ subgraph:
     on: response
     attributes:
       subgraph.name: true
-      static: foo # This shows up twice without attribute deduplication
+      static:
+        static: foo # This shows up twice without attribute deduplication
         "#,
         )
         .unwrap();

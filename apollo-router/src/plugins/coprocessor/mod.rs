@@ -76,87 +76,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        if matches!(
-            init.config.router.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.router.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
         if let Some(ref url) = init.config.router.request.url {
@@ -505,33 +424,12 @@ pub(super) struct BodyFieldsConf {
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
-pub(super) enum ContextConf {
-    /// Deprecated configuration using a boolean
-    Deprecated(bool),
-    NewContextConf(NewContextConf),
-}
-
-impl ContextConf {
-    fn is_deprecated(&self) -> bool {
-        match self {
-            Self::Deprecated(v) => *v,
-            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
-        }
-    }
-}
-
-impl Default for ContextConf {
-    fn default() -> Self {
-        Self::Deprecated(false)
-    }
-}
-
-/// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(super) enum NewContextConf {
+pub(super) enum ContextConf {
+    /// Do not send context to the coprocessor (the default)
+    #[default]
+    None,
     /// Send all context keys to coprocessor
     All,
     /// Send all context keys using deprecated names (from router 1.x) to coprocessor
@@ -541,10 +439,15 @@ pub(super) enum NewContextConf {
 }
 
 impl ContextConf {
+    pub(crate) fn is_deprecated(&self) -> bool {
+        matches!(self, Self::Deprecated)
+    }
+
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::None => None,
+            Self::All => Some(ctx.clone()),
+            Self::Deprecated => {
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     (
                         context_key_to_deprecated(elt.key().clone()),
@@ -552,10 +455,9 @@ impl ContextConf {
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-
                 Some(new_ctx)
             }
-            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            Self::Selective(context_keys) => {
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
                         Some((elt.key().clone(), elt.value().clone()))
@@ -564,10 +466,8 @@ impl ContextConf {
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-
                 Some(new_ctx)
             }
-            Self::Deprecated(false) => None,
         }
     }
 }
@@ -626,9 +526,11 @@ pub(crate) fn update_context_from_coprocessor(
     // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
+    let is_deprecated = context_config.is_deprecated();
+
     for (mut key, value) in context_returned.try_into_iter()? {
         // Handle deprecated key names - convert back to actual key names
-        if context_config.is_deprecated() {
+        if is_deprecated {
             key = context_key_from_deprecated(key);
         }
 
@@ -639,7 +541,7 @@ pub(crate) fn update_context_from_coprocessor(
     // Delete keys that were sent but are missing from the returned context
     // If the context config is selective, only delete keys that are in the selective list
     match context_config {
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
+        ContextConf::Selective(context_keys) => {
             target_context.retain(|key, _v| {
                 if keys_returned.contains(key) {
                     return true;
@@ -787,7 +689,6 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed_clone()
     }
@@ -919,7 +820,6 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed_clone()
     }
@@ -1064,9 +964,7 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
+                if request_config.context.is_deprecated() {
                     key = context_key_from_deprecated(key);
                 }
                 res.context.upsert_json_value(key, move |_current| value);
@@ -1089,8 +987,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1445,9 +1342,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     subgraph_response
@@ -1473,8 +1368,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request

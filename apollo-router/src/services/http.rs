@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_service::Service;
 
 use super::Plugins;
 use super::router::body::RouterBody;
@@ -16,7 +15,6 @@ mod tests;
 
 pub(crate) use service::HttpClientService;
 
-pub(crate) type BoxService = tower::util::BoxService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, HttpResponse, BoxError>;
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
@@ -73,24 +71,6 @@ impl HttpClientServiceFactory {
             .fold(service.boxed_clone(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
             })
-    }
-}
-
-pub(crate) trait MakeHttpService: Send + Sync + 'static {
-    fn make(&self) -> BoxCloneService;
-}
-
-impl<S> MakeHttpService for S
-where
-    S: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<HttpRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxCloneService {
-        self.clone().boxed_clone()
     }
 }
 

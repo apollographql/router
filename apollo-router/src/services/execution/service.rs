@@ -21,8 +21,6 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
@@ -38,20 +36,14 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::Plugins;
-use crate::services::execution;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
@@ -62,11 +54,11 @@ use crate::spec::query::subselections::BooleanValues;
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
+    pub(crate) fetch_service: FetchService,
     pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
-    subscription_config: Option<SubscriptionConfig>,
-    apollo_telemetry_config: Option<ApolloTelemetryConfig>,
+    pub(crate) subscription_config: Option<SubscriptionConfig>,
+    pub(crate) apollo_telemetry_config: Option<ApolloTelemetryConfig>,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -149,7 +141,7 @@ impl ExecutionService {
             .query_plan
             .execute(
                 &context,
-                &self.fetch_service_factory,
+                &self.fetch_service,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
                 &self.subgraph_schemas,
@@ -618,51 +610,6 @@ async fn consume_responses(
                 current_response = response;
             }
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct ExecutionServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) plugins: Arc<Plugins>,
-    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
-    pub(crate) configuration: Arc<Configuration>,
-}
-
-impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
-    type Service = execution::BoxCloneService;
-
-    fn create(&self) -> Self::Service {
-        let subscription_plugin_conf = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-        let apollo_telemetry_conf = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == "apollo.telemetry")
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
-            .map(|t| t.config.apollo.clone());
-
-        ServiceBuilder::new()
-            .service(
-                self.plugins.iter().rev().fold(
-                    crate::services::execution::service::ExecutionService {
-                        schema: self.schema.clone(),
-                        fetch_service_factory: self.fetch_service_factory.clone(),
-                        subscription_config: subscription_plugin_conf,
-                        subgraph_schemas: self.subgraph_schemas.clone(),
-                        apollo_telemetry_config: apollo_telemetry_conf,
-                        configuration: Arc::clone(&self.configuration),
-                    }
-                    .boxed_clone(),
-                    |acc, (_, e)| e.execution_service(acc),
-                ),
-            )
-            .boxed_clone()
     }
 }
 

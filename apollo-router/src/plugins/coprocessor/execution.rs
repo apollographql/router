@@ -172,7 +172,6 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed_clone()
     }
@@ -285,9 +284,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     execution_response
@@ -313,8 +310,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -637,7 +633,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -649,6 +645,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         mock_execution_service
             .expect_call()
@@ -773,7 +773,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -784,7 +784,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_execution_service = MockExecutionService::new();
+        let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -847,7 +851,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -857,6 +861,10 @@ mod tests {
         };
 
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         mock_execution_service
             .expect_call()
@@ -984,7 +992,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -994,6 +1002,10 @@ mod tests {
         };
 
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
 
         mock_execution_service
             .expect_call()
@@ -1096,7 +1108,7 @@ mod tests {
             request: Default::default(),
             response: ExecutionResponseConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1108,6 +1120,11 @@ mod tests {
     // Helper function to create mock execution service
     fn create_mock_execution_service() -> MockExecutionService {
         let mut mock_execution_service = MockExecutionService::new();
+
+        mock_execution_service
+            .expect_clone()
+            .returning(MockExecutionService::new);
+
         mock_execution_service
             .expect_call()
             .returning(|req: execution::Request| {
@@ -1127,7 +1144,7 @@ mod tests {
         ExecutionStage {
             request: ExecutionRequestConf {
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,

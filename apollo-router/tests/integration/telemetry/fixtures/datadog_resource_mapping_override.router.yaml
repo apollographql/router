@@ -26,7 +26,8 @@ telemetry:
             operation_name: string
       supergraph:
         attributes:
-          override.name: overridden
+          override.name:
+            static: overridden
 
 
 

@@ -20,7 +20,6 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 
 use super::connect::BoxCloneService;
-use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
@@ -276,12 +275,8 @@ impl ConnectorServiceFactory {
             )),
         )
     }
-}
 
-impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
-    type Service = BoxCloneService;
-
-    fn create(&self) -> Self::Service {
+    pub(crate) fn create(&self) -> BoxCloneService {
         ConnectorService {
             _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),

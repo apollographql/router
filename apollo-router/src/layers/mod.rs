@@ -101,7 +101,8 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Decide if processing should continue or not, and if not allow returning of a response.
     /// Unlike checkpoint it is possible to perform async operations in the callback. However
-    /// this requires that the service is `Clone`. This can be achieved using `.buffered()`.
+    /// the resulting service requires `S: Clone`. Since `BoxCloneService` is already `Clone`,
+    /// a `.buffered()` call is no longer needed when wrapping a `BoxCloneService`.
     ///
     /// This is useful for things like authentication where you need to make an external call to
     /// check if a request should proceed or not.
@@ -158,7 +159,18 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Adds a buffer to the service stack with a default size.
     ///
-    /// This is useful for making services `Clone` and `Send`
+    /// The buffer spawns a dedicated worker task and queues requests in an in-memory channel.
+    /// The primary reasons to include a buffer are:
+    ///
+    /// - **Backpressure**: callers block (rather than failing immediately) when the inner
+    ///   service is busy processing previous requests.
+    /// - **`LoadShed` / `ConcurrencyLimit` / `RateLimit` interaction**: these layers
+    ///   signal overload by returning `Poll::Pending` from `poll_ready`. A buffer placed
+    ///   *before* them absorbs that pending state and prevents Tokio's cooperative-scheduling
+    ///   budget from causing spurious `Overloaded` responses.
+    ///
+    /// Now that pipeline services are `BoxCloneService`, a buffer is **no longer needed
+    /// merely to make a service `Clone` or `Send`**.
     ///
     /// # Examples
     ///
@@ -292,7 +304,6 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
@@ -304,7 +315,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await })
     ///     .service(service)
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(
@@ -430,7 +441,6 @@ pub trait ServiceExt<Request>: Service<Request> {
     /// ```rust
     /// # use std::future::Future;
     /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
-    /// # use tower::util::BoxService;
     /// # use tower_service::Service;
     /// # use tracing::info_span;
     /// # use apollo_router::Context;
@@ -443,7 +453,7 @@ pub trait ServiceExt<Request>: Service<Request> {
     ///         |req: &supergraph::Request| req.context.clone(),
     ///         |ctx : Context, fut| async { fut.await }
     ///     )
-    ///     .boxed();
+    ///     .boxed_clone();
     /// # }
     /// ```
     fn map_future_with_request_data<RF, MF>(

@@ -19,7 +19,6 @@ use tower::ServiceExt;
 use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
-use super::NewContextConf;
 use super::get_coprocessor_timer;
 use super::internalize_header_map;
 use super::record_coprocessor_operation;
@@ -214,7 +213,6 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
             .boxed_clone()
     }
@@ -341,9 +339,7 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
+                if request_config.context.is_deprecated() {
                     key = context_key_from_deprecated(key);
                 }
                 request
@@ -374,8 +370,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request

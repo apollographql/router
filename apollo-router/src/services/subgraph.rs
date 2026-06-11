@@ -39,7 +39,6 @@ use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;
 
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;

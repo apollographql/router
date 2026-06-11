@@ -240,9 +240,13 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Change { path, from, to } => {
-                if !jsonpath_lib::select(config, &format!("$[?(@.{path} == {from})]"))
+                // We query the value directly (`$.<path>`) rather than using a root-level
+                // filter expression (`$[?(@.<path> == <from>)]`) — jsonpath_lib's filter
+                // form does not support traversing paths more than two levels deep.
+                if jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
-                    .is_empty()
+                    .into_iter()
+                    .any(|v| v == from)
                 {
                     transformer_builder = transformer_builder
                         .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);

@@ -175,7 +175,6 @@ impl SupergraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed_clone()
     }
@@ -287,9 +286,7 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                        &request_config.context
-                    {
+                    if request_config.context.is_deprecated() {
                         key = context_key_from_deprecated(key);
                     }
                     supergraph_response
@@ -315,8 +312,7 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
+            if request_config.context.is_deprecated() {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -652,7 +648,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -663,6 +659,10 @@ mod tests {
 
         // This will never be called because we will fail at the coprocessor.
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -795,7 +795,7 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ]),
                 headers: false,
-                context: ContextConf::Deprecated(false),
+                context: ContextConf::None,
                 body: true,
                 sdl: false,
                 method: false,
@@ -805,7 +805,11 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_supergraph_service = MockSupergraphService::new();
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -869,6 +873,11 @@ mod tests {
         );
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
         mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
@@ -933,7 +942,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -943,6 +952,10 @@ mod tests {
         };
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -1070,7 +1083,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1080,6 +1093,10 @@ mod tests {
         };
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -1188,7 +1205,7 @@ mod tests {
                     SelectorOrValue::Value(true.into()),
                 ]),
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1198,6 +1215,10 @@ mod tests {
         };
 
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
 
         mock_supergraph_service
             .expect_call()
@@ -1302,7 +1323,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: BodyConf::All(true),
                 sdl: true,
                 status_code: false,
@@ -1314,6 +1335,11 @@ mod tests {
     // Helper function to create mock supergraph service
     fn create_mock_supergraph_service() -> MockSupergraphService {
         let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+
         mock_supergraph_service
             .expect_call()
             .returning(|req: supergraph::Request| {
@@ -1332,7 +1358,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Condition::True,
                 headers: true,
-                context: ContextConf::NewContextConf(NewContextConf::All),
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 method: true,

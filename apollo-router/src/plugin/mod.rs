@@ -935,6 +935,8 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
+    // BoxCloneService is Send but not Sync. The buffer's handle (Arc + Sender) is Sync,
+    // which is required for axum's route_service handler to be usable across threads.
     service: UnconstrainedBuffer<
         router::Request,
         <router::BoxCloneService as Service<router::Request>>::Future,
