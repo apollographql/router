@@ -273,58 +273,6 @@ fn coerce_arguments_default_values(
 /// This is not what we would want to do for coercion in a real execution scenario, but it matches
 /// a behaviour in graphql-js so we can compare API schema results between federation-next and JS
 /// federation. We can consider removing this when we no longer rely on JS federation.
-pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
-    // Keep a copy of the types in the schema so we can mutate the schema while walking it.
-    let types = schema.types.clone();
-
-    for ty in schema.types.values_mut() {
-        match ty {
-            ExtendedType::Object(object) => {
-                let object = object.make_mut();
-                for field in object.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::Interface(interface) => {
-                let interface = interface.make_mut();
-                for field in interface.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::InputObject(input_object) => {
-                let input_object = input_object.make_mut();
-                for field in input_object.fields.values_mut() {
-                    let field = field.make_mut();
-                    let Some(default_value) = &mut field.default_value else {
-                        continue;
-                    };
-
-                    if coerce_value(
-                        &types,
-                        default_value,
-                        &field.ty,
-                        DefaultValueBehavior::Check,
-                    )
-                    .is_err()
-                    {
-                        field.default_value = None;
-                    }
-                }
-            }
-            ExtendedType::Union(_) | ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                // Nothing to do
-            }
-        }
-    }
-
-    for directive in schema.directive_definitions.values_mut() {
-        let directive = directive.make_mut();
-        coerce_arguments_default_values(&types, &mut directive.arguments);
-    }
-}
-
 pub(crate) fn coerce_schema_values(schema: &mut Schema) {
     // Keep a copy of the types in the schema so we can mutate the schema while walking it.
     let types = schema.types.clone();
@@ -627,7 +575,7 @@ pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut Ex
 /// `printSchema(buildSchema()` in graphql-js.
 pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
-    coerce_schema_default_values(schema);
+    coerce_schema_values(schema);
 }
 
 #[cfg(test)]

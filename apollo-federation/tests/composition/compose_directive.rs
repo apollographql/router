@@ -1506,8 +1506,9 @@ mod inconsistent_definitions {
 }
 
 mod string_to_enum_coercion {
-    use super::*;
     use insta::assert_snapshot;
+
+    use super::*;
 
     /// When one subgraph defines a composed directive with an enum argument type
     /// and another defines it with a String argument type, both subgraphs are
