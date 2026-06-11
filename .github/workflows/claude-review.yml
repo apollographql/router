@@ -50,3 +50,13 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'
           show_full_output: true
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(gh api -X POST repos/apollographql/router/pulls/*/comments *)",
+                  "Bash(gh api -X POST repos/apollographql/router/pulls/*/reviews *)",
+                  "Write(.claude_comment*.md)"
+                ]
+              }
+            }
