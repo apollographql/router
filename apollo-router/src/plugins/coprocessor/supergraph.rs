@@ -1491,7 +1491,7 @@ mod tests {
 
             let service = supergraph_stage.as_service(
                 mock_http_client,
-                mock_supergraph_service.boxed(),
+                mock_supergraph_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false,

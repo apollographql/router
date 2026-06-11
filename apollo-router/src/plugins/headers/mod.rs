@@ -450,14 +450,11 @@ impl PluginPrivate for Headers {
         })
     }
 
-<<<<<<< HEAD
     fn subgraph_service(
         &self,
         name: &str,
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-=======
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         // Get operations for this subgraph (fallback to global)
         let operations = self
             .subgraph_operations
@@ -469,7 +466,6 @@ impl PluginPrivate for Headers {
         // request context once in `router_service` below, and consumers
         // resolve per-subgraph rules at read time via
         // `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
->>>>>>> origin/dev
         ServiceBuilder::new()
             .layer(HeadersLayer::new(operations))
             .service(service)
@@ -480,24 +476,20 @@ impl PluginPrivate for Headers {
         &self,
         service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-<<<<<<< HEAD
     ) -> crate::services::connector::request_service::BoxCloneService {
-=======
-    ) -> crate::services::connector::request_service::BoxService {
         let operations = self
             .connector_source_operations
             .get(&source_name)
             .cloned()
             .unwrap_or_else(|| self.all_connector_operations.clone());
 
->>>>>>> origin/dev
         ServiceBuilder::new()
             .layer(HeadersLayer::new(operations))
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let masking_rules_map = self.masking_rules_map.clone();
 
         ServiceBuilder::new()
@@ -532,11 +524,7 @@ impl<S> Layer<S> for HeadersLayer {
         }
     }
 }
-<<<<<<< HEAD
 #[derive(Clone)]
-=======
-
->>>>>>> origin/dev
 struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,

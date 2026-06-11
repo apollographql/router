@@ -777,7 +777,7 @@ mod test {
                 .returning(super::example_response);
 
             SubgraphAuth { signing_params }
-                .subgraph_service(name, mock.boxed())
+                .subgraph_service(name, mock.boxed_clone())
                 .ready()
                 .await?
                 .call(request)
