@@ -4,6 +4,8 @@ The deprecated `connectors.subgraphs` configuration field has been removed. The 
 
 Existing configurations are migrated automatically at startup: each `subgraphs.<subgraph_name>.sources.<source_name>` entry is collapsed into a single `sources` entry keyed by `<subgraph_name>.<source_name>`, and any `$config` block at the subgraph level is copied onto each source. The router logs a notice describing the rewrite.
 
+The migration preserves the deprecated runtime's precedence rules: a subgraph-level `$config` overwrites any source-level `$config` defined alongside it (matching the order in which the old `apply_config` assigned values). A subgraph entry that only declares `$config` (no `sources`) cannot be expressed in the new shape and its `$config` is dropped — under the new model, `$config` is per-source.
+
 Before:
 
 ```yaml
