@@ -1055,8 +1055,8 @@ async fn missing_fields_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1191,8 +1191,8 @@ async fn missing_typename_and_fragments_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1327,8 +1327,8 @@ async fn missing_typename_and_fragments_in_requires2() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1481,8 +1481,8 @@ async fn null_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -2350,8 +2350,8 @@ async fn missing_nonnull_field_in_requires_returns_error() {
     let schema = supergraph_schema(
         r#"
         enum join__Graph {
-            SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-            SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
         }
 
         type Query
@@ -2416,6 +2416,89 @@ async fn missing_nonnull_field_in_requires_returns_error() {
     assert_response_diagnostics(&value, serde_json::json!([]), serde_json::json!([]));
 }
 
+// Variant of C.1 with `enable_result_coercion_errors` ON. Nullable missing fields surface
+// `RESPONSE_VALIDATION_FAILED` in `response.errors` when the gate is enabled.
+#[tokio::test]
+async fn missing_nullable_field_in_requires_returns_error_coercion_on() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query { entity { id computed nickname } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    let data = &value["data"]["entity"];
+    assert_eq!(data["computed"], serde_json::Value::Null);
+    assert_eq!(data["nickname"], serde_json::Value::Null);
+
+    // With coercion errors ON, nullable missing fields emit
+    // `RESPONSE_VALIDATION_FAILED` at the leaf path. No valueCompletion
+    // (that's non-null only).
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+            {
+                "message": "Missing field",
+                "path": ["entity", "nickname"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([]),
+    );
+}
+
 // Variant of `missing_nonnull_field_in_requires_returns_error` where `computed` is a non-nullable
 // field. When the skipped fetch's field is non-nullable, `apply_selection_set` propagates null up
 // to the parent (entity), per the GraphQL spec. The post-fix `format_response` emits a
@@ -2425,8 +2508,8 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
     let schema = supergraph_schema(
         r#"
         enum join__Graph {
-            SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-            SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
         }
 
         type Query
@@ -2519,8 +2602,8 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
     let schema = supergraph_schema(
         r#"
         enum join__Graph {
-            SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-            SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
         }
 
         type Query
@@ -2626,7 +2709,7 @@ async fn response_formatting_missing_vs_null_nonnull_field_asymmetry() {
     let schema = supergraph_schema(
         r#"
         enum join__Graph {
-            SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
         }
 
         type Query @join__type(graph: SUB1) {

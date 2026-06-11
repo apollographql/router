@@ -178,6 +178,12 @@ impl Query {
                                     .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                             }
 
+                            if let Some(errors) = parameters.coercion_errors.as_mut()
+                                && !errors.is_empty()
+                            {
+                                response.errors.append(errors);
+                            }
+
                             return parameters.nullified;
                         }
                         None => {
