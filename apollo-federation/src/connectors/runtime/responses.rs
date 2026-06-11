@@ -356,7 +356,9 @@ pub(super) fn map_error(
     );
 
     // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
-    // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
+    // We'll merge by applying the source and then the connect. User-supplied extensions deep-merge with the existing values, so a default like
+    // `http: { status }` is preserved when the user sets a sibling field like `http: { myField }` (the docs at
+    // https://www.apollographql.com/docs/graphos/connectors/responses/error-handling promise that defaults are retained alongside user fields).
     // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
     // can't make sense of it in the if/else due to how the builder is constructed.
     let mut extension_code = "CONNECTOR_FETCH".to_string();
@@ -380,7 +382,7 @@ pub(super) fn map_error(
         }
 
         for (key, value) in extensions {
-            error = error.extension(key, value);
+            error = error.merge_extension(key, value);
         }
     }
 
@@ -404,7 +406,7 @@ pub(super) fn map_error(
         }
 
         for (key, value) in extensions {
-            error = error.extension(key, value);
+            error = error.merge_extension(key, value);
         }
     }
 

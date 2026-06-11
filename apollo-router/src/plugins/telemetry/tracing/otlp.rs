@@ -41,14 +41,41 @@ impl TracingConfigurator for super::super::otlp::Config {
                 .build()
                 .filtered();
 
-        if builder
-            .tracing_common()
-            .preview_datadog_agent_sampling
-            .unwrap_or_default()
-        {
-            builder.with_span_processor(batch_span_processor.always_sampled())
+        let common = builder.tracing_common();
+        let datadog_agent_sampling = common.preview_datadog_agent_sampling.unwrap_or(false);
+
+        // In Datadog agent sampling mode all spans are forwarded (including RecordOnly spans)
+        // so the agent can apply its own sampling decisions via sampling.priority.
+        // Unlike the Datadog exporter, OTLP typically targets a different backend, so a
+        // per-exporter sampler is respected — but warn if one is set, since if this OTLP
+        // endpoint also points at the Datadog agent it would receive incomplete traces.
+        if datadog_agent_sampling && config.sampler.is_some() {
+            ::tracing::warn!(
+                "telemetry.exporters.tracing.otlp.sampler is configured alongside \
+                 preview_datadog_agent_sampling. If this OTLP endpoint is the Datadog agent, \
+                 the agent may receive incomplete traces."
+            );
+        }
+
+        if datadog_agent_sampling {
+            let processor = batch_span_processor.always_sampled();
+            if let Some(ref sampler) = config.sampler {
+                let sampled_batch_span_processor =
+                    processor.with_sampler(sampler, common.parent_based_sampler, &common.sampler);
+                builder.with_span_processor(sampled_batch_span_processor);
+            } else {
+                builder.with_span_processor(processor);
+            }
+        } else if let Some(ref sampler) = config.sampler {
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+
+            builder.with_span_processor(sampled_batch_span_processor);
         } else {
-            builder.with_span_processor(batch_span_processor)
+            builder.with_span_processor(batch_span_processor);
         }
 
         Ok(())

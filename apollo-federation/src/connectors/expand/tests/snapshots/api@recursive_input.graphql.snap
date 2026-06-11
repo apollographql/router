@@ -1,0 +1,16 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 25
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/recursive_input.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+input AnInput {
+  name: String
+  child: AnInput
+}
+
+type Query {
+  foo(input: AnInput): String
+}

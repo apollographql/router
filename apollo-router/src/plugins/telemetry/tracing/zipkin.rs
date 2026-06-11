@@ -23,6 +23,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
@@ -50,6 +51,18 @@ pub(crate) struct Config {
     /// Batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Per-exporter sampler.
+    ///
+    /// Uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.
+    /// Accepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.
+    /// Should be ≤ the common sampler; setting it higher has no effect.
+    ///
+    /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
+    /// header already marked as sampled by the calling service will be passed through to this
+    /// exporter regardless of this sampler's value — including when set to `always_off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sampler: Option<SamplerOption>,
 }
 
 impl Config {
@@ -90,12 +103,24 @@ impl TracingConfigurator for Config {
             .build()?;
 
         let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
-        builder.with_span_processor(
+        let batch_span_processor =
             BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin-tracing"))
                 .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
                 .build()
-                .filtered(),
-        );
+                .filtered();
+
+        if let Some(sampler) = &self.sampler {
+            let common = builder.tracing_common();
+            let sampled_batch_span_processor = batch_span_processor.with_sampler(
+                sampler,
+                common.parent_based_sampler,
+                &common.sampler,
+            );
+
+            builder.with_span_processor(sampled_batch_span_processor);
+        } else {
+            builder.with_span_processor(batch_span_processor);
+        }
         Ok(())
     }
 }

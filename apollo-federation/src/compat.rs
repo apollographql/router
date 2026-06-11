@@ -377,6 +377,11 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                         &types,
                         &mut field.directives,
                     );
+                    coerce_argument_directive_application_values(
+                        &directive_definitions,
+                        &types,
+                        &mut field.arguments,
+                    );
                 }
             }
             ExtendedType::Interface(interface) => {
@@ -393,6 +398,11 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                         &directive_definitions,
                         &types,
                         &mut field.directives,
+                    );
+                    coerce_argument_directive_application_values(
+                        &directive_definitions,
+                        &types,
+                        &mut field.arguments,
                     );
                 }
             }
@@ -545,6 +555,26 @@ fn coerce_directive_application_values_ast(
     }
 }
 
+/// Coerce the values of directives applied to field arguments (the `ARGUMENT_DEFINITION` location).
+/// `coerce_schema_values` already handles directives on types, fields, input fields and enum
+/// values; arguments are handled here so e.g. an enum-typed directive argument given as a string
+/// literal is coerced to the enum value (matching graphql-js leniency) instead of failing later
+/// schema validation.
+fn coerce_argument_directive_application_values(
+    directive_definitions: &IndexMap<Name, Node<DirectiveDefinition>>,
+    type_definitions: &IndexMap<Name, ExtendedType>,
+    arguments: &mut [Node<InputValueDefinition>],
+) {
+    for arg in arguments {
+        let arg = arg.make_mut();
+        coerce_directive_application_values_ast(
+            directive_definitions,
+            type_definitions,
+            &mut arg.directives,
+        );
+    }
+}
+
 fn coerce_selection_set_values(
     schema: &Valid<Schema>,
     selection_set: &mut executable::SelectionSet,
@@ -694,11 +724,46 @@ mod tests {
         {
           test(string: enumVal1, strings: enumVal2, custom: enumVal1, customList: enumVal2)
         }
-        "#), @r###"
+        "#), @r#"
         {
           test(string: "enumVal1", strings: ["enumVal2"], custom: enumVal1, customList: [enumVal2])
         }
-        "###);
+        "#);
+    }
+
+    #[test]
+    fn coerces_enum_string_in_field_argument_directive() {
+        // Regression: a directive applied to a *field argument* (ARGUMENT_DEFINITION) whose
+        // argument is enum-typed but given a string literal must be coerced to the enum value,
+        // just like directives on fields/enum-values. Previously `coerce_schema_values` skipped
+        // field-argument directives, so such a string survived to fail later schema validation.
+        let mut schema = Schema::parse(
+            r#"
+            directive @d(x: E!) on ARGUMENT_DEFINITION
+            enum E { A B }
+            type Query { f(a: Int @d(x: "A")): Int }
+            "#,
+            "schema.graphql",
+        )
+        .expect("valid subgraph schema");
+
+        super::coerce_schema_values(&mut schema);
+
+        let sdl = schema.to_string();
+        insta::assert_snapshot!(sdl, @"
+        directive @d(x: E!) on ARGUMENT_DEFINITION
+
+        enum E {
+          A
+          B
+        }
+
+        type Query {
+          f(
+            a: Int @d(x: A),
+          ): Int
+        }
+        ");
     }
 
     #[test]
@@ -726,7 +791,7 @@ mod tests {
         fragment f on T {
             get(bools: true)
         }
-        "#), @r###"
+        "#), @"
         {
           test {
             ...f
@@ -736,6 +801,6 @@ mod tests {
         fragment f on T {
           get(bools: [true])
         }
-        "###);
+        ");
     }
 }
