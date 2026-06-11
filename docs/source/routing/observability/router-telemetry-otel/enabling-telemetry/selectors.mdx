@@ -45,6 +45,8 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `response_context`    | Yes         |                             | The name of a response context key                                   |
 | `response_body`       | Yes         |                             | JSON Path into the router response body data (it might impact performance) |
 | `response_errors`     | Yes         |                             | JSON Path into the router response body errors (it might impact performance) |
+| `response_errors_count` | No          |                             | Count of router response errors matching a JSONPath filter (it might impact performance) |
+| `response_errors_field` | No          |                             | Extract a field from each router response error as an array of strings (it might impact performance) |
 | `baggage`             | Yes         |                             | The name of a baggage item                                           |
 | `env`                 | Yes         |                             | The name of an environment variable                                  |
 | `on_graphql_error`    | No          | `true` \| `false`             | Boolean set to true if the response payload contains a GraphQL error |
@@ -252,6 +254,63 @@ telemetry:
               # response_errors: "$.[0].message"
               # response_errors: "$.[0].locations"
               # response_errors: "$.[0].extensions"
+```
+
+### Counting router response errors with `response_errors_count`
+
+The `response_errors_count` selector evaluates a JSONPath expression against the router response's `errors` array and returns how many errors match. Use `"$[*]"` to count every error, or a filter expression to count only errors that match (for example, by `extensions.code`).
+
+Typical use: drive a counter instrument so you increment by the number of errors in the response, not just once per request.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Total number of GraphQL errors in the response body
+        my.errors.total:
+          type: counter
+          unit: error
+          description: "Sum of individual GraphQL errors per request"
+          value:
+            response_errors_count: "$[*]"
+
+        # Example: count only errors with a specific extension code
+        my.errors.filtered:
+          type: counter
+          unit: error
+          description: "Errors matching a JSONPath filter"
+          value:
+            response_errors_count: "$[?(@.extensions.code == 'NOT_FOUND')]"
+```
+
+### Extracting fields from each router error with `response_errors_field`
+
+The `response_errors_field` selector runs a JSONPath on each error object and collects the results into an array of strings (non-string values are serialized as JSON). If no values are extracted, the attribute is omitted.
+
+Typical use: structured logs or span attributes with every error message or extension code in one attribute.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      router:
+        my.error.log:
+          message: "request completed with errors"
+          level: info
+          on: response
+          condition:
+            eq:
+              - on_graphql_error: true
+              - true
+          attributes:
+            error_messages:
+              response_errors_field: "$.message"
+            error_codes:
+              response_errors_field: "$.extensions.code"
+            # Custom extension, e.g. subgraph name when present
+            error_services:
+              response_errors_field: "$.extensions.service"
 ```
 
 ### Splitting metrics between primary and deferred chunks

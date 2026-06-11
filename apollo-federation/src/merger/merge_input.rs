@@ -203,7 +203,7 @@ impl Merger {
 
             if self.subgraphs[*idx]
                 .schema()
-                .try_get_type(dest.type_name.clone())
+                .try_get_type(&dest.type_name)
                 .is_some()
             {
                 // Our needsJoinField logic adds @join__field if any subgraphs define

@@ -53,7 +53,7 @@ The `error` level applies only to request lifecycle errors, not GraphQL errors.
 
 </Note>
 
-To configure these events, set the level to `trace`, `info`, `warn`, `error` or `off` (default).
+To configure these events, set the level to `info`, `warn`, `error` or `off` (default).
 
 For example:
 
@@ -148,7 +148,7 @@ telemetry:
 
 ### `level`
 
-Custom events have a level, `trace`, `debug`, `info`, `warn`, `error` or `off` (if you want to disable this event). The level determines the severity of the event.
+Custom events have a level: `info`, `warn`, `error` or `off` (if you want to disable this event). The level determines the severity of the event.
 
 To set the level:
 ```yaml title="future.router.yaml"
@@ -157,7 +157,7 @@ telemetry:
     events:
       router:
         acme.event:
-          level: info # trace, debug, info, warn, error, off
+          level: info # info, warn, error, off
           # ...
 ```
 
@@ -213,12 +213,12 @@ You can configure events with the following options:
 | `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
 | `attributes`       | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)     |         | The attributes of the custom log event.                     |
 | `condition`        | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                   |         | The condition that must be met for the event to be emitted. |
-| `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
-| `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
+| `error`            | `info`\|`warn`\|`error`\|`off`                                     | `off`   | The level of the error log event.                           |
+| `level`            | `info`\|`warn`\|`error`\|`off`                                     | `off`   | The level of the custom log event.                          |
 | `message`          |                                                                              |         | The message of the custom log event.                        |
 | `on`               | `request`\|`response`\|`error`                                               |         | When to trigger the event.                                  |
-| `request`          | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the request log event.                         |
-| `response`         | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the response log event.                        |
+| `request`          | `info`\|`warn`\|`error`\|`off`                                     | `off`   | The level of the request log event.                         |
+| `response`         | `info`\|`warn`\|`error`\|`off`                                     | `off`   | The level of the response log event.                        |
 
 ## Event configuration examples
 

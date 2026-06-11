@@ -1,4 +1,8 @@
-use indexmap::IndexSet;
+use std::collections::BTreeSet;
+
+use apollo_compiler::Name;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use tracing::trace;
 
 use crate::error::CompositionError;
@@ -73,6 +77,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         trace!("Validating interface objects");
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
+        let mut is_interface_object = false;
 
         // Validates that if a source defines the interface as an @interfaceObject, then it doesn't define any
         // of the implementations. We can discuss if there is ways to lift that limitation later, but an
@@ -90,6 +95,7 @@ impl Merger {
             if !subgraph.is_interface_object_type(&ty_as_obj.into()) {
                 continue;
             }
+            is_interface_object = true;
 
             let subgraph_name = &subgraph.name;
             let defined_implementations: IndexSet<_> = supergraph_implementations
@@ -105,6 +111,85 @@ impl Merger {
             }
         }
 
+        // @interfaceObject cannot be implemented by other interfaces
+        if is_interface_object {
+            for interface_implements_intf_object in self
+                .merged
+                .all_implementation_types(dest)?
+                .iter()
+                .filter(|implementation| {
+                    matches!(
+                        implementation,
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(_)
+                    )
+                })
+            {
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                    message: format!(
+                        "Interfaces implementing @interfaceObject are not supported: @interfaceObject \"{dest}\" is implemented by an interface \"{interface_implements_intf_object}\".",
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates that `@interfaceObject` types within the same subgraph are pairwise
+    /// disjoint in their implementing types. Query planning assumes that when jumping
+    /// to a type in a subgraph via `@key`, there's only one version of that type.
+    /// Multiple `@interfaceObject` types sharing an implementation type would violate
+    /// this assumption.
+    pub(crate) fn validate_interface_object_disjointness(&mut self) -> Result<(), FederationError> {
+        for subgraph in self.subgraphs.iter() {
+            if subgraph.metadata().interface_object_types().is_empty() {
+                continue;
+            }
+
+            // collect all @interfaceObject types in this subgraph and their implementations
+            let mut impls_to_intf_objects: IndexMap<
+                ObjectTypeDefinitionPosition,
+                IndexSet<InterfaceTypeDefinitionPosition>,
+            > = IndexMap::default();
+            for intf_object in subgraph.metadata().interface_object_types() {
+                let itf_pos = InterfaceTypeDefinitionPosition {
+                    type_name: intf_object.clone(),
+                };
+                if let Ok(runtime_types) =
+                    self.merged.possible_runtime_types(itf_pos.clone().into())
+                {
+                    runtime_types.iter().for_each(|t| {
+                        impls_to_intf_objects
+                            .entry(t.clone())
+                            .or_default()
+                            .insert(itf_pos.clone());
+                    });
+                }
+            }
+
+            impls_to_intf_objects.iter()
+                .filter(|(_, intf_objects)| intf_objects.len() > 1)
+                .fold(IndexMap::<BTreeSet<Name>, IndexSet<Name>>::default(), |mut acc, (impl_, intf_objects)| {
+                    let key: BTreeSet<Name> = BTreeSet::from_iter(intf_objects.iter().map(|i| i.type_name.clone()));
+                    acc.entry(key)
+                        .or_default()
+                        .insert(impl_.type_name.clone());
+                    acc
+                })
+                .iter()
+                .for_each(|(intf_objects, impls)|
+                  self.error_reporter.add_error(
+                      CompositionError::InterfaceObjectUsageError {
+                          message: format!(
+                              "[{}] @interfaceObject {} in subgraph \"{}\" share implementation {}. Each @interfaceObject type in a subgraph must have a disjoint set of implementations.",
+                              subgraph.name,
+                              human_readable_types(intf_objects.iter()),
+                              subgraph.name,
+                              human_readable_types(impls.iter()),
+                          ),
+                      },
+                  )
+                );
+        }
         Ok(())
     }
 
@@ -126,7 +211,7 @@ impl Merger {
                     .map(|(idx, subgraph)| {
                         let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
                             .schema()
-                            .get_type(itf.type_name.clone())
+                            .get_type(&itf.type_name)
                             .ok()
                             .and_then(|ty| ty.try_into().ok());
                         (idx, maybe_ty)

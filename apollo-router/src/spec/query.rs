@@ -16,6 +16,7 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -751,27 +752,28 @@ impl Query {
                     }
 
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
-                        // A prior fragment spread may have nullified this field due to a non-null
-                        // constraint violation.  Object-typed inputs are never take()n so
-                        // input_value stays non-null even after nullification; without this guard
-                        // a later fragment would re-enter format_value and overwrite the null.
-                        if output.get(field_name.as_str()).is_some_and(Value::is_null) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-
                         path.push(ResponsePathElement::Key(field_name.as_str()));
                         let res = self.format_value(
                             parameters,
@@ -919,6 +921,35 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+        // Track which named fragments have already been applied during this root
+        // selection-set traversal. Re-applying a `...Frag` at the same (input,
+        // output, root_type_name, path) is idempotent — the same fields would be
+        // written from the same input — so the second application can be skipped.
+        // This collapses exponential fragment-of-fragment blowups (e.g. `L1 = ...L0
+        // ...L0`, `L2 = ...L1 ...L1`, ...) into linear work.
+        let mut applied_fragments: HashSet<&'a str> = HashSet::new();
+        self.apply_root_selection_set_cached(
+            root_type_name,
+            selection_set,
+            parameters,
+            input,
+            output,
+            path,
+            &mut applied_fragments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_root_selection_set_cached<'a: 'b, 'b>(
+        &'a self,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
+        parameters: &mut FormatParameters,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        applied_fragments: &mut HashSet<&'a str>,
+    ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -940,26 +971,28 @@ impl Query {
                             output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
-                        // A prior fragment spread may have nullified this field due to a non-null
-                        // constraint violation.  Object-typed inputs are never take()n so
-                        // input_value stays non-null even after nullification; without this guard
-                        // a later fragment would re-enter format_value and overwrite the null.
-                        if output.get(field_name_str).is_some_and(Value::is_null) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
                         path.push(ResponsePathElement::Key(field_name_str));
                         let res = self.format_value(
                             parameters,
@@ -1001,13 +1034,17 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
-                        self.apply_root_selection_set(
+                        // Inline fragments share the named-fragment cache with their
+                        // parent so an anonymous `... on T { ...Frag }` wrapper still
+                        // benefits from de-duplication of `...Frag`.
+                        self.apply_root_selection_set_cached(
                             root_type_name,
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
+                            applied_fragments,
                         )?;
                     }
                 }
@@ -1022,6 +1059,14 @@ impl Query {
                         continue;
                     }
 
+                    // Skip if we have already applied this named fragment during the
+                    // current root-selection-set traversal. The first application
+                    // wrote every reachable field; a second application would write
+                    // the same values, so it is safe to omit.
+                    if !applied_fragments.insert(name.as_str()) {
+                        continue;
+                    }
+
                     if let Some(Fragment {
                         type_condition,
                         selection_set,
@@ -1033,13 +1078,14 @@ impl Query {
                             || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {
-                            self.apply_root_selection_set(
+                            self.apply_root_selection_set_cached(
                                 root_type_name,
                                 selection_set,
                                 parameters,
                                 input,
                                 output,
                                 path,
+                                applied_fragments,
                             )?;
                         }
                     } else {

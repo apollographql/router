@@ -69,6 +69,7 @@ pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;

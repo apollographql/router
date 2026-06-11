@@ -1,0 +1,47 @@
+description: log deprecation warning for the Static(String) telemetry attribute selector variant
+actions:
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.spans.router.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.spans.supergraph.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.spans.subgraph.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.events.router.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.events.supergraph.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.events.subgraph.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.instruments.router.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.instruments.supergraph.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
+  - type: log
+    condition: is_string
+    level: warn
+    path: telemetry.instrumentation.instruments.subgraph.*.attributes.*
+    log: "The string shorthand form of the static telemetry attribute selector (e.g. `my_attribute: \"value\"`) is deprecated. Use the object form instead: `my_attribute: {static: \"value\"}`, which additionally supports typed values (bool, int, float, array). See https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors"
