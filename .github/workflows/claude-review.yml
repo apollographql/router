@@ -14,6 +14,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: read
+      actions: read
 
     steps:
       # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
@@ -43,8 +45,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          pr_number: ${{ github.event.issue.number }}
-          model: claude-opus-4-8
+          claude_args: '--model claude-opus-4-8'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review apollographql/router/pull/${{ github.event.issue.number }}'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }}'
+          show_full_output: true
