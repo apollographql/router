@@ -1505,6 +1505,66 @@ mod inconsistent_definitions {
     }
 }
 
+mod string_to_enum_coercion {
+    use super::*;
+    use insta::assert_snapshot;
+
+    /// When one subgraph defines a composed directive with an enum argument type
+    /// and another defines it with a String argument type, both subgraphs are
+    /// internally valid.
+    /// After merging, whichever definition is picked, the applied directives from
+    /// the other subgraph should be coerced rather than rejected. A string value
+    /// like `"PUBLIC"` is a valid representation of enum value `PUBLIC`, and an
+    /// unquoted enum value `INTERNAL` is a valid representation of string `"INTERNAL"`.
+    #[test]
+    fn composes_directive_with_enum_arg_when_other_subgraph_uses_string() {
+        let subgraph_a = Subgraph::parse("subgraphA", "", r#"
+            extend schema @composeDirective(name: "@custom")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
+
+            enum CustomTag {
+              INTERNAL
+              PUBLIC
+            }
+
+            directive @custom(tag: CustomTag!) on FIELD_DEFINITION
+
+            type Query {
+              product(id: ID!): Product @custom(tag: PUBLIC)
+            }
+
+            type Product @key(fields: "id") {
+              id: ID!
+              name: String
+            }
+        "#).expect("valid first subgraph");
+
+        let subgraph_b = Subgraph::parse("subgraphB", "", r#"
+            extend schema @composeDirective(name: "@custom")
+              @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@shareable"])
+              @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"])
+
+            directive @custom(tag: String!) on FIELD_DEFINITION
+
+            type Query {
+              user(id: ID!): User @custom(tag: "INTERNAL")
+            }
+
+            type User @key(fields: "id")  {
+              id: ID!
+              name: String
+            }
+        "#).expect("valid second subgraph");
+
+        // Regardless of subgraph ordering (which determines which definition is
+        // picked), composition must succeed. The applied directives that were
+        // valid in their source subgraph should not be rejected after merge.
+        let result = compose(vec![subgraph_a, subgraph_b]).expect("successfully composed");
+        assert_snapshot!(result.schema().schema());
+    }
+}
+
 fn generate_subgraph(
     name: &str,
     link_text: &str,

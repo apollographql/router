@@ -24,9 +24,7 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
         }
 
         input InputWithRequired {
-          requiredA: String!
-          requiredB: String!
-          requiredC: String!
+          required: String!
         }
 
         input InputAllOptional {
@@ -36,16 +34,7 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
     };
 
     let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
-    let sdl = print_sdl(supergraph.schema().schema());
-
-    assert!(
-        !sdl.contains("filter: InputWithRequired = {}"),
-        "supergraph should omit invalid empty-object default when input has required fields, got:\n{sdl}"
-    );
-    assert!(
-        sdl.contains("filter: InputAllOptional = {}"),
-        "supergraph should keep valid empty-object default when all input fields are optional, got:\n{sdl}"
-    );
+    assert_snapshot!(supergraph.schema().schema());
 }
 
 #[test]

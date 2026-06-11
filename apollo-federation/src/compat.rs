@@ -267,35 +267,6 @@ fn coerce_arguments_default_values(
     }
 }
 
-/// Like [`coerce_arguments_default_values`] but preserves `= {}` defaults even when the
-/// input type has required fields. Used at subgraph-parse time to match graphql-js behavior:
-/// JS keeps `= {}` verbatim in the upgraded subgraph SDL regardless of required fields;
-/// the supergraph/API-schema path uses [`coerce_arguments_default_values`] directly, which
-/// still strips them there.
-fn coerce_arguments_default_values_keep_empty_object(
-    types: &IndexMap<Name, ExtendedType>,
-    arguments: &mut Vec<Node<InputValueDefinition>>,
-) {
-    for arg in arguments {
-        let arg = arg.make_mut();
-        let Some(default_value) = &mut arg.default_value else {
-            continue;
-        };
-        let is_empty_object =
-            matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
-            if is_empty_object {
-                // Restore `= {}` — coerce_value may have partially mutated the value before
-                // failing. Matches graphql-js parse-time behavior: keep `= {}` even when the
-                // input type has required fields with no defaults.
-                *default_value.make_mut() = Value::Object(Default::default());
-            } else {
-                arg.default_value = None;
-            }
-        }
-    }
-}
-
 /// Do graphql-js-style input coercion on default values. Invalid default values are silently
 /// removed from the schema.
 ///
@@ -371,7 +342,7 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in object.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_arguments_default_values(&types, &mut field.arguments);
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
@@ -393,7 +364,7 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in interface.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_arguments_default_values(&types, &mut field.arguments);
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
