@@ -177,7 +177,7 @@ expression: response
     },
     "valueCompletion": [
       {
-        "message": "Null value found for non-nullable type Int",
+        "message": "Cannot return null for non-nullable type Int",
         "path": [
           "t",
           "u"

@@ -3524,7 +3524,7 @@ fn filter_nested_object_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type String",
+                    "message": "Cannot return null for non-nullable type String",
                     "path": ["me", "reviews1", 0]
                 }
             ]
@@ -7296,7 +7296,7 @@ fn reformat_response_data_nested_fragment_spread_with_unions() {
         .expected_extensions(json!({
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type ID",
+                    "message": "Cannot return null for non-nullable type ID",
                     "path": ["thing", "collection"]
                 }
             ]

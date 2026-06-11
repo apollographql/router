@@ -1002,18 +1002,12 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if field_type.is_non_null() {
-                        parameters.errors.push(
-                            Error::builder()
-                                .message(format!(
-                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .build(),
-                        );
-                        return Err(InvalidValue);
                     } else {
                         output.insert(field_name.clone(), Value::Null);
+                        emit_missing_field(parameters, field_type, field_name_str, path);
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     }
                 }
                 Selection::InlineFragment {
@@ -1265,11 +1259,13 @@ fn emit_missing_field<'b>(
     field_name: &'b str,
     path: &mut Vec<ResponsePathElement<'b>>,
 ) {
-    // valueCompletion: non-null only (legacy behavior)
+    // valueCompletion: non-null only
     if field_type.is_non_null() {
-        // Legacy message
+        // Based on historic discussion, we report this missing field error at the parent path (not
+        // the missing field path), since the parent is the one being nullified. Though the field
+        // name/path could be more informative.
         let message = format!(
-            "Null value found for non-nullable type {}",
+            "Cannot return null for non-nullable type {}",
             field_type.0.inner_named_type()
         );
         let parent_path = Path::from_response_slice(path);
@@ -1281,12 +1277,12 @@ fn emit_missing_field<'b>(
     // response.errors: nullable and non-null both, gated by coercion config.
     if parameters.coercion_errors.is_some() {
         path.push(ResponsePathElement::Key(field_name));
-        let leaf_path = Path::from_response_slice(path);
+        let field_path = Path::from_response_slice(path);
         path.pop();
         parameters.insert_coercion_error(
             Error::builder()
                 .message("Missing field")
-                .path(leaf_path)
+                .path(field_path)
                 .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                 .build(),
         );

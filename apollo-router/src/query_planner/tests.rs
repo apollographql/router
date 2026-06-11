@@ -2587,7 +2587,7 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
             },
         ]),
         serde_json::json!([
-            { "message": "Null value found for non-nullable type String", "path": ["entity"] },
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
         ]),
     );
 }
@@ -2689,7 +2689,7 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
             },
         ]),
         serde_json::json!([
-            { "message": "Null value found for non-nullable type String", "path": ["entity"] },
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
             { "message": "Null value found for non-nullable type Entity", "path": ["entity"] },
         ]),
     );
@@ -2770,7 +2770,7 @@ async fn response_formatting_missing_vs_null_nonnull_field_asymmetry() {
             },
         ]),
         serde_json::json!([
-            { "message": "Null value found for non-nullable type String", "path": ["entity"] },
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
         ]),
     );
 
