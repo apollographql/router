@@ -454,8 +454,8 @@ impl Query {
                     //     selection set, which already emitted both sinks at the originating
                     //     leaf. Skip.
                     //   - Otherwise (primitive scalar / Enum / custom scalar): the scalar
-                    //     formatter wrote response.errors but does not know it sits in a
-                    //     non-null position; Emit here.
+                    //     formatter emitted coercion errors but does not know it sits in a
+                    //     non-null position; Emit a valueCompletion error here.
                     let inner_emitted_error = inner_type.is_list()
                         || matches!(
                             parameters.schema.types.get(inner_type.inner_named_type()),
