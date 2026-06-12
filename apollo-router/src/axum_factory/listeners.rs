@@ -36,6 +36,7 @@ use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
+use crate::metrics::FutureMetricsExt;
 use crate::http_server_factory::NetworkStream;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
@@ -477,7 +478,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
                                     }
                                 }
-                            });
+                            }.with_current_meter_provider());
                         }
                         Err(e) => process_error(e).await
                     }
@@ -845,10 +846,6 @@ mod tests {
 
     // --- Tests for HTTP 431 / 414 metric and trace emission ---
 
-    // Note: classify_hyper_rejection is covered by the integration test
-    // `it_returns_431_when_too_many_headers` below, which generates real hyper::Error
-    // values. Unit tests using fake std::io::Error don't work with the downcast approach.
-
     #[tokio::test]
     async fn emit_connection_rejection_metrics_records_431() {
         async {
@@ -889,40 +886,58 @@ mod tests {
 
     #[tokio::test]
     async fn it_returns_431_when_too_many_headers() {
-        // Configure a very low header limit to trigger hyper's 431 response.
-        let conf = Arc::new(
-            Configuration::fake_builder()
-                .operation_limits(limits::Config {
-                    router: limits::RouterLimitsConfig {
-                        http1_max_request_headers: Some(5),
+        async {
+            // Configure a very low header limit to trigger hyper's 431 response.
+            let conf = Arc::new(
+                Configuration::fake_builder()
+                    .operation_limits(limits::Config {
+                        router: limits::RouterLimitsConfig {
+                            http1_max_request_headers: Some(5),
+                            ..Default::default()
+                        },
                         ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .build()
-                .unwrap(),
-        );
+                    })
+                    .build()
+                    .unwrap(),
+            );
 
-        let router_service = router::service::empty().await;
-        let (server, _) = init_with_config(router_service, conf, MultiMap::new())
-            .await
-            .unwrap();
+            let router_service = router::service::empty().await;
+            let (server, _) = init_with_config(router_service, conf, MultiMap::new())
+                .await
+                .unwrap();
 
-        // Send far more headers than the 5-header limit allows.
-        let mut req_builder = reqwest::Client::new().get(format!(
-            "{}",
-            server.graphql_listen_address().as_ref().unwrap()
-        ));
-        for i in 0..20 {
-            req_builder = req_builder.header(format!("x-custom-{i}"), "value");
+            // Send far more headers than the 5-header limit allows.
+            let mut req_builder = reqwest::Client::new().get(format!(
+                "{}",
+                server.graphql_listen_address().as_ref().unwrap()
+            ));
+            for i in 0..20 {
+                req_builder = req_builder.header(format!("x-custom-{i}"), "value");
+            }
+
+            let response = req_builder.send().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::from_u16(431).unwrap(),
+                "expected 431 Request Header Fields Too Large"
+            );
+            let _ = response.bytes().await;
+
+            server.shutdown().await.unwrap();
+
+            assert_counter!(
+                "apollo.router.operations",
+                1,
+                "http.response.status_code" = 431i64
+            );
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 431i64
+            );
         }
-
-        let response = req_builder.send().await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::from_u16(431).unwrap(),
-            "expected 431 Request Header Fields Too Large"
-        );
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -931,39 +946,54 @@ mod tests {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpStream;
 
-        // hyper's MAX_URI_LEN is hardcoded at 65534 bytes (u16::MAX - 1) and is not
-        // configurable. Exceeding it triggers Parse::UriTooLong → 414. No special router
-        // config is needed; the default configuration is sufficient.
-        //
-        // reqwest rejects URLs this long before even connecting, so we use a raw TCP
-        // stream and write the HTTP request manually.
-        let router_service = router::service::empty().await;
-        let (server, _) = init_with_config(
-            router_service,
-            Arc::new(Configuration::fake_builder().build().unwrap()),
-            MultiMap::new(),
-        )
-        .await
-        .unwrap();
+        async {
+            // hyper's MAX_URI_LEN is hardcoded at 65534 bytes (u16::MAX - 1) and is not
+            // configurable. Exceeding it triggers Parse::UriTooLong → 414. No special router
+            // config is needed; the default configuration is sufficient.
+            //
+            // reqwest rejects URLs this long before even connecting, so we use a raw TCP
+            // stream and write the HTTP request manually.
+            let router_service = router::service::empty().await;
+            let (server, _) = init_with_config(
+                router_service,
+                Arc::new(Configuration::fake_builder().build().unwrap()),
+                MultiMap::new(),
+            )
+            .await
+            .unwrap();
 
-        let listen_addr = server.graphql_listen_address().as_ref().unwrap();
-        let (ip, port) = listen_addr.ip_and_port().unwrap();
-        let mut stream = TcpStream::connect((ip, port)).await.unwrap();
+            let listen_addr = server.graphql_listen_address().as_ref().unwrap();
+            let (ip, port) = listen_addr.ip_and_port().unwrap();
+            let mut stream = TcpStream::connect((ip, port)).await.unwrap();
 
-        // Path is 65535 bytes — one over MAX_URI_LEN (65534) — triggering UriTooLong.
-        let long_path = format!("/{}", "a".repeat(65534));
-        let request = format!("GET {} HTTP/1.1\r\nHost: localhost\r\n\r\n", long_path);
-        stream.write_all(request.as_bytes()).await.unwrap();
+            // Path is 65535 bytes — one over MAX_URI_LEN (65534) — triggering UriTooLong.
+            let long_path = format!("/{}", "a".repeat(65534));
+            let request = format!("GET {} HTTP/1.1\r\nHost: localhost\r\n\r\n", long_path);
+            stream.write_all(request.as_bytes()).await.unwrap();
 
-        // Read just enough to verify the status line.
-        let mut buf = [0u8; 32];
-        let n = stream.read(&mut buf).await.unwrap();
-        assert!(
-            buf[..n].starts_with(b"HTTP/1.1 414"),
-            "expected 414 URI Too Long, got: {}",
-            String::from_utf8_lossy(&buf[..n])
-        );
+            // Read just enough to verify the status line.
+            let mut buf = [0u8; 32];
+            let n = stream.read(&mut buf).await.unwrap();
+            assert!(
+                buf[..n].starts_with(b"HTTP/1.1 414"),
+                "expected 414 URI Too Long, got: {}",
+                String::from_utf8_lossy(&buf[..n])
+            );
 
-        server.shutdown().await.unwrap();
+            server.shutdown().await.unwrap();
+
+            assert_counter!(
+                "apollo.router.operations",
+                1,
+                "http.response.status_code" = 414i64
+            );
+            assert_histogram_count!(
+                "http.server.request.duration",
+                1,
+                "http.response.status_code" = 414i64
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

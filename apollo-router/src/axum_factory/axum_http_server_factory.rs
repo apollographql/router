@@ -52,6 +52,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
+use crate::metrics::FutureMetricsExt;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
@@ -300,12 +301,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the main (GraphQL) server into a task
-            let main_future = tokio::task::spawn(main_server)
+            let main_future = tokio::task::spawn(main_server.with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             // Spawn all other servers (health, metrics, etc...) into a task
-            let extra_futures = tokio::task::spawn(join_all(servers))
+            let extra_futures = tokio::task::spawn(join_all(servers).with_current_meter_provider())
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
