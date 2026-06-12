@@ -16,19 +16,11 @@ expression: response
       }
     },
     {
-      "message": "Null value found for non-nullable type U",
+      "message": "Missing field",
       "path": [
         "t",
-        "u"
-      ],
-      "extensions": {
-        "code": "RESPONSE_VALIDATION_FAILED"
-      }
-    },
-    {
-      "message": "Null value found for non-nullable type T",
-      "path": [
-        "t"
+        "u",
+        "field"
       ],
       "extensions": {
         "code": "RESPONSE_VALIDATION_FAILED"
@@ -166,23 +158,10 @@ expression: response
     },
     "valueCompletion": [
       {
-        "message": "Null value found for non-nullable type Int",
+        "message": "Cannot return null for non-nullable type Int",
         "path": [
           "t",
           "u"
-        ]
-      },
-      {
-        "message": "Null value found for non-nullable type U",
-        "path": [
-          "t",
-          "u"
-        ]
-      },
-      {
-        "message": "Null value found for non-nullable type T",
-        "path": [
-          "t"
         ]
       }
     ]
