@@ -2185,8 +2185,7 @@ mod tests {
         let _guard = tracing_test::dispatcher_guard();
 
         let config: Config =
-            serde_json::from_value(serde_json::json!({ "enabled": true, "subgraph": {} }))
-                .unwrap();
+            serde_json::from_value(serde_json::json!({ "enabled": true, "subgraph": {} })).unwrap();
         let init = crate::plugin::PluginInit::fake_builder()
             .config(config)
             .build();
