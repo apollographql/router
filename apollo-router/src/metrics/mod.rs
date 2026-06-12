@@ -83,6 +83,7 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
+pub(crate) mod renames;
 
 /// A RAII guard for an up-down counter that automatically decrements on drop.
 ///
@@ -157,6 +158,10 @@ where
 #[must_use = "without holding the guard the timer records nothing"]
 pub struct HistogramTimerGuard {
     histogram: opentelemetry::metrics::Histogram<f64>,
+    /// Secondary UCUM-suffixed histogram registered via the rename table; records the same
+    /// elapsed time on drop so customers can migrate dashboards before the legacy name is
+    /// removed in router 3.x. See `crate::metrics::renames`.
+    secondary: Option<opentelemetry::metrics::Histogram<f64>>,
     attributes: Vec<opentelemetry::KeyValue>,
     start: Instant,
 }
@@ -165,6 +170,7 @@ impl HistogramTimerGuard {
     #[doc(hidden)]
     pub fn new(
         histogram: std::sync::Arc<opentelemetry::metrics::Histogram<f64>>,
+        secondary: Option<std::sync::Arc<opentelemetry::metrics::Histogram<f64>>>,
         attributes: &[opentelemetry::KeyValue],
     ) -> Self {
         // It is essential that we take the histogram out of the arc rather than cloning the arc.
@@ -172,6 +178,7 @@ impl HistogramTimerGuard {
         // Holding the Arc directly would keep a strong reference and prevent invalidation.
         Self {
             histogram: (*histogram).clone(),
+            secondary: secondary.map(|arc| (*arc).clone()),
             attributes: attributes.to_vec(),
             start: Instant::now(),
         }
@@ -183,8 +190,11 @@ impl Drop for HistogramTimerGuard {
     ///
     /// The duration is measured from when the guard was created to when it is dropped.
     fn drop(&mut self) {
-        self.histogram
-            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.histogram.record(elapsed, &self.attributes);
+        if let Some(secondary) = &self.secondary {
+            secondary.record(elapsed, &self.attributes);
+        }
     }
 }
 
@@ -336,6 +346,29 @@ pub(crate) mod test_utils {
                         .filter(|metric| metric.name() == name)
                 })
                 .next()
+        }
+
+        /// Returns (scope_name, &Metric) for every metric in every scope that matches
+        /// the predicate. Used by ROUTER-1777 dual-emit tests to assert that the same
+        /// callsite produces records on both the legacy `apollo/router` scope and the
+        /// `apollo/router/ucum` rename scope.
+        pub(crate) fn find_all_scopes<F>(
+            &self,
+            mut predicate: F,
+        ) -> Vec<(String, &opentelemetry_sdk::metrics::data::Metric)>
+        where
+            F: FnMut(&str, &opentelemetry_sdk::metrics::data::Metric) -> bool,
+        {
+            let mut out = Vec::new();
+            for scope_metrics in self.resource_metrics.scope_metrics() {
+                let scope_name = scope_metrics.scope().name().to_string();
+                for metric in scope_metrics.metrics() {
+                    if predicate(&scope_name, metric) {
+                        out.push((scope_name.clone(), metric));
+                    }
+                }
+            }
+            out
         }
 
         pub(crate) fn assert<T: NumCast + Display + 'static>(
@@ -1447,14 +1480,79 @@ macro_rules! get_or_create_metric {
     };
 }
 
+/// Companion to `get_or_create_metric!`. For metrics listed in
+/// `crate::metrics::renames::rename_for`, registers a secondary instrument on the
+/// `apollo/router/ucum` meter scope with the rename target's UCUM unit so the
+/// Prometheus exporter emits the suffixed name. Returns `None` for metrics that
+/// are not in the rename table. See ROUTER-1777.
+macro_rules! get_or_create_renamed_metric {
+    ($ty:ident, $instrument:ident, $name:expr, $description:literal) => {
+        paste::paste! {
+            {
+                if let Some((new_name, unit)) = crate::metrics::renames::rename_for($name) {
+                    let create_instrument_fn = move |meter: opentelemetry::metrics::Meter| {
+                        let mut builder = meter.[<$ty _ $instrument>](new_name);
+                        builder = builder.with_description($description);
+                        if !unit.is_empty() {
+                            builder = builder.with_unit(unit);
+                        }
+                        builder.build()
+                    };
+
+                    #[cfg(test)]
+                    let cache_callsite = crate::metrics::CACHE_CALLSITE.with(|cell| cell.load(std::sync::atomic::Ordering::SeqCst));
+                    #[cfg(not(test))]
+                    let cache_callsite = true;
+
+                    if cache_callsite {
+                        static SECONDARY_INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
+
+                        let mut instrument_guard = SECONDARY_INSTRUMENT_CACHE
+                            .get_or_init(|| {
+                                let meter_provider = crate::metrics::meter_provider_internal();
+                                let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter(crate::metrics::renames::UCUM_METER_SCOPE)));
+                                parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
+                            })
+                            .lock();
+                        if let Some(instrument) = instrument_guard.upgrade() {
+                            drop(instrument_guard);
+                            Some(instrument)
+                        } else {
+                            let meter_provider = crate::metrics::meter_provider_internal();
+                            let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter(crate::metrics::renames::UCUM_METER_SCOPE)));
+                            *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
+                            drop(instrument_guard);
+                            Some(instrument_ref)
+                        }
+                    } else {
+                        let meter_provider = crate::metrics::meter_provider();
+                        let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, crate::metrics::renames::UCUM_METER_SCOPE);
+                        Some(std::sync::Arc::new(create_instrument_fn(meter)))
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+    };
+}
+
 macro_rules! metric {
     ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
         paste::paste! {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let secondary = get_or_create_renamed_metric!($ty, $instrument, $name, $description);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                instrument.$mutation($value, attrs);
-                $guard::new(instrument.clone(), $value, attrs)
+                // Bind once so $value (potentially a side-effecting expression) isn't evaluated
+                // multiple times when both the legacy and the secondary UCUM instruments are
+                // mutated. Metric value types ($ty: u64/i64/f64) are all Copy.
+                let value: $ty = $value;
+                instrument.$mutation(value, attrs);
+                if let Some(secondary) = &secondary {
+                    secondary.$mutation(value, attrs);
+                }
+                $guard::new(instrument.clone(), value, attrs)
             }
         }
     };
@@ -1468,8 +1566,9 @@ macro_rules! metric {
         paste::paste! {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
+                let secondary = get_or_create_renamed_metric!($ty, $instrument, $name, $description);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                $guard::new(instrument.clone(), attrs)
+                $guard::new(instrument.clone(), secondary, attrs)
             }
         }
     };
@@ -2449,6 +2548,174 @@ mod test {
 
             // The metric should now be 3 since both tasks contributed
             assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Collect (scope_name, metric_name, unit) triples for any metric whose name OR rename
+    /// target matches `legacy_name`. Used to assert the dual-emit invariant for ROUTER-1777.
+    fn collect_emissions_for(legacy_name: &str) -> Vec<(String, String, String)> {
+        use crate::metrics::renames::UCUM_METER_SCOPE;
+        let new_name = crate::metrics::renames::rename_for(legacy_name).map(|(n, _)| n);
+        let collected = crate::metrics::collect_metrics();
+        let mut out: Vec<(String, String, String)> = collected
+            .find_all_scopes(|scope, metric| {
+                if scope != "apollo/router" && scope != UCUM_METER_SCOPE {
+                    return false;
+                }
+                metric.name() == legacy_name || Some(metric.name()) == new_name
+            })
+            .into_iter()
+            .map(|(scope, metric)| (scope, metric.name().to_string(), metric.unit().to_string()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[tokio::test]
+    async fn dual_emit_records_legacy_and_ucum_for_renamed_histogram() {
+        async {
+            f64_histogram!(
+                "apollo.router.cache.hit.time",
+                "Time to get a value from the cache in seconds",
+                0.5
+            );
+            let emissions = collect_emissions_for("apollo.router.cache.hit.time");
+            assert_eq!(
+                emissions,
+                vec![
+                    (
+                        "apollo/router".to_string(),
+                        "apollo.router.cache.hit.time".to_string(),
+                        String::new(),
+                    ),
+                    (
+                        "apollo/router/ucum".to_string(),
+                        "apollo.router.cache.hit.time".to_string(),
+                        "s".to_string(),
+                    ),
+                ],
+                "expected legacy (no unit) + UCUM-scoped (unit=s) emissions"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dual_emit_records_legacy_and_ucum_for_renamed_counter() {
+        async {
+            u64_counter!(
+                "apollo.router.operations.fetch.request_size",
+                "Total number of request bytes for subgraph fetches",
+                42u64
+            );
+            let emissions =
+                collect_emissions_for("apollo.router.operations.fetch.request_size");
+            assert_eq!(
+                emissions,
+                vec![
+                    (
+                        "apollo/router".to_string(),
+                        "apollo.router.operations.fetch.request_size".to_string(),
+                        String::new(),
+                    ),
+                    (
+                        "apollo/router/ucum".to_string(),
+                        "apollo.router.operations.fetch.request_size".to_string(),
+                        "By".to_string(),
+                    ),
+                ],
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dual_emit_renames_uplink_otel_name() {
+        async {
+            f64_histogram!(
+                "apollo.router.uplink.fetch.duration.seconds",
+                "Duration of Apollo Uplink fetches.",
+                0.25
+            );
+            let emissions =
+                collect_emissions_for("apollo.router.uplink.fetch.duration.seconds");
+            // Legacy keeps the `.seconds`-suffixed OTel name; secondary drops it and sets unit=s.
+            assert_eq!(
+                emissions,
+                vec![
+                    (
+                        "apollo/router".to_string(),
+                        "apollo.router.uplink.fetch.duration.seconds".to_string(),
+                        String::new(),
+                    ),
+                    (
+                        "apollo/router/ucum".to_string(),
+                        "apollo.router.uplink.fetch.duration".to_string(),
+                        "s".to_string(),
+                    ),
+                ],
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dual_emit_records_timer_to_secondary_on_drop() {
+        async {
+            {
+                let _timer = f64_histogram_timer!(
+                    "apollo.router.operations.coprocessor.duration",
+                    "Time spent waiting for the coprocessor to answer, in seconds"
+                );
+                // drop at end of scope writes elapsed seconds to both instruments
+            }
+            let emissions =
+                collect_emissions_for("apollo.router.operations.coprocessor.duration");
+            assert_eq!(
+                emissions,
+                vec![
+                    (
+                        "apollo/router".to_string(),
+                        "apollo.router.operations.coprocessor.duration".to_string(),
+                        String::new(),
+                    ),
+                    (
+                        "apollo/router/ucum".to_string(),
+                        "apollo.router.operations.coprocessor.duration".to_string(),
+                        "s".to_string(),
+                    ),
+                ],
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn unrenamed_metric_emits_only_once() {
+        async {
+            u64_counter!(
+                "apollo.router.graphql_error",
+                "Number of GraphQL error responses returned by the router",
+                1u64
+            );
+            // Use the helper but supply a name absent from the rename table: only the
+            // primary scope/legacy name should show up.
+            let emissions = collect_emissions_for("apollo.router.graphql_error");
+            assert_eq!(
+                emissions,
+                vec![(
+                    "apollo/router".to_string(),
+                    "apollo.router.graphql_error".to_string(),
+                    String::new(),
+                )],
+                "metrics outside renames::rename_for must not emit a secondary instrument"
+            );
         }
         .with_metrics()
         .await;

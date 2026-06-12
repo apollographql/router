@@ -20,6 +20,34 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
+<Note>
+
+**Upcoming Prometheus name changes in router 3.x.** Several duration and byte-count instruments will gain a UCUM unit (`s` for durations, `By` for bytes) in router 3.x. The Prometheus exporter appends a UCUM-derived suffix to the exported name when a unit is set — for example, `apollo_router_cache_hit_time` becomes `apollo_router_cache_hit_time_seconds`.
+
+To give you time to migrate dashboards, alerts, and recording rules, router 2.x **dual-emits** each affected metric: the legacy unsuffixed series continues to appear on `otel_scope_name="apollo/router"`, and a new suffixed series appears in parallel on `otel_scope_name="apollo/router/ucum"`. The legacy series will be removed in router 3.x.
+
+| Legacy Prometheus name | Router 3.x canonical Prometheus name |
+| --- | --- |
+| `apollo_router_cache_hit_time` | `apollo_router_cache_hit_time_seconds` |
+| `apollo_router_cache_invalidation_duration` | `apollo_router_cache_invalidation_duration_seconds` |
+| `apollo_router_cache_miss_time` | `apollo_router_cache_miss_time_seconds` |
+| `apollo_router_operations_coprocessor_duration` | `apollo_router_operations_coprocessor_duration_seconds` |
+| `apollo_router_query_planning_plan_duration` | `apollo_router_query_planning_plan_duration_seconds` |
+| `apollo_router_query_planning_total_duration` | `apollo_router_query_planning_total_duration_seconds` |
+| `apollo_router_query_planning_warmup_duration` | `apollo_router_query_planning_warmup_duration_seconds` |
+| `apollo_router_schema_load_duration` | `apollo_router_schema_load_duration_seconds` |
+| `apollo_router_operations_fetch_request_size_total` | `apollo_router_operations_fetch_request_size_bytes_total` |
+| `apollo_router_operations_fetch_response_size_total` | `apollo_router_operations_fetch_response_size_bytes_total` |
+| `apollo_router_operations_request_size_total` | `apollo_router_operations_request_size_bytes_total` |
+| `apollo_router_operations_response_size_total` | `apollo_router_operations_response_size_bytes_total` |
+| `apollo_router_operations_file_uploads_file_size` | `apollo_router_operations_file_uploads_file_size_bytes` |
+
+`apollo_router_uplink_fetch_duration_seconds` is also dual-emitted: its Prometheus name is unchanged but the underlying OTel metric name shifts from `apollo.router.uplink.fetch.duration.seconds` to `apollo.router.uplink.fetch.duration` (with unit `s`), which matters for OTLP consumers.
+
+Cardinality note: each dual-emitted metric now produces two series per attribute combination. Filter queries with `{otel_scope_name="apollo/router/ucum"}` (or omit it) to pick a side.
+
+</Note>
+
 ## Measuring router overhead
 
 Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and customization plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate, operation complexity, and response sizes all heavily affect the router’s overall load.
