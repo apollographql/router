@@ -15,7 +15,6 @@ executors:
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
@@ -54,14 +53,14 @@ executors:
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
+      CARGO_BUILD_JOBS: 4
   arm_linux_test: &arm_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
+      CARGO_BUILD_JOBS: 4
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -83,7 +82,7 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -91,7 +90,7 @@ executors:
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
