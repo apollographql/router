@@ -210,7 +210,7 @@ impl PluginPrivate for EntityCache {
         if init.config.enabled {
             tracing::warn!(
                 "The `apollo.preview_entity_cache` plugin is deprecated and will be removed \
-                 in a future major release. Migrate to `apollo.response_cache`, which supersedes it. \
+                 in Router 3.x. Migrate to `apollo.response_cache`, which supersedes it. \
                  See https://www.apollographql.com/docs/graphos/routing/performance/caching/overview"
             );
         }
