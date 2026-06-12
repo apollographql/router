@@ -12,7 +12,7 @@ expression: response
   "extensions": {
     "valueCompletion": [
       {
-        "message": "Null value found for non-nullable type ID",
+        "message": "Cannot return null for non-nullable type ID",
         "path": [
           "currentUser",
           "activeOrganization"

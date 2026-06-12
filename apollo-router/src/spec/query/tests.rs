@@ -2034,7 +2034,7 @@ fn reformat_response_composite_list_missing_nonnull_field() {
         .expected_extensions(json!({
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type Int",
+                    "message": "Cannot return null for non-nullable type Int",
                     "path": ["items", 0],
                 },
             ]
@@ -2480,7 +2480,7 @@ fn reformat_response_unknown_typename_emits_at_typename_leaf() {
         .expected_extensions(json!({
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type String",
+                    "message": "Cannot return null for non-nullable type String",
                     "path": ["thing"],
                 },
             ]
@@ -4109,7 +4109,7 @@ fn filter_nested_object_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type String",
+                    "message": "Cannot return null for non-nullable type String",
                     "path": ["me", "reviews1", 0]
                 }
             ]
@@ -7881,7 +7881,7 @@ fn reformat_response_data_nested_fragment_spread_with_unions() {
         .expected_extensions(json!({
             "valueCompletion": [
                 {
-                    "message": "Null value found for non-nullable type ID",
+                    "message": "Cannot return null for non-nullable type ID",
                     "path": ["thing", "collection"]
                 }
             ]
