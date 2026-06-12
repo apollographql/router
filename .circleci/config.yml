@@ -518,7 +518,7 @@ jobs:
       - run:
           name: Skip if no source files changed
           command: |
-            # Always run on dev (post-merge) — CIRCLE_BRANCH is 'dev' for nightly triggers too
+            # Always run on dev (post-merge); CIRCLE_BRANCH is 'dev' for nightly triggers too
             if [ "$CIRCLE_BRANCH" = "dev" ]; then
               exit 0
             fi
@@ -527,14 +527,10 @@ jobs:
             CHANGED=$(git diff --name-only "$BASE" HEAD)
             echo "Changed files:"
             echo "$CHANGED"
-            while IFS= read -r file; do
-              case "$file" in
-                apollo-router/src/*|apollo-router/tests/*|apollo-router/benches/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|xtask/*)
-                  echo "Source file changed: $file -- running tests"
-                  exit 0
-                  ;;
-              esac
-            done <<< "$CHANGED"
+            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches)/|Cargo\.(toml|lock)|rust-toolchain\.toml|xtask/)'; then
+              echo "Source files changed -- running tests"
+              exit 0
+            fi
             echo "No source files changed -- skipping tests"
             circleci-agent step halt
       - setup_environment:
