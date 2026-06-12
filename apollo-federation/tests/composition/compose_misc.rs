@@ -24,9 +24,7 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
         }
 
         input InputWithRequired {
-          requiredA: String!
-          requiredB: String!
-          requiredC: String!
+          required: String!
         }
 
         input InputAllOptional {
@@ -36,16 +34,7 @@ fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
     };
 
     let supergraph = compose_as_fed2_subgraphs(&[subgraph]).expect("composition should succeed");
-    let sdl = print_sdl(supergraph.schema().schema());
-
-    assert!(
-        !sdl.contains("filter: InputWithRequired = {}"),
-        "supergraph should omit invalid empty-object default when input has required fields, got:\n{sdl}"
-    );
-    assert!(
-        sdl.contains("filter: InputAllOptional = {}"),
-        "supergraph should keep valid empty-object default when all input fields are optional, got:\n{sdl}"
-    );
+    assert_snapshot!(supergraph.schema().schema());
 }
 
 #[test]
@@ -608,4 +597,199 @@ fn misc_conflicting_subgraph_names_sanitization() {
         schema_str.contains("MYSUBGRAPH_2"),
         "Expected MYSUBGRAPH_2 in schema"
     );
+}
+
+mod supergraph_spec_imports {
+    use apollo_federation::subgraph::typestate::Subgraph;
+    use insta::assert_snapshot;
+
+    use crate::composition::assert_composition_errors;
+    use crate::composition::compose;
+
+    #[test]
+    fn fed2_with_explicit_supergraph_spec_import_propagates_policy() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
+                @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+
+            type Query {
+                user(id: ID!): Account
+            }
+
+            type Account @key(fields: "id") {
+                id: ID!
+                rate: Float @policy(policies: [["view_rate"]])
+            }
+        "#;
+        let subgraph =
+            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+
+        let supergraph = compose(vec![subgraph]).expect("composition should succeed");
+        assert_snapshot!(supergraph.schema().schema());
+    }
+
+    #[test]
+    fn fed2_with_overlapping_inaccessible_import_errors() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@inaccessible"])
+                @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+
+            type Query {
+                product(id: ID!): Product
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                name: String!
+                internalCode: String @inaccessible
+            }
+        "#;
+        let subgraph = Subgraph::parse("products", "http://products/graphql", sdl)
+            .expect("successfully parsed");
+        let result = compose(vec![subgraph]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[products] Invalid use of @link in schema: import for '@inaccessible' of https://specs.apollo.dev/federation/v2.5 conflicts with spec https://specs.apollo.dev/inaccessible/v0.2"#,
+            )],
+        );
+    }
+
+    #[test]
+    fn fed2_with_overlapping_policy_and_requires_scopes_imports_errors() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.6", import: ["@key", "@policy", "@requiresScopes"])
+                @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+                @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+
+            type Query {
+                account(id: ID!): Account
+            }
+
+            type Account @key(fields: "id") {
+                id: ID!
+                balance: Float! @requiresScopes(scopes: [["read:balance"]])
+                rate: Float @policy(policies: [["view_rate"]])
+            }
+        "#;
+        let subgraph =
+            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+        let result = compose(vec![subgraph]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[accounts] Invalid use of @link in schema: import for '@policy' of https://specs.apollo.dev/federation/v2.6 conflicts with spec https://specs.apollo.dev/policy/v0.1"#,
+            )],
+        );
+    }
+
+    #[test]
+    fn fed1_with_link_bootstrap_and_supergraph_spec_import_propagates_policy() {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+            {
+                query: Query
+            }
+
+            directive @key(fields: String!) repeatable on OBJECT | INTERFACE
+            directive @policy(policies: [[policy__Policy!]!]!) on
+              | FIELD_DEFINITION
+              | OBJECT
+              | INTERFACE
+              | SCALAR
+              | ENUM
+
+            scalar policy__Policy
+
+            type Query {
+                account(id: ID!): Account
+            }
+
+            type Account @key(fields: "id") {
+                id: ID!
+                rate: Float @policy(policies: [["view_rate"]])
+            }
+        "#;
+        let subgraph =
+            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+
+        let supergraph = compose(vec![subgraph]).expect("composition should succeed");
+        assert_snapshot!(supergraph.schema().schema());
+    }
+
+    #[test]
+    fn fed1_with_link_bootstrap_and_inaccessible_spec_import_errors_due_to_collision() {
+        let sdl = r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
+            {
+                query: Query
+            }
+
+            type Query {
+                product(id: ID!): Product
+            }
+
+            type Product {
+                id: ID!
+                name: String!
+                internalCode: String @inaccessible
+            }
+        "#;
+        let subgraph =
+            Subgraph::parse("products", "http://products/graphql", sdl).expect("valid subgraph");
+        let result = compose(vec![subgraph]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[products] Invalid use of @link in schema: import for '@inaccessible' of https://specs.apollo.dev/federation/v2.4 conflicts with spec https://specs.apollo.dev/inaccessible/v0.2"#,
+            )],
+        );
+    }
+
+    #[test]
+    fn fed1_without_link_bootstrap_drops_supergraph_spec_import_of_policy() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+
+            directive @key(fields: String!) repeatable on OBJECT | INTERFACE
+            directive @policy(policies: [[policy__Policy!]!]!) on
+              | FIELD_DEFINITION
+              | OBJECT
+              | INTERFACE
+              | SCALAR
+              | ENUM
+
+            scalar policy__Policy
+
+            type Query {
+                account(id: ID!): Account
+            }
+
+            type Account @key(fields: "id") {
+                id: ID!
+                rate: Float @policy(policies: [["view_rate"]])
+            }
+        "#;
+        let subgraph =
+            Subgraph::parse("accounts", "http://accounts/graphql", sdl).expect("valid subgraph");
+
+        let supergraph = compose(vec![subgraph]).expect("composition should succeed");
+        let schema = supergraph.schema().schema();
+
+        assert!(
+            !schema.directive_definitions.contains_key("policy"),
+            "Supergraph should NOT contain @policy when @link is not bootstrapped"
+        );
+    }
 }
