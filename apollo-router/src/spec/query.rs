@@ -351,6 +351,8 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
+    /// Format a field's value.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -364,11 +366,13 @@ impl Query {
         // and return Ok(()), because values are optional by default
         match field_type {
             executable::Type::Named(name) => match name.as_str() {
-                "Int" => self.format_integer(parameters, path, input, output),
-                "Float" => self.format_float(parameters, path, input, output),
-                "Boolean" => self.format_boolean(parameters, path, input, output),
-                "String" => self.format_string(parameters, path, input, output),
-                "Id" => self.format_id(parameters, path, input, output),
+                // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
+                // avoids redundant "Null value found for non-nullable" errors.
+                "Int" => self.format_integer(parameters, path, input, output)?,
+                "Float" => self.format_float(parameters, path, input, output)?,
+                "Boolean" => self.format_boolean(parameters, path, input, output)?,
+                "String" => self.format_string(parameters, path, input, output)?,
+                "Id" => self.format_id(parameters, path, input, output)?,
                 _ => self.format_named_type(
                     parameters,
                     field_type,
@@ -402,6 +406,8 @@ impl Query {
         Ok(())
     }
 
+    /// Format a non-null field's value.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
@@ -423,24 +429,59 @@ impl Query {
             }
         };
 
-        self.format_value(parameters, &inner_type, input, output, path, selection_set)?;
+        let inner_result =
+            self.format_value(parameters, &inner_type, input, output, path, selection_set);
 
         if output.is_null() {
             let message = format!("Null value found for non-nullable type {inner_type}");
-            parameters.errors.push(
-                Error::builder()
-                    .message(&message)
-                    .path(Path::from_response_slice(path))
-                    .build(),
-            );
-            parameters.insert_coercion_error(
-                Error::builder()
-                    .message(message)
-                    .path(Path::from_response_slice(path))
-                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                    .build(),
-            );
-
+            match inner_result {
+                Ok(()) => {
+                    // Null value from the subgraph (explicit null for a non-null position) without
+                    // coercion error from formatting. Emit errors here.
+                    parameters.errors.push(
+                        Error::builder()
+                            .message(&message)
+                            .path(Path::from_response_slice(path))
+                            .build(),
+                    );
+                    parameters.insert_coercion_error(
+                        Error::builder()
+                            .message(message)
+                            .path(Path::from_response_slice(path))
+                            .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                            .build(),
+                    );
+                }
+                Err(InvalidValue) => {
+                    // The `format_value` errored. Decide based on `inner_type`:
+                    //   - List: `format_list` only returns `Err` when an element's
+                    //     `format_value` returned `Err` with a non-null element type. Skip.
+                    //   - Composite (Object/Interface/Union): the Err came from a child
+                    //     selection set, which already emitted both sinks at the originating
+                    //     leaf. Skip.
+                    //   - Otherwise (primitive scalar / Enum / custom scalar): the scalar
+                    //     formatter emitted coercion errors but does not know it sits in a
+                    //     non-null position; Emit a valueCompletion error here.
+                    let inner_emitted_error = inner_type.is_list()
+                        || matches!(
+                            parameters.schema.types.get(inner_type.inner_named_type()),
+                            Some(
+                                ExtendedType::Object(_)
+                                    | ExtendedType::Interface(_)
+                                    | ExtendedType::Union(_)
+                            )
+                        );
+                    if !inner_emitted_error {
+                        parameters.errors.push(
+                            Error::builder()
+                                .message(message)
+                                .path(Path::from_response_slice(path))
+                                .build(),
+                        );
+                    }
+                }
+            }
+            // Propagate error to parent
             Err(InvalidValue)
         } else {
             Ok(())
@@ -470,32 +511,40 @@ impl Query {
                 .enumerate()
                 .try_for_each(|(i, element)| {
                     path.push(ResponsePathElement::Index(i));
-                    self.format_value(
+                    let res = self.format_value(
                         parameters,
                         inner_type,
                         element,
                         &mut output_array[i],
                         path,
                         selection_set,
-                    )?;
+                    );
                     path.pop();
+                    // Type-aware Err handling: non-null inner type propagates (whole list
+                    // nullifies per spec). Nullable inner type swallows the error (element already
+                    // nullified by child).
+                    if res.is_err() && inner_type.is_non_null() {
+                        return Err(InvalidValue);
+                    }
                     Ok(())
                 })
         {
-            // We pop here because, if an error is found, the path still contains the index of the
-            // invalid value.
-            path.pop();
             parameters.nullified.push(Path::from_response_slice(path));
-            parameters.insert_coercion_error(
-                Error::builder()
-                    .message(format!(
-                        "Invalid value found inside the array of type [{inner_type}]"
-                    ))
-                    .path(Path::from_response_slice(path))
-                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                    .build(),
-            );
+            // Emit only at the innermost list level (when inner_type is not a list).
+            // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
+            if !inner_type.is_list() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message(format!(
+                            "Invalid value found inside the array of type [{inner_type}]"
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
+            return Err(InvalidValue);
         }
         Ok(())
     }
@@ -567,23 +616,25 @@ impl Query {
                 _ => field_type,
             };
 
-            if self
-                .apply_selection_set(
-                    selection_set,
-                    parameters,
-                    input_object,
-                    output_object,
-                    path,
-                    current_type,
-                )
-                .is_err()
-            {
+            if let Err(err) = self.apply_selection_set(
+                selection_set,
+                parameters,
+                input_object,
+                output_object,
+                path,
+                current_type,
+            ) {
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
+                // Propagate the Err, since `apply_selection_set` already emitted an error.
+                return Err(err);
             }
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
             *output = Value::Null;
+            // We don't emit errors for null object value nor propagate Err.
+            // Note: `format_non_nullable_value` will emit an error if this object's type is
+            //       non-nullable.
         }
 
         Ok(())
@@ -596,15 +647,19 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
         if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
             || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
         {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Int")
@@ -612,8 +667,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -624,11 +679,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_f64().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Float")
@@ -636,8 +695,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -648,11 +707,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Boolean")
@@ -660,8 +723,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -672,11 +735,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_str().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type String")
@@ -684,8 +751,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -696,11 +763,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type ID")
@@ -708,8 +779,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -752,6 +823,11 @@ impl Query {
                         if let Some(object_type) = object_type {
                             output.insert((*field_name).clone(), object_type.name.as_str().into());
                         } else {
+                            // If the __typename value does not resolve to a known object type in
+                            // the schema nor the current_type is an object type, emit an error.
+                            // TODO: __typename could be an interface type (due to @interfaceObject).
+                            //       That case is currently not handled and results in false error.
+                            emit_missing_field(parameters, field_type, field_name.as_str(), path);
                             return Err(InvalidValue);
                         }
                         continue;
@@ -790,7 +866,12 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        res?
+                        // Type-aware Err handling: non-null fields propagate Err to continue the
+                        // bubble; nullable fields swallow (the child already reported, the field
+                        // is already nullified).
+                        if res.is_err() && field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
@@ -1001,7 +1082,12 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        res?
+                        // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
+                        // propagate Err to continue the bubble; nullable fields swallow (child
+                        // already reported, field is already nullified).
+                        if res.is_err() && field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     } else {
                         output.insert(field_name.clone(), Value::Null);
                         emit_missing_field(parameters, field_type, field_name_str, path);

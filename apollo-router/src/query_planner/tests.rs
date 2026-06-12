@@ -2664,16 +2664,8 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
     // the null bubbles up to `data` itself.
     assert_eq!(value["data"], serde_json::Value::Null);
 
-    // Two `RESPONSE_VALIDATION_FAILED` errors expected:
-    //   - leaf `[entity, computed]` (the originating non-null missing
-    //     field, from `emit_missing_field`)
-    //   - bubble target `[entity]` (entity non-null bubble re-emit with
-    //     the legacy "Null value found for non-nullable type" message,
-    //     from `format_non_nullable_value`)
-    // Both emitters write to both sinks for non-null, so
-    // `valueCompletion` carries matching entries at the parent paths.
-    // The root-data nullification is the spec's bubble end (no further
-    // emission past `[entity]`).
+    // Only ONE `RESPONSE_VALIDATION_FAILED` at the originating leaf
+    // `[entity, computed]`.
     assert_response_diagnostics(
         &value,
         serde_json::json!([
@@ -2682,15 +2674,9 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
                 "path": ["entity", "computed"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
-            {
-                "message": "Null value found for non-nullable type Entity",
-                "path": ["entity"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
-            },
         ]),
         serde_json::json!([
             { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
-            { "message": "Null value found for non-nullable type Entity", "path": ["entity"] },
         ]),
     );
 }

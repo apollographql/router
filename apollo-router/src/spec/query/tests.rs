@@ -1448,11 +1448,6 @@ fn reformat_response_expected_int_range() {
                 "path": ["me", "someOtherNumber"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["me", "someOtherNumber"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
         ]))
         .test();
 }
@@ -1681,6 +1676,9 @@ fn reformat_response_coercion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
         ]))
+        // Nullable scalar elements coerce to null in place — no
+        // `format_non_nullable_value` wrapper, so no valueCompletion entries.
+        .expected_extensions(json!({}))
         .test();
 
     FormatTest::builder()
@@ -1715,16 +1713,22 @@ fn reformat_response_coercion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "a", 1],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
                 "message": "Invalid value found inside the array of type [Int!]",
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
         ]))
+        // `format_non_nullable_value(Int!)` emits valueCompletion at the
+        // element leaf; the outer list `[Int!]` is nullable so no outer
+        // wrapper emits.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["thing", "a", 1]
+                },
+            ]
+        }))
         .test();
 
     FormatTest::builder()
@@ -1757,21 +1761,20 @@ fn reformat_response_coercion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "a", 1],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
                 "message": "Invalid value found inside the array of type [Int!]",
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type [Int!]",
-                "path": ["thing", "a"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
+        // Single originating leaf entry.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["thing", "a", 1]
+                },
+            ]
+        }))
         .test();
 }
 
@@ -1845,16 +1848,9 @@ fn reformat_response_coercion_propagation_into_object() {
         .expected(json!({
             "thing": null
         }))
-        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
-        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
@@ -1883,23 +1879,612 @@ fn reformat_response_coercion_propagation_into_object() {
                 "c": 1.2
             }
         }))
-        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
-        // nullification from there
-        .expected_errors(json!([            {
+        .expected_errors(json!([
+            {
                 "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },            {
-                "message": "Null value found for non-nullable type Thing",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
+        .test();
+}
+
+// `format_list` bubble suppression for a non-null list `[Thing!]!` combined with
+// scalar-Err dedup at the leaf.
+//
+// Before any dedup, a single bad element produced six `response.errors`:
+//   1. `[items, 0, value]` — "Invalid value found for the type Int" (from `format_integer`)
+//   2. `[items, 0, value]` — "Null value found for non-nullable type Int" (from
+//      `format_non_nullable_value` at the leaf)
+//   3. `[items, 0]` — "Null value found for non-nullable type Thing" (from
+//      `format_non_nullable_value` at the element)
+//   4. `[items]` — "Invalid value found inside the array of type [Thing!]" (from
+//      `format_list`)
+//   5. `[items]` — "Null value found for non-nullable type [Thing!]" (from
+//      `format_non_nullable_value` at the list)
+//
+// After all dedup layers: #2's response.errors duplicate is suppressed by scalar-Err
+// dedup (only the valueCompletion sink fires at the leaf); #3 is suppressed by
+// `format_named_type` propagation (both sinks); #5 is suppressed by `format_list`
+// returning `Err` (both sinks). Net `response.errors`: #1 + #4. Net `valueCompletion`:
+// only the leaf entry from the Int! wrapper.
+#[test]
+fn reformat_response_coercion_propagation_into_nonnull_list() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                items: [Thing!]!
+            }
+
+            type Thing {
+                value: Int!
+            }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        .response(json!({
+            "items": [ { "value": 1.5 } ]
+        }))
+        // Root field `items` is non-null, so the bubble propagates all the way to `data`.
+        .expected(json!(null))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["items", 0, "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["items"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Expect valueCompletion only at the originating leaf entry
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["items", 0, "value"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Composite list `[Thing!]!` with an explicit-null element. The element-level
+// `format_non_nullable_value(Thing!)` is the originating frame here (inner
+// `format_named_type` returns Ok with output=null because input was null),
+// so it emits both sinks at `[items, 0]`. Outer `format_non_nullable_value`
+// for `[Thing!]!` skips (Object inner_named_type), no drop.
+#[test]
+fn reformat_response_composite_list_explicit_null_element() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { items: [Thing!]! }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        .response(json!({ "items": [null] }))
+        .expected(json!(null))
+        .expected_errors(json!([
+            // Element wrapper originating emit (Ok branch — inner returned
+            // Ok with null output, no descendant reported).
+            {
+                "message": "Null value found for non-nullable type Thing",
+                "path": ["items", 0],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            // format_list's own diagnostic.
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["items"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Single originating valueCompletion entry at the element. The
+        // outer `[Thing!]!` wrapper skips (Object inner_named_type).
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Thing",
+                    "path": ["items", 0],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Composite list `[Thing!]!` whose element is missing a required non-null
+// sub-field. `emit_missing_field` is the originating emit site (writes
+// valueCompletion at the element parent path `[items, 0]` and response.errors
+// at the missing-field leaf `[items, 0, value]`); both wrapper frames (Thing!
+// and [Thing!]!) skip via Object inner_named_type. No drop.
+#[test]
+fn reformat_response_composite_list_missing_nonnull_field() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { items: [Thing!]! }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        // Element is an empty object — `value` (Int!) is missing.
+        .response(json!({ "items": [{}] }))
+        .expected(json!(null))
+        .expected_errors(json!([
+            // emit_missing_field response.errors at the leaf.
+            {
+                "message": "Missing field",
+                "path": ["items", 0, "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            // format_list's own diagnostic.
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["items"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // emit_missing_field valueCompletion at the element parent path.
+        // Both wrapper frames skip — no duplicate, no drop.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable type Int",
+                    "path": ["items", 0],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Composite list `[Thing!]` (nullable outer, non-null inner) with a deep
+// element error. The bubble propagates element → Thing! wrapper → nullable
+// list (absorbs). The nullable outer list does NOT wrap in
+// `format_non_nullable_value`, so no outer emit to drop.
+#[test]
+fn reformat_response_composite_list_nullable_outer_absorbs() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { items: [Thing!] }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        .response(json!({ "items": [{ "value": 1.5 }] }))
+        // Nullable list absorbs — `items` becomes null.
+        .expected(json!({ "items": null }))
+        .expected_errors(json!([
+            // Scalar leaf coercion emit (no companion "Null value" entry —
+            // scalar-Err dedup).
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["items", 0, "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            // format_list's own diagnostic (inner type Thing! is non-null
+            // → format_list propagates and emits at the list path).
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["items"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Single originating valueCompletion at the deep scalar leaf.
+        // Thing! wrapper skips (Object inner_named_type); the outer list
+        // is nullable so no `format_non_nullable_value` wraps it.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["items", 0, "value"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Composite list `[Thing!]` (nullable outer, non-null inner) with an
+// explicit-null element — `[null]`. The element-level
+// `format_non_nullable_value(Thing!)` is the originating frame (inner
+// `format_named_type` returns Ok with output=null because input was null),
+// so it emits both sinks at `[items, 0]`. `format_list` then propagates and
+// emits its own "Invalid value found inside the array" entry to
+// response.errors. The nullable outer list has no `format_non_nullable_value`
+// wrapper, so no outer emit either way.
+#[test]
+fn reformat_response_composite_list_nullable_outer_explicit_null_element() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { items: [Thing!] }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        .response(json!({ "items": [null] }))
+        // Nullable outer absorbs the bubble — `items` becomes null.
+        .expected(json!({ "items": null }))
+        .expected_errors(json!([
+            {
+                "message": "Null value found for non-nullable type Thing",
+                "path": ["items", 0],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["items"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Single originating valueCompletion at the element. No outer-list
+        // wrapper to deduplicate against.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Thing",
+                    "path": ["items", 0],
+                },
+            ]
+        }))
+        .test();
+}
+
+// List with nullable inner `[Thing]!`. An element that fails an inner
+// non-null contract nullifies independently — the bubble terminates at the
+// nullable element slot, not at the list. No outer list emit either.
+#[test]
+fn reformat_response_composite_list_nullable_inner_per_element() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { items: [Thing]! }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ items { value } }"#)
+        .response(json!({
+            "items": [
+                { "value": 1 },
+                { "value": 1.5 },
+                { "value": 3 }
+            ]
+        }))
+        // Middle element nullifies in place; siblings preserved.
+        .expected(json!({
+            "items": [
+                { "value": 1 },
+                null,
+                { "value": 3 }
+            ]
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["items", 1, "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Single valueCompletion at the originating scalar leaf. The
+        // nullable Thing slot absorbs, no list-level emit.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["items", 1, "value"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Nested composite list `[[Thing!]!]!` with a deep scalar coercion failure.
+// The bubble crosses inner-list, element-Thing!, outer-list, and finally the
+// root `format_non_nullable_value` wrapper. Each composite wrapper SKIPs
+// (Object inner_named_type), confirming no drop in the nested case.
+#[test]
+fn reformat_response_composite_nested_list_deep_failure() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query { grid: [[Thing!]!]! }
+            type Thing { value: Int! }
+            "#,
+        )
+        .query(r#"{ grid { value } }"#)
+        .response(json!({ "grid": [[ { "value": 1.5 } ]] }))
+        .expected(json!(null))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["grid", 0, 0, "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            // Only the innermost list emits its "Invalid value found inside the
+            // array" entry — the outer list's element type is itself a list, so
+            // `format_list` skips its own emit to avoid bubble compounding.
+            {
+                "message": "Invalid value found inside the array of type [Thing!]",
+                "path": ["grid", 0],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Single originating valueCompletion at the deep scalar leaf. Every
+        // composite wrapper above (Thing!, [Thing!]!, [[Thing!]!]!) skips —
+        // confirms the composite skip predicate doesn't drop the deep entry.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["grid", 0, 0, "value"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// `apply_root_selection_set` bubble suppression for a non-null root field.
+//
+// Mirrors the `apply_selection_set` case: a non-null root field whose child
+// errors no longer re-emits a "Null value found for non-nullable type X"
+// at the root field's path.  The leaf still emits once.
+#[test]
+fn reformat_response_root_nonnull_bubble_suppression() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing!
+            }
+
+            type Thing {
+                value: Int!
+            }
+            "#,
+        )
+        .query(r#"{ thing { value } }"#)
+        .response(json!({
+            "thing": { "value": 1.5 }
+        }))
+        // Root field `thing` is non-null → bubble propagates to `data`.
+        .expected(json!(null))
+        // Only the originating coercion error remains. Before any dedup, three
+        // extra entries would have landed.
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "value"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // Expect valueCompletion only at the originating non-null scalar leaf.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["thing", "value"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Two separate bubble paths under a nullable root: each must emit its own leaf error.
+//
+// The dedup change suppresses *re-emits along a single bubble path* (a non-null parent
+// re-stating what its child already reported).  It must NOT suppress independent
+// bubbles that originate from sibling subtrees.
+//
+// Layout:
+//
+//     Query.outer: Outer            # nullable — absorbs both bubbles
+//     Outer.alpha: Mid              # nullable — absorbs alpha's bubble
+//     Outer.beta:  Int!             # non-null — beta's bubble propagates past
+//     Mid.inner:   Int!             # non-null
+//
+// Bubble #1 — `outer.alpha.inner` is invalid:
+//   leaf emit at `[outer, alpha, inner]` → `Mid` propagates `Err` → `apply_selection_set`
+//   on `Outer.alpha` (nullable) swallows.  `alpha` lands as `null`.
+//
+// Bubble #2 — `outer.beta` is invalid:
+//   leaf emit at `[outer, beta]` → `Outer.beta` (non-null) propagates `Err` →
+//   `format_named_type` on `Outer` propagates → `apply_root_selection_set` on
+//   `Query.outer` (nullable) swallows.  `outer` lands as `null`.
+//
+// Both leaves emit; both bubbles terminate at distinct nullable ancestors; no
+// duplicated parent-path emits along either chain.
+#[test]
+fn reformat_response_two_independent_bubbles_each_report() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                outer: Outer
+            }
+
+            type Outer {
+                alpha: Mid
+                beta: Int!
+            }
+
+            type Mid {
+                inner: Int!
+            }
+            "#,
+        )
+        .query(r#"{ outer { alpha { inner } beta } }"#)
+        .response(json!({
+            "outer": {
+                "alpha": { "inner": 1.5 },
+                "beta": 2.5
+            }
+        }))
+        // `Query.outer` is nullable → both bubbles terminate inside `outer`,
+        // so `outer` itself is `null` (beta's bubble nullified the whole object).
+        .expected(json!({ "outer": null }))
+        // Two entries, one originating coercion error per bubble.  Scalar-Err
+        // dedup suppresses the "Null value found for non-nullable type Int"
+        // emits at each leaf; format_named_type-Err dedup suppresses the
+        // intermediate "Null value found for non-nullable type Mid/Outer"
+        // bubbles along each chain.
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["outer", "alpha", "inner"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["outer", "beta"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // valueCompletion: one entry per originating leaf, two total.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["outer", "alpha", "inner"],
+                },
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["outer", "beta"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// Nested errors along the same chain: an absorbed deep bubble plus a separate
+// invalid-value error at the outer level.  Both errors must be reported, with
+// the nullable middle layer absorbing the deep bubble silently.
+//
+// Three behaviors stacked along the response tree:
+//
+//     leaf   (`mid.leaf`, Int!)  — non-null with invalid value → errors at leaf path
+//     mid    (`mid`, Mid)        — nullable → absorbs the leaf's bubble (silent)
+//     outer  (`outer`, Int)      — own invalid value → errors at outer path
+//
+// Without dedup, `mid`'s absorbed bubble would also re-emit "Null value found for
+// non-nullable type Int" at `[mid]` (the old `format_non_nullable_value` path on
+// the nullified `mid.leaf`).  Post-dedup, the `Err` from `apply_selection_set`
+// propagates through `format_named_type`, `format_non_nullable_value`'s `?`
+// short-circuits, and the absorb at `mid` is silent.  Outer is independent —
+// `format_integer` emits at `[outer]` on its own coercion failure.
+#[test]
+fn reformat_response_outer_invalid_and_absorbed_inner_bubble_both_report() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                outer: Int
+                mid: Mid
+            }
+
+            type Mid {
+                leaf: Int!
+            }
+            "#,
+        )
+        .query(r#"{ outer mid { leaf } }"#)
+        .response(json!({
+            "outer": 1.5,
+            "mid": { "leaf": 2.5 }
+        }))
+        // `outer` nullifies in place (nullable Int with invalid value);
+        // `mid` nullifies via the absorbed leaf bubble.
+        .expected(json!({
+            "outer": null,
+            "mid": null,
+        }))
+        .expected_errors(json!([
+            // outer error: nullable Int, only the coercion-side emit (no
+            // "Null value for non-nullable" because outer is nullable).
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["outer"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            // leaf error: non-null Int!, only the originating coercion error.
+            // Scalar-Err dedup suppresses the leaf-level "Null value found"
+            // emit, and mid's nullable swallow is silent — the absorbed
+            // bubble adds nothing further.
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["mid", "leaf"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        // valueCompletion: only the originating non-null leaf at `[mid, leaf]`.
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Null value found for non-nullable type Int",
+                    "path": ["mid", "leaf"],
+                },
+            ]
+        }))
+        .test();
+}
+
+// `__typename` selection on an abstract (union) type where the input has no
+// `__typename` to disambiguate the concrete object.
+//
+// Before this change, the `__typename` branch returned `Err(InvalidValue)`
+// with no emit; `format_named_type` then swallowed the `Err`, leaving
+// `output = null`, and `format_non_nullable_value` emitted
+// "Null value found for non-nullable type X" at the parent path.
+//
+// After the dedup change, `format_named_type` propagates the `Err` —
+// without an emit at the `__typename` branch, the nullification would be
+// silent.  The fix calls `emit_missing_field` so the diagnostic lands at
+// the `__typename` leaf path.
+#[test]
+fn reformat_response_unknown_typename_emits_at_typename_leaf() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            union Thing = Foo | Bar
+
+            type Foo { a: Int }
+            type Bar { b: Int }
+            "#,
+        )
+        .query(r#"{ thing { __typename } }"#)
+        // Input has no `__typename`, and the field's `current_type` is the union
+        // `Thing` — `get_object("Thing")` is None and there's no input `__typename`
+        // to fall back on, so the `__typename` branch returns `Err`.
+        .response(json!({
+            "thing": {}
+        }))
+        // `thing` is nullable, so it nullifies in `data` without bubbling further.
+        .expected(json!({ "thing": null }))
+        // New: `emit_missing_field` reports the unresolvable `__typename` at the
+        // leaf path.  Field type `String!` (non-null) → emits to both sinks.
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "__typename"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .expected_extensions(json!({
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable type String",
+                    "path": ["thing"],
+                },
+            ]
+        }))
         .test();
 }
 
@@ -2024,19 +2609,14 @@ fn reformat_response_coercion_propagation_into_union() {
         .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
-        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
-        // nullification from there
+        // Only the originating coercion error: No extra "Null value found for non-nullable type"
+        // error.
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
         .test();
 
@@ -2046,7 +2626,13 @@ fn reformat_response_coercion_propagation_into_union() {
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([]))
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "__typename"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     FormatTest::builder()
@@ -2054,7 +2640,13 @@ fn reformat_response_coercion_propagation_into_union() {
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([]))
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "__typename"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // Case 4: __typename is queried and is returned
@@ -2089,19 +2681,12 @@ fn reformat_response_coercion_propagation_into_union() {
         .query(query_with_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
-        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
-        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
         .test();
 }
@@ -2237,19 +2822,12 @@ fn reformat_response_coercion_propagation_into_interfaces() {
         .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
-        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
-        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
         .test();
 
@@ -2261,7 +2839,13 @@ fn reformat_response_coercion_propagation_into_interfaces() {
         // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
         // `__typename` being queried.
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([]))
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "__typename"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     FormatTest::builder()
@@ -2269,7 +2853,13 @@ fn reformat_response_coercion_propagation_into_interfaces() {
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([]))
+        .expected_errors(json!([
+            {
+                "message": "Missing field",
+                "path": ["thing", "__typename"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
         .test();
 
     // Case 4: __typename is queried and is returned
@@ -2310,11 +2900,6 @@ fn reformat_response_coercion_propagation_into_interfaces() {
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Null value found for non-nullable type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
         ]))
         .test();
 }
