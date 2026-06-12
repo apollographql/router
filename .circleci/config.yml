@@ -512,6 +512,9 @@ jobs:
       coverage:
         type: boolean
         default: false
+      nightly:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -526,6 +529,84 @@ jobs:
       #         - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
       #     steps:
       #       - fuzz_build
+      - when:
+          condition:
+            equal: ["dev", "<< pipeline.git.branch >>"]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: CI tests **failed** on `dev` for `${CIRCLE_JOB}` — a merge may have broken the build!\n<${CIRCLE_BUILD_URL}|View failed job>"
+                        }
+                      }
+                    ]
+                  }
+      - when:
+          condition:
+            equal: [true, << parameters.nightly >>]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: A `nightly` test run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+            - slack/notify:
+                event: pass
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: A `nightly` test run has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
   coverage:
     environment:
       <<: *common_job_environment
@@ -1065,8 +1146,12 @@ workflows:
             parameters:
               platform: [amd_linux_build]
       - test:
+          nightly: true
           requires:
             - lint
+          context:
+            - router
+            - orb-publishing
           matrix:
             parameters:
               platform:
