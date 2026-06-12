@@ -103,6 +103,7 @@ mod tests {
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
+    use crate::test_harness::tracing_test;
 
     #[tokio::test]
     async fn load_plugin() {
@@ -120,6 +121,35 @@ mod tests {
             .build_router()
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deprecated_context_key_mode_warns_at_startup() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "router": {
+                    "request": {
+                        "context": "deprecated"
+                    }
+                }
+            }
+        });
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        assert!(
+            tracing_test::logs_contain(
+                "coprocessor.router.request.context: deprecated` is deprecated"
+            ),
+            "expected deprecation warning for context: deprecated config"
+        );
     }
 
     #[tokio::test]
