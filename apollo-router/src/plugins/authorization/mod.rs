@@ -137,6 +137,13 @@ pub(crate) enum ErrorLocation {
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
     pub(crate) errors: ErrorConfig,
+    /// For paths denied by `@policy`, the policy names attached to the
+    /// originating field's `@policy(policies: [[...]])` directive. Surfaced
+    /// to the consumer as `extensions.policy` on the resulting
+    /// `UNAUTHORIZED_FIELD_OR_TYPE` error so plugins can attribute the strip
+    /// to a specific policy without re-walking the supergraph schema.
+    #[serde(default)]
+    pub(crate) policies_by_path: HashMap<Path, Vec<String>>,
 }
 
 impl UnauthorizedPaths {
@@ -162,11 +169,19 @@ impl UnauthorizedPaths {
         response: &mut graphql::Response,
     ) {
         let unauthorized_path_errors = self.paths.iter().map(|path| {
-            graphql::Error::builder()
+            let mut builder = graphql::Error::builder()
                 .message("Unauthorized field or type")
                 .path(path.clone())
-                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
-                .build()
+                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE");
+            if let Some(policies) = self.policies_by_path.get(path) {
+                if !policies.is_empty() {
+                    builder = builder.extension(
+                        "policy",
+                        Value::String(policies.join(",").into()),
+                    );
+                }
+            }
+            builder.build()
         });
 
         match self.errors.response {
@@ -397,6 +412,7 @@ impl AuthorizationPlugin {
 
         let mut is_filtered = false;
         let mut unauthorized_paths: Vec<Path> = vec![];
+        let mut policies_by_path: HashMap<Path, Vec<String>> = HashMap::new();
 
         let filter_res = Self::authenticated_filter_query(schema, dry_run, &doc, is_authenticated)?;
 
@@ -438,8 +454,9 @@ impl AuthorizationPlugin {
 
         let doc = match filter_res {
             None => doc,
-            Some((filtered_doc, paths)) => {
+            Some((filtered_doc, paths, paths_to_policies)) => {
                 unauthorized_paths.extend(paths);
+                policies_by_path.extend(paths_to_policies);
 
                 // FIXME: consider only `filtered_doc.operations.get(key.operation_name)`?
                 if filtered_doc.definitions.is_empty() {
@@ -457,7 +474,7 @@ impl AuthorizationPlugin {
         }
 
         if is_filtered {
-            Ok(Some((unauthorized_paths, doc)))
+            Ok(Some((unauthorized_paths, policies_by_path, doc)))
         } else {
             Ok(None)
         }
@@ -545,7 +562,10 @@ impl AuthorizationPlugin {
 
         doc: &ast::Document,
         policies: &[String],
-    ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
+    ) -> Result<
+        Option<(ast::Document, Vec<Path>, HashMap<Path, Vec<String>>)>,
+        QueryPlannerError,
+    > {
         if let Some(mut visitor) = PolicyFilteringVisitor::new(
             schema.supergraph_schema(),
             &schema.implementers_map,
@@ -564,7 +584,11 @@ impl AuthorizationPlugin {
                         .map(|path| path.to_string())
                         .collect::<Vec<_>>()
                 );
-                Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((
+                    modified_query,
+                    visitor.unauthorized_paths,
+                    visitor.policies_by_path,
+                )))
             } else {
                 tracing::debug!("the query does not require policies");
                 Ok(None)

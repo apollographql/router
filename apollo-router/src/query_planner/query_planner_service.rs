@@ -297,6 +297,7 @@ impl QueryPlannerService {
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
                 errors: self.authorization_config.error_config(),
+                policies_by_path: std::collections::HashMap::new(),
             },
             subselections,
             defer_stats,
@@ -480,7 +481,11 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
 }
 
 // Appease clippy::type_complexity
-pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
+pub(crate) type FilteredQuery = (
+    Vec<Path>,
+    std::collections::HashMap<Path, Vec<String>>,
+    ast::Document,
+);
 
 impl QueryPlannerService {
     async fn get(
@@ -535,6 +540,7 @@ impl QueryPlannerService {
                         let unauthorized = UnauthorizedPaths {
                             paths,
                             errors: self.authorization_config.error_config(),
+                            policies_by_path: std::collections::HashMap::new(),
                         };
                         unauthorized.log_unauthorized_paths();
                         unauthorized.update_response_with_unauthorized_path_errors(&mut response);
@@ -550,7 +556,7 @@ impl QueryPlannerService {
             None
         };
 
-        if let Some((unauthorized_paths, new_doc)) = filter_res {
+        if let Some((unauthorized_paths, policies_by_path, new_doc)) = filter_res {
             let new_query = new_doc.to_string();
             let new_hash = self
                 .schema
@@ -569,6 +575,7 @@ impl QueryPlannerService {
             )
             .map_err(QueryPlannerError::from)?;
             selections.unauthorized.paths = unauthorized_paths;
+            selections.unauthorized.policies_by_path = policies_by_path;
         }
 
         if key.filtered_query != key.original_query {

@@ -194,6 +194,12 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
+    /// For each unauthorized path collected by `@policy`, the policy names
+    /// attached to that field's `@policy(policies: [[...]])` directive.
+    /// Surfaced via `extensions.policy` on the resulting
+    /// `UNAUTHORIZED_FIELD_OR_TYPE` error so consumers can attribute each
+    /// error to a specific policy without re-walking the schema.
+    pub(crate) policies_by_path: HashMap<Path, Vec<String>>,
     // store the error paths from fragments so we can  add them at
     // the point of application
     fragments_unauthorized_paths: HashMap<String, Vec<Path>>,
@@ -235,6 +241,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
+            policies_by_path: HashMap::new(),
             fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
             policy_directive_name: Schema::directive_name(
@@ -268,6 +275,23 @@ impl<'a> PolicyFilteringVisitor<'a> {
         } else {
             false
         }
+    }
+
+    /// Returns the union of policy names attached to the field's `@policy`
+    /// directive, deduplicated and order-preserving. Empty when the field has
+    /// no `@policy` directive.
+    fn field_policy_names(&self, field: &schema::FieldDefinition) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        if let Some(directive) = field.directives.get(&self.policy_directive_name) {
+            for set in policies_sets_argument(directive) {
+                for name in set {
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+        }
+        names
     }
 
     fn is_type_authorized(&self, ty: &schema::ExtendedType) -> bool {
@@ -439,6 +463,11 @@ impl transform::Visitor for PolicyFilteringVisitor<'_> {
             || implementors_with_missing_requirements
             || implementors_with_missing_field_requirements
         {
+            let policies = self.field_policy_names(field_def);
+            if !policies.is_empty() {
+                self.policies_by_path
+                    .insert(self.current_path.clone(), policies);
+            }
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_policies = true;
 
