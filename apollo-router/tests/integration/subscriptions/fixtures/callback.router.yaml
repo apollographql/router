@@ -22,5 +22,6 @@ subscription:
 headers:
   all:
     request:
-      - propagate:
-          named: custom_id
+      operations:
+        - propagate:
+            named: custom_id

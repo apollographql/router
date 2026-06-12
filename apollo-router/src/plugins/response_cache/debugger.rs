@@ -76,7 +76,7 @@ impl CacheKeyContext {
             title: "Cache-Control header documentation".to_string(),
         };
         // Not cached because either no cache-control header set or no-store
-        if self.cache_control.is_no_store() {
+        if self.cache_control.no_store() {
             self.warnings.push(Warning {
                 code: "CACHE_CONTROL_NO_STORE".to_string(),
                 links: vec![cache_control_mdn_docs.clone()],
@@ -91,8 +91,9 @@ impl CacheKeyContext {
                 message: "The subgraph returned a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user.".to_string(),
             });
         }
+
         // TTL
-        match self.cache_control.s_max_age_or_max_age() {
+        match self.cache_control.max_age() {
             Some(maxage) => {
                 // Small maxage less than a minute
                 if maxage < 60 {
@@ -114,12 +115,16 @@ impl CacheKeyContext {
                 }
             }
             None => {
-                // Default ttl
-                self.warnings.push(Warning {
-                    code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
-                    links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
-                    message: "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file).".to_string(),
-                });
+                // Only warn about missing max-age if no-store isn't set; if no-store is set,
+                // the CACHE_CONTROL_NO_STORE warning above already covers the non-caching case.
+                if !self.cache_control.no_store() {
+                    // Default ttl
+                    self.warnings.push(Warning {
+                        code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
+                        links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
+                        message: "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file).".to_string(),
+                    });
+                }
             }
         }
         if let CacheEntryKind::RootFields { root_fields } = &self.kind {

@@ -86,8 +86,9 @@ Additionally, you'll need to configure the router to forward the [`Cookie`](http
 headers:
   all:
     request:
-      - propagate:
-          named: cookie
+      operations:
+        - propagate:
+            named: cookie
 ```
 
 For examples of sending cookies and authorization headers from Apollo Client, see [Authentication](/react/networking/authentication/).

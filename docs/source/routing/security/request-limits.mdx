@@ -18,7 +18,7 @@ limits:
     # Network-based limits
     http_max_request_bytes: 2000000 # Default value: 2 MB
     http1_max_request_headers: 200 # Default value: 100
-    http1_max_request_buf_size: 800kb # Default value: 400kib
+    http1_max_request_buf_size: 800KiB # Default value: 400KiB
     http2_max_headers_list_bytes: 48KiB # Default value: 16KiB
 
     # Parser-based limits
@@ -37,18 +37,18 @@ limits:
   # Subgraph response size limits
   subgraph:
     all:
-      http_max_response_size: 10mb # 10 MB for all subgraphs
+      http_max_response_size: 10MiB # 10MiB for all subgraphs
     subgraphs:
       products:
-        http_max_response_size: 20mb # per-subgraph override (20 MB)
+        http_max_response_size: 20MiB # per-subgraph override (20MiB)
 
   # Connector response size limits
   connector:
     all:
-      http_max_response_size: 5mb # 5 MB for all connector sources
+      http_max_response_size: 5MiB # 5MiB for all connector sources
     sources:
       products.rest:
-        http_max_response_size: 10mb # per-source override (10 MB)
+        http_max_response_size: 10MiB # per-source override (10MiB)
 ```
 
 ## Operation-based limits
@@ -363,7 +363,7 @@ If router receives more headers than the buffer size, it responds to the client 
 
 ### `http1_max_request_buf_size`
 
-Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
+Limit the maximum buffer size for the HTTP1 connection. Default is ~400KiB.
 
 ### `http2_max_headers_list_bytes`
 
@@ -431,10 +431,10 @@ You can set a global default that applies to all subgraphs, and optionally overr
 limits:
   subgraph:
     all:
-      http_max_response_size: 10mb # 10 MB for all subgraphs
+      http_max_response_size: 10MiB # 10MiB for all subgraphs
     subgraphs:
       products:
-        http_max_response_size: 20mb # 20 MB override for 'products'
+        http_max_response_size: 20MiB # 20MiB override for 'products'
 ```
 
 The per-subgraph entry under `subgraphs` takes precedence over `all`. If only `all` is set, it applies to every subgraph. If only a named entry is set, only that subgraph is limited.
@@ -478,10 +478,10 @@ Identify sources by `subgraph_name.source_name` (matching the key format used in
 limits:
   connector:
     all:
-      http_max_response_size: 5mb # 5 MB for all connector sources
+      http_max_response_size: 5MiB # 5MiB for all connector sources
     sources:
       products.rest:
-        http_max_response_size: 10mb # 10 MB override for 'products.rest'
+        http_max_response_size: 10MiB # 10MiB override for 'products.rest'
 ```
 
 The per-source entry under `sources` takes precedence over `all`.

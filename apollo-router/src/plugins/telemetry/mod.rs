@@ -25,7 +25,6 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
-use http::header;
 use http::header::CACHE_CONTROL;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
@@ -327,6 +326,7 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        config.validate_per_exporter_samplers()?;
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
 
@@ -539,6 +539,7 @@ impl PluginPrivate for Telemetry {
                         filter_headers(
                             request.router_request.headers(),
                             &config_request.apollo.send_headers,
+                            &request.context,
                         ),
                     ));
 
@@ -1898,14 +1899,23 @@ pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
     VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
 }
 
-fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+fn filter_headers(
+    headers: &HeaderMap,
+    forward_rules: &ForwardHeaders,
+    context: &Context,
+) -> String {
     if let ForwardHeaders::None = forward_rules {
         return String::from("{}");
     }
     let headers_map = headers
         .iter()
         .filter(|(name, _value)| {
-            name != &header::AUTHORIZATION && name != &header::COOKIE && name != &header::SET_COOKIE
+            // Never forward sensitive headers to Apollo trace exports. Sensitivity
+            // is governed by the shared header-masking config (with the built-in
+            // fail-secure defaults — authorization, cookie, set-cookie, … — when
+            // unconfigured), so a user-configured sensitive header is redacted here
+            // too, rather than only the legacy hardcoded set.
+            !crate::services::header_masking::is_sensitive_request_header(context, name.as_str())
         })
         .filter_map(|(name, value)| {
             let send_header = match &forward_rules {
@@ -3309,12 +3319,13 @@ mod tests {
             HeaderName::from_static("apollo-x-name"),
             HeaderValue::from_static("polaris"),
         );
-        let filtered_headers = super::filter_headers(&headers, &fw_headers);
+        let filtered_headers = super::filter_headers(&headers, &fw_headers, &crate::Context::new());
         assert_eq!(
             filtered_headers.as_str(),
             r#"{"apollo-x-name":["polaris"],"test":["content"]}"#
         );
-        let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
+        let filtered_headers =
+            super::filter_headers(&headers, &ForwardHeaders::None, &crate::Context::new());
         assert_eq!(filtered_headers.as_str(), "{}");
     }
 

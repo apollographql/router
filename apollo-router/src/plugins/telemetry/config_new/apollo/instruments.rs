@@ -75,7 +75,6 @@ impl ApolloSubgraphInstruments {
                     APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: CLIENT_NAME.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -83,7 +82,6 @@ impl ApolloSubgraphInstruments {
                     APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: CLIENT_VERSION.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -91,7 +89,6 @@ impl ApolloSubgraphInstruments {
                     GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
                     SubgraphSelector::SupergraphOperationName {
                         supergraph_operation_name: OperationName::String,
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -105,7 +102,6 @@ impl ApolloSubgraphInstruments {
                     APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
                     SubgraphSelector::ResponseContext {
                         response_context: APOLLO_OPERATION_ID.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -193,7 +189,6 @@ impl ApolloConnectorInstruments {
                     APOLLO_CLIENT_NAME_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: CLIENT_NAME.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -201,7 +196,6 @@ impl ApolloConnectorInstruments {
                     APOLLO_CLIENT_VERSION_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: CLIENT_VERSION.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -209,7 +203,6 @@ impl ApolloConnectorInstruments {
                     GRAPHQL_OPERATION_NAME_ATTRIBUTE.to_string(),
                     ConnectorSelector::SupergraphOperationName {
                         supergraph_operation_name: OperationName::String,
-                        redact: None,
                         default: None,
                     },
                 ),
@@ -223,7 +216,6 @@ impl ApolloConnectorInstruments {
                     APOLLO_OPERATION_ID_ATTRIBUTE.to_string(),
                     ConnectorSelector::RequestContext {
                         request_context: APOLLO_OPERATION_ID.to_string(),
-                        redact: None,
                         default: None,
                     },
                 ),
