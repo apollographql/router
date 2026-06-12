@@ -444,42 +444,6 @@ commands:
           path: ./codecov_report.json
 
 jobs:
-  check_paths:
-    executor: amd_linux_build
-    steps:
-      - checkout
-      - run:
-          name: Check if source files changed
-          command: |
-            # Always run tests on dev branch (post-merge full matrix)
-            if [ "$CIRCLE_BRANCH" = "dev" ]; then
-              mkdir -p /tmp/path_filter
-              echo "true" > /tmp/path_filter/run_tests
-              echo "On dev branch — tests will run"
-              exit 0
-            fi
-            git fetch origin dev --depth=1
-            BASE=$(git merge-base HEAD origin/dev 2>/dev/null || echo "HEAD~1")
-            CHANGED=$(git diff --name-only "$BASE" HEAD)
-            echo "Changed files:"
-            echo "$CHANGED"
-            RUN_TESTS=false
-            while IFS= read -r file; do
-              case "$file" in
-                apollo-router/src/*|apollo-router/tests/*|apollo-router/benches/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|xtask/*)
-                  RUN_TESTS=true
-                  break
-                  ;;
-              esac
-            done <<< "$CHANGED"
-            echo "RUN_TESTS=$RUN_TESTS"
-            mkdir -p /tmp/path_filter
-            echo "$RUN_TESTS" > /tmp/path_filter/run_tests
-      - persist_to_workspace:
-          root: /tmp/path_filter
-          paths:
-            - run_tests
-
   fmt_check:
     environment:
       <<: *common_job_environment
@@ -550,16 +514,29 @@ jobs:
         default: false
     executor: << parameters.platform >>
     steps:
-      - attach_workspace:
-          at: /tmp/path_filter
+      - checkout
       - run:
           name: Skip if no source files changed
           command: |
-            if [ "$(cat /tmp/path_filter/run_tests)" = "false" ]; then
-              echo "No source files changed — skipping test run"
-              circleci-agent step halt
+            # Always run on dev (post-merge) — CIRCLE_BRANCH is 'dev' for nightly triggers too
+            if [ "$CIRCLE_BRANCH" = "dev" ]; then
+              exit 0
             fi
-      - checkout
+            git fetch origin dev --depth=1
+            BASE=$(git merge-base HEAD origin/dev 2>/dev/null || echo "HEAD~1")
+            CHANGED=$(git diff --name-only "$BASE" HEAD)
+            echo "Changed files:"
+            echo "$CHANGED"
+            while IFS= read -r file; do
+              case "$file" in
+                apollo-router/src/*|apollo-router/tests/*|apollo-router/benches/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|xtask/*)
+                  echo "Source file changed: $file -- running tests"
+                  exit 0
+                  ;;
+              esac
+            done <<< "$CHANGED"
+            echo "No source files changed -- skipping tests"
+            circleci-agent step halt
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
@@ -1066,12 +1043,10 @@ workflows:
             parameters:
               platform: [amd_linux_build]
 
-      - check_paths
       - test:
           # this should be changed back to true on dev after release
           fuzz: false
           requires:
-            - check_paths
             - fmt_check
           matrix:
             parameters:
