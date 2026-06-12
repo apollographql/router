@@ -50,3 +50,19 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'
           show_full_output: true
+
+      - name: Post decision comment if agent did not
+        if: steps.team-check.outputs.is_member == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          RESULT=$(jq -r '.result // empty' /home/runner/work/_temp/claude-execution-output.json)
+          [ -z "$RESULT" ] && exit 0
+
+          EXISTING=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comments --json comments \
+            | jq -r '[.comments[] | select(.body | contains("## Code review"))] | length')
+
+          if [ "$EXISTING" -eq 0 ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$RESULT"
+          fi
