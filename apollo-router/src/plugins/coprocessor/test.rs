@@ -5241,18 +5241,13 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-<<<<<<< HEAD
-        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
-            .unwrap();
-=======
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
+            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
->>>>>>> origin/dev
 
         // k1 should be updated
         assert_eq!(
@@ -5289,18 +5284,13 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-<<<<<<< HEAD
-        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
-            .unwrap();
-=======
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
+            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
->>>>>>> origin/dev
 
         // k1 should be updated
         assert_eq!(
@@ -5334,13 +5324,8 @@ mod tests {
 
         // Use Selective config to only send "k1", not "key_not_sent"
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
-<<<<<<< HEAD
         let context_config = ContextConf::Selective(Arc::new(selective_keys));
-=======
-        let context_config =
-            ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
->>>>>>> origin/dev
 
         // Update context
         update_context_from_coprocessor(
@@ -5381,12 +5366,8 @@ mod tests {
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-<<<<<<< HEAD
             &ContextConf::Deprecated,
-=======
-            &context_conf,
             &keys_sent,
->>>>>>> origin/dev
         )
         .unwrap();
 
@@ -5429,7 +5410,7 @@ mod tests {
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
+            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
@@ -5482,7 +5463,7 @@ mod tests {
         update_context_from_coprocessor(
             &shared_context,
             returned_context,
-            &ContextConf::NewContextConf(NewContextConf::All),
+            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
@@ -6092,7 +6073,7 @@ mod tests {
             let service_stack = router_stage
                 .as_service(
                     mock_http_client,
-                    mock_router_service.boxed(),
+                    mock_router_service.boxed_clone(),
                     "http://test".to_string(),
                     Arc::new("".to_string()),
                     false,
@@ -7607,20 +7588,13 @@ mod tests {
             }
         }
 
-<<<<<<< HEAD
         fn create_error_connector_service() -> tower::util::BoxCloneService<
             request_service::Request,
             request_service::Response,
             BoxError,
         > {
-            tower::service_fn(|req: request_service::Request| async {
-=======
-        fn create_error_connector_service()
-        -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
-        {
             tower::service_fn(|req: request_service::Request| async move {
                 let subgraph_name = req.connector.id.subgraph_name.to_string();
->>>>>>> origin/dev
                 Ok(request_service::Response {
                     context: req.context,
                     subgraph_name,
@@ -7748,7 +7722,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -7813,7 +7787,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -7877,7 +7851,7 @@ mod tests {
                 request: SubgraphRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     uri: false,
                     method: false,
@@ -7900,6 +7874,9 @@ mod tests {
                         .subgraph_name("test_subgraph".to_string())
                         .build())
                 });
+            mock_subgraph_service
+                .expect_clone()
+                .returning(MockSubgraphService::new);
 
             // Mock coprocessor that captures headers
             let received_headers = Arc::new(std::sync::Mutex::new(None));
@@ -7946,7 +7923,7 @@ mod tests {
 
             let service = subgraph_stage.as_service(
                 mock_http_client,
-                mock_subgraph_service.boxed(),
+                mock_subgraph_service.boxed_clone(),
                 "http://test".to_string(),
                 "test_subgraph".to_string(),
                 false,
@@ -7990,7 +7967,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8039,7 +8016,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -8077,7 +8054,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8140,7 +8117,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
@@ -8205,7 +8182,7 @@ mod tests {
                 request: RouterRequestConf {
                     condition: Default::default(),
                     headers: true,
-                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    context: ContextConf::All,
                     body: false,
                     sdl: false,
                     path: false,
@@ -8271,7 +8248,7 @@ mod tests {
 
             let service = router_stage.as_service(
                 mock_http_client,
-                mock_router_service.boxed(),
+                mock_router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("schema".to_string()),
                 false,
