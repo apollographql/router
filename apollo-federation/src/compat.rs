@@ -267,93 +267,12 @@ fn coerce_arguments_default_values(
     }
 }
 
-/// Like [`coerce_arguments_default_values`] but preserves `= {}` defaults even when the
-/// input type has required fields. Used at subgraph-parse time to match graphql-js behavior:
-/// JS keeps `= {}` verbatim in the upgraded subgraph SDL regardless of required fields;
-/// the supergraph/API-schema path uses [`coerce_arguments_default_values`] directly, which
-/// still strips them there.
-fn coerce_arguments_default_values_keep_empty_object(
-    types: &IndexMap<Name, ExtendedType>,
-    arguments: &mut Vec<Node<InputValueDefinition>>,
-) {
-    for arg in arguments {
-        let arg = arg.make_mut();
-        let Some(default_value) = &mut arg.default_value else {
-            continue;
-        };
-        let is_empty_object =
-            matches!(default_value.as_ref(), Value::Object(fields) if fields.is_empty());
-        if coerce_value(types, default_value, &arg.ty, DefaultValueBehavior::Check).is_err() {
-            if is_empty_object {
-                // Restore `= {}` — coerce_value may have partially mutated the value before
-                // failing. Matches graphql-js parse-time behavior: keep `= {}` even when the
-                // input type has required fields with no defaults.
-                *default_value.make_mut() = Value::Object(Default::default());
-            } else {
-                arg.default_value = None;
-            }
-        }
-    }
-}
-
 /// Do graphql-js-style input coercion on default values. Invalid default values are silently
 /// removed from the schema.
 ///
 /// This is not what we would want to do for coercion in a real execution scenario, but it matches
 /// a behaviour in graphql-js so we can compare API schema results between federation-next and JS
 /// federation. We can consider removing this when we no longer rely on JS federation.
-pub(crate) fn coerce_schema_default_values(schema: &mut Schema) {
-    // Keep a copy of the types in the schema so we can mutate the schema while walking it.
-    let types = schema.types.clone();
-
-    for ty in schema.types.values_mut() {
-        match ty {
-            ExtendedType::Object(object) => {
-                let object = object.make_mut();
-                for field in object.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::Interface(interface) => {
-                let interface = interface.make_mut();
-                for field in interface.fields.values_mut() {
-                    let field = field.make_mut();
-                    coerce_arguments_default_values(&types, &mut field.arguments);
-                }
-            }
-            ExtendedType::InputObject(input_object) => {
-                let input_object = input_object.make_mut();
-                for field in input_object.fields.values_mut() {
-                    let field = field.make_mut();
-                    let Some(default_value) = &mut field.default_value else {
-                        continue;
-                    };
-
-                    if coerce_value(
-                        &types,
-                        default_value,
-                        &field.ty,
-                        DefaultValueBehavior::Check,
-                    )
-                    .is_err()
-                    {
-                        field.default_value = None;
-                    }
-                }
-            }
-            ExtendedType::Union(_) | ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                // Nothing to do
-            }
-        }
-    }
-
-    for directive in schema.directive_definitions.values_mut() {
-        let directive = directive.make_mut();
-        coerce_arguments_default_values(&types, &mut directive.arguments);
-    }
-}
-
 pub(crate) fn coerce_schema_values(schema: &mut Schema) {
     // Keep a copy of the types in the schema so we can mutate the schema while walking it.
     let types = schema.types.clone();
@@ -371,7 +290,7 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in object.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_arguments_default_values(&types, &mut field.arguments);
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
@@ -393,7 +312,7 @@ pub(crate) fn coerce_schema_values(schema: &mut Schema) {
                 );
                 for field in interface.fields.values_mut() {
                     let field = field.make_mut();
-                    coerce_arguments_default_values_keep_empty_object(&types, &mut field.arguments);
+                    coerce_arguments_default_values(&types, &mut field.arguments);
                     coerce_directive_application_values_ast(
                         &directive_definitions,
                         &types,
@@ -656,7 +575,7 @@ pub(crate) fn coerce_executable_values(schema: &Valid<Schema>, document: &mut Ex
 /// `printSchema(buildSchema()` in graphql-js.
 pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
     remove_non_semantic_directives(schema);
-    coerce_schema_default_values(schema);
+    coerce_schema_values(schema);
 }
 
 #[cfg(test)]
