@@ -30,4 +30,4 @@ Affected metrics:
 
 **Cardinality note:** each affected metric now produces two series per attribute combination — distinguishable by the `otel_scope_name` label. The legacy series can be filtered out via `{otel_scope_name="apollo/router/ucum"}` in queries once dashboards have migrated.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9633
