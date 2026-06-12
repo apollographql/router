@@ -82,6 +82,10 @@ mod uplink;
 
 pub(crate) mod allocator;
 #[doc(hidden)]
+#[deprecated(
+    since = "2.16.0",
+    note = "Will be removed in 3.0. Use opentelemetry_http::HeaderExtractor / opentelemetry_http::HeaderInjector directly."
+)]
 pub mod otel_compat;
 mod registry;
 
