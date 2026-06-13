@@ -1343,12 +1343,31 @@ static TRIE_SPEC_NAME_IN_SCHEMA_CONTINUE: &str = concat!(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use apollo_compiler::name;
 
     use super::*;
     use crate::link::Import;
     use crate::link::Purpose;
     use crate::link::spec::Version;
+    use crate::subgraph::typestate::Subgraph;
+
+    fn errors(schema: &str) -> Vec<String> {
+        // Note: we use `expand_links()` because currently it takes care of automatically adding
+        // directive definitions, and we don't want to bother with adding the @link definition
+        // to every example.
+        let actual_errors: BTreeSet<_> =
+            match Subgraph::parse("A", "", schema).and_then(|subgraph| subgraph.expand_links()) {
+                Ok(_) => Default::default(),
+                Err(error) => error
+                    .errors
+                    .into_iter()
+                    .map(|e| e.error.to_string())
+                    .collect(),
+            };
+        actual_errors.into_iter().collect()
+    }
 
     #[test]
     fn explicit_root_directive_import() -> Result<(), FederationError> {
@@ -1595,118 +1614,893 @@ mod tests {
         assert_eq!(tag_source.name_in_spec, Some(name!("tag")));
     }
 
+    /// TODO: In the JS codebase, malformed imports can generate multiple errors, we should mirror
+    ///       that behavior eventually.
     mod link_import {
         use super::*;
 
         #[test]
         fn errors_on_malformed_values() {
-            let schema = r#"
-                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
-                extend schema @link(
-                  url: "https://specs.apollo.dev/federation/v2.0",
-                  import: [
-                    2,
-                    { foo: "bar" },
-                    { name: "@key", badName: "foo"},
-                    { name: 42 },
-                    { as: "bar" },
-                   ]
-                )
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [2]
+              )
 
-                type Query {
-                  q: Int
-                }
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "`2` in @link(import:) argument must either be a string `\"<importedElement>\"` or an object `{ name: \"<importedElement>\", as: \"<alias>\" }`",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ foo: "bar" }]
+              )
 
-                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-            "#;
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{foo: \"bar\"}` in @link(import:) argument, field \"foo\" is not a known field",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "@key", badName: "foo" }]
+              )
 
-            let schema = Schema::parse(schema, "testSchema").unwrap();
-            let errors = LinksMetadata::from_schema(&schema).expect_err("should error");
-            // TODO Multiple errors
-            insta::assert_snapshot!(errors, @r###"`2` in @link(import:) argument must either be a string `"<importedElement>"` or an object `{ name: "<importedElement>", as: "<alias>" }`"###);
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"@key\", badName: \"foo\"}` in @link(import:) argument, field \"badName\" is not a known field",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: 42 }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: 42}` in @link(import:) argument, value for field \"name\" must be a string",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "42" }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"42\"}` in @link(import:) argument, value for field \"name\" is not a valid GraphQL name",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "" }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"\"}` in @link(import:) argument, value for field \"name\" is not a valid GraphQL name",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "@bar", as: "@" }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"@bar\", as: \"@\"}` in @link(import:) argument, value for field \"as\" is not a valid GraphQL name",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ as: "bar" }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{as: \"bar\"}` in @link(import:) argument, missing required field \"name\"",
+            ]
+            "###);
         }
 
         #[test]
         fn errors_on_mismatch_between_name_and_alias() {
-            let schema = r#"
-                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
-                extend schema @link(
-                  url: "https://specs.apollo.dev/federation/v2.0",
-                  import: [
-                    { name: "@key", as: "myKey" },
-                    { name: "FieldSet", as: "@fieldSet" },
-                  ]
-                )
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "@key", as: "myKey" }]
+              )
 
-                type Query {
-                  q: Int
-                }
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"@key\", as: \"myKey\"}` in @link(import:) argument, value for field \"as\" must start with \"@\" since value for field \"name\" does (\"@\" indicates a directive import)",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "FieldSet", as: "@fieldSet" }]
+              )
 
-                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-            "#;
-
-            let schema = Schema::parse(schema, "testSchema").unwrap();
-            let errors = LinksMetadata::from_schema(&schema).expect_err("should error");
-            // TODO Multiple errors
-            insta::assert_snapshot!(errors, @r###"For `{name: "@key", as: "myKey"}` in @link(import:) argument, value for field "as" must start with "@" since value for field "name" does ("@" indicates a directive import)"###);
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "For `{name: \"FieldSet\", as: \"@fieldSet\"}` in @link(import:) argument, value for field \"as\" must not start with \"@\" since value for field \"name\" does not (\"@\" indicates a directive import)",
+            ]
+            "###);
         }
 
         #[test]
         fn errors_on_importing_unknown_elements_for_known_features() {
-            let schema = r#"
-                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
-                extend schema @link(
-                  url: "https://specs.apollo.dev/federation/v2.0",
-                  import: [ "@foo", "key", { name: "@sharable" } ]
-                )
-
-                type Query {
-                  q: Int
-                }
-
-                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-            "#;
-
-            let schema = Schema::parse(schema, "testSchema").unwrap();
-            let errors = LinksMetadata::from_schema(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @r###"Cannot import unknown element "@foo"."###);
-
-            // TODO Support multiple errors, in the meantime we'll just clone the code and run again
-            let schema = r#"
-                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
-                extend schema @link(
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
                 url: "https://specs.apollo.dev/federation/v2.0",
-                import: [ "key", { name: "@sharable" } ]
-                )
+                import: ["@foo"]
+              )
 
-                type Query {
+              type Query {
                 q: Int
-                }
-
-                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-            "#;
-
-            let schema = Schema::parse(schema, "testSchema").unwrap();
-            let errors = LinksMetadata::from_schema(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @r###"Cannot import unknown element "key". Did you mean directive "@key"?"###);
-
-            let schema = r#"
-                extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
-                extend schema @link(
+              }
+            "#), @r###"
+            [
+                "Cannot import unknown element \"@foo\".",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
                 url: "https://specs.apollo.dev/federation/v2.0",
-                import: [ { name: "@sharable" } ]
+                import: ["key"]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import unknown element \"key\". Did you mean directive \"@key\"?",
+            ]
+            "###);
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema @link(
+                url: "https://specs.apollo.dev/federation/v2.0",
+                import: [{ name: "@sharable" }]
+              )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import unknown element \"@sharable\". Did you mean \"@shareable\"?",
+            ]
+            "###);
+        }
+    }
+
+    mod link_alias_and_import_conflicts {
+        use super::*;
+
+        #[test]
+        fn errors_for_same_identity_imported_twice() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot link feature \"https://specs.apollo.dev/federation\" since it has already been linked in the schema.",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_containing_double_underscore() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/f__oo/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot link feature \"https://custom.dev/f__oo\" as \"f__oo\" since it contains \"__\". Please rename to a compliant name via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_containing_double_underscore() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/f__oo/v1.0", as: "foo")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        // See the relevant code in `LinksMetadata.add_link()` for why we have this exception. That
+        // exception and this test may be removed in the future once we have dropped support for the
+        // bugged compositions that necessitate the exception.
+        #[test]
+        fn allows_exception_in_double_underscore_validation_for_federation_namespaced_tag_and_inaccessible()
+         {
+            insta::assert_debug_snapshot!(errors(r#"
+              schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+                @link(
+                  url: "https://specs.apollo.dev/inaccessible/v0.2"
+                  as: "federation__inaccessible"
+                  for: SECURITY
+                )
+                @link(url: "https://specs.apollo.dev/tag/v0.3", as: "federation__tag") {
+                query: Query
+              }
+
+              directive @federation__tag(
+                name: String!
+              ) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+              directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+              directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+              directive @join__field(
+                graph: join__Graph
+                requires: join__FieldSet
+                provides: join__FieldSet
+                type: String
+                external: Boolean
+                override: String
+                usedOverridden: Boolean
+              ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+              directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+              directive @join__implements(
+                graph: join__Graph!
+                interface: String!
+              ) repeatable on OBJECT | INTERFACE
+
+              directive @join__type(
+                graph: join__Graph!
+                key: join__FieldSet
+                extension: Boolean! = false
+                resolvable: Boolean! = true
+                isInterfaceObject: Boolean! = false
+              ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+              directive @join__unionMember(
+                graph: join__Graph!
+                member: String!
+              ) repeatable on UNION
+
+              directive @link(
+                url: String
+                as: String
+                for: link__Purpose
+                import: [link__Import]
+              ) repeatable on SCHEMA
+
+              scalar join__FieldSet
+
+              enum join__Graph {
+                S @join__graph(name: "s", url: "")
+              }
+
+              scalar link__Import
+
+              enum link__Purpose {
+                SECURITY
+                EXECUTION
+              }
+
+              type Query @join__type(graph: S) {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_ending_in_underscore() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/foo_/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot link feature \"https://custom.dev/foo_\" as \"foo_\" since it ends in \"_\". Please rename to a compliant name via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_ending_in_underscore() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/foo_/v1.0", as: "foo")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_is_not_a_valid_graphql_name() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/0foo/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot link feature \"https://custom.dev/0foo\" as \"0foo\" since it is not a valid GraphQL name. Please rename to a compliant name via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_that_is_not_a_valid_graphql_name() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/0foo/v1.0", as: "foo")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        // See the relevant code in `LinksMetadata.add_link()` for why we have this exception. That
+        // exception and this test may be removed in the future during a major version bump.
+        #[test]
+        fn allows_exception_in_graphql_name_validation_for_period_and_hyphen() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/f-o.o/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_conflicts_with_past_namespaced_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [{ name: "@key", as: "@foo__key" }]
+                )
+                @link(url: "https://custom.dev/foo/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@key\" as \"@foo__key\" from feature \"https://specs.apollo.dev/federation\" since it can be confused with a namespaced name from another linked feature \"https://custom.dev/foo\". Please rename the import or feature to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_that_conflicts_with_past_namespaced_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [{ name: "@key", as: "@foo__key" }]
+                )
+                @link(url: "https://custom.dev/foo/v1.0", as: "bar")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_conflicts_with_future_namespaced_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "Foo", as: "federation__Foo" }]
                 )
 
-                type Query {
+              type Query {
                 q: Int
-                }
+              }
+            "#), @r###"
+            [
+                "Cannot import \"Foo\" as \"federation__Foo\" from feature \"https://custom.dev/foo\" since it can be confused with a namespaced name from another linked feature \"https://specs.apollo.dev/federation\". Please rename the import or feature to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
 
-                directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-            "#;
+        #[test]
+        fn succeeds_renaming_spec_name_that_conflicts_with_future_namespaced_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", as: "bar")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "Foo", as: "federation__Foo" }]
+                )
 
-            let schema = Schema::parse(schema, "testSchema").unwrap();
-            let errors = LinksMetadata::from_schema(&schema).expect_err("should error");
-            insta::assert_snapshot!(errors, @r###"Cannot import unknown element "@sharable". Did you mean "@shareable"?"###);
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_conflicts_with_past_default_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+                @link(url: "https://custom.dev/key/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@key\" from feature \"https://specs.apollo.dev/federation\" since it can be confused with a namespaced name from another linked feature \"https://custom.dev/key\". Please rename the import or feature to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_that_conflicts_with_past_default_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+                @link(url: "https://custom.dev/key/v1.0", as: "foo")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_conflicts_with_future_default_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "@foo", as: "@federation" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@foo\" as \"@federation\" from feature \"https://custom.dev/foo\" since it can be confused with a namespaced name from another linked feature \"https://specs.apollo.dev/federation\". Please rename the import or feature to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_that_conflicts_with_future_default_directive() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", as: "bar")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "@foo", as: "@federation" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_spec_name_in_schema_that_conflicts_with_another_spec_name_in_schema() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/federation/v1.0")
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot link feature https://custom.dev/federation as \"federation\" since another feature \"https://specs.apollo.dev/federation\" already uses that alias. Please rename the feature to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_spec_name_that_conflicts_with_another_spec_name_in_schema() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(url: "https://custom.dev/federation/v1.0", as: "foo")
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_namespaced_import_that_is_not_a_no_op_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [{ name: "@key", as: "@federation__requires" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@key\" as \"@federation__requires\" from feature \"https://specs.apollo.dev/federation\" since it can be confused with the namespaced name for \"@requires\". Please rename the import to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_for_namespaced_import_that_is_a_no_op_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [{ name: "@key", as: "@federation__key" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_default_directive_import_that_is_not_a_no_op_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  as: "bar"
+                  import: [{ name: "@baz", as: "@bar" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@baz\" as \"@bar\" from feature \"https://custom.dev/foo\" since it can be confused with the namespaced name for \"@foo\". Please rename the import to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_for_default_directive_import_that_is_a_no_op_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0")
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  as: "bar"
+                  import: [{ name: "@foo", as: "@bar" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_imports_of_one_element_to_different_names() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: ["@key", { name: "@key", as: "@foo" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@key\" as \"@foo\" from feature \"https://specs.apollo.dev/federation\" since it was previously imported as \"@key\". Please remove one of these imports.",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_for_imports_of_one_element_to_same_name() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [
+                    { name: "@key", as: "@foo" }
+                    "@requires"
+                    { name: "@key", as: "@foo" }
+                  ]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_import_name_in_schema_that_already_exists_in_different_spec() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "@foo", as: "@key" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@foo\" as \"@key\" from feature \"https://custom.dev/foo\" since it was previously imported from feature \"https://specs.apollo.dev/federation\". Please rename the import to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_import_name_that_already_exists_in_different_spec() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [{ name: "@key", as: "@bar" }]
+                )
+                @link(
+                  url: "https://custom.dev/foo/v1.0"
+                  import: [{ name: "@foo", as: "@key" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_import_name_in_schema_that_already_exists_in_same_spec() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: ["@key", { name: "@requires", as: "@key" }]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@requires\" as \"@key\" from feature \"https://specs.apollo.dev/federation\" since it was previously imported for \"@key\". Please rename the import to avoid conflicts via \"as\".",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_renaming_import_name_that_already_exists_in_same_spec() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: [
+                    { name: "@key", as: "@requires" }
+                    { name: "@requires", as: "@key" }
+                  ]
+                )
+
+              type Query {
+                q: Int
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_used_shadowed_directive_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+              directive @federation__key(
+                fields: federation__FieldSet!
+                resolvable: Boolean = true
+              ) repeatable on OBJECT | INTERFACE
+
+              scalar federation__FieldSet
+
+              type Query {
+                users: [User!]!
+              }
+
+              type User @federation__key(fields: "id") {
+                id: ID!
+                name: String!
+              }
+            "#), @r###"
+            [
+                "Cannot import \"@key\" from feature \"https://specs.apollo.dev/federation\" since there's a used definition for the namespaced name \"@federation__key\". Please switch usages of the namespaced name to the import name and remove the definition.",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_for_unused_shadowed_directive_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+              directive @federation__key(
+                fields: federation__FieldSet!
+                resolvable: Boolean = true
+              ) repeatable on OBJECT | INTERFACE
+
+              scalar federation__FieldSet
+
+              type Query {
+                users: [User!]!
+              }
+
+              type User @key(fields: "id") {
+                id: ID!
+                name: String!
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn errors_for_used_shadowed_type_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: ["FieldSet"]
+                )
+
+              scalar federation__FieldSet
+
+              type Query {
+                users: [User!]!
+              }
+
+              type User {
+                id: ID!
+                fieldSet: federation__FieldSet!
+              }
+            "#), @r###"
+            [
+                "Cannot import \"FieldSet\" from feature \"https://specs.apollo.dev/federation\" since there's a used definition for the namespaced name \"federation__FieldSet\". Please switch usages of the namespaced name to the import name and remove the definition.",
+            ]
+            "###);
+        }
+
+        #[test]
+        fn succeeds_for_unused_shadowed_type_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: ["FieldSet"]
+                )
+
+              scalar federation__FieldSet
+
+              type Query {
+                users: [User!]!
+              }
+
+              type User {
+                id: ID!
+                fieldSet: String!
+              }
+            "#), @"[]");
+        }
+
+        #[test]
+        fn succeeds_for_shadowed_type_import_used_in_shadowed_import() {
+            insta::assert_debug_snapshot!(errors(r#"
+              extend schema
+                @link(
+                  url: "https://specs.apollo.dev/federation/v2.0"
+                  import: ["@key", "FieldSet"]
+                )
+
+              directive @federation__key(
+                fields: federation__FieldSet!
+                resolvable: Boolean = true
+              ) repeatable on OBJECT | INTERFACE
+
+              scalar federation__FieldSet
+
+              type Query {
+                users: [User!]!
+              }
+
+              type User {
+                id: ID!
+                fieldSet: String!
+              }
+            "#), @"[]");
         }
     }
 
