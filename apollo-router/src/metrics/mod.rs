@@ -2611,8 +2611,7 @@ mod test {
                 "Total number of request bytes for subgraph fetches",
                 42u64
             );
-            let emissions =
-                collect_emissions_for("apollo.router.operations.fetch.request_size");
+            let emissions = collect_emissions_for("apollo.router.operations.fetch.request_size");
             assert_eq!(
                 emissions,
                 vec![
@@ -2641,8 +2640,7 @@ mod test {
                 "Duration of Apollo Uplink fetches.",
                 0.25
             );
-            let emissions =
-                collect_emissions_for("apollo.router.uplink.fetch.duration.seconds");
+            let emissions = collect_emissions_for("apollo.router.uplink.fetch.duration.seconds");
             // Legacy keeps the `.seconds`-suffixed OTel name; secondary drops it and sets unit=s.
             assert_eq!(
                 emissions,
@@ -2674,8 +2672,7 @@ mod test {
                 );
                 // drop at end of scope writes elapsed seconds to both instruments
             }
-            let emissions =
-                collect_emissions_for("apollo.router.operations.coprocessor.duration");
+            let emissions = collect_emissions_for("apollo.router.operations.coprocessor.duration");
             assert_eq!(
                 emissions,
                 vec![
