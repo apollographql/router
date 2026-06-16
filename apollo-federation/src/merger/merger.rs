@@ -628,7 +628,7 @@ impl Merger {
         // Match graphql-js `printSchema(buildSchema(...))` behavior: argument and input-field
         // defaults that cannot be coerced to their types (for example `{}` when the input object
         // has required fields) are removed rather than left on the composed supergraph SDL.
-        crate::compat::coerce_schema_default_values(merged.schema_mut());
+        crate::compat::coerce_schema_values(merged.schema_mut());
 
         // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
         // because they refer to a document they don't know about (the merged-but-not-returned

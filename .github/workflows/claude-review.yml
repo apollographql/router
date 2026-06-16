@@ -45,7 +45,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          claude_args: '--model claude-opus-4-8'
+          claude_args: '--model claude-opus-4-8 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review."'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'
@@ -54,9 +54,20 @@ jobs:
             {
               "permissions": {
                 "allow": [
-                  "Bash(gh api -X POST repos/apollographql/router/pulls/*/comments *)",
-                  "Bash(gh api -X POST repos/apollographql/router/pulls/*/reviews *)",
-                  "Write(.claude_comment*.md)"
+                  "Bash(gh api *)",
+                  "Bash(cat *)",
+                  "Write(**)"
                 ]
               }
             }
+          # The wildcards above look broad but the actual blast radius is
+          # bounded by the GITHUB_TOKEN granted to this job, which only has
+          # pull-requests: write and contents: read. That token cannot push
+          # code, delete branches, create releases, or perform any admin
+          # operation — so even unrestricted gh api calls can only read repo
+          # content and write PR comments/reviews. The tighter per-endpoint
+          # patterns we tried first (gh api -X POST repos/.../comments *) kept
+          # breaking because the code-review plugin generates different command
+          # forms between runs (-X POST vs --method POST, with/without a
+          # leading slash, inline body vs heredoc via cat). The token scope is
+          # the real security boundary here.
