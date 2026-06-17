@@ -142,7 +142,7 @@ pub(crate) struct RouterLimitsConfig {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
-    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.
+    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.
     ///
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".

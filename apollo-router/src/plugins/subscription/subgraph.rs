@@ -606,7 +606,7 @@ fn get_websocket_request(
     opentelemetry::global::get_text_map_propagator(|propagator| {
         propagator.inject_context(
             &prepare_context(tracing::Span::current().context()),
-            &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
+            &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
         );
     });
 
