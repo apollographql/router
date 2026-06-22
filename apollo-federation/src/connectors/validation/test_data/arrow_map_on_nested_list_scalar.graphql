@@ -6,13 +6,17 @@ extend schema
 
 @source(name: "api", http: { baseURL: "http://127.0.0.1" })
 
-# Focused repro of the connect/v0.4 force-upgrade diagnostic seen on
-# `apollo-constellation` (ashby `generateReport`): a renamed arrow-method
-# projection over a nested-list scalar field. This is NOT a group selection
-# (`data { ... }`); it is `data: data->map(...)`. Under the 2.14.1 connector
-# validation it was reported as `GROUP_SELECTION_IS_NOT_OBJECT` ("selects a
-# group `data {}` … is of type `String`"), which mischaracterizes both the
-# construct and the (`[[String]]`) type.
+# A renamed arrow-method projection over a nested-list scalar field
+# (`data: data->map(...)` where `ReportData.data: [[String]]`). This is a
+# scalar projection, NOT a group selection (`data { ... }`), so it must
+# validate cleanly.
+#
+# Regression test: this previously emitted a false-positive
+# `GROUP_SELECTION_IS_NOT_OBJECT` ("selects a group `data {}` … is of type
+# `String`") because the validator treated every `Array`-shaped selection as
+# a group. It now only treats a list whose *element* shape is an object as a
+# group. Surfaced while force-upgrading apollo-constellation connector
+# subgraphs (ashby `generateReport`) from connect/v0.3 to v0.4.
 type Query {
     report: ReportData
       @connect(

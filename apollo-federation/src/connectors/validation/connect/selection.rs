@@ -576,6 +576,28 @@ impl<'schema> SelectionValidator<'schema> {
         once(self.root).chain(self.path.iter().copied())
     }
 
+    /// Whether a selected field's value shape implies a group selection
+    /// (`field { ... }`), which requires the field's GraphQL type to be an object.
+    ///
+    /// An `Object` shape is a group selection. An `Array` shape is a group
+    /// selection only when its element shape is itself a group — i.e. a list of
+    /// objects. A list of scalars (for example `data: data->map(@->map(@->toString))`
+    /// over a `[[String]]` field) is a scalar projection, not a group selection,
+    /// so it must not require an object type.
+    fn shape_implies_group_selection(shape: &Shape) -> bool {
+        match shape.case() {
+            ShapeCase::Object { .. } => true,
+            ShapeCase::Array { prefix, tail } => {
+                prefix.iter().any(Self::shape_implies_group_selection)
+                    || Self::shape_implies_group_selection(tail)
+            }
+            ShapeCase::One(shapes) => shapes.iter().any(Self::shape_implies_group_selection),
+            ShapeCase::All(shapes) => shapes.iter().any(Self::shape_implies_group_selection),
+            // `ShapeCase::Name` is a placeholder; scalars/leaves are not groups.
+            _ => false,
+        }
+    }
+
     fn walk_selection_with_shape(
         &mut self,
         type_ref: SchemaTypeRef<'schema>,
@@ -648,13 +670,10 @@ impl<'schema> SelectionValidator<'schema> {
                         self.seen_fields
                             .push((type_ref.name().clone(), field_def.name.clone()));
 
-                        // Check if this field has subselections (group selection)
-                        // Object/Array shapes correspond to GraphQL object/list types with subselections
-                        let has_subselection = match field_shape.case() {
-                            ShapeCase::Object { .. } => true,
-                            ShapeCase::Array { .. } => true,
-                            _ => false, // ShapeCase::Name is a placeholder, don't assume subselections
-                        };
+                        // Check if this field has subselections (group selection).
+                        // An object shape (or a list of objects) is a group selection; a
+                        // list of scalars is a scalar projection, not a group selection.
+                        let has_subselection = Self::shape_implies_group_selection(field_shape);
 
                         if let Some(field_type_ref) =
                             SchemaTypeRef::new(self.schema, inner_type_name)
