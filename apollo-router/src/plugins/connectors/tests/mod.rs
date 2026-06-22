@@ -286,14 +286,17 @@ async fn test_root_field_plus_entity() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
+    // The `/users/1` and `/users/2` entity fetches run in parallel after the
+    // root `/users` fetch resolves, so we can't rely on their wire ordering.
+    // Use Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
@@ -414,14 +417,17 @@ async fn test_entity_references() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/posts"),
+    // The two per-user fetches run in parallel after the root /posts fetch,
+    // so their arrival order at the mock server is non-deterministic. Use
+    // Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/posts")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
@@ -693,29 +699,31 @@ async fn test_override_headers_with_config() {
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  // This is additive to the existing forwarding rule
-                  {
-                    "propagate": {
-                      "named": "x-forward-2",
-                      "rename": "x-forward"
+                  "request": {
+                    "operations": [
+                    // This is additive to the existing forwarding rule
+                    {
+                      "propagate": {
+                        "named": "x-forward-2",
+                        "rename": "x-forward"
+                      }
+                    },
+                    // This is an override
+                    {
+                      "insert": {
+                        "name": "x-insert",
+                        "value": "inserted-by-config"
+                      }
+                    },
+                    // This is an override
+                    {
+                      "insert": {
+                        "name": "x-insert-multi-value",
+                        "value": "third,fourth"
+                      }
                     }
-                  },
-                  // This is an override
-                  {
-                    "insert": {
-                      "name": "x-insert",
-                      "value": "inserted-by-config"
-                    }
-                  },
-                  // This is an override
-                  {
-                    "insert": {
-                      "name": "x-insert-multi-value",
-                      "value": "third,fourth"
-                    }
+                    ]
                   }
-                  ]
                 }
               }
             }
@@ -786,13 +794,15 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "propagate": {
-                      "named": "x-forward",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "propagate": {
+                        "named": "x-forward",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }
@@ -867,13 +877,15 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "propagate": {
-                      "matching": ".+?forward",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "propagate": {
+                        "matching": ".+?forward",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }
@@ -953,13 +965,15 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
             "headers": {
               "connector": {
                 "all": {
-                  "request": [
-                  {
-                    "remove": {
-                      "named": "x-insert",
-                    }
-                  },
-                  ]
+                  "request": {
+                    "operations": [
+                    {
+                      "remove": {
+                        "named": "x-insert",
+                      }
+                    },
+                    ]
+                  }
                 }
               }
             }
@@ -1005,25 +1019,28 @@ async fn test_args_and_this_in_header() {
     )
     .await;
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new()
-                .method("GET")
-                .header(
-                    HeaderName::from_str("x-from-args").unwrap(),
-                    HeaderValue::from_str("before 2 after").unwrap(),
-                )
-                .path("/users/2"),
-            Matcher::new()
-                .method("GET")
-                .header(
-                    HeaderName::from_str("x-from-this").unwrap(),
-                    HeaderValue::from_str("before 2 after").unwrap(),
-                )
-                .path("/users/2/nicknames"),
-        ],
-    );
+    // The user fetch (`/users/2`) and the nickname fetch (`/users/2/nicknames`)
+    // are both gated only on the `id` argument from the query — neither
+    // depends on the other's response — so the planner can dispatch them in
+    // parallel and wire-arrival order is non-deterministic. Use Plan::Parallel
+    // to assert without depending on order.
+    let plan = Plan::Parallel(vec![
+        Matcher::new()
+            .method("GET")
+            .header(
+                HeaderName::from_str("x-from-args").unwrap(),
+                HeaderValue::from_str("before 2 after").unwrap(),
+            )
+            .path("/users/2"),
+        Matcher::new()
+            .method("GET")
+            .header(
+                HeaderName::from_str("x-from-this").unwrap(),
+                HeaderValue::from_str("before 2 after").unwrap(),
+            )
+            .path("/users/2/nicknames"),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 mock! {
@@ -1127,14 +1144,17 @@ async fn test_operation_counter() {
             None,
         )
         .await;
-        req_asserts::matches(
-            &mock_server.received_requests().await.unwrap(),
-            vec![
-                Matcher::new().method("GET").path("/users"),
+        // The `/users/1` and `/users/2` entity fetches run in parallel after the
+        // root `/users` fetch resolves, so we can't rely on their wire ordering.
+        // Use Plan::Sequence + Plan::Parallel to assert without depending on order.
+        let plan = Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
                 Matcher::new().method("GET").path("/users/1"),
                 Matcher::new().method("GET").path("/users/2"),
-            ],
-        );
+            ]),
+        ]);
+        plan.assert_matches(&mock_server.received_requests().await.unwrap());
         assert_counter!(
             "apollo.router.operations.connectors",
             3,
@@ -1774,28 +1794,32 @@ async fn test_interface_object() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-          Matcher::new().method("GET").path("/itfs"),
-          Matcher::new().method("GET").path("/itfs/1/e"),
-          Matcher::new().method("GET").path("/itfs/2/e"),
-          Matcher::new().method("GET").path("/itfs/1"),
-          Matcher::new().method("GET").path("/itfs/2"),
-          Matcher::new()
-            .method("POST")
-            .path("/graphql")
-            .body(serde_json::json!({
-              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
-              "variables": {
-                "representations": [
-                  { "__typename": "Itf", "id": 1 },
-                  { "__typename": "Itf", "id": 2 }
-                ]
-              }
-            })),
-        ],
-    );
+    // The five entity-resolution fetches (per-id field fetches and the
+    // _entities POST) run in parallel after the root /itfs fetch, so their
+    // arrival order at the mock server is non-deterministic. Use
+    // Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/itfs")),
+        Plan::Parallel(vec![
+            Matcher::new().method("GET").path("/itfs/1/e"),
+            Matcher::new().method("GET").path("/itfs/2/e"),
+            Matcher::new().method("GET").path("/itfs/1"),
+            Matcher::new().method("GET").path("/itfs/2"),
+            Matcher::new()
+                .method("POST")
+                .path("/graphql")
+                .body(serde_json::json!({
+                  "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
+                  "variables": {
+                    "representations": [
+                      { "__typename": "Itf", "id": 1 },
+                      { "__typename": "Itf", "id": 2 }
+                    ]
+                  }
+                })),
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]

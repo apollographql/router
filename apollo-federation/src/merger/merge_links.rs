@@ -16,8 +16,8 @@ use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
-use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::merger::merge::MergedDirectiveInfo;
 use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
@@ -74,13 +74,20 @@ impl Merger {
                 let import = match linked_elem.import {
                     Some(import) => import,
                     None => {
-                        // If there is no explicit import, we create a synthetic import for merging
-                        let Some((_, directive_name_in_spec)) = directive.split_once("__") else {
-                            continue;
-                        };
-                        let Ok(element_name) = Name::new(directive_name_in_spec) else {
-                            continue;
-                        };
+                        // If there is no explicit import, we create a synthetic import for
+                        // merging. The directive name in the spec is either derived from the
+                        // "__" prefix (e.g., "join__field" -> "field") or, for directives
+                        // that match their spec's identity name (e.g., @requiresScopes from
+                        // the requiresScopes spec), from the linked element's name_in_spec.
+                        let element_name =
+                            if let Some((_, name_in_spec)) = directive.split_once("__") {
+                                let Ok(name) = Name::new(name_in_spec) else {
+                                    continue;
+                                };
+                                name
+                            } else {
+                                linked_elem.name_in_spec
+                            };
                         Arc::new(Import {
                             element: element_name,
                             is_directive: true,

@@ -29,7 +29,8 @@ telemetry:
 headers:
   all: # Header rules for all subgraphs
     request:
-      - propagate:
-          named: custom_id
-      - propagate:
-          named: replaceable
+      operations:
+        - propagate:
+            named: custom_id
+        - propagate:
+            named: replaceable

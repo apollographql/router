@@ -20,7 +20,6 @@ expression: cache_keys
     "source": "subgraph",
     "cacheControl": {
       "created": 0,
-      "maxAge": 86400,
       "noStore": true
     },
     "shouldStore": false,

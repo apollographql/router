@@ -885,3 +885,33 @@ mod override_tests {
         result.expect("Expected composition to succeed");
     }
 }
+
+#[test]
+fn coerces_unquoted_key_fields_in_fed1_schema() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: id) {
+                id: ID!
+                name: String
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type T @key(fields: "id") @extends {
+                id: ID! @external
+                value: Int
+            }
+        "#,
+    };
+
+    let result = compose_services(&[subgraph_a, subgraph_b]);
+    result.expect("Expected composition to succeed with unquoted @key fields argument");
+}

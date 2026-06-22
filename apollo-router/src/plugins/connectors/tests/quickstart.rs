@@ -1,3 +1,4 @@
+use super::req_asserts::Plan;
 use super::*;
 
 macro_rules! map {
@@ -265,14 +266,18 @@ async fn query_4() {
         }
         "###);
 
-    req_asserts::matches(
-        &server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users/1"),
-            Matcher::new().method("GET").path("/users/1/posts"),
+    // After the initial /users/1 + /users/1/posts sequence, the per-post
+    // /posts/{id} fetches and the deduped /users/1 author fetch all run in
+    // parallel; their arrival order at the mock server is non-deterministic.
+    // Use Plan::Sequence + Plan::Parallel to assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users/1")),
+        Plan::Fetch(Matcher::new().method("GET").path("/users/1/posts")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/posts/1"),
             Matcher::new().method("GET").path("/posts/2"),
             Matcher::new().method("GET").path("/users/1"),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&server.received_requests().await.unwrap());
 }

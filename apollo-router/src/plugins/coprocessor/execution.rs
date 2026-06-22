@@ -17,6 +17,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
+use crate::services::header_masking::MaskingRulesMap;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -95,6 +96,10 @@ impl ExecutionStage {
                 let sdl = sdl.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_execution_request_stage(
@@ -105,6 +110,7 @@ impl ExecutionStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -132,6 +138,10 @@ impl ExecutionStage {
 
                 async move {
                     let response: execution::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;
@@ -143,6 +153,7 @@ impl ExecutionStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -184,6 +195,7 @@ impl ExecutionStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_execution_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -192,6 +204,7 @@ async fn process_execution_request_stage<C>(
     request_config: ExecutionRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -211,11 +224,24 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
+            "Execution request headers (masked)"
+        );
+    }
+
     let body_to_send = request_config
         .body
         .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
     let query_plan = request_config
@@ -234,7 +260,11 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(None)
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -251,7 +281,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -337,6 +374,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -345,6 +383,7 @@ async fn process_execution_response_stage<C>(
     response_config: ExecutionResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<execution::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -372,9 +411,24 @@ where
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers));
+
+    // Log headers with masking for security
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
+            "Execution response headers (masked)"
+        );
+    }
+
     let body_to_send = filter_graphql_response_body(&first, &response_config.body);
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.get_context(&response.context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::execution_builder()
@@ -389,7 +443,11 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_response(None)
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
     // understand what could be sent to coprocessors and how that might affect their behavior
@@ -405,7 +463,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_response(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
@@ -431,7 +496,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -451,11 +521,16 @@ where
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
             let response_config_context = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             async move {
                 let body_to_send =
                     filter_graphql_response_body(&deferred_response, &response_config.body);
-                let context_to_send = response_config_context.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match response_config_context.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -470,48 +545,69 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
-                let co_processor_result = payload
-                    .call(
-                        generator_client,
-                        &generator_coprocessor_url,
-                        generator_map_context.clone(),
-                    )
-                    .await;
-                tracing::debug!(?co_processor_result, "co-processor returned");
-                let co_processor_output = co_processor_result?;
-
-                validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
-
-                // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
-                let incoming_payload_was_valid =
-                    crate::plugins::coprocessor::was_incoming_payload_valid(
-                        &deferred_response,
-                        &response_config.body,
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = super::scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
+                let co_processor_result = {
+                    let _timer = get_coprocessor_timer(PipelineStep::ExecutionResponse);
+                    payload
+                        .call(generator_client, &generator_coprocessor_url, Context::new())
+                        .await
+                };
+                {
+                    let co_processor_result_for_log = super::scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
                     );
-
-                // Third, process our reply and act on the contents. Our processing logic is
-                // that we replace "bits" of our incoming response with the updated bits if they
-                // are present in our co_processor_output. If they aren't present, just use the
-                // bits that we sent to the co_processor.
-                let new_deferred_response = handle_graphql_response(
-                    deferred_response,
-                    co_processor_output.body,
-                    response_validation,
-                    incoming_payload_was_valid,
-                    &response_config.body,
-                )?;
-
-                if let Some(context) = co_processor_output.context {
-                    update_context_from_coprocessor(
-                        &generator_map_context,
-                        context,
-                        &response_config_context,
-                    )?;
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
                 }
+                let result: Result<graphql::Response, BoxError> = async {
+                    let co_processor_output = co_processor_result?;
 
-                // We return the deferred_response into our stream of response chunks
-                Ok::<_, BoxError>(new_deferred_response)
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::ExecutionResponse,
+                    )?;
+
+                    // Check if the incoming deferred GraphQL response was valid according to GraphQL spec
+                    let incoming_payload_was_valid =
+                        crate::plugins::coprocessor::was_incoming_payload_valid(
+                            &deferred_response,
+                            &response_config.body,
+                        );
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+                    let new_deferred_response = handle_graphql_response(
+                        deferred_response,
+                        co_processor_output.body,
+                        response_validation,
+                        incoming_payload_was_valid,
+                        &response_config.body,
+                    )?;
+
+                    if let Some(context) = co_processor_output.context {
+                        update_context_from_coprocessor(
+                            &generator_map_context,
+                            context,
+                            &response_config_context,
+                            &keys_sent,
+                        )?;
+                    }
+
+                    Ok(new_deferred_response)
+                }
+                .await;
+                record_coprocessor_operation(PipelineStep::ExecutionResponse, result.is_ok());
+                result
             }
         })
         .map(|res: Result<graphql::Response, BoxError>| match res {
@@ -553,8 +649,10 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::services::execution;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -1100,6 +1198,87 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
+    }
+
+    #[tokio::test]
+    async fn deferred_chunk_metric_incremented_for_all_chunks() {
+        // Tests that apollo.router.operations.coprocessor is recorded for every deferred
+        // execution response chunk, not only the first.
+        //
+        // Bug: record_coprocessor_operation was missing from mapped_stream, so metrics
+        // were never recorded for deferred chunks even when the coprocessor was called.
+        // The execution stage calls the coprocessor unconditionally for all chunks.
+        async {
+            let execution_stage = ExecutionStage {
+                request: Default::default(),
+                response: ExecutionResponseConf {
+                    body: BodyConf::All(true),
+                    ..Default::default()
+                },
+            };
+
+            let mut mock_execution_service = MockExecutionService::new();
+            mock_execution_service
+                .expect_call()
+                .returning(|req: execution::Request| {
+                    Ok(execution::Response::fake_stream_builder()
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 1 }))
+                                .has_next(true)
+                                .build(),
+                        )
+                        .response(
+                            graphql::Response::builder()
+                                .data(json!({ "test": 2 }))
+                                .has_next(false)
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
+
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = serde_json_bytes::json!({
+                        "version": 1,
+                        "stage": "ExecutionResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            let service = execution_stage.as_service(
+                mock_http_client,
+                mock_execution_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("".to_string()),
+                false,
+            );
+
+            let request = execution::Request::fake_builder().build();
+            let mut res = service.oneshot(request).await.unwrap();
+            // Drain the stream to force the lazy mapped_stream to run
+            while res.response.body_mut().next().await.is_some() {}
+
+            // Both chunks trigger the coprocessor (execution stage has no condition check).
+            // Before the fix, the metric was only recorded for the first chunk (total: 1).
+            // After the fix, it is recorded for every chunk (total: 2).
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionResponse,
+                2,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
     }
 
     // Helper function to create execution stage for validation tests

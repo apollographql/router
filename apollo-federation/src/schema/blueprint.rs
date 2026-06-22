@@ -12,7 +12,6 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -23,6 +22,7 @@ use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::fed1_link_imports;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -55,16 +55,33 @@ impl FederationBlueprint {
         schema: &mut FederationSchema,
         directive: &Component<Directive>,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
-        if directive.name == DEFAULT_LINK_NAME {
-            let (alias, imports) =
-                LinkSpecDefinition::extract_alias_and_imports_on_missing_link_directive_definition(
-                    directive,
-                )?;
-            LinkSpecDefinition::latest().add_definitions_to_schema(schema, alias, imports)?;
-            Ok(schema.get_directive_definition(&directive.name))
-        } else {
-            Ok(None)
+        if directive.name != LINK_DIRECTIVE_NAME_IN_SPEC {
+            return Ok(None);
         }
+
+        // Scan all @link directives on the schema definition to find one targeting the link
+        // spec and extract its alias/imports. This ensures that when a subgraph has e.g.
+        // `@link(url: "link/v1.0", import: ["Purpose"])`, the imported name is used instead
+        // of the namespaced `link__Purpose`.
+        let (alias, imports) = schema
+            .schema()
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|d| d.name == directive.name)
+            .find_map(|d| {
+                let (alias, imports) =
+                    LinkSpecDefinition::extract_alias_and_imports_on_missing_link_directive_definition(d).ok()?;
+                if alias.is_some() || !imports.is_empty() {
+                    Some((alias, imports))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        LinkSpecDefinition::latest().add_definitions_to_schema(schema, alias, imports)?;
+        Ok(schema.get_directive_definition(&directive.name))
     }
 
     pub(crate) fn on_directive_definition_and_schema_parsed(
@@ -400,7 +417,19 @@ impl FederationBlueprint {
     }
 
     fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
+        // PORT_NOTE: Matches JS `expandKnownFeatures` which skips link, federation, and join.
+        // Link and federation are already handled earlier. Join is a supergraph-only spec
+        // whose elements are added by the merger, not during subgraph expansion.
+        // See: https://github.com/apollographql/federation/blob/8200b154/internals-js/src/federation.ts#L2238
+        let skip = [
+            Identity::link_identity(),
+            Identity::federation_identity(),
+            Identity::join_identity(),
+        ];
         for feature in schema.all_features()? {
+            if skip.contains(feature.identity()) {
+                continue;
+            }
             feature.add_elements_to_schema(schema)?;
         }
 

@@ -375,9 +375,15 @@ async fn service_call(
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
+                        let header_string = crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Response,
+                            None,
+                            &parts.headers,
+                        );
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.headers"),
-                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                            opentelemetry::Value::String(header_string.into()),
                         ));
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.status"),

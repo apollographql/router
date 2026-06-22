@@ -153,3 +153,4 @@ telemetry:
 | `http`            |                |                                                                       | Configuration specific to HTTP protocol.         |
 | `temporality`     |                |                                                                       | This configuration option is unused for tracing. |
 | `batch_processor` |                |                                                                       | The batch processor settings.                    |
+| `sampler`         | `always_on` \| `always_off` \| `0.0`–`1.0` | (not set) | Per-exporter sampling rate. Must not exceed `telemetry.exporters.tracing.common.sampler`. See [Per-exporter sampler](/router/configuration/telemetry/exporters/tracing/overview#per-exporter-sampler). |
