@@ -858,9 +858,7 @@ pub async fn start_callback_subgraph_server_with_payloads(
                         // the correct 200/202 (not 404) for subsequent next/complete
                         // callbacks. Without this the mock returns NOT_FOUND, which
                         // is what a real subgraph would treat as "subscription gone".
-                        subscription_ids
-                            .lock()
-                            .push(subscription_id.to_string());
+                        subscription_ids.lock().push(subscription_id.to_string());
 
                         tokio::spawn(send_callback_events_with_payloads(
                             callback_url.to_string(),
