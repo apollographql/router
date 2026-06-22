@@ -1,0 +1,12 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/arrow_map_on_nested_list_scalar.graphql
+---
+[
+    Message {
+        code: GroupSelectionIsNotObject,
+        message: "`@connect(selection:)` on `Query.report` selects a group `data {}`, but `ReportData.data` is of type `String` which is not an object.",
+        locations: [],
+    },
+]

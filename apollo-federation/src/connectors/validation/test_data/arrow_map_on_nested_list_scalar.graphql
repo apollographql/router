@@ -1,0 +1,30 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+# Focused repro of the connect/v0.4 force-upgrade diagnostic seen on
+# `apollo-constellation` (ashby `generateReport`): a renamed arrow-method
+# projection over a nested-list scalar field. This is NOT a group selection
+# (`data { ... }`); it is `data: data->map(...)`. Under the 2.14.1 connector
+# validation it was reported as `GROUP_SELECTION_IS_NOT_OBJECT` ("selects a
+# group `data {}` … is of type `String`"), which mischaracterizes both the
+# construct and the (`[[String]]`) type.
+type Query {
+    report: ReportData
+      @connect(
+        source: "api"
+        http: { GET: "/report" }
+        selection: """
+        data: data->map(@->map(@->toString))
+        """
+      )
+}
+
+type ReportData {
+    "List of rows; each row is a list of stringified cells."
+    data: [[String]]
+}
