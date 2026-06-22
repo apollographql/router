@@ -536,7 +536,11 @@ connector:
         let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
-            error!(name = "export_failure", message = "explicit error message", "");
+            error!(
+                name = "export_failure",
+                message = "explicit error message",
+                ""
+            );
         });
 
         let raw = buff.to_string();
@@ -544,8 +548,7 @@ connector:
         let parsed: serde_json::Value =
             serde_json::from_str(raw).expect("output should be valid JSON");
         assert_eq!(
-            parsed["message"],
-            "explicit error message",
+            parsed["message"], "explicit error message",
             "explicit message should be present"
         );
         assert!(

@@ -324,8 +324,10 @@ impl field::Visit for EventFieldCollector {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let name = field.name();
         let name = name.strip_prefix("r#").unwrap_or(name);
-        self.fields
-            .push((name.to_owned(), serde_json::Value::from(format!("{value:?}"))));
+        self.fields.push((
+            name.to_owned(),
+            serde_json::Value::from(format!("{value:?}")),
+        ));
     }
 }
 
@@ -452,7 +454,7 @@ where
             event.record(&mut collector);
             collector
                 .serialize_into(&mut serializer)
-                .map_err(|e| serde::ser::Error::custom(e))?;
+                .map_err(serde::ser::Error::custom)?;
 
             if self.config.display_target {
                 serializer.serialize_entry("target", meta.target())?;
