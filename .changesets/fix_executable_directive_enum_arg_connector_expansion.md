@@ -1,0 +1,7 @@
+### Fix `INTERNAL_ERROR` composing connector subgraphs alongside an executable directive whose argument is a custom type ([Issue #RH-1375](https://apollographql.atlassian.net/browse/RH-1375))
+
+Composing a supergraph that uses Apollo Connectors together with an executable directive whose argument references a custom input type (for example `directive @ownership(owners: [Owner!]) on FIELD` with `enum Owner`) failed satisfiability validation with `INTERNAL_ERROR: Cannot wrap an undefined/null type` (Rust: `Directive argument's inner type does not refer to an existing input type`).
+
+The root cause was that connector expansion produced an internally inconsistent supergraph: subgraph extraction copies executable directive definitions into *every* extracted subgraph, but the expanded supergraph's `@join__type` membership declared the directives' argument types absent from the synthetic connector subgraphs. When those types already existed in the merged supergraph (contributed by a non-connector subgraph), connector expansion skipped reconciling their membership onto the synthetic subgraphs. Connector expansion now stamps `@join__type` (and `@join__enumValue` / `@join__field`) membership for an executable directive's argument types (scalars, enums, and input objects, recursively) onto the synthetic subgraphs, so the expanded supergraph is valid by construction.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9635
