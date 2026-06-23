@@ -45,9 +45,10 @@ Amazon VPC Lattice relies on the `host` header to secure and route requests. You
 headers:
   all: # Header rules for all subgraphs
     request:
-      - propagate:
-          named: 'host'
-          rename: 'x-host'
+      operations:
+        - propagate:
+            named: 'host'
+            rename: 'x-host'
 ```
 
 The previous example renames a `host` header to `x-host`.
@@ -67,9 +68,10 @@ If your subgraphs rely on the `Authorization` header for authentication, your ro
 headers:
   all: # Header rules for all subgraphs
     request:
-      - propagate:
-          named: 'Authorization'
-          rename: 'X-Authorization'
+      operations:
+        - propagate:
+            named: 'Authorization'
+            rename: 'X-Authorization'
 ```
 
 Then, update your subgraphs to check for `Authorization` or your new header name.
