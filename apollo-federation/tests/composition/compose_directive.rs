@@ -957,17 +957,17 @@ mod inconsistent_imports {
     fn errors_when_different_exported_directives_have_the_same_name() {
         let subgraph_a = generate_subgraph(
             "subgraphA",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
-            r#"@composeDirective(name: "@foo")"#,
-            "directive @foo(name: String!) on FIELD_DEFINITION",
-            r#"@foo(name: "a")"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@baz"])"#,
+            r#"@composeDirective(name: "@baz")"#,
+            "directive @baz(name: String!) on FIELD_DEFINITION",
+            r#"@baz(name: "a")"#,
         );
         let subgraph_b = generate_subgraph(
             "subgraphA",
-            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@bar", as: "@foo" }])"#,
-            r#"@composeDirective(name: "@foo")"#,
-            "directive @foo(name: String!) on FIELD_DEFINITION",
-            r#"@foo(name: "a")"#,
+            r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@bar", as: "@baz" }])"#,
+            r#"@composeDirective(name: "@baz")"#,
+            "directive @baz(name: String!) on FIELD_DEFINITION",
+            r#"@baz(name: "a")"#,
         );
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
@@ -979,7 +979,7 @@ mod inconsistent_imports {
         );
         assert_eq!(
             error.to_string(),
-            r#"Composed directive "@foo" does not refer to the same directive in every subgraph"#
+            r#"Composed directive "@baz" does not refer to the same directive in every subgraph"#
         );
     }
 
@@ -1028,38 +1028,37 @@ mod inconsistent_imports {
         );
     }
 
-    // TODO: Re-work this test after further @link validations have been added.
-    // #[rstest]
-    // #[case("@join__field")]
-    // #[case("@join__graph")]
-    // #[case("@join__implements")]
-    // #[case("@join__type")]
-    // #[case("@join__unionMember")]
-    // #[case("@join__enumValue")]
-    // fn errors_when_exported_directives_conflict_with_join_spec_directives(#[case] directive: &str) {
-    //     let subgraph_a = generate_subgraph(
-    //         "subgraphA",
-    //         &r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@foo", as: "<DIRECTIVE>" }])"#.replace("<DIRECTIVE>", directive),
-    //         &r#"@composeDirective(name: "<DIRECTIVE>")"#.replace("<DIRECTIVE>", directive),
-    //         &r#"directive <DIRECTIVE>(name: String!) on FIELD_DEFINITION"#.replace("<DIRECTIVE>", directive),
-    //         &r#"<DIRECTIVE>(name: "a")"#.replace("<DIRECTIVE>", directive),
-    //     );
-    //     let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
-    //
-    //     let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err();
-    //     assert_eq!(result.len(), 1);
-    //     let error = result.first().unwrap();
-    //     assert_eq!(
-    //         error.code().definition().code().to_string(),
-    //         "DIRECTIVE_COMPOSITION_ERROR"
-    //     );
-    //     assert_eq!(
-    //         error.to_string(),
-    //         format!(
-    //             "Directive \"{directive}\" in subgraph \"subgraphA\" cannot be composed because it is not a member of a core feature"
-    //         )
-    //     );
-    // }
+    #[rstest]
+    #[case("@join__field")]
+    #[case("@join__graph")]
+    #[case("@join__implements")]
+    #[case("@join__type")]
+    #[case("@join__unionMember")]
+    #[case("@join__enumValue")]
+    fn errors_when_exported_directives_conflict_with_join_spec_directives(#[case] directive: &str) {
+        let subgraph_a = generate_subgraph(
+            "subgraphA",
+            &r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{ name: "@foo", as: "<DIRECTIVE>" }])"#.replace("<DIRECTIVE>", directive),
+            &r#"@composeDirective(name: "<DIRECTIVE>")"#.replace("<DIRECTIVE>", directive),
+            &r#"directive <DIRECTIVE>(name: String!) on FIELD_DEFINITION"#.replace("<DIRECTIVE>", directive),
+            &r#"<DIRECTIVE>(name: "a")"#.replace("<DIRECTIVE>", directive),
+        );
+        let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
+
+        let result = compose(vec![subgraph_a, subgraph_b]).unwrap_err().errors;
+        assert_eq!(result.len(), 1);
+        let error = result.first().unwrap();
+        assert_eq!(
+            error.code().definition().code().to_string(),
+            "INVALID_LINK_DIRECTIVE_USAGE"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Cannot import \"@foo\" as \"{directive}\" from feature \"https://specs.custom.dev/foo\" since it can be confused with a namespaced name from another linked feature \"https://specs.apollo.dev/join\". Please rename the import or feature to avoid conflicts via \"as\"."
+            )
+        );
+    }
 }
 
 mod validation {
@@ -1161,7 +1160,7 @@ mod composition {
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@tag"])
-                @link(url: "https://custom.dev/myspec/v1.0", import: [{ name: "@tag", as: "@mytag"}])
+                @link(url: "https://custom.dev/tag/v1.0", as: "mytag", import: [{ name: "@tag", as: "@mytag"}])
                 @composeDirective(name: "@mytag")
 
             directive @mytag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT
@@ -1208,9 +1207,12 @@ mod composition {
         assert_eq!(tag_directive.to_string(), r#"@tag(name: "c")"#);
 
         assert!(schema.to_string().contains(
-                r#"@link(url: "https://custom.dev/myspec/v1.0", import: [{name: "@tag", as: "@mytag"}])"#,
-            ),
-            "Expected link to custom spec to be in composed schema, but got schema:\n{schema}",
+            r#"@link(url: "https://custom.dev/tag/v1.0", as: "_0tag", import: [{name: "@tag", as: "@mytag"}])"#,
+        ));
+        assert!(
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.apollo.dev/tag/v0.3")"#,)
         );
     }
 
@@ -1285,11 +1287,9 @@ mod composition {
                 .to_string()
                 .contains(r#"@link(url: "https://custom.dev/myspec/v1.0", import: ["@tag"])"#)
         );
-        assert!(
-            schema
-                .to_string()
-                .contains(r#"@link(url: "https://specs.apollo.dev/tag/v0.3", import: [{name: "@tag", as: "@mytag"}])"#)
-        );
+        assert!(schema .to_string() .contains(
+            r#"@link(url: "https://specs.apollo.dev/tag/v0.3", as: "_0tag", import: [{name: "@tag", as: "@mytag"}])"#
+        ));
     }
 
     #[test]

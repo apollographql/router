@@ -672,7 +672,7 @@ fn duplicate_link_spec_application_is_rejected() {
         err.format_errors(),
         vec![(
             "INVALID_LINK_DIRECTIVE_USAGE".to_string(),
-            r#"[subgraphA] Invalid use of @link in schema: the @link for the link specification itself ("https://specs.apollo.dev/link/v1.0") is applied multiple times"#.to_string(),
+            r#"[subgraphA] Cannot link the link/core feature itself in `@link(url: "https://specs.apollo.dev/link/v1.0", import: ["@link", "Import"])` since it has already been linked in `@link(url: "https://specs.apollo.dev/link/v1.0", import: ["@link", "Purpose"])`"#.to_string(),
         )],
     );
 }
