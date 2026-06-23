@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/set_context.rs
+assertion_line: 310
 expression: response
 ---
 {
@@ -19,6 +20,15 @@ expression: response
       ],
       "extensions": {
         "service": "Subgraph1"
+      }
+    },
+    {
+      "message": "Missing field",
+      "path": [
+        "t"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
       }
     }
   ],
@@ -107,7 +117,7 @@ expression: response
     },
     "valueCompletion": [
       {
-        "message": "Cannot return null for non-nullable field Query.t",
+        "message": "Cannot return null for non-nullable type T",
         "path": []
       }
     ]

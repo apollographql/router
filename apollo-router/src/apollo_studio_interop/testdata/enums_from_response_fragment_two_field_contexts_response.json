@@ -1,0 +1,8 @@
+{
+  "first": {
+    "enumResponse": "SOME_VALUE_1"
+  },
+  "second": {
+    "enumResponse": "SOME_VALUE_2"
+  }
+}

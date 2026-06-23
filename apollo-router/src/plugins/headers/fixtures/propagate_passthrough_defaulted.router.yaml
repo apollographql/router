@@ -1,9 +1,10 @@
 headers:
   all:
     request:
-      - propagate:
-          named: a
-          rename: b
-      - propagate:
-          named: b
-          default: defaulted
+      operations:
+        - propagate:
+            named: a
+            rename: b
+        - propagate:
+            named: b
+            default: defaulted

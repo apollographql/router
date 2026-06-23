@@ -282,6 +282,45 @@ The router handles <code>@Skip</code> and <code>@include</code> directives throu
 
 During response processing, the router's [<code>Query::format_response</code>](https://github.com/apollographql/router/blob/115d7a1a170c415a5a3dfa03fa9261406c7e7868/apollo-router/src/spec/query.rs#L124) logic validates that subgraphs properly handled the conditional directives. If a subgraph fails to correctly apply <code>@Skip</code> or <code>@include</code> logic, the router automatically prunes unrequested fields and reorders the response to match the expected shape. This dual-layer approach ensures reliable execution even when subgraphs have inconsistent directive handling.
 
+## Tuning query planner limits
+
+Two experimental configuration options limit the work the query planner does before emitting a plan: `experimental_plans_limit` and `experimental_paths_limit`. Both live under `supergraph.query_planning` in the YAML config, alongside the cache configuration.
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    experimental_plans_limit: 10000 # default
+    experimental_paths_limit: null  # default — no limit
+```
+
+These options behave differently under stress, and the choice between them affects production behavior. Use the [`apollo.router.query_planning.plan.evaluated_plans` and `apollo.router.query_planning.plan.evaluated_paths`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-planning) histograms to choose between them.
+
+### `experimental_plans_limit`
+
+Limits the number of query plans the planner generates while exploring the supergraph.
+
+- Default: `10000`
+- When exceeded: Silently prunes branches and returns a valid but possibly suboptimal plan
+- Use case: Bound planning time and memory by reducing this value
+
+### `experimental_paths_limit`
+
+Limits the number of subgraph options the planner considers for any single field path during planning. Field paths can produce many options because fields might be provided by multiple subgraphs, and abstract types (unions and interfaces) require the planner to traverse each constituent object type. On complex schemas or queries, the per-path option count can grow large and dominate planning time.
+
+- Default: `None` — no limit
+- When exceeded: Aborts planning and fails the operation with `QueryPlanComplexityExceeded`
+- Use case: Abort planning quickly on complex queries instead of allowing them to dominate the planner
+
+### Choosing a configuration option based on symptoms
+
+| Symptom | What to look at | Configuration option |
+| --- | --- | --- |
+| Planner takes too long but produces a plan | High `evaluated_paths`, high `evaluated_plans` | Reduce `experimental_plans_limit` to bound exploration |
+| Planner runs out of memory or memory usage spikes during planning | `evaluated_plans` near the limit, high `apollo.router.query_planner.memory` peaks | Reduce `experimental_plans_limit` (e.g., `1000`) |
+| Specific queries fail with `QueryPlanComplexityExceeded` | `evaluated_paths` hitting `experimental_paths_limit` | Review the offending query, or raise `experimental_paths_limit` if intentional |
+
+To track the limits each router instance applies, the router emits `apollo.router.config.experimental_plans_limit` and `apollo.router.config.experimental_paths_limit` gauges (added in v2.14.1).
+
 ## Use recommended features
 
 GraphOS and router provide many features that help monitor and improve query planning performance, both at build time and runtime. 

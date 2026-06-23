@@ -539,7 +539,7 @@ fn lookup_feature_type_in_schema(
         bail!("Type {name} shouldn't be added without being attached to a @connect spec")
     };
     let actual_name = link.type_name_in_schema(name);
-    schema.get_type(actual_name)
+    schema.get_type(&actual_name)
 }
 
 fn lookup_scalar_in_schema(

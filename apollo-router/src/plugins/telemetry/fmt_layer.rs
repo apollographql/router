@@ -887,6 +887,7 @@ connector:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -1323,6 +1324,7 @@ subgraph:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)

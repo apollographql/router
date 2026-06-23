@@ -233,8 +233,8 @@ pub(crate) mod strip_ranges {
                     inner: TopLevelSelection::Named(subselect.strip_ranges()),
                     spec: self.spec,
                 },
-                TopLevelSelection::Path(path) => Self {
-                    inner: TopLevelSelection::Path(path.strip_ranges()),
+                TopLevelSelection::Value(lit) => Self {
+                    inner: TopLevelSelection::Value(lit.strip_ranges()),
                     spec: self.spec,
                 },
             }
@@ -330,13 +330,14 @@ pub(crate) mod strip_ranges {
                     LitExpr::Number(n) => LitExpr::Number(n.clone()),
                     LitExpr::Bool(b) => LitExpr::Bool(*b),
                     LitExpr::Null => LitExpr::Null,
-                    LitExpr::Object(map) => {
+                    LitExpr::LegacyObject(map) => {
                         let mut new_map = IndexMap::default();
                         for (key, value) in map {
                             new_map.insert(key.strip_ranges(), value.strip_ranges());
                         }
-                        LitExpr::Object(new_map)
+                        LitExpr::LegacyObject(new_map)
                     }
+                    LitExpr::Object(sub) => LitExpr::Object(sub.strip_ranges()),
                     LitExpr::Array(vec) => {
                         let mut new_vec = vec![];
                         for value in vec {

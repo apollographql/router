@@ -89,6 +89,11 @@ pub struct Response {
     /// The request context
     pub(crate) context: Context,
 
+    /// Originating federation subgraph name for this connector call. Carried
+    /// on the response (rather than passed through shared context) so parallel
+    /// connector calls don't race when resolving per-subgraph response rules.
+    pub(crate) subgraph_name: String,
+
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -99,6 +104,7 @@ pub struct Response {
 impl Response {
     pub(crate) fn error_new(
         context: Context,
+        subgraph_name: String,
         error: Error,
         message: impl Into<String>,
         response_key: ResponseKey,
@@ -113,6 +119,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name,
             transport_result: Err(error),
             mapped_response,
         }
@@ -143,6 +150,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name: String::new(),
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
@@ -276,6 +284,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     }
                     Ok(Response {
                         context: request.context,
+                        subgraph_name: original_subgraph_name,
                         transport_result: Ok(TransportResponse::MappingOnly),
                         mapped_response: mapped,
                     })
@@ -294,6 +303,8 @@ impl tower::Service<Request> for ConnectorRequestService {
                             &http_request.inner,
                             log_request_level,
                             request.connector.label.as_ref(),
+                            &request.context,
+                            &original_subgraph_name,
                         );
 
                         let result = if let Some(http_client) = http_client {
@@ -350,27 +361,22 @@ fn log_request(
     request: &http::Request<String>,
     log_request_level: Option<EventLevel>,
     label: &str,
+    context: &Context,
+    subgraph_name: &str,
 ) {
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
 
-        #[cfg(test)]
-        let headers = {
-            let mut headers: IndexMap<String, http::HeaderValue> = request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            headers.sort_keys();
-            headers
-        };
-        #[cfg(not(test))]
-        let headers = request.headers().clone();
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Request,
+            Some(subgraph_name),
+            request.headers(),
+        );
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(header_string.into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_METHOD,
