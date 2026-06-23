@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.2:subgraph:orga:type:Query:hash:ecb60e7b7532188345c92d38694462036d11b95b414d0e70830e1d4d091b1caa:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Query:hash:bfd88262844c798400bbb7e939dc0b49ae56d4e8d6a41f70845b79670c7f868d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [],
     "indexes": {
       "subgraph": true,
@@ -48,7 +48,7 @@ expression: cache_keys
     ]
   },
   {
-    "key": "version:1.2:subgraph:user:type:Query:hash:fc555f3f265988de90b287f312c77672cd2a07fafb57a74b6da284bf74de9d67:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:user:type:Query:hash:231d7d6fe14cd5d71107fd5aba84c25c9463f54efa056d968678dfbd6c432e73:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],
@@ -86,7 +86,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:9eca86265c1d56b08f7950048e8644af3524940e4bb4cba6f37feac0db0ddd24:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:186961676d3ec37a9d9a9859d66b9fd01ba3df61f4aa6e74d8abe05254822cd5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1"
