@@ -189,12 +189,11 @@ impl Storage {
                         for _ in 0..CACHE_TAG_CHANNEL_SIZE {
                             match cache_tag_rx.try_recv() {
                                 Ok(key) => {
-                                    keys.insert(key); 
+                                    keys.insert(key);
                                 }
-                                // Errors _should_ mean the channel is `empty`, but it's also
-                                // possible that it means the channel has been disconnected
+                                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
                                 Err(err) => {
-                                    tracing::debug!("error encounted while performing periodic maintenance: {err}");
+                                    tracing::debug!("maintenance queue disconnected: {err}");
                                     break
                                 }
                             }
@@ -1701,31 +1700,27 @@ mod tests {
             Ok(())
         }
 
-        /// Dropping the channel sender (by dropping `Storage`) while an item is being drained
-        /// causes `try_recv` to return `Err(Disconnected)`. The drain loop must break cleanly
-        /// rather than panic.
+        /// After the consumer processes the first item via `recv()`, the drain loop calls
+        /// `try_recv()`. When the channel is empty it must observe `Empty` and break cleanly
+        /// rather than spin. Note: dropping `storage` does NOT disconnect the channel — the
+        /// spawned worker task holds its own `Storage` clone (and thus its own sender), so
+        /// `Disconnected` is structurally unreachable. This test verifies the `Empty` break path.
         #[tokio::test]
-        async fn disconnected_sender_is_handled_gracefully() -> Result<(), BoxError> {
+        async fn idle_channel_terminates_drain_loop_cleanly() -> Result<(), BoxError> {
             let mock = Arc::new(RecordingMocks::default());
             let (_drop_tx, drop_rx) = broadcast::channel(2);
             let storage =
                 Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
 
-            // Queue one item, then drop the storage so the sender is disconnected. The item is
-            // still in the channel. When the consumer drains after consuming that first item via
-            // recv(), try_recv() will observe Disconnected rather than Empty and must break
-            // cleanly without panicking.
-            storage.send_to_maintenance_queue_for_test("disconnected-test-key".to_string());
-            drop(storage);
+            // Queue exactly one item. After the consumer pulls it via recv() and enters the drain
+            // loop, try_recv() immediately observes Empty and breaks — no extra Redis calls.
+            storage.send_to_maintenance_queue_for_test("idle-test-key".to_string());
 
-            // Yield a couple of times to give the consumer task a chance to run and observe the
-            // disconnected channel.
-            tokio::task::yield_now().await;
-            tokio::task::yield_now().await;
+            wait_for(|| mock.total_calls() >= 1).await;
 
-            // If we reach this line the consumer did not panic. The queued item may or may not
-            // have been processed depending on scheduler ordering — either is correct.
-            assert!(mock.total_calls() <= 1);
+            // Exactly one ZREMRANGEBYSCORE call for the single queued key — no extra calls from
+            // the drain loop spinning on an empty channel.
+            assert_eq!(mock.total_calls(), 1);
 
             Ok(())
         }
