@@ -2327,7 +2327,7 @@ async fn test_defer_is_not_buffered_with_compression() {
                         graphql_response
                     })
                 })
-                .boxed()
+                .boxed_clone()
         })
         .subgraph_hook(move |name, service| {
             if name != "accounts" {
@@ -2345,7 +2345,7 @@ async fn test_defer_is_not_buffered_with_compression() {
                         future.await
                     }
                 })
-                .boxed()
+                .boxed_clone()
         })
         .build_http_service()
         .await

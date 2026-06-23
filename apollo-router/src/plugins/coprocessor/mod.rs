@@ -560,22 +560,15 @@ pub(super) enum ContextConf {
 }
 
 impl ContextConf {
-<<<<<<< HEAD
     pub(crate) fn is_deprecated(&self) -> bool {
         matches!(self, Self::Deprecated)
     }
 
-    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
-        match self {
-            Self::None => None,
-            Self::All => Some(ctx.clone()),
-            Self::Deprecated => {
-=======
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => {
+            Self::None => None,
+            Self::All => {
                 let mut keys_sent = HashSet::new();
->>>>>>> origin/dev
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     keys_sent.insert(elt.key().clone());
                     (elt.key().clone(), elt.value().clone())
@@ -583,7 +576,7 @@ impl ContextConf {
                 new_ctx.id = ctx.id.clone();
                 Some((new_ctx, keys_sent))
             }
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::Deprecated => {
                 let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     keys_sent.insert(elt.key().clone());
@@ -593,16 +586,10 @@ impl ContextConf {
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-<<<<<<< HEAD
-                Some(new_ctx)
-            }
-            Self::Selective(context_keys) => {
-=======
                 Some((new_ctx, keys_sent))
             }
-            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+            Self::Selective(context_keys) => {
                 let mut keys_sent = HashSet::new();
->>>>>>> origin/dev
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
                         keys_sent.insert(elt.key().clone());
@@ -612,11 +599,7 @@ impl ContextConf {
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-<<<<<<< HEAD
-                Some(new_ctx)
-=======
                 Some((new_ctx, keys_sent))
->>>>>>> origin/dev
             }
         }
     }
@@ -676,15 +659,9 @@ pub(crate) fn update_context_from_coprocessor(
 ) -> Result<(), BoxError> {
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
-    let is_deprecated = context_config.is_deprecated();
-
     for (mut key, value) in context_returned.try_into_iter()? {
-<<<<<<< HEAD
         // Handle deprecated key names - convert back to actual key names
-        if is_deprecated {
-=======
         if context_config.is_deprecated() {
->>>>>>> origin/dev
             key = context_key_from_deprecated(key);
         }
 
@@ -692,27 +669,9 @@ pub(crate) fn update_context_from_coprocessor(
         target_context.insert_json_value(key, value);
     }
 
-<<<<<<< HEAD
-    // Delete keys that were sent but are missing from the returned context
-    // If the context config is selective, only delete keys that are in the selective list
-    match context_config {
-        ContextConf::Selective(context_keys) => {
-            target_context.retain(|key, _v| {
-                if keys_returned.contains(key) {
-                    return true;
-                } else if context_keys.contains(key) {
-                    return false;
-                }
-                true
-            });
-        }
-        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
-    }
-=======
     // Only delete keys that were SENT to the coprocessor but NOT returned.
     // Keys never sent (e.g. added concurrently by parallel subgraph stages) are preserved.
     target_context.retain(|key, _v| keys_returned.contains(key) || !keys_sent.contains(key));
->>>>>>> origin/dev
 
     Ok(())
 }

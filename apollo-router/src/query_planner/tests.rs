@@ -2244,27 +2244,18 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     let schema = include_str!("testdata/defer_depends_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
-        (
-            "X".into(),
-            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Y".into(),
-            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-        ),
-        (
-            "Z".into(),
-            Arc::new(mock_z_service) as Arc<dyn MakeSubgraphService>,
-        ),
+        ("X".into(), mock_x_service.boxed_clone()),
+        ("Y".into(), mock_y_service.boxed_clone()),
+        ("Z".into(), mock_z_service.boxed_clone()),
     ]);
-    let sf = Arc::new(FetchServiceFactory::new(
+    let sf = FetchService::new(
         schema.clone(),
         Default::default(),
         Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
         Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    ));
+    );
 
     let response = query_plan
         .execute(
