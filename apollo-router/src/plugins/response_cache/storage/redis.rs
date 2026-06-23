@@ -39,6 +39,8 @@ use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 
 pub(crate) type Config = super::config::Config;
 
+const CACHE_TAG_CHANNEL_SIZE: usize = 1000;
+
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
     data: serde_json_bytes::Value,
@@ -95,7 +97,7 @@ impl Storage {
         // for wrapped client
         storage.clone().create_client_pool().await?;
 
-        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
+        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(CACHE_TAG_CHANNEL_SIZE);
         let s = Self {
             storage,
             cache_tag_tx,
@@ -176,7 +178,32 @@ impl Storage {
                 tokio::select! {
                     biased;
                     _ = drop_rx.recv() => break,
-                    Some(cache_tag) = cache_tag_rx.recv() => storage.perform_maintenance_on_cache_tag(cache_tag).await
+                    Some(first_cache_tag) = cache_tag_rx.recv() => {
+                        // The main method of deduplication: using a HashSet. This will keep our
+                        // total commands sent to redis for ZSET removal lower than otherwise would
+                        // be the case
+                        let mut keys = HashSet::new();
+                        keys.insert(first_cache_tag);
+                        // We make sure that we have a hard limit for how long we loop, just in
+                        // case more tags are added to the queue than we can process at a time
+                        for _ in 0..CACHE_TAG_CHANNEL_SIZE {
+                            match cache_tag_rx.try_recv() {
+                                Ok(key) => {
+                                    keys.insert(key); 
+                                }
+                                // Errors _should_ mean the channel is `empty`, but it's also
+                                // possible that it means the channel has been disconnected
+                                Err(err) => {
+                                    tracing::debug!("error encounted while performing periodic maintenance: {err}");
+                                    break
+                                }
+                            }
+                        }
+
+                        for key in keys {
+                            storage.perform_maintenance_on_cache_tag(key).await
+                        }
+                    }
                 }
             }
         });
