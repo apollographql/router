@@ -1686,7 +1686,7 @@ mod tests {
             }
 
             // Wait until all distinct keys have been seen.
-            wait_for(|| mock.unique_keys_called() >= cool_count + 1).await;
+            wait_for(|| mock.unique_keys_called() > cool_count).await;
 
             // Exactly 5 unique keys, each processed at least once.
             assert_eq!(mock.unique_keys_called(), cool_count + 1);
@@ -1778,7 +1778,7 @@ mod tests {
 
             // Batch 2 — same key. Consumer must process it again, not skip it.
             storage.send_to_maintenance_queue_for_test(key.clone());
-            wait_for(|| mock.total_calls() >= after_batch1 + 1).await;
+            wait_for(|| mock.total_calls() > after_batch1).await;
 
             assert!(
                 mock.total_calls() >= 2,
