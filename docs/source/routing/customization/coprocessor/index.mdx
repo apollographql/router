@@ -250,24 +250,24 @@ UDS also supports HTTP/2:
 coprocessor:
   url: unix:///tmp/coprocessor.sock
   client:
-    experimental_http2: http2only
+    protocol: http2
 ```
 
 <HttpConnection type="coprocessor" />
 
-For example, to enable h2c (http2 cleartext) communication with a coprocessor you can use this configuration:
+For example, to enable h2c (HTTP/2 cleartext) communication with a coprocessor you can use this configuration:
 
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:8081
-  # Using an HTTP (not HTTPS) URL and experimental_http2: http2only results in connections that use h2c
+  # Using an HTTP (not HTTPS) URL and protocol: http2 results in connections that use h2c (HTTP/2 cleartext)
   client:
-    experimental_http2: http2only
+    protocol: http2
 ```
 
 #### Connection pool
 
-The router maintains a pool of connections to your coprocessor. Use `pool_idle_timeout` to set how long an idle connection stays in the pool before it's eligible for eviction. The default is 15 seconds. Set it to `null` to disable idle eviction entirely.
+The router maintains a pool of HTTP/1.1 connections to your coprocessor. Use `client.http1.pool_idle_timeout` to set how long an idle connection stays in the pool before it's eligible for eviction. The default is 90 seconds.
 
 Expired connections are evicted lazily: when the router fetches a connection from the pool to make a request, it discards any connection that has been idle longer than `pool_idle_timeout` and opens a fresh one.
 
@@ -275,7 +275,27 @@ Expired connections are evicted lazily: when the router fetches a connection fro
 coprocessor:
   url: http://service.example.com
   client:
-    pool_idle_timeout: 30s  # default: 15s; set to null to disable
+    http1:
+      pool_idle_timeout: 30s  # default: 90s
+```
+
+#### TLS configuration
+
+To connect to a coprocessor over HTTPS with a custom certificate authority, client certificate (mTLS), or both, configure the `client.tls` section:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: https://my-coprocessor.internal
+  client:
+    tls:
+      # PEM-encoded CA certificate bundle. Loaded from disk via file expansion.
+      certificate_authorities: "${file:./certs/ca.pem}"
+      # Set to false to trust only the supplied bundle (disables OS native store).
+      use_native_certificate_store: true
+      # Optional: present a client certificate for mutual TLS (mTLS).
+      client_authentication:
+        certificate_chain: "${file:./certs/client.pem}"
+        key: "${file:./certs/client.key}"
 ```
 
 ## Coprocessor request format
