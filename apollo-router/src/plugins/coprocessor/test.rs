@@ -7864,6 +7864,11 @@ mod tests {
             };
 
             let mut mock_subgraph_service = MockSubgraphService::new();
+
+            mock_subgraph_service
+                .expect_clone()
+                .returning(MockSubgraphService::new);
+
             mock_subgraph_service
                 .expect_call()
                 .returning(|req: subgraph::Request| {
