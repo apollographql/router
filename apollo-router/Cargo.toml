@@ -60,6 +60,7 @@ addr2line = "0.26.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.15.1" }
+apollo-http-client = "0.2"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -216,7 +217,7 @@ reqwest = { workspace = true, default-features = false, features = [
 ] }
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
-rustls = { version = "0.23.19", default-features = false }
+rustls = { version = "0.23.19", default-features = false, features = ["ring"] }
 rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.2.0"
 schemars.workspace = true

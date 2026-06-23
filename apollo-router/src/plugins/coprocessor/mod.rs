@@ -28,7 +28,6 @@ use tower::timeout::TimeoutLayer;
 use tower::util::MapFutureLayer;
 
 use crate::Context;
-use crate::configuration::shared::Client;
 use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
 use crate::error::Error;
@@ -183,16 +182,55 @@ where
     }
 }
 
-// Type alias for coprocessor HTTP client - uses HttpClientService with timeout
-type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
+// Adapter: RouterBody (UnsyncBoxBody) is !Sync; HttpClient requires B: Sync.
+// Bridges the gap by collecting to Bytes and re-wrapping the response body error.
+#[derive(Clone)]
+struct CoprocessorHttpClient(apollo_http_client::HttpClient);
+
+impl tower::Service<HttpRequest> for CoprocessorHttpClient {
+    type Response = HttpResponse;
+    type Error = BoxError;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<HttpResponse, BoxError>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        // Use fully qualified syntax to pin the body type, since HttpClient is generic over B.
+        type Req = http::Request<http_body_util::Full<bytes::Bytes>>;
+        <apollo_http_client::HttpClient as tower::Service<Req>>::poll_ready(&mut self.0, cx)
+            .map_err(Into::into)
+    }
+
+    fn call(&mut self, req: HttpRequest) -> Self::Future {
+        let context = req.context.clone();
+        let (parts, body) = req.http_request.into_parts();
+        // HttpClient is cheap to clone and its underlying pool is always ready.
+        let mut inner = self.0.clone();
+        Box::pin(async move {
+            // RouterBody (UnsyncBoxBody) is !Sync; Full<Bytes> satisfies HttpClient's B: Sync bound.
+            let body_bytes = body.collect().await?.to_bytes();
+            let new_req: http::Request<http_body_util::Full<bytes::Bytes>> =
+                http::Request::from_parts(parts, http_body_util::Full::new(body_bytes));
+            let resp = inner.call(new_req).await?;
+            let (resp_parts, resp_body) = resp.into_parts();
+            // Re-wrap body error: HttpClient returns BoxError, RouterBody expects axum::Error.
+            let router_body = RouterBody::new(resp_body.map_err(axum::Error::new));
+            Ok(HttpResponse {
+                http_response: http::Response::from_parts(resp_parts, router_body),
+                context,
+            })
+        })
+    }
+}
+
+type HTTPClientService = tower::timeout::Timeout<CoprocessorHttpClient>;
 
 #[async_trait::async_trait]
 impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let client_config = init.config.client.clone().unwrap_or_default();
-
         if matches!(
             init.config.router.request.context,
             ContextConf::Deprecated(true)
@@ -301,16 +339,8 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
             validate_coprocessor_url(url, "coprocessor.subgraph.all.response.url")?;
         }
 
-        // Use shared HttpClientService infrastructure instead of duplicated client creation
-        let tls_root_store =
-            crate::services::http::service::HttpClientService::native_roots_store();
-        let http_client_service =
-            crate::services::http::service::HttpClientService::from_config_for_coprocessor(
-                &tls_root_store,
-                client_config,
-            )?;
-
-        let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
+        let client = CoprocessorHttpClient(apollo_http_client::HttpClient::new(&init.config.client)?);
+        let client = TimeoutLayer::new(init.config.timeout).layer(client);
 
         // Masking rules are published by the headers plugin into request
         // context at router-service time; each coprocessor stage reads them
@@ -552,7 +582,8 @@ pub(super) struct SubgraphResponseConf {
 struct Conf {
     /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
     url: String,
-    client: Option<Client>,
+    #[serde(default)]
+    client: apollo_http_client::HttpClientConfig,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]

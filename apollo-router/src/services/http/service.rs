@@ -450,7 +450,11 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder();
+    // Use ring explicitly: both ring (fred) and aws-lc-rs (apollo-http-client) are in the
+    // dep tree, causing ClientConfig::builder() to panic on ambiguous auto-detection.
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let tls_builder = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?;
 
     Ok(match client_cert_config {
         Some(client_auth_config) => tls_builder

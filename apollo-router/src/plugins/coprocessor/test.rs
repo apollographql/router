@@ -6076,7 +6076,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "http2only"
+                    "protocol": "http2"
                 }
             }
         });
@@ -6099,7 +6099,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "enable"
+                    "protocol": "alpn"
                 }
             }
         });
@@ -6122,7 +6122,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "disable"
+                    "protocol": "http1"
                 }
             }
         });
