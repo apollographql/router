@@ -1476,9 +1476,9 @@ mod tests {
         use tower::BoxError;
 
         use super::SUBGRAPH_NAME;
+        use super::Storage;
         use super::common_document;
         use super::redis_config;
-        use super::Storage;
         use crate::metrics::FutureMetricsExt;
         use crate::plugins::response_cache::storage::CacheStorage;
 
@@ -1800,8 +1800,7 @@ mod tests {
                 successful_calls: successful.clone(),
             });
             let (_drop_tx, drop_rx) = broadcast::channel(2);
-            let storage =
-                Storage::mocked(&redis_config(false), false, mock, drop_rx).await?;
+            let storage = Storage::mocked(&redis_config(false), false, mock, drop_rx).await?;
 
             // One key will fail, two will succeed. All three are in the same drain batch.
             storage.send_to_maintenance_queue_for_test("error-key".to_string());
@@ -1835,8 +1834,7 @@ mod tests {
                 // All 200 sends are synchronous (no awaits), so the consumer cannot drain
                 // the channel between sends, keeping the count deterministic.
                 for i in 0..200 {
-                    storage
-                        .send_to_maintenance_queue_for_test(format!("overflow-metric-key-{i}"));
+                    storage.send_to_maintenance_queue_for_test(format!("overflow-metric-key-{i}"));
                 }
 
                 assert_counter!(
