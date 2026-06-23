@@ -604,6 +604,10 @@ impl Storage {
         let key = self.make_key(key);
         Ok(self.storage.client().await?.exists(key).await?)
     }
+
+    pub(crate) fn send_to_maintenance_queue_for_test(&self, key: String) {
+        self.send_to_maintenance_queue(key);
+    }
 }
 
 #[cfg(all(
@@ -1450,6 +1454,431 @@ mod tests {
             let invalidated = storage.invalidate_by_subgraph("S1", "subgraph").await?;
             assert_eq!(invalidated, 0);
             assert!(!storage.exists(&document_key).await?);
+
+            Ok(())
+        }
+    }
+
+    /// Tests specific to the maintenance consumer's batch-drain and deduplication behaviour.
+    mod maintenance_consumer {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        use fred::error::Error;
+        use fred::error::ErrorKind;
+        use fred::mocks::MockCommand;
+        use fred::mocks::Mocks;
+        use fred::types::Value;
+        use parking_lot::Mutex;
+        use tokio::sync::broadcast;
+        use tower::BoxError;
+
+        use super::SUBGRAPH_NAME;
+        use super::common_document;
+        use super::redis_config;
+        use super::Storage;
+        use crate::metrics::FutureMetricsExt;
+        use crate::plugins::response_cache::storage::CacheStorage;
+
+        /// Records every ZREMRANGEBYSCORE call made by the maintenance worker.
+        #[derive(Default, Clone, Debug)]
+        struct RecordingMocks {
+            /// key → call count
+            calls: Arc<Mutex<HashMap<String, usize>>>,
+        }
+
+        impl RecordingMocks {
+            fn total_calls(&self) -> usize {
+                self.calls.lock().values().sum()
+            }
+
+            fn unique_keys_called(&self) -> usize {
+                self.calls.lock().len()
+            }
+        }
+
+        impl Mocks for RecordingMocks {
+            fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
+                if command.cmd == "ZREMRANGEBYSCORE" {
+                    let key = command
+                        .args
+                        .first()
+                        .and_then(|v| v.clone().into_string())
+                        .unwrap_or_default();
+                    *self.calls.lock().entry(key).or_insert(0) += 1;
+                    return Ok(Value::Integer(0));
+                }
+                Ok(Value::Integer(0))
+            }
+        }
+
+        /// Returns an error for any ZREMRANGEBYSCORE call whose key contains `error_key_fragment`;
+        /// counts all successful ZREMRANGEBYSCORE calls in `successful_calls`.
+        #[derive(Debug, Clone)]
+        struct SelectiveErrorMocks {
+            error_key_fragment: String,
+            successful_calls: Arc<AtomicUsize>,
+        }
+
+        impl Mocks for SelectiveErrorMocks {
+            fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
+                if command.cmd == "ZREMRANGEBYSCORE" {
+                    let key = command
+                        .args
+                        .first()
+                        .and_then(|v| v.clone().into_string())
+                        .unwrap_or_default();
+                    if key.contains(&self.error_key_fragment) {
+                        return Err(Error::new(ErrorKind::Unknown, "simulated redis error"));
+                    }
+                    self.successful_calls.fetch_add(1, Ordering::SeqCst);
+                    return Ok(Value::Integer(0));
+                }
+                Ok(Value::Integer(0))
+            }
+        }
+
+        /// Yields to the tokio scheduler until `condition` is true, with a 5-second hard timeout.
+        async fn wait_for(condition: impl Fn() -> bool) {
+            let timeout = tokio::time::Instant::now() + Duration::from_secs(5);
+            while !condition() {
+                assert!(
+                    tokio::time::Instant::now() < timeout,
+                    "timed out waiting for condition"
+                );
+                tokio::task::yield_now().await;
+            }
+        }
+
+        /// When the same cache-tag key is queued N times before the consumer runs, the drain loop
+        /// collapses all N copies into one HashSet entry and issues a single ZREMRANGEBYSCORE call.
+        #[tokio::test]
+        async fn deduplicates_same_key_in_batch() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // All 50 sends are synchronous (try_send, no await). The consumer task cannot run
+            // until we yield, so all 50 items land in the channel before the first drain.
+            let key = "test-dedup-key".to_string();
+            for _ in 0..50 {
+                storage.send_to_maintenance_queue_for_test(key.clone());
+            }
+
+            // Yield until at least one ZREMRANGEBYSCORE has been recorded.
+            wait_for(|| mock.total_calls() >= 1).await;
+
+            // 50 identical sends → one unique key → at most a handful of Redis calls (one per
+            // drain batch), nowhere near 50.
+            assert!(
+                mock.total_calls() < 50,
+                "expected deduplication to reduce 50 identical sends to far fewer Redis calls, \
+                 got {}",
+                mock.total_calls()
+            );
+
+            Ok(())
+        }
+
+        /// All distinct keys queued before the consumer runs must each receive their own
+        /// ZREMRANGEBYSCORE call — none should be silently skipped.
+        #[tokio::test]
+        async fn processes_all_distinct_keys() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            let n = 10usize;
+            for i in 0..n {
+                storage.send_to_maintenance_queue_for_test(format!("test-distinct-key-{i}"));
+            }
+
+            // Wait until all n distinct keys have each been seen at least once.
+            wait_for(|| mock.unique_keys_called() >= n).await;
+
+            assert_eq!(
+                mock.unique_keys_called(),
+                n,
+                "all {n} distinct keys should have been maintained"
+            );
+
+            Ok(())
+        }
+
+        /// Sending more items than the channel capacity must not panic. Items that fit are still
+        /// processed; overflowing items are silently dropped (recorded as queue errors).
+        #[tokio::test]
+        async fn channel_overflow_does_not_panic() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // The mock channel capacity is 100. Sending 200 items will overflow it; the second
+            // 100 are dropped. The first 100 distinct keys should still be processed.
+            for i in 0..200 {
+                storage.send_to_maintenance_queue_for_test(format!("test-overflow-key-{i}"));
+            }
+
+            wait_for(|| mock.total_calls() >= 1).await;
+
+            assert!(
+                mock.total_calls() <= 200,
+                "expected at most 200 Redis calls, got {}",
+                mock.total_calls()
+            );
+
+            Ok(())
+        }
+
+        /// After the consumer drains and processes one batch it must block on recv() and then pick
+        /// up subsequent items when they arrive — the loop must not exit after the first batch.
+        #[tokio::test]
+        async fn processes_subsequent_batches() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // First batch: 5 distinct keys.
+            for i in 0..5 {
+                storage.send_to_maintenance_queue_for_test(format!("test-batch1-{i}"));
+            }
+            wait_for(|| mock.unique_keys_called() >= 5).await;
+
+            // Second batch: 5 more distinct keys sent after the first batch is consumed.
+            for i in 0..5 {
+                storage.send_to_maintenance_queue_for_test(format!("test-batch2-{i}"));
+            }
+            wait_for(|| mock.unique_keys_called() >= 10).await;
+
+            assert_eq!(
+                mock.unique_keys_called(),
+                10,
+                "consumer should have processed both batches (10 unique keys total)"
+            );
+
+            Ok(())
+        }
+
+        /// A realistic traffic mix: many copies of a hot key alongside a handful of cooler keys.
+        /// The HashSet must collapse the hot-key duplicates while still giving every cooler key
+        /// its own ZREMRANGEBYSCORE call — none should be starved or skipped.
+        #[tokio::test]
+        async fn deduplicates_hot_key_while_preserving_cool_keys() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // Simulate one hot subgraph ZSET flooding the queue alongside 4 cooler ones.
+            let hot = "hot-subgraph-key";
+            let cool_count = 4usize;
+            for _ in 0..20 {
+                storage.send_to_maintenance_queue_for_test(hot.to_string());
+            }
+            for i in 0..cool_count {
+                storage.send_to_maintenance_queue_for_test(format!("cool-key-{i}"));
+            }
+
+            // Wait until all distinct keys have been seen.
+            wait_for(|| mock.unique_keys_called() >= cool_count + 1).await;
+
+            // Exactly 5 unique keys, each processed at least once.
+            assert_eq!(mock.unique_keys_called(), cool_count + 1);
+            // Deduplification must have collapsed the 20 hot-key sends to far fewer calls.
+            assert!(
+                mock.total_calls() < 20,
+                "expected deduplication to collapse 20 hot-key sends, got {} total calls",
+                mock.total_calls()
+            );
+
+            Ok(())
+        }
+
+        /// Dropping the channel sender (by dropping `Storage`) while an item is being drained
+        /// causes `try_recv` to return `Err(Disconnected)`. The drain loop must break cleanly
+        /// rather than panic.
+        #[tokio::test]
+        async fn disconnected_sender_is_handled_gracefully() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // Queue one item, then drop the storage so the sender is disconnected. The item is
+            // still in the channel. When the consumer drains after consuming that first item via
+            // recv(), try_recv() will observe Disconnected rather than Empty and must break
+            // cleanly without panicking.
+            storage.send_to_maintenance_queue_for_test("disconnected-test-key".to_string());
+            drop(storage);
+
+            // Yield a couple of times to give the consumer task a chance to run and observe the
+            // disconnected channel.
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+
+            // If we reach this line the consumer did not panic. The queued item may or may not
+            // have been processed depending on scheduler ordering — either is correct.
+            assert!(mock.total_calls() <= 1);
+
+            Ok(())
+        }
+
+        /// When the shutdown signal fires before the consumer task has had a chance to run,
+        /// the biased select must observe the drop signal first and exit without processing any
+        /// queued items — and must not panic.
+        #[tokio::test]
+        async fn shutdown_with_items_queued_does_not_panic() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // Queue 10 items without yielding so the consumer has not yet run.
+            for i in 0..10 {
+                storage.send_to_maintenance_queue_for_test(format!("shutdown-key-{i}"));
+            }
+
+            // Fire the shutdown signal. Because no awaits have happened since the sends, the
+            // consumer task is still parked. On the next select iteration it checks drop_rx first
+            // (biased) and breaks immediately without processing anything.
+            drop(drop_tx);
+
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+
+            // No panic is the primary assertion. The items should not have been processed since
+            // the shutdown signal took priority.
+            assert_eq!(
+                mock.total_calls(),
+                0,
+                "consumer should have exited via shutdown before processing any items"
+            );
+
+            Ok(())
+        }
+
+        /// A key that appears in both batch 1 and batch 2 must be processed in both. The
+        /// HashSet is local to each drain iteration; if it were accidentally shared across
+        /// outer-loop iterations, the key would be silently skipped the second time.
+        #[tokio::test]
+        async fn same_key_is_processed_in_each_new_batch() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            let key = "repeated-across-batches".to_string();
+
+            // Batch 1.
+            storage.send_to_maintenance_queue_for_test(key.clone());
+            wait_for(|| mock.total_calls() >= 1).await;
+            let after_batch1 = mock.total_calls();
+
+            // Batch 2 — same key. Consumer must process it again, not skip it.
+            storage.send_to_maintenance_queue_for_test(key.clone());
+            wait_for(|| mock.total_calls() >= after_batch1 + 1).await;
+
+            assert!(
+                mock.total_calls() >= 2,
+                "key should have been processed once per batch, \
+                 got {} total calls",
+                mock.total_calls()
+            );
+
+            Ok(())
+        }
+
+        /// A ZREMRANGEBYSCORE error on one ZSET key must not prevent the consumer from
+        /// processing the remaining keys in the same batch. Each key's error is isolated.
+        #[tokio::test]
+        async fn redis_error_on_one_key_does_not_skip_others() -> Result<(), BoxError> {
+            let successful = Arc::new(AtomicUsize::new(0));
+            let mock = Arc::new(SelectiveErrorMocks {
+                error_key_fragment: "error-key".to_string(),
+                successful_calls: successful.clone(),
+            });
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock, drop_rx).await?;
+
+            // One key will fail, two will succeed. All three are in the same drain batch.
+            storage.send_to_maintenance_queue_for_test("error-key".to_string());
+            storage.send_to_maintenance_queue_for_test("good-key-1".to_string());
+            storage.send_to_maintenance_queue_for_test("good-key-2".to_string());
+
+            wait_for(|| successful.load(Ordering::SeqCst) >= 2).await;
+
+            assert_eq!(
+                successful.load(Ordering::SeqCst),
+                2,
+                "both good keys should have been processed despite the error on error-key"
+            );
+
+            Ok(())
+        }
+
+        /// When `try_send` fails because the channel is full, `record_maintenance_queue_error`
+        /// must be incremented. This is the primary signal operators use to detect a backlogged
+        /// maintenance consumer.
+        #[tokio::test]
+        async fn channel_overflow_records_queue_error_metric() -> Result<(), BoxError> {
+            async move {
+                let mock = Arc::new(RecordingMocks::default());
+                let (_drop_tx, drop_rx) = broadcast::channel(2);
+                let storage =
+                    Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+                // The mock channel capacity is 100. Sending 200 items means the second 100
+                // each fail with TrySendError::Full, incrementing the counter exactly 100 times.
+                // All 200 sends are synchronous (no awaits), so the consumer cannot drain
+                // the channel between sends, keeping the count deterministic.
+                for i in 0..200 {
+                    storage
+                        .send_to_maintenance_queue_for_test(format!("overflow-metric-key-{i}"));
+                }
+
+                assert_counter!(
+                    "apollo.router.operations.response_cache.maintenance.queue.error",
+                    100,
+                    "error" = "channel full"
+                );
+
+                Ok(())
+            }
+            .with_metrics()
+            .await
+        }
+
+        /// Verifies that `insert()` — the real production path — actually wires through to
+        /// `send_to_maintenance_queue`, causing the background worker to call ZREMRANGEBYSCORE.
+        /// This covers the gap left by tests that use `send_to_maintenance_queue_for_test`
+        /// directly, which bypass `internal_insert_in_batch` entirely.
+        #[tokio::test]
+        async fn insert_wires_to_maintenance_queue() -> Result<(), BoxError> {
+            let mock = Arc::new(RecordingMocks::default());
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage =
+                Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+            // `insert` calls `internal_insert_in_batch`, which calls `send_to_maintenance_queue`
+            // for each distinct ZSET key before executing the pipeline. Whether the pipeline
+            // itself succeeds or fails is irrelevant — the queue send happens first.
+            let _ = storage.insert(common_document(), SUBGRAPH_NAME).await;
+
+            // The background worker must have picked up at least one ZSET key.
+            wait_for(|| mock.total_calls() >= 1).await;
+
+            assert!(
+                mock.total_calls() >= 1,
+                "insert() must wire through to the maintenance queue"
+            );
 
             Ok(())
         }
