@@ -7,20 +7,36 @@ expression: response
     "topProducts": [
       {
         "name": "chair",
-        "reviews": [
-          {
-            "body": "I can sit on it"
-          }
-        ]
+        "reviews": null
       },
       {
         "name": "plate",
-        "reviews": [
-          {
-            "body": "I can eat in it"
-          }
-        ]
+        "reviews": null
       }
     ]
-  }
+  },
+  "errors": [
+    {
+      "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }\",\"variables\":{\"representations\":[{\"upc\":\"1\",\"__typename\":\"Product\"},{\"upc\":\"3\",\"__typename\":\"Product\"}]}}",
+      "path": [
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "code": "FETCH_ERROR",
+        "service": "reviews"
+      }
+    },
+    {
+      "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }\",\"variables\":{\"representations\":[{\"upc\":\"1\",\"__typename\":\"Product\"},{\"upc\":\"3\",\"__typename\":\"Product\"}]}}",
+      "path": [
+        "topProducts",
+        1
+      ],
+      "extensions": {
+        "code": "FETCH_ERROR",
+        "service": "reviews"
+      }
+    }
+  ]
 }
