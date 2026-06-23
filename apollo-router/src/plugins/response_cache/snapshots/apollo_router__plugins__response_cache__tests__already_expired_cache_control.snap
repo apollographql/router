@@ -9,6 +9,11 @@ expression: cache_keys
     "invalidationKeys": [
       "currentUser"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "currentUser"
@@ -44,6 +49,11 @@ expression: cache_keys
       "organization",
       "organization-1"
     ],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "typename": "Organization",
       "entityKey": {
