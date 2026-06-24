@@ -30,7 +30,9 @@ use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::metrics::record_maintenance_deduplicated_commands;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
@@ -173,39 +175,49 @@ impl Storage {
         let storage = self.clone();
 
         // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = drop_rx.recv() => break,
-                    Some(first_cache_tag) = cache_tag_rx.recv() => {
-                        // The main method of deduplication: using a HashSet. This will keep our
-                        // total commands sent to redis for ZSET removal lower than otherwise would
-                        // be the case
-                        let mut keys = HashSet::new();
-                        keys.insert(first_cache_tag);
-                        // We make sure that we have a hard limit for how long we loop, just in
-                        // case more tags are added to the queue than we can process at a time
-                        for _ in 0..CACHE_TAG_CHANNEL_SIZE {
-                            match cache_tag_rx.try_recv() {
-                                Ok(key) => {
-                                    keys.insert(key);
-                                }
-                                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                                Err(err) => {
-                                    tracing::debug!("maintenance queue disconnected: {err}");
-                                    break
+        tokio::spawn(
+            async move {
+                loop {
+                    tokio::select! {
+                            biased;
+                            _ = drop_rx.recv() => break,
+                            Some(first_cache_tag) = cache_tag_rx.recv() => {
+                            // The main method of deduplication: using a HashSet. This will keep our
+                            // total commands sent to redis for ZSET removal lower than otherwise would
+                            // be the case
+                            let mut keys = HashSet::new();
+                            let mut deduplicated_commands = 0u64;
+                            keys.insert(first_cache_tag);
+                            // We make sure that we have a hard limit for how long we loop, just in
+                            // case more tags are added to the queue than we can process at a time
+                            for _ in 0..CACHE_TAG_CHANNEL_SIZE {
+                                match cache_tag_rx.try_recv() {
+                                    Ok(key) => {
+                                        if !keys.insert(key) {
+                                            deduplicated_commands += 1;
+                                        }
+                                    }
+                                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                                    Err(err) => {
+                                        tracing::debug!("maintenance queue disconnected: {err}");
+                                        break
+                                    }
                                 }
                             }
-                        }
 
-                        for key in keys {
-                            storage.perform_maintenance_on_cache_tag(key).await
+                            if deduplicated_commands > 0 {
+                                record_maintenance_deduplicated_commands(deduplicated_commands);
+                            }
+
+                            for key in keys {
+                                storage.perform_maintenance_on_cache_tag(key).await
+                            }
                         }
                     }
                 }
             }
-        });
+            .with_current_meter_provider(),
+        );
     }
 
     async fn perform_maintenance_on_cache_tag(&self, cache_tag: String) {
@@ -1841,6 +1853,35 @@ mod tests {
                     "apollo.router.operations.response_cache.maintenance.queue.error",
                     100,
                     "error" = "channel full"
+                );
+
+                Ok(())
+            }
+            .with_metrics()
+            .await
+        }
+
+        /// When duplicates are collapsed in the drain loop, the deduplicated_commands metric
+        /// must increment by exactly (raw - unique). Sending 10 identical keys synchronously
+        /// guarantees they all land in one batch; 10 → 1 unique means 9 deduplicated.
+        #[tokio::test]
+        async fn deduplication_records_deduplicated_commands_metric() -> Result<(), BoxError> {
+            async move {
+                let mock = Arc::new(RecordingMocks::default());
+                let (_drop_tx, drop_rx) = broadcast::channel(2);
+                let storage =
+                    Storage::mocked(&redis_config(false), false, mock.clone(), drop_rx).await?;
+
+                let key = "dedup-metric-test-key".to_string();
+                for _ in 0..10 {
+                    storage.send_to_maintenance_queue_for_test(key.clone());
+                }
+
+                wait_for(|| mock.total_calls() >= 1).await;
+
+                assert_counter!(
+                    "experimental.apollo.router.operations.response_cache.maintenance.deduplicated_commands",
+                    9
                 );
 
                 Ok(())

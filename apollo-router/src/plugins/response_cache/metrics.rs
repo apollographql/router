@@ -82,6 +82,15 @@ pub(super) fn record_maintenance_success(entries: u64) {
     );
 }
 
+pub(super) fn record_maintenance_deduplicated_commands(count: u64) {
+    u64_counter_with_unit!(
+        "experimental.apollo.router.operations.response_cache.maintenance.deduplicated_commands",
+        "Cache tag maintenance commands avoided by deduplication within a drain cycle",
+        "{command}",
+        count
+    );
+}
+
 pub(super) fn record_maintenance_error(error: &storage::Error) {
     u64_counter_with_unit!(
         "apollo.router.operations.response_cache.maintenance.error",
