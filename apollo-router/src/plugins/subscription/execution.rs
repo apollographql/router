@@ -105,8 +105,12 @@ where
             let (subs_tx, subs_rx) = mpsc::channel(1);
             let query_plan = req.query_plan.clone();
             let execution_service_cloned = inner.clone();
-            let cloned_supergraph_req =
-                clone_supergraph_request(&req.supergraph_request, context.clone());
+            // Move the original HTTP request out of `req` for the side-channel
+            // task; `req` keeps a clone for `inner.call`. One synchronous clone
+            // on this path. `clone_supergraph_request()` is deferred to the
+            // spawned task (per subscription event in `dispatch_subscription_event`).
+            let supergraph_http_request = req.supergraph_request;
+            req.supergraph_request = supergraph_http_request.clone();
 
             // Race fix (subscribe-before-publish, A3 candidate #2): subscribe to
             // the schema/configuration broadcast channels *here*, synchronously
@@ -149,7 +153,7 @@ where
                     context,
                     query_plan,
                     subs_rx,
-                    cloned_supergraph_req,
+                    supergraph_http_request,
                     configuration_updated_rx,
                     schema_updated_rx,
                 )
@@ -202,7 +206,7 @@ async fn subscription_task(
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
-    supergraph_req: SupergraphRequest,
+    supergraph_http_request: http::Request<graphql::Request>,
     mut configuration_updated_rx: Pin<Box<dyn Stream<Item = Weak<Configuration>> + Send>>,
     mut schema_updated_rx: Pin<Box<dyn Stream<Item = Arc<Schema>> + Send>>,
 ) {
@@ -273,13 +277,11 @@ async fn subscription_task(
     // and passed in as parameters. See the comment in `call` for the race
     // this fix addresses.
 
-    let mut timeout = if supergraph_req
-        .context
+    let mut timeout = if context
         .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         .is_some()
     {
-        let expires_in =
-            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        let expires_in = crate::plugins::authentication::jwks::jwt_expires_in(&context);
         tokio::time::sleep(expires_in).boxed()
     } else {
         futures::future::pending().boxed()
@@ -310,7 +312,7 @@ async fn subscription_task(
                 match message {
                     Some(mut val) => {
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_subscription_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_subscription_event(&supergraph_http_request, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
@@ -347,7 +349,7 @@ async fn subscription_task(
 }
 
 async fn dispatch_subscription_event(
-    supergraph_req: &SupergraphRequest,
+    supergraph_http_request: &http::Request<graphql::Request>,
     execution_service: impl Service<
         ExecutionRequest,
         Response = execution::Response,
@@ -362,10 +364,8 @@ async fn dispatch_subscription_event(
     let span = Span::current();
     let res = match query_plan {
         Some(query_plan) => {
-            let cloned_supergraph_req = clone_supergraph_request(
-                &supergraph_req.supergraph_request,
-                supergraph_req.context.clone(),
-            );
+            let cloned_supergraph_req =
+                clone_supergraph_request(supergraph_http_request, context.clone());
             let execution_request = ExecutionRequest::internal_builder()
                 .supergraph_request(cloned_supergraph_req.supergraph_request)
                 .query_plan(query_plan.clone())
