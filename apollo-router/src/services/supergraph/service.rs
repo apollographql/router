@@ -107,9 +107,11 @@ impl Service<SupergraphRequest> for SupergraphService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.query_planner_service
-            .poll_ready(cx)
-            .map_err(|err| err.into())
+        match self.query_planner_service.poll_ready(cx) {
+            Poll::Ready(Ok(())) => {}
+            other => return other.map_err(|err| err.into()),
+        }
+        self.execution_service.poll_ready(cx)
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
@@ -119,16 +121,18 @@ impl Service<SupergraphRequest> for SupergraphService {
         }
 
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let clone = self.query_planner_service.clone();
+        let planning_clone = self.query_planner_service.clone();
+        let planning = std::mem::replace(&mut self.query_planner_service, planning_clone);
 
-        let planning = std::mem::replace(&mut self.query_planner_service, clone);
+        let execution_clone = self.execution_service.clone();
+        let execution = std::mem::replace(&mut self.execution_service, execution_clone);
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
         let fut = service_call(
             planning,
-            self.execution_service.clone(),
+            execution,
             schema,
             req,
             self.strict_variable_validation,
@@ -154,7 +158,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<QueryPlannerService>,
-    execution_service: execution::BoxCloneService,
+    mut execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     strict_variable_validation: Mode,
@@ -326,7 +330,7 @@ async fn service_call(
                 Ok(res)
             } else {
                 let execution_response = execution_service
-                    .oneshot(
+                    .call(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
