@@ -2958,7 +2958,8 @@ expression: "&schema"
         },
         "preview_connect_v0_4": {
           "default": null,
-          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
           "type": [
             "boolean",
             "null"
