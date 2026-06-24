@@ -1,4 +1,4 @@
-use crate::services::external::PipelineStep;
+use crate::services::PipelineStep;
 
 macro_rules! assert_counter_zero_or_absent {
     ($($arg:tt)*) => {{
@@ -97,12 +97,13 @@ mod tests {
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
-    use crate::services::external::PipelineStep;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
+    use crate::test_harness::tracing_test;
 
     #[tokio::test]
     async fn load_plugin() {
@@ -120,6 +121,62 @@ mod tests {
             .build_router()
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deprecated_context_key_mode_string_warns_at_startup() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://this-url-is-never-connected-to.invalid/",
+                "router": {
+                    "request": {
+                        "context": "deprecated"
+                    }
+                }
+            }
+        });
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        assert!(
+            tracing_test::logs_contain(
+                "coprocessor.router.request.context: deprecated` is deprecated"
+            ),
+            "expected deprecation warning for context: deprecated config"
+        );
+    }
+
+    #[tokio::test]
+    async fn deprecated_context_key_mode_bool_warns_at_startup() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://this-url-is-never-connected-to.invalid/",
+                "router": {
+                    "request": {
+                        "context": true
+                    }
+                }
+            }
+        });
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        assert!(
+            tracing_test::logs_contain("coprocessor.router.request.context: true` is deprecated"),
+            "expected deprecation warning for context: true config"
+        );
     }
 
     #[tokio::test]
@@ -1713,7 +1770,6 @@ mod tests {
                 // Will be satisfied
                 condition: Condition::Exists(SubgraphSelector::ResponseContext {
                     response_context: String::from("context_value"),
-                    redact: None,
                     default: None,
                 }),
                 body: BodyConf::All(true),
@@ -4526,18 +4582,26 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
+    fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+    where
+        F: Fn(
+                http::Request<RouterBody>,
+            ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let callback = Arc::new(callback);
         let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
+            let callback = callback.clone();
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(
                     move |req: crate::services::http::HttpRequest| {
+                        let callback = callback.clone();
                         let context = req.context.clone();
                         let fut = callback(req.http_request);
                         Box::pin(async move {
@@ -5107,6 +5171,8 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_deletes_missing_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5115,6 +5181,8 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
         target_context.insert("k3", "v3".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2", "k3"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context without k2 (deleted)
         let returned_context = Context::new();
@@ -5129,6 +5197,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5148,12 +5217,16 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_adds_new_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
         // Create a context with some keys
         let target_context = Context::new();
         target_context.insert("k1", "v1".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context with a new key
         let returned_context = Context::new();
@@ -5167,6 +5240,7 @@ mod tests {
             &target_context,
             returned_context,
             &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
         )
         .unwrap();
 
@@ -5204,10 +5278,16 @@ mod tests {
         let selective_keys: HashSet<String> = ["k1".to_string()].into();
         let context_config =
             ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(selective_keys)));
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &context_config)
-            .unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_config,
+            &keys_sent,
+        )
+        .unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5227,6 +5307,8 @@ mod tests {
         )]
         context_conf: ContextConf,
     ) {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5234,8 +5316,18 @@ mod tests {
             Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
         let returned_context =
             Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+        let keys_sent: HashSet<String> = [target_context_key_name]
+            .into_iter()
+            .map(String::from)
+            .collect();
 
-        update_context_from_coprocessor(&target_context, returned_context, &context_conf).unwrap();
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &context_conf,
+            &keys_sent,
+        )
+        .unwrap();
 
         assert_eq!(
             target_context.get_json_value(CLIENT_NAME),
@@ -5246,6 +5338,100 @@ mod tests {
             !target_context.contains_key(DEPRECATED_CLIENT_NAME),
             "DEPRECATED_CLIENT_NAME should not be present"
         );
+    }
+
+    #[test]
+    fn test_update_context_from_coprocessor_preserves_concurrently_added_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate: keys_sent = {k1, k2} (snapshot at time T1), then k3 is added
+        // to target concurrently (at time T2), coprocessor returns {k1} (deleted k2).
+        // Result: k1 kept, k2 deleted, k3 preserved (was never sent).
+        let target_context = Context::new();
+        target_context.insert("k1", "v1".to_string()).unwrap();
+        target_context.insert("k2", "v2".to_string()).unwrap();
+        // k3 simulates a key added by a concurrent parallel subgraph stage after the
+        // snapshot was taken but before the retain runs
+        target_context
+            .insert("k3", "concurrent_value".to_string())
+            .unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2"].into_iter().map(String::from).collect();
+        let returned_context = Context::new();
+        returned_context.insert("k1", "v1".to_string()).unwrap();
+        // k2 intentionally removed by coprocessor
+        // k3 was never sent, must survive
+
+        update_context_from_coprocessor(
+            &target_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        assert!(target_context.contains_key("k1"));
+        assert!(!target_context.contains_key("k2")); // deleted by coprocessor
+        assert!(target_context.contains_key("k3")); // preserved (never sent)
+    }
+
+    #[test]
+    fn test_sibling_subgraph_response_does_not_delete_other_subgraphs_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate the parallel fanout scenario:
+        // - accounts SubgraphRequest added accounts_request_start to shared context
+        // - book SubgraphResponse fires, its snapshot didn't include accounts_request_start
+        // - book's coprocessor returns without accounts_request_start
+        // - accounts_request_start must survive in the shared context
+        let shared_context = Context::new();
+        shared_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        shared_context
+            .insert("accounts_request_start", 1234i64)
+            .unwrap();
+        shared_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+
+        // book's snapshot only had base_key and book_request_start at the time
+        let keys_sent: HashSet<String> = ["base_key", "book_request_start"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let returned_context = Context::new();
+        returned_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        returned_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+        returned_context
+            .insert("book_request_end", 5700i64)
+            .unwrap();
+
+        update_context_from_coprocessor(
+            &shared_context,
+            returned_context,
+            &ContextConf::NewContextConf(NewContextConf::All),
+            &keys_sent,
+        )
+        .unwrap();
+
+        // accounts_request_start was never sent to book's coprocessor, so it must survive
+        assert!(shared_context.contains_key("accounts_request_start"));
+        assert!(shared_context.contains_key("book_request_start"));
+        // new key added by coprocessor
+        assert!(shared_context.contains_key("book_request_end"));
+        assert!(shared_context.contains_key("base_key"));
     }
 
     // Subgraph stage metrics test
@@ -5734,6 +5920,134 @@ mod tests {
                 4,
                 Some(false),
             )]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn router_response_deferred_chunk_metric_incremented_when_on_graphql_error_matches() {
+        // Tests that apollo.router.operations.coprocessor is recorded when a deferred chunk
+        // matches the on_graphql_error condition, even when the first chunk did not match.
+        //
+        // Bug: `executed` was only set based on first-chunk processing.  If the first chunk
+        // had no errors (condition false) but a later deferred chunk did (condition true), the
+        // metric was never recorded because the lazy mapped_stream runs after `executed` is
+        // checked by the caller.
+        //
+        // The mock uses supergraph::Response::new_from_response (which calls check_for_errors
+        // internally) to drive CHUNK_CONTAINS_GRAPHQL_ERROR from the actual response content —
+        // the same mechanism used in the real pipeline.
+        async {
+            use futures::StreamExt as _;
+
+            use crate::graphql::Error as GraphQLError;
+            use crate::plugins::telemetry::config::AttributeValue;
+
+            // RouterStage with condition: on_graphql_error: true
+            let router_stage = RouterStage {
+                request: Default::default(),
+                response: RouterResponseConf {
+                    condition: Condition::Eq([
+                        SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
+                            on_graphql_error: true,
+                        }),
+                        SelectorOrValue::Value(AttributeValue::Bool(true)),
+                    ]),
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            // HTTP client mock: returns a simple "continue" response for coprocessor calls
+            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let response = json!({
+                        "version": 1,
+                        "stage": "RouterResponse",
+                        "control": "continue",
+                    });
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&response).unwrap(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Mock router service returning a 2-chunk response. The response is built using
+            // supergraph::Response::new_from_response, which calls check_for_errors internally.
+            // check_for_errors wraps the graphql::Response stream so that CHUNK_CONTAINS_GRAPHQL_ERROR
+            // is set in context as each chunk is polled — identical to how the real pipeline works.
+            //
+            //   Chunk 1: no errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = false
+            //   Chunk 2: has errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = true
+            let mut mock_router_service = MockRouterService::new();
+            mock_router_service
+                .expect_call()
+                .returning(move |req: router::Request| {
+                    let ctx = req.context.clone();
+
+                    let graphql_chunks = vec![
+                        // Chunk 1: successful response — condition will not fire
+                        Response::builder()
+                            .data(serde_json_bytes::json!({"hello": "world"}))
+                            .build(),
+                        // Chunk 2: response with errors — condition will fire
+                        Response::builder()
+                            .errors(vec![
+                                GraphQLError::builder().message("deferred error").build(),
+                            ])
+                            .build(),
+                    ];
+
+                    // new_from_response applies check_for_errors, which lazily sets
+                    // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
+                    let sg_response = supergraph::Response::new_from_response(
+                        http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
+                        ctx.clone(),
+                    );
+
+                    // Serialize the graphql stream to bytes. CHUNK_CONTAINS_GRAPHQL_ERROR is
+                    // set by check_for_errors before each chunk is yielded, so downstream
+                    // condition evaluation in process_router_response_stage reads accurate values.
+                    let bytes_stream = sg_response.response.into_body().map(|graphql_resp| {
+                        Ok::<bytes::Bytes, tower::BoxError>(
+                            serde_json::to_vec(&graphql_resp)
+                                .expect("graphql::Response serializes without error")
+                                .into(),
+                        )
+                    });
+
+                    let body = router::body::from_result_stream(bytes_stream);
+                    Ok(router::Response::http_response_builder()
+                        .response(http::Response::new(body))
+                        .context(ctx)
+                        .build()
+                        .unwrap())
+                });
+
+            let service_stack = router_stage
+                .as_service(
+                    mock_http_client,
+                    mock_router_service.boxed(),
+                    "http://test".to_string(),
+                    Arc::new("".to_string()),
+                    false,
+                )
+                .boxed();
+
+            let request = router::Request::fake_builder().build().unwrap();
+            let response = service_stack.oneshot(request).await.unwrap();
+            // Drain the response body — this forces the lazy mapped_stream to run,
+            // which calls the coprocessor for the deferred error chunk.
+            let _ = router::body::into_bytes(response.response.into_body()).await;
+
+            // The coprocessor should have been called exactly once — for the deferred
+            // chunk that contained GraphQL errors. Before the fix, the metric was silently
+            // dropped because `executed` was already checked (as false) before the stream ran.
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
         }
         .with_metrics()
         .await;
@@ -6265,27 +6579,35 @@ mod tests {
         use crate::plugins::coprocessor::connector::ConnectorStage;
         use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
         use crate::plugins::telemetry::config_new::conditions::Condition;
+        use crate::services::PipelineStep;
         use crate::services::connector::request_service;
-        use crate::services::external::PipelineStep;
         use crate::services::http::HttpRequest;
         use crate::services::http::HttpResponse;
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
-        fn mock_with_callback(
-            callback: fn(
-                http::Request<RouterBody>,
-            )
-                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-        ) -> MockInternalHttpClientService {
+        fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+        where
+            F: Fn(
+                    http::Request<RouterBody>,
+                )
+                    -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>
+                + Send
+                + Sync
+                + 'static,
+        {
+            let callback = Arc::new(callback);
             let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
+                let callback = callback.clone();
                 let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
+                    let callback = callback.clone();
                     let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client
                         .expect_call()
                         .returning(move |req: HttpRequest| {
+                            let callback = callback.clone();
                             let context = req.context.clone();
                             let fut = callback(req.http_request);
                             Box::pin(async move {
@@ -6314,11 +6636,11 @@ mod tests {
                     None,
                     0,
                 ),
-                transport: HttpJsonTransport {
+                transport: Some(HttpJsonTransport {
                     source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
-                },
+                }),
                 selection: JSONSelection::empty(),
                 config: None,
                 max_requests: None,
@@ -6351,10 +6673,10 @@ mod tests {
                 .body(r#"{"query":"test"}"#.to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             request_service::Request {
                 context: crate::Context::default(),
@@ -6520,10 +6842,10 @@ mod tests {
                 .body("plain text body".to_string())
                 .unwrap();
 
-            let transport_request = TransportRequest::Http(ConnectorsHttpRequest {
+            let transport_request = TransportRequest::Http(Box::new(ConnectorsHttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            });
+            }));
 
             let request = request_service::Request {
                 context: crate::Context::default(),
@@ -6603,7 +6925,9 @@ mod tests {
                 let captured_uri = captured_uri_clone.clone();
                 let captured_headers = captured_headers_clone.clone();
                 async move {
-                    let TransportRequest::Http(ref http_req) = req.transport_request;
+                    let TransportRequest::Http(ref http_req) = req.transport_request else {
+                        panic!("expected Http transport request");
+                    };
                     *captured_uri.lock().unwrap() = http_req.inner.uri().to_string();
                     *captured_headers.lock().unwrap() = http_req
                         .inner
@@ -7226,9 +7550,11 @@ mod tests {
         fn create_error_connector_service()
         -> tower::util::BoxService<request_service::Request, request_service::Response, BoxError>
         {
-            tower::service_fn(|req: request_service::Request| async {
+            tower::service_fn(|req: request_service::Request| async move {
+                let subgraph_name = req.connector.id.subgraph_name.to_string();
                 Ok(request_service::Response {
                     context: req.context,
+                    subgraph_name,
                     transport_result: Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),
@@ -7339,5 +7665,605 @@ mod tests {
                 _ => panic!("Expected MappedResponse::Error"),
             }
         }
+    }
+
+    // Header masking integration tests
+    mod header_masking_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn router_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that sensitive headers (like Authorization) are sent unmasked to the coprocessor
+            // for functionality, even when header masking is enabled
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            // Mock coprocessor that captures the headers it receives
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    // Capture the headers from the coprocessor request
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules for sensitive headers
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            // Send a request with sensitive headers
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret-token-12345") // gitleaks:allow
+                .header("cookie", "session=my-session-id")
+                .header("user-agent", "test-agent")
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received the FULL headers (unmasked)
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some(), "Headers should be sent to coprocessor");
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            // Authorization header should be unmasked
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret-token-12345", // gitleaks:allow
+                "Authorization header should be sent unmasked to coprocessor"
+            );
+
+            // Cookie header should be unmasked
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=my-session-id",
+                "Cookie header should be sent unmasked to coprocessor"
+            );
+
+            // Non-sensitive header should also be present
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+        }
+
+        #[tokio::test]
+        async fn subgraph_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that subgraph request headers are sent unmasked to coprocessor
+            let subgraph_stage = SubgraphStage {
+                request: SubgraphRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    uri: false,
+                    method: false,
+                    service_name: false,
+                    subgraph_request_id: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service
+                .expect_call()
+                .returning(|req: subgraph::Request| {
+                    Ok(subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .subgraph_name("test_subgraph".to_string())
+                        .build())
+                });
+
+            // Mock coprocessor that captures headers
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Create masking rules
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["x-api-key".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = subgraph_stage.as_service(
+                mock_http_client,
+                mock_subgraph_service.boxed(),
+                "http://test".to_string(),
+                "test_subgraph".to_string(),
+                false,
+            );
+
+            let request = subgraph::Request::fake_builder()
+                .subgraph_request(
+                    http::Request::builder()
+                        .header("x-api-key", "secret-api-key-67890") // gitleaks:allow
+                        .header("content-type", "application/json")
+                        .body(graphql::Request::fake_builder().query("{ test }").build())
+                        .unwrap(),
+                )
+                .build();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify the coprocessor received unmasked headers
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-api-key-67890", // gitleaks:allow
+                "API key should be sent unmasked to coprocessor"
+            );
+        }
+
+        #[tokio::test]
+        async fn headers_sent_when_masking_disabled() {
+            // Test that when masking is disabled, headers are still sent normally
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // No masking rules (disabled): leave context empty.
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer token") // gitleaks:allow
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify headers are still sent
+            let headers = received_headers.lock().unwrap();
+            assert!(headers.is_some());
+
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer token"
+            );
+        }
+
+        #[tokio::test]
+        async fn multiple_headers_selective_masking() {
+            // Test that with multiple headers, only configured ones would be masked in logs
+            // (but all are sent unmasked to coprocessor)
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Configure to mask only authorization and cookie
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret") // gitleaks:allow
+                .header("cookie", "session=secret") // gitleaks:allow
+                .header("user-agent", "test-agent")
+                .header("x-custom-header", "custom-value")
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Verify ALL headers are sent unmasked to coprocessor
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "session=secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "test-agent"
+            );
+            assert_eq!(
+                headers_obj
+                    .get("x-custom-header")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "custom-value"
+            );
+        }
+
+        #[tokio::test]
+        async fn custom_sensitive_headers_list() {
+            // Test using a custom list of sensitive headers
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::NewContextConf(NewContextConf::All),
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .await;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+                let received_headers = received_headers_clone.clone();
+                Box::pin(async move {
+                    let body_bytes = router::body::into_bytes(req.into_body()).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+                    if let Some(headers) = body.get("headers") {
+                        *received_headers.lock().unwrap() = Some(headers.clone());
+                    }
+
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            serde_json::json!({
+                                "version": 1,
+                                "stage": "RouterRequest",
+                                "control": "continue",
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap())
+                })
+            });
+
+            // Custom sensitive headers list
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec![
+                            "x-internal-token".to_string(),
+                            "x-secret-key".to_string(),
+                        ],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("x-internal-token", "internal-secret") // gitleaks:allow
+                .header("x-secret-key", "secret-key-value") // gitleaks:allow
+                .header("authorization", "Bearer public-token") // in built-in defaults (replace_defaults: false)
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+
+            // Coprocessors always receive raw header values — masking applies to logs/telemetry
+            // only, not to the externalized payload. All three headers arrive unmasked regardless
+            // of whether they appear in the sensitive list.
+            let headers = received_headers.lock().unwrap();
+            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+            assert_eq!(
+                headers_obj
+                    .get("x-internal-token")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "internal-secret" // gitleaks:allow
+            );
+            assert_eq!(
+                headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "secret-key-value" // gitleaks:allow
+            );
+            // `authorization` is in the effective sensitive list (built-in default, since
+            // `replace_defaults: false` merges user headers with the built-ins). It still arrives
+            // unmasked here because coprocessors receive raw headers by design.
+            assert_eq!(
+                headers_obj
+                    .get("authorization")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[0]
+                    .as_str()
+                    .unwrap(),
+                "Bearer public-token"
+            );
+        }
+
+        // Real end-to-end coverage for the coprocessor + masking flow lives in
+        // the sibling integration tests above (e.g.
+        // `router_request_headers_sent_unmasked_to_coprocessor`,
+        // `multiple_headers_selective_masking`), which drive
+        // `RouterStage::as_service` with a mocked HTTP client and assert on
+        // what the coprocessor actually receives. Config-shape contracts are
+        // pinned by `HeaderMaskingConfig::tests` and the schema snapshot.
     }
 }

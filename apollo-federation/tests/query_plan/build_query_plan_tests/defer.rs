@@ -3529,11 +3529,11 @@ fn defer_on_renamed_root_type() {
     );
 }
 
-// Reproduces RH-1172: when a deferred node depends on a fetch that operates at a
-// deeper path than the deferred Flatten, the transitive reduction removes the direct
-// edge from an ancestor fetch (which provides __typename and entity keys) to the
-// deferred node. This causes the deferred node to only register the deeper fetch as
-// a dependency, missing the ancestor's data at runtime.
+// When a deferred node depends on a fetch that operates at a deeper path than the
+// deferred Flatten, the transitive reduction removes the direct edge from an ancestor
+// fetch (which provides __typename and entity keys) to the deferred node. Without
+// recovery, the deferred node only registers the deeper fetch as a dependency,
+// missing the ancestor's data at runtime.
 #[test]
 fn defer_deferred_depends_on_ancestor_with_same_merge_at_intermediate() {
     let planner = planner!(
@@ -3770,11 +3770,11 @@ fn defer_deferred_depends_on_intermediate_fetch_missing_ancestor() {
     );
 }
 
-// Reproduces a variant of RH-1172: when the deferred section is reached through an
-// interface type condition (e.g. `... on P { q { ... on Q @defer { ... } } }`),
-// the merge_at path contains a TypenameEquals element. The `selection_set_at_path`
-// function needs to handle this element to correctly detect that the source fetch
-// provides fields needed by the deferred node.
+// Variant where the deferred section is reached through an interface type condition
+// (e.g. `... on P { q { ... on Q @defer { ... } } }`): the merge_at path contains a
+// TypenameEquals element. The `selection_set_at_path` function needs to handle this
+// element to correctly detect that the source fetch provides fields needed by the
+// deferred node.
 #[test]
 fn defer_deferred_depends_through_type_condition_path() {
     let planner = planner!(
@@ -3921,9 +3921,9 @@ fn defer_deferred_depends_through_type_condition_path() {
     );
 }
 
-// Reproduces a variant of RH-1172: when the source fetch and the deferred child both
-// have merge_at paths that share a common prefix, we must skip the shared prefix and
-// navigate only the remaining suffix to compare fields at the correct nesting depth.
+// Variant where the source fetch and the deferred child both have merge_at paths
+// that share a common prefix: we must skip the shared prefix and navigate only the
+// remaining suffix to compare fields at the correct nesting depth.
 //
 // Here:
 //   Fetch A (root, merge_at=None): provides `start { __typename id }`

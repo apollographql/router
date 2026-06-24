@@ -16,15 +16,15 @@ use crate::error::SubgraphLocation;
 use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::Link;
-use crate::link::LinkedElement;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::metadata::LinkedElement;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
+use crate::link::spec_registry::APOLLO_SPEC_DOMAIN;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -65,28 +65,38 @@ pub(crate) struct ComposeDirectiveManager {
 pub(crate) struct MergeDirectiveItem {
     subgraph_name: String,
     pub(crate) definition: DirectiveDefinition,
-    link: LinkedElement,
+    link: Arc<Link>,
+    name_in_spec: Name,
+    name_in_schema: Name,
 }
 
 impl MergeDirectiveItem {
-    fn new(subgraph_name: String, definition: DirectiveDefinition, link: LinkedElement) -> Self {
+    fn new(
+        subgraph_name: String,
+        definition: DirectiveDefinition,
+        link: Arc<Link>,
+        name_in_spec: Name,
+        name_in_schema: Name,
+    ) -> Self {
         Self {
             subgraph_name,
             definition,
             link,
+            name_in_spec,
+            name_in_schema,
         }
     }
 
     fn identity(&self) -> &Identity {
-        &self.link.link.url.identity
+        &self.link.url.identity
     }
 
     fn directive_name_in_spec(&self) -> &Name {
-        &self.link.name_in_spec
+        &self.name_in_spec
     }
 
     fn directive_name(&self) -> &Name {
-        &self.link.name
+        &self.name_in_schema
     }
 
     fn directive_has_different_name_in_subgraph<T: HasMetadata>(
@@ -96,7 +106,7 @@ impl MergeDirectiveItem {
         let Some(metadata) = subgraph.schema().metadata() else {
             return false;
         };
-        let Some(link) = metadata.for_identity(&self.link.link.url.identity) else {
+        let Some(link) = metadata.for_identity(&self.link.url.identity) else {
             return false;
         };
         let Some(imp) = link
@@ -119,7 +129,6 @@ impl std::fmt::Display for MergeDirectiveItem {
 
 type DirectiveImportSpecNamesByAlias<'a> = Cow<'a, IndexMap<Name, Name>>;
 
-#[allow(dead_code)]
 impl ComposeDirectiveManager {
     pub(crate) fn new() -> Self {
         Self {
@@ -247,21 +256,11 @@ impl ComposeDirectiveManager {
 
         let tag_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.tag_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.tag_directive_name().zip(Some(s.name.clone())))
             .collect();
         let inaccessible_names_in_subgraphs: MultiMap<Name, String> = subgraphs
             .iter()
-            .filter_map(|s| {
-                s.inaccessible_directive_name()
-                    .ok()
-                    .flatten()
-                    .zip(Some(s.name.clone()))
-            })
+            .filter_map(|s| s.inaccessible_directive_name().zip(Some(s.name.clone())))
             .collect();
 
         for subgraph in subgraphs {
@@ -307,12 +306,20 @@ impl ComposeDirectiveManager {
                         // one when merging. Otherwise, it doesn't make much sense to force users to
                         // write a dummy URL, especially when we error/warn when used with any
                         // Federation directives.
-                        let Some(feature) = subgraph
+                        let Some(LinkedElement { link, name_in_spec }) = subgraph
                             .schema()
                             .metadata()
                             .and_then(|links| links.source_link_of_directive(&directive.name))
                         else {
                             error_reporter.add_compose_directive_error_for_unrecognized_feature(
+                                compose_directive.arguments.name,
+                                subgraph.name.as_str(),
+                            );
+                            continue;
+                        };
+
+                        let Some(name_in_spec) = name_in_spec else {
+                            error_reporter.add_compose_directive_error_for_invalid_name_in_spec(
                                 compose_directive.arguments.name,
                                 subgraph.name.as_str(),
                             );
@@ -325,15 +332,15 @@ impl ComposeDirectiveManager {
                         // Note that we check for conflicts across subgraphs to make sure that we
                         // don't compose a custom `@tag` directive with the federation one, if it
                         // hasn't been properly renamed in another subgraph.
-                        if feature.link.url.identity.domain == APOLLO_SPEC_DOMAIN
-                            && DEFAULT_COMPOSED_DIRECTIVES.contains(&feature.name_in_spec)
+                        if link.url.identity.domain == APOLLO_SPEC_DOMAIN
+                            && DEFAULT_COMPOSED_DIRECTIVES.contains(&name_in_spec)
                         {
                             error_reporter
                                 .add_compose_directive_hint_for_default_composed_directive(
                                     compose_directive.arguments.name,
                                     directive.locations(subgraph),
                                 );
-                        } else if feature.link.url.identity.domain == APOLLO_SPEC_DOMAIN {
+                        } else if link.url.identity.domain == APOLLO_SPEC_DOMAIN {
                             error_reporter.add_compose_directive_error_for_unsupported_directive(
                                 compose_directive.arguments.name,
                                 subgraph.name.as_str(),
@@ -358,7 +365,9 @@ impl ComposeDirectiveManager {
                             let item = MergeDirectiveItem::new(
                                 subgraph.name.clone(),
                                 directive.as_ref().clone(),
-                                feature,
+                                link,
+                                name_in_spec,
+                                directive.name.clone(),
                             );
                             items_by_subgraph.insert(subgraph.name.clone(), item.clone());
                             items_by_directive_name.insert(directive.name.clone(), item.clone());
@@ -394,8 +403,7 @@ impl ComposeDirectiveManager {
                     subgraph
                         .schema()
                         .metadata()?
-                        .links
-                        .iter()
+                        .all_links()
                         .map(|link| &link.url.identity),
                 )
             })
@@ -467,7 +475,7 @@ impl ComposeDirectiveManager {
                 .collect();
             if !subgraphs_with_different_naming.is_empty() {
                 error_reporter.add_hint(CompositionHint {
-                    code: HintCode::DirectiveCompositionWarn.code().to_string(),
+                    definition: HintCode::DirectiveCompositionWarn.definition(),
                     message: format!("Composed directive \"@{name}\" is named differently in a subgraph that doesn't export it. Consistent naming will be required to export it."),
                     locations: Self::locations_for_identity(item.identity(), subgraphs_with_different_naming),
                 });
@@ -561,7 +569,7 @@ impl ComposeDirectiveManager {
                 // the user determine whether it's an issue.
                 if !major_mismatch_hint_raised {
                     error_reporter.add_hint(CompositionHint {
-                        code: HintCode::DirectiveCompositionInfo.code().to_string(),
+                        definition: HintCode::DirectiveCompositionInfo.definition(),
                         message: format!("Non-composed core feature \"{identity}\" has major version mismatch across subgraphs"),
                         locations: Self::locations_for_identity(identity, subgraphs),
                     });
@@ -665,6 +673,12 @@ impl ErrorReporter {
         });
     }
 
+    fn add_compose_directive_error_for_invalid_name_in_spec(&mut self, name: &str, subgraph: &str) {
+        self.add_error(CompositionError::DirectiveCompositionError {
+            message: format!("Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because its spec name is invalid or imported to a different name")
+        });
+    }
+
     fn add_compose_directive_error_for_unrecognized_feature(&mut self, name: &str, subgraph: &str) {
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!("Directive \"{name}\" in subgraph \"{subgraph}\" cannot be composed because it is not a member of a core feature")
@@ -677,7 +691,7 @@ impl ErrorReporter {
         locations: Vec<SubgraphLocation>,
     ) {
         self.add_hint(CompositionHint {
-            code: HintCode::DirectiveCompositionInfo.code().to_string(),
+            definition: HintCode::DirectiveCompositionInfo.definition(),
             message: format!("Directive \"{name}\" should not be explicitly manually composed since it is a federation directive composed by default"),
             locations,
         });
@@ -737,7 +751,7 @@ impl ErrorReporter {
         );
         self.add_error(CompositionError::DirectiveCompositionError {
             message: format!(
-                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\". {}",
+                "Could not find matching directive definition for argument to @composeDirective \"{name}\" in subgraph \"{}\".{}",
                 subgraph.name,
                 did_you_mean(words),
             ),

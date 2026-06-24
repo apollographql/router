@@ -281,6 +281,17 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+        },
         "send_headers": {
           "allOf": [
             {
@@ -733,6 +744,7 @@ expression: "&schema"
               "$ref": "#/definitions/BatchingMode"
             }
           ],
+          "default": "batch_http_link",
           "description": "Batching mode"
         },
         "subgraph": {
@@ -744,12 +756,10 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Subgraph options for batching"
         }
       },
-      "required": [
-        "mode"
-      ],
       "type": "object"
     },
     "BatchingMode": {
@@ -997,16 +1007,15 @@ expression: "&schema"
       "type": "object"
     },
     "CommonBatchingConfig": {
+      "additionalProperties": false,
       "description": "Common options for configuring subgraph batching",
       "properties": {
         "enabled": {
+          "default": false,
           "description": "Whether this batching config should be enabled",
           "type": "boolean"
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "Compression": {
@@ -2043,6 +2052,11 @@ expression: "&schema"
           "description": "Enable or disable the response caching feature",
           "type": "boolean"
         },
+        "include_cache_control_header_on_router_response": {
+          "default": true,
+          "description": "Whether to include a Cache-Control header in the supergraph response sent to clients.\nWhen set to false, the router will not set a Cache-Control header on the client response,\nwhile all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.\nDefaults to true for backward compatibility.",
+          "type": "boolean"
+        },
         "invalidation": {
           "anyOf": [
             {
@@ -2193,23 +2207,22 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "ConnectorConfiguration": {
+    "ConnectorConnectorLimitsConfiguration": {
       "properties": {
         "all": {
           "allOf": [
             {
-              "$ref": "#/definitions/TlsClient"
+              "$ref": "#/definitions/ConnectorLimits"
             }
           ],
           "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
+            "http_max_response_size": null
           },
           "description": "Options applying to all sources"
         },
         "sources": {
           "additionalProperties": {
-            "$ref": "#/definitions/TlsClient"
+            "$ref": "#/definitions/ConnectorLimits"
           },
           "default": {},
           "description": "Map of subgraph_name.connector_source_name to configuration",
@@ -2220,11 +2233,12 @@ expression: "&schema"
     },
     "ConnectorHeadersConfiguration": {
       "additionalProperties": false,
+      "description": "Configuration for connectors (no masking - inherits from parent subgraph)",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/ConnectorHeadersLocation"
             },
             {
               "type": "null"
@@ -2234,10 +2248,43 @@ expression: "&schema"
         },
         "sources": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/ConnectorHeadersLocation"
           },
           "description": "Map of subgraph_name.connector_source_name to configuration",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Configuration for connector headers at a specific location\nConnectors only have request operations - masking is inherited from parent subgraph",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConnectorRequestHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request-side propagate/insert/remove operations"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorLimits": {
+      "additionalProperties": false,
+      "description": "Per-connector-source response size limits.",
+      "properties": {
+        "http_max_response_size": {
+          "default": null,
+          "description": "Limit the size of incoming connector response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -2294,6 +2341,20 @@ expression: "&schema"
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorRequestHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Request-side connector header configuration. Mirrors the wrapped\n`operations:` shape used by `HeadersLocation`, so connector config doesn't\ndrift from regular subgraph config.",
+      "properties": {
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
+          "items": {
+            "$ref": "#/definitions/Operation"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -2394,6 +2455,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -2414,6 +2486,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             }
           },
           "required": [
@@ -2796,6 +2879,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ConnectorTlsClientConfiguration": {
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsClient"
+            }
+          ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
+          "description": "Options applying to all sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/TlsClient"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorValue": {
       "anyOf": [
         {
@@ -2850,7 +2958,8 @@ expression: "&schema"
         },
         "preview_connect_v0_4": {
           "default": null,
-          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
           "type": [
             "boolean",
             "null"
@@ -3171,6 +3280,17 @@ expression: "&schema"
           "description": "Custom mapping to be used as the resource field in spans, defaults to:\nrouter -> http.route\nsupergraph -> graphql.operation.name\nquery_planning -> graphql.operation.name\nsubgraph -> subgraph.name\nsubgraph_request -> subgraph.name\nhttp_request -> http.route",
           "type": "object"
         },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nIgnored when `preview_datadog_agent_sampling` is enabled — in that mode the Datadog agent\ncontrols sampling via `sampling.priority` and all spans must be forwarded unfiltered."
+        },
         "span_metrics": {
           "additionalProperties": {
             "type": "boolean"
@@ -3204,6 +3324,11 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.\n(default: true)",
+          "type": "boolean"
+        },
+        "ignore_auth_context": {
+          "default": false,
+          "description": "When true, JWT claims from the authorization context are excluded from the deduplication key.\nUse this when your subgraph data does not vary by user identity and you want authenticated\nusers to share a single subgraph WebSocket connection.\n\nSecurity note: with this enabled, a user may receive events from a connection originally\nopened by a different user.  Only enable this when subgraph subscription data is truly\nnon-personalized.\n(default: false)",
           "type": "boolean"
         },
         "ignored_headers": {
@@ -4321,10 +4446,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4332,10 +4464,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/ConditionalRouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
@@ -4602,10 +4741,17 @@ expression: "&schema"
         "client.name": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client name populated from the request headers."
@@ -4613,10 +4759,17 @@ expression: "&schema"
         "client.version": {
           "anyOf": [
             {
-              "$ref": "#/definitions/StandardAttribute"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StandardAttribute"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
-              "type": "null"
+              "$ref": "#/definitions/RouterSelector"
             }
           ],
           "description": "Optional client version populated from the request headers."
@@ -5589,6 +5742,35 @@ expression: "&schema"
         }
       ]
     },
+    "GlobalHeadersConfiguration": {
+      "additionalProperties": false,
+      "description": "Per-subgraph (or global) header configuration. Request configuration covers\npropagation + masking; response configuration covers masking only.",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Request configuration (operations and masking)"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ResponseHeadersLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Response configuration (masking only)"
+        }
+      },
+      "type": "object"
+    },
     "GraphQLSelector": {
       "anyOf": [
         {
@@ -5779,20 +5961,45 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "HeaderMaskingConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for header masking in logs and telemetry",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable header masking globally (default: true for fail-secure behavior)",
+          "type": "boolean"
+        },
+        "replace_defaults": {
+          "default": false,
+          "description": "When true, `sensitive_headers` replaces the built-in default list\ninstead of extending it. Default: false (additive, fail-secure).",
+          "type": "boolean"
+        },
+        "sensitive_headers": {
+          "default": [],
+          "description": "Additional header names to mask (case-insensitive). By default these are\nmerged with the built-in sensitive-header list (see\n`default_sensitive_headers`). Set `replace_defaults: true` to opt out of\nthe built-ins and treat this list as authoritative.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "HeadersConfig": {
       "additionalProperties": false,
-      "description": "Configuration for header propagation",
+      "description": "Configuration for header propagation and masking",
       "properties": {
         "all": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HeadersLocation"
+              "$ref": "#/definitions/GlobalHeadersConfiguration"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Rules to apply to all subgraphs"
+          "description": "Rules to apply to all subgraphs (global defaults)"
         },
         "connector": {
           "allOf": [
@@ -5804,9 +6011,9 @@ expression: "&schema"
         },
         "subgraphs": {
           "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation"
+            "$ref": "#/definitions/GlobalHeadersConfiguration"
           },
-          "description": "Rules to specific subgraphs",
+          "description": "Rules for specific subgraphs",
           "type": "object"
         }
       },
@@ -5814,18 +6021,28 @@ expression: "&schema"
     },
     "HeadersLocation": {
       "additionalProperties": false,
+      "description": "Request-side header configuration: propagation operations + optional masking.",
       "properties": {
-        "request": {
-          "description": "Propagate/Insert/Remove headers from request",
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration applied to request headers in logs/telemetry."
+        },
+        "operations": {
+          "description": "Propagate/Insert/Remove operations",
           "items": {
             "$ref": "#/definitions/Operation"
           },
           "type": "array"
         }
       },
-      "required": [
-        "request"
-      ],
       "type": "object"
     },
     "HealthCheckConfig": {
@@ -5957,6 +6174,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -5977,6 +6205,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -6648,6 +6887,28 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "InvalidationIndexes": {
+      "additionalProperties": false,
+      "description": "Which invalidation indexes a subgraph maintains for its cached entries. Each field controls\nwhether the corresponding ZSET is written on cache inserts and whether the corresponding\ninvalidation request kind is honored at the `/invalidation` endpoint.\n\nAll three indexes are enabled by default. Operators with workloads that only ever invalidate\nby a subset of modes can opt out of the unused indexes to reduce per-insert Redis work.\n\nNote: `indexes` is **additive only**. Enabling a previously-disabled index does NOT\nretroactively index existing cache entries. If a deployment changes from\n`{cache_tag: true}` to `{cache_tag: true, subgraph: true}`, the `subgraph-{name}` ZSET will\nbe populated only for entries written after the config change. Pre-change entries are\ninvisible to `By subgraph` invalidation requests until they age out via TTL. To bring the\nnew index online over the full cache set, flush Redis before enabling the additional index.",
+      "properties": {
+        "cache_tag": {
+          "default": true,
+          "description": "Maintain the per-tag indexes for `apolloCacheTags`, `apolloEntityCacheTags`, and resolved\n`@cacheTag` directive values. Required for `By cache tag` invalidation requests.",
+          "type": "boolean"
+        },
+        "subgraph": {
+          "default": true,
+          "description": "Maintain the `subgraph-{name}` index. Required for `By subgraph` invalidation requests.",
+          "type": "boolean"
+        },
+        "type": {
+          "default": true,
+          "description": "Maintain the by-type index. Required for `By type` invalidation requests.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "JWTConf": {
       "additionalProperties": false,
       "properties": {
@@ -6768,102 +7029,56 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
-        "http1_max_request_buf_size": {
-          "default": null,
-          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorConnectorLimitsConfiguration"
+            }
+          ],
+          "default": {
+            "all": {
+              "http_max_response_size": null
+            },
+            "sources": {}
+          },
+          "description": "Limits that apply to outbound connector responses."
         },
-        "http1_max_request_headers": {
-          "default": null,
-          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with\n\"431 Request Header Fields Too Large\".",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "router": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RouterLimitsConfig"
+            }
+          ],
+          "default": {
+            "http1_max_request_buf_size": null,
+            "http1_max_request_headers": null,
+            "http2_max_headers_list_bytes": null,
+            "http_max_request_bytes": 2000000,
+            "introspection_max_depth": true,
+            "max_aliases": null,
+            "max_depth": null,
+            "max_height": null,
+            "max_recursive_selections": 10000000,
+            "max_root_fields": null,
+            "parser_max_recursion": 500,
+            "parser_max_tokens": 15000,
+            "warn_only": false
+          },
+          "description": "Limits that apply to inbound requests to the router."
         },
-        "http2_max_headers_list_bytes": {
-          "default": null,
-          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "http_max_request_bytes": {
-          "default": 2000000,
-          "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "introspection_max_depth": {
-          "default": true,
-          "description": "Limit the depth of nested list fields in introspection queries\nto protect avoid generating huge responses. Returns a GraphQL\nerror with `{ message: \"Maximum introspection depth exceeded\" }`\nwhen nested fields exceed the limit.\nDefault: true",
-          "type": "boolean"
-        },
-        "max_aliases": {
-          "default": null,
-          "description": "If set, requests with operations with more aliases than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_depth": {
-          "default": null,
-          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_height": {
-          "default": null,
-          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_root_fields": {
-          "default": null,
-          "description": "If set, requests with operations with more root fields than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set,\nincluding fragments and inline fragments.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "parser_max_recursion": {
-          "default": 500,
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow.\ndefault: 500",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parser_max_tokens": {
-          "default": 15000,
-          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "warn_only": {
-          "default": false,
-          "description": "If set to true (which is the default is dev mode),\nrequests that exceed a `max_*` limit are *not* rejected.\nInstead they are executed normally, and a warning is logged.",
-          "type": "boolean"
+        "subgraph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphSubgraphLimitsConfiguration"
+            }
+          ],
+          "default": {
+            "all": {
+              "http_max_response_size": null
+            },
+            "subgraphs": {}
+          },
+          "description": "Limits that apply to outbound subgraph responses."
         }
       },
       "type": "object"
@@ -7022,6 +7237,15 @@ expression: "&schema"
           ],
           "uniqueItems": true
         },
+        "cardinality_limit": {
+          "description": "Maximum number of distinct attribute combinations (cardinality) for this instrument.\n\nOverrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.\nIf neither this nor the global limit is set, the OTel SDK default of 2000 applies.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "description": {
           "description": "New description to set to the instrument",
           "type": [
@@ -7137,6 +7361,16 @@ expression: "&schema"
           },
           "type": "array"
         },
+        "cardinality_limit": {
+          "default": null,
+          "description": "Maximum number of distinct attribute combinations (cardinality)\n\nIf not set, the OTel SDK default of 2000 applies.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "resource": {
           "additionalProperties": {
             "$ref": "#/definitions/AttributeValue"
@@ -7248,6 +7482,14 @@ expression: "&schema"
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "operation_body_timeout": {
+          "default": null,
+          "description": "Maximum time allowed for the client to deliver the GraphQL operation (query and variables)\nwithin the multipart body. This timeout does not apply to reading the file contents\nthemselves. If the operation part of the request is too slow to arrive, the request is\nrejected with a `504 Gateway Timeout` error.\n\nIf not set, no operation body timeout is applied.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7359,6 +7601,17 @@ expression: "&schema"
           ],
           "default": "grpc",
           "description": "The protocol to use when sending data"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler for tracing.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect. Has no effect on metrics.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhen `preview_datadog_agent_sampling` is enabled, this sampler is still applied (including\nto `RecordOnly` spans that would not normally be exported), but a warning is emitted at\nstartup. If this OTLP endpoint targets the Datadog agent, the agent may receive incomplete\ntraces; if it targets a different backend (e.g. Jaeger or Grafana Tempo), subsampling\nindependently is safe."
         },
         "temporality": {
           "allOf": [
@@ -8170,6 +8423,21 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "RedactMode": {
+      "description": "Per-selector masking override. `Allow` shows the raw header value; `Mask`\nalways replaces it with `***MASKED***`. When unset, the selector defers to\nthe global request/response rules in `MaskingRulesMap`.",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Always show the header value, ignoring any global masking rules.",
+          "type": "string"
+        },
+        {
+          "const": "mask",
+          "description": "Always mask the header value, regardless of global rules.",
+          "type": "string"
+        }
+      ]
+    },
     "RedisCache": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
@@ -8268,6 +8536,31 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Reload": {
+      "additionalProperties": false,
+      "description": "Configuration for router reload behavior.",
+      "properties": {
+        "max_retries": {
+          "default": 5,
+          "description": "Maximum number of automatic retry attempts when a reload fails.\n`0` disables automatic retries entirely.\n`null` allows unlimited retries.\nDefaults to 5 — an arbitrary but conservative limit to prevent a\nbad publish from causing endless reload attempts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Base delay between retry attempts. A random jitter of up to 25% is\nadded automatically to spread retries across router instances.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Remove": {
       "description": "Remove header",
       "oneOf": [
@@ -8338,6 +8631,25 @@ expression: "&schema"
         }
       ]
     },
+    "ResponseHeadersLocation": {
+      "additionalProperties": false,
+      "description": "Response-side header configuration. Response propagation isn't a router\nfeature, so only masking is configurable here.",
+      "properties": {
+        "masking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeaderMaskingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header masking configuration applied to response headers in logs/telemetry."
+        }
+      },
+      "type": "object"
+    },
     "ResponseStatus": {
       "oneOf": [
         {
@@ -8356,6 +8668,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for the Rhai Plugin",
       "properties": {
+        "intern_strings": {
+          "default": true,
+          "description": "Whether to enable Rhai's internal string interning.\n\nString interning can reduce memory allocations and string comparison\ncost. But it also introduces synchronization overhead.\n\nSetting this to `false` can improve throughput and is recommended\nfor workloads with many concurrent Rhai executions.\n\nDefaults to `true`.",
+          "type": "boolean"
+        },
         "main": {
           "description": "The main entry point for Rhai script evaluation",
           "type": [
@@ -8389,6 +8706,117 @@ expression: "&schema"
             },
             "redis": null
           }
+        }
+      },
+      "type": "object"
+    },
+    "RouterLimitsConfig": {
+      "additionalProperties": false,
+      "description": "Limits that apply to inbound requests to the router.",
+      "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "http2_max_headers_list_bytes": {
+          "default": null,
+          "description": "For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.\n\nIf router receives more headers than allowed size of the header list, it responds to the client with\n\"431 Request Header Fields Too Large\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http_max_request_bytes": {
+          "default": 2000000,
+          "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "introspection_max_depth": {
+          "default": true,
+          "description": "Limit the depth of nested list fields in introspection queries\nto protect avoid generating huge responses. Returns a GraphQL\nerror with `{ message: \"Maximum introspection depth exceeded\" }`\nwhen nested fields exceed the limit.\nDefault: true",
+          "type": "boolean"
+        },
+        "max_aliases": {
+          "default": null,
+          "description": "If set, requests with operations with more aliases than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_depth": {
+          "default": null,
+          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_height": {
+          "default": null,
+          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_recursive_selections": {
+          "default": 10000000,
+          "description": "Limit the total number of selections encountered when recursively expanding\nfragment spreads in an operation. This protects against extremely large or\ndeeply nested operations that could consume excessive resources during\nquery planning. Default: 10000000 (10 million).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_root_fields": {
+          "default": null,
+          "description": "If set, requests with operations with more root fields than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set,\nincluding fragments and inline fragments.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parser_max_recursion": {
+          "default": 500,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow.\ndefault: 500",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parser_max_tokens": {
+          "default": 15000,
+          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warn_only": {
+          "default": false,
+          "description": "If set to true (which is the default is dev mode),\nrequests that exceed a `max_*` limit are *not* rejected.\nInstead they are executed normally, and a warning is logged.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -8617,6 +9045,17 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -8696,6 +9135,34 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "Count of response errors matching a JSONPath filter",
+          "properties": {
+            "response_errors_count": {
+              "description": "JSONPath filter for response errors. Use \"$[*]\" to count all errors.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Extract a specific field from each error in the response",
+          "properties": {
+            "response_errors_field": {
+              "description": "JSONPath to extract from each error. E.g., \"$.message\" or \"$.extensions.code\"",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors_field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A header from the response",
           "properties": {
             "default": {
@@ -8709,8 +9176,19 @@ expression: "&schema"
               ],
               "description": "Optional default value."
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "response_header": {
-              "description": "The name of the request header.",
+              "description": "The name of the response header.",
               "type": "string"
             }
           },
@@ -9974,6 +10452,33 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphDeduplicationConfigConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeduplicationConfig"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "ignore_auth_context": false,
+            "ignored_headers": []
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DeduplicationConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphErrorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -10044,10 +10549,38 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
+        "indexes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InvalidationIndexes"
+            }
+          ],
+          "default": {
+            "cache_tag": true,
+            "subgraph": true,
+            "type": true
+          },
+          "description": "Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to\nall three (`subgraph`, `type`, `cache_tag`) enabled, matching the original\n`response_cache` behavior. Operators with workloads that only invalidate by a subset of\nmodes can opt out of the unused indexes to reduce per-insert Redis work.\n\nSetting all three to `false` disables invalidation indexing entirely; the `/invalidation`\nendpoint then returns HTTP 400 for any request against this subgraph. This shape is\nuseful for pure TTL-based caching without an invalidation API."
+        },
         "shared_key": {
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphLimits": {
+      "additionalProperties": false,
+      "description": "Per-subgraph response size limits.",
+      "properties": {
+        "http_max_response_size": {
+          "default": null,
+          "description": "Limit the size of incoming subgraph response bodies read from the network,\nto protect against running out of memory. Default: no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10369,6 +10902,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "subgraph_request_header": {
               "description": "The name of a subgraph request header.",
               "type": "string"
@@ -10401,6 +10945,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "subgraph_response_header": {
               "description": "The name of a subgraph response header.",
@@ -10564,6 +11119,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "supergraph_request_header": {
               "description": "The supergraph request header name.",
@@ -11087,6 +11653,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphSubgraphLimitsConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphLimits"
+            }
+          ],
+          "default": {
+            "http_max_response_size": null
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphLimits"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphSubgraphStrategyConfigConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -11156,12 +11747,16 @@ expression: "&schema"
         "deduplication": {
           "allOf": [
             {
-              "$ref": "#/definitions/DeduplicationConfig"
+              "$ref": "#/definitions/SubgraphDeduplicationConfigConfiguration"
             }
           ],
           "default": {
-            "enabled": true,
-            "ignored_headers": []
+            "all": {
+              "enabled": true,
+              "ignore_auth_context": false,
+              "ignored_headers": []
+            },
+            "subgraphs": {}
           },
           "description": "Configure subgraph subscription deduplication"
         },
@@ -11169,6 +11764,14 @@ expression: "&schema"
           "default": true,
           "description": "Enable subscription",
           "type": "boolean"
+        },
+        "max_lifetime": {
+          "default": null,
+          "description": "Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "max_opened_subscriptions": {
           "default": null,
@@ -11538,6 +12141,17 @@ expression: "&schema"
                 "null"
               ]
             },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
+            },
             "request_header": {
               "description": "The name of the request header.",
               "type": "string"
@@ -11557,6 +12171,17 @@ expression: "&schema"
                 "string",
                 "null"
               ]
+            },
+            "redact": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RedactMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional redaction pattern."
             },
             "response_header": {
               "description": "The name of the response header.",
@@ -11956,7 +12581,7 @@ expression: "&schema"
         "connector": {
           "allOf": [
             {
-              "$ref": "#/definitions/ConnectorConfiguration"
+              "$ref": "#/definitions/ConnectorTlsClientConfiguration"
             }
           ],
           "default": {
@@ -12412,6 +13037,17 @@ expression: "&schema"
             }
           ],
           "description": "The endpoint to send to"
+        },
+        "sampler": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SamplerOption"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
         }
       },
       "required": [
@@ -12845,6 +13481,21 @@ expression: "&schema"
     },
     "progressive_override": {
       "$ref": "#/definitions/Config7"
+    },
+    "reload": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Reload"
+        }
+      ],
+      "default": {
+        "max_retries": 5,
+        "retry_delay": {
+          "nanos": 0,
+          "secs": 10
+        }
+      },
+      "description": "Reload configuration"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

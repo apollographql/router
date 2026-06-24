@@ -11,13 +11,15 @@ use itertools::Itertools;
 
 use crate::schema::FederationSchema;
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ArgumentCompositionStrategy {
     Max,
+    #[allow(dead_code)]
     Min,
     // Sum,
+    #[allow(dead_code)]
     Intersection,
+    #[allow(dead_code)]
     Union,
     NullableAnd,
     NullableMax,

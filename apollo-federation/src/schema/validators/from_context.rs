@@ -906,7 +906,6 @@ fn validate_field_value_type_inner(
         .flatten()
 }
 
-#[allow(dead_code)]
 fn validate_field_value_type(
     context: &str,
     current_type: &TypeDefinitionPosition,

@@ -34,10 +34,8 @@ pub(crate) enum HttpClientSelector {
     HttpClientRequestHeader {
         /// The name of the request header.
         request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -45,10 +43,8 @@ pub(crate) enum HttpClientSelector {
     HttpClientResponseHeader {
         /// The name of the response header.
         response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -63,16 +59,34 @@ impl Selector for HttpClientSelector {
         match self {
             HttpClientSelector::HttpClientRequestHeader {
                 request_header,
+                redact,
                 default,
-                ..
-            } => request
-                .http_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| h.to_str().ok())
-                .map(|h| h.to_string())
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            } => {
+                let header_value = request
+                    .http_request
+                    .headers()
+                    .get(request_header)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|h| h.to_string());
+                // The http-client layer is a transport shared across all
+                // subgraphs/connectors and carries no subgraph identity, so
+                // masking here uses the global request rules. Per-subgraph
+                // masking overrides are applied at the subgraph/connector
+                // telemetry layers, which do know the subgraph. The global
+                // rules include the fail-secure defaults, so common secrets are
+                // still masked here.
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             HttpClientSelector::HttpClientResponseHeader { default, .. } => {
                 default.clone().map(opentelemetry::Value::from)
             }
@@ -86,16 +100,34 @@ impl Selector for HttpClientSelector {
             }
             HttpClientSelector::HttpClientResponseHeader {
                 response_header,
+                redact,
                 default,
-                ..
-            } => response
-                .http_response
-                .headers()
-                .get(response_header)
-                .and_then(|h| h.to_str().ok())
-                .map(|h| h.to_string())
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            } => {
+                let header_value = response
+                    .http_response
+                    .headers()
+                    .get(response_header)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|h| h.to_string());
+                // The http-client layer is a transport shared across all
+                // subgraphs/connectors and carries no subgraph identity, so
+                // masking here uses the global response rules. Per-subgraph
+                // masking overrides are applied at the subgraph/connector
+                // telemetry layers, which do know the subgraph. The global
+                // rules include the fail-secure defaults, so common secrets are
+                // still masked here.
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
         }
     }
 
@@ -120,6 +152,8 @@ impl Selector for HttpClientSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::*;
     use crate::Context;
 
@@ -148,6 +182,92 @@ mod test {
             Some(opentelemetry::Value::String(
                 "application/json".to_string().into()
             ))
+        );
+    }
+
+    #[test]
+    fn http_client_request_header_masks_via_global_rules() {
+        use std::collections::HashMap;
+
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::DirectionRules;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = HttpClientSelector::HttpClientRequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let context = Context::new();
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new(
+            DirectionRules::new(rules.clone(), HashMap::new()),
+            DirectionRules::new(rules, HashMap::new()),
+        ));
+        context.extensions().with_lock(|lock| lock.insert(map));
+
+        let http_request = ::http::Request::builder()
+            .method(::http::Method::GET)
+            .uri("http://localhost/graphql")
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .body(crate::services::router::body::empty())
+            .unwrap();
+        let request = http::HttpRequest {
+            http_request,
+            context,
+        };
+        assert_eq!(
+            selector.on_request(&request),
+            Some(opentelemetry::Value::String("***MASKED***".into()))
+        );
+    }
+
+    #[test]
+    fn http_client_request_header_redact_allow_bypasses_global_rules() {
+        use std::collections::HashMap;
+
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::DirectionRules;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = HttpClientSelector::HttpClientRequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+
+        let context = Context::new();
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new(
+            DirectionRules::new(rules.clone(), HashMap::new()),
+            DirectionRules::new(rules, HashMap::new()),
+        ));
+        context.extensions().with_lock(|lock| lock.insert(map));
+
+        let http_request = ::http::Request::builder()
+            .method(::http::Method::GET)
+            .uri("http://localhost/graphql")
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .body(crate::services::router::body::empty())
+            .unwrap();
+        let request = http::HttpRequest {
+            http_request,
+            context,
+        };
+        assert_eq!(
+            selector.on_request(&request),
+            Some(opentelemetry::Value::String("Bearer secret".into()))
         );
     }
 

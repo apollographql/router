@@ -125,7 +125,11 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .and_then(|arg| arg.as_list())
         .into_iter()
         .flatten()
-        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
+        .filter_map(|value| {
+            Import::try_from(value.as_ref())
+                .ok()
+                .map(|import| (value, import))
+        })
         .collect_vec();
 
     let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
@@ -513,8 +517,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
             // Continue walking with nested selection sets
             let mut nested = SelectionSetWalker::new(self.name.clone(), self.schema, sub_selection);
             next_shape.visit_shape(&mut nested)?;
-            self.unmapped_fields
-                .extend(nested.unmapped_fields.into_iter());
+            self.unmapped_fields.extend(nested.unmapped_fields);
         }
         Ok(())
     }

@@ -23,7 +23,7 @@ use crate::connectors::json_selection::TopLevelSelection;
 
 impl std::fmt::Display for JSONSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.pretty_print())
+        f.write_str(&PrettyPrintable::pretty_print(self))
     }
 }
 
@@ -31,6 +31,11 @@ impl std::fmt::Display for JSONSelection {
 ///
 /// This trait marks a type as supporting pretty printing itself outside of a
 /// Display implementation, which might be more useful for snapshots.
+///
+/// Output preserves what the user wrote: `PathList::Expr(inner, tail)` always
+/// emits `$(inner)rest`, because a `PathList::Expr` node in the AST can only
+/// come from an explicit `$(...)` wrapper in source (that invariant is
+/// enforced by the parser). There is no spec-dependent rewriting.
 pub(crate) trait PrettyPrintable {
     /// Pretty print the struct
     fn pretty_print(&self) -> String {
@@ -53,9 +58,7 @@ impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         match &self.inner {
             TopLevelSelection::Named(named) => named.print_subselections(inline, indentation),
-            TopLevelSelection::Path(path) => {
-                path.pretty_print_with_indentation(inline, indentation)
-            }
+            TopLevelSelection::Value(lit) => lit.pretty_print_with_indentation(inline, indentation),
         }
     }
 }
@@ -147,12 +150,13 @@ impl PrettyPrintable for PathList {
                 result.push_str(rest.as_str());
             }
             Self::Expr(expr, tail) => {
+                // `PathList::Expr` comes only from an explicit `$(...)` in
+                // source, so pretty-print it back verbatim — the wrapper is
+                // part of what the user wrote, not a syntactic accident.
+                let inner = expr.pretty_print_with_indentation(inline, indentation);
                 let rest = tail.pretty_print_with_indentation(inline, indentation);
                 result.push_str("$(");
-                result.push_str(
-                    expr.pretty_print_with_indentation(inline, indentation)
-                        .as_str(),
-                );
+                result.push_str(inner.as_str());
                 result.push(')');
                 result.push_str(rest.as_str());
             }
@@ -256,7 +260,45 @@ impl PrettyPrintable for LitExpr {
             Self::Number(n) => result.push_str(n.to_string().as_str()),
             Self::Bool(b) => result.push_str(b.to_string().as_str()),
             Self::Null => result.push_str("null"),
-            Self::Object(map) => {
+            Self::Object(sub) => {
+                result.push('{');
+
+                if sub.selections.is_empty() {
+                    result.push('}');
+                    return result;
+                }
+
+                let mut is_first = true;
+                for sel in &sub.selections {
+                    if is_first {
+                        is_first = false;
+                    } else {
+                        result.push(',');
+                    }
+
+                    if inline {
+                        result.push(' ');
+                    } else {
+                        result.push('\n');
+                        result.push_str(indent_chars(indentation + 1).as_str());
+                    }
+
+                    result.push_str(
+                        sel.pretty_print_with_indentation(inline, indentation + 1)
+                            .as_str(),
+                    );
+                }
+
+                if inline {
+                    result.push(' ');
+                } else {
+                    result.push('\n');
+                    result.push_str(indent_chars(indentation).as_str());
+                }
+
+                result.push('}');
+            }
+            Self::LegacyObject(map) => {
                 result.push('{');
 
                 if map.is_empty() {
@@ -369,11 +411,25 @@ impl PrettyPrintable for NamedSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
+        // Collapse `alias: key...` to `key...` when alias matches the path's
+        // single leading key (e.g. `a: a?` prints as `a?`). Both forms are
+        // semantically equivalent and round-trip through the parser.
+        let is_shorthand = if let NamingPrefix::Alias(alias) = &self.prefix
+            && let LitExpr::Path(path) = self.path.as_ref()
+        {
+            path.get_single_key()
+                .is_some_and(|key| alias.name.as_ref() == key.as_ref())
+        } else {
+            false
+        };
+
         match &self.prefix {
             NamingPrefix::None => {}
             NamingPrefix::Alias(alias) => {
-                result.push_str(alias.pretty_print().as_str());
-                result.push(' ');
+                if !is_shorthand {
+                    result.push_str(alias.pretty_print().as_str());
+                    result.push(' ');
+                }
             }
             NamingPrefix::Spread(token_range) => {
                 if token_range.is_some() {
@@ -421,6 +477,7 @@ mod tests {
     use crate::connectors::json_selection::NamedSelection;
     use crate::connectors::json_selection::PrettyPrintable;
     use crate::connectors::json_selection::location::new_span;
+    use crate::connectors::json_selection::location::new_span_with_spec;
     use crate::connectors::json_selection::pretty::indent_chars;
     use crate::connectors::spec::ConnectSpec;
     use crate::selection;
@@ -490,6 +547,9 @@ mod tests {
 
     #[test]
     fn it_prints_a_path_selection() {
+        // These round-trip assertions include `$(...)` wrappers around
+        // literals/OpChains, which v0.2/v0.3 require to disambiguate from
+        // field lookups. v0.4 drops the wrappers (see the v0.4 variant below).
         let paths = [
             // Var
             "$.one.two.three",
@@ -508,7 +568,8 @@ mod tests {
             "$($args.unnecessary.parens)->eq(42)",
         ];
         for path in paths {
-            let (unmatched, path_selection) = PathSelection::parse(new_span(path)).unwrap();
+            let (unmatched, path_selection) =
+                PathSelection::parse(new_span_with_spec(path, ConnectSpec::V0_2)).unwrap();
             assert!(
                 unmatched.is_empty(),
                 "static path was not fully parsed: '{path}' ({path_selection:?}) had unmatched '{unmatched}'"
@@ -582,6 +643,117 @@ mod tests {
         test_permutations(root_selection, "id\nname");
     }
 
+    // Round-trip helpers for connect/v0.4 top-level LitExpr forms. The
+    // pretty-printer preserves whatever `$(...)` the user wrote (or didn't),
+    // so for these canonical forms parse+pretty is the identity.
+    fn assert_round_trip_v0_4(input: &str, canonical: &str) {
+        let first = selection!(input, ConnectSpec::V0_4);
+        let printed = first.pretty_print();
+        assert_eq!(
+            printed, canonical,
+            "V0_4 pretty-print of `{input}` gave `{printed}`, expected `{canonical}`",
+        );
+        // Re-parsing the canonical form must yield a structurally identical
+        // selection, or the pretty/parse cycle is asymmetric.
+        let second = selection!(canonical, ConnectSpec::V0_4);
+        let second_printed = second.pretty_print();
+        assert_eq!(
+            printed, second_printed,
+            "re-parse of canonical V0_4 form did not reproduce the same AST",
+        );
+    }
+
+    // The top-level `$(...)` form preserves its wrapper through pretty-print:
+    // `PathList::Expr` is reserved for actual `$(...)` in source, so parsing
+    // then pretty-printing is the identity in every case below.
+
+    #[test]
+    fn top_level_v0_4_number_literal() {
+        assert_round_trip_v0_4("$(1234)", "$(1234)");
+    }
+
+    #[test]
+    fn top_level_v0_4_negative_number_literal() {
+        assert_round_trip_v0_4("$(-1)", "$(-1)");
+    }
+
+    #[test]
+    fn top_level_v0_4_string_literal() {
+        assert_round_trip_v0_4(r#"$("hello")"#, r#"$("hello")"#);
+    }
+
+    #[test]
+    fn top_level_v0_4_boolean_literal() {
+        assert_round_trip_v0_4("$(true)", "$(true)");
+    }
+
+    #[test]
+    fn top_level_v0_4_null_literal() {
+        assert_round_trip_v0_4("$(null)", "$(null)");
+    }
+
+    #[test]
+    fn top_level_v0_4_array_literal() {
+        assert_round_trip_v0_4("$([1, 2, 3])", "$([1, 2, 3])");
+    }
+
+    #[test]
+    fn top_level_v0_4_number_with_method_chain() {
+        assert_round_trip_v0_4("$(1234)->add(1111)", "$(1234)->add(1111)");
+    }
+
+    #[test]
+    fn top_level_v0_4_negative_number_with_method_chain() {
+        assert_round_trip_v0_4("$(-1)->add(10)", "$(-1)->add(10)");
+    }
+
+    #[test]
+    fn top_level_v0_4_string_with_method_chain() {
+        assert_round_trip_v0_4(r#"$("abc")->first"#, r#"$("abc")->first"#);
+    }
+
+    #[test]
+    fn top_level_v0_4_array_with_method_chain() {
+        assert_round_trip_v0_4("$([1, 2, 3])->last", "$([1, 2, 3])->last");
+    }
+
+    #[test]
+    fn top_level_v0_4_object_literal_with_key_access() {
+        // The `$({ a: 1, b: 2 }.b)` form wraps a `LitPath(Object, Key)`
+        // expression. The pretty-printer formats the object multi-line, so
+        // the canonical reflects that.
+        assert_round_trip_v0_4("$({ a: 1, b: 2 }.b)", "$({\n  a: 1,\n  b: 2\n}.b)");
+    }
+
+    #[test]
+    fn top_level_v0_4_operator_chain() {
+        assert_round_trip_v0_4(
+            r#"$($args.maybe ?? "fallback")"#,
+            r#"$($args.maybe ?? "fallback")"#,
+        );
+    }
+
+    #[test]
+    fn top_level_v0_4_nested_expr_path_preserves_wrappers() {
+        // `$($(-1)->add($(10)))` has three `$(...)` layers in source, and the
+        // pretty-printer preserves every one of them — we never synthesize or
+        // elide `$(...)` at any depth.
+        assert_round_trip_v0_4("$($(-1)->add($(10)))", "$($(-1)->add($(10)))");
+    }
+
+    #[test]
+    fn top_level_v0_4_bare_single_key_still_named() {
+        // Single-key ambiguity: a bare key at the top level must still
+        // parse as a NamedSelectionList so `author` means
+        // `{ author: $.author }`, not a flat value lookup.
+        let sel = selection!("author", ConnectSpec::V0_4);
+        assert_eq!(sel.pretty_print(), "author");
+        assert!(
+            sel.next_subselection().is_some(),
+            "top-level `author` should remain a NamedSelectionList wrapping a SubSelection",
+        );
+    }
+
     #[test]
     fn it_reprints_shorthand_properties() {
         let expected = r#"
@@ -595,7 +767,7 @@ upc
     }
   }],
   ["film", $ {
-    __typename: $("Film")
+    __typename: "Film"
     title
     director {
       id

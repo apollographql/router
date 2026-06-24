@@ -54,6 +54,115 @@ macro_rules! test_schema {
     };
 }
 
+/// The common part of supergraph schema shared by every test schema below
+/// (directives, scalars, and the `link__Purpose` enum). Tests append a
+/// `enum join__Graph { ... }` block plus their type definitions; use
+/// [`supergraph_schema`] to glue the pieces together.
+const SUPERGRAPH_SCHEMA_COMMON: &str = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+    query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+    SECURITY
+    EXECUTION
+}
+"#;
+
+/// Glue the federation boilerplate with the test-specific schema body
+/// (graph enum + type definitions).
+fn supergraph_schema(body: &str) -> String {
+    format!("{SUPERGRAPH_SCHEMA_COMMON}{body}")
+}
+
+/// Default test harness config: include subgraph errors, coercion errors off.
+fn default_config() -> serde_json::Value {
+    serde_json::json!({ "include_subgraph_errors": { "all": true } })
+}
+
+/// Config with `enable_result_coercion_errors=true`, so missing/invalid
+/// values surface in `response.errors` with `RESPONSE_VALIDATION_FAILED`.
+fn coercion_errors_config() -> serde_json::Value {
+    serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "supergraph": { "enable_result_coercion_errors": true },
+    })
+}
+
+/// Run a single GraphQL request against a mocked supergraph and return
+/// the response as a JSON value. Bundles the `TestHarness` →
+/// `supergraph::Request::fake_builder` → `oneshot` plumbing that every
+/// test in this file would otherwise repeat verbatim.
+async fn run_query(
+    schema: &str,
+    subgraphs: MockedSubgraphs,
+    query: &str,
+    config: serde_json::Value,
+) -> serde_json::Value {
+    let service = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    serde_json::to_value(&response).unwrap()
+}
+
+/// Assert on the **full** set of user-visible diagnostics in a supergraph
+/// response: both `response.errors` and `extensions.valueCompletion`. Use
+/// this instead of filter-and-check-inclusion so that any unexpected
+/// extra (or missing, or duplicated) emission shows up as a test failure.
+fn assert_response_diagnostics(
+    value: &serde_json::Value,
+    expected_errors: serde_json::Value,
+    expected_value_completion: serde_json::Value,
+) {
+    let actual_errors = value["errors"].clone();
+    let actual_errors = if actual_errors.is_null() {
+        serde_json::json!([])
+    } else {
+        actual_errors
+    };
+    let actual_value_completion = value["extensions"]["valueCompletion"].clone();
+    let actual_value_completion = if actual_value_completion.is_null() {
+        serde_json::json!([])
+    } else {
+        actual_value_completion
+    };
+    assert_eq!(
+        actual_errors, expected_errors,
+        "response.errors mismatch (actual on left, expected on right)"
+    );
+    assert_eq!(
+        actual_value_completion, expected_value_completion,
+        "extensions.valueCompletion mismatch (actual on left, expected on right)"
+    );
+}
+
 fn subgraph_service_factory(
     graphs: Vec<(String, Arc<dyn MakeSubgraphService>)>,
 ) -> SubgraphServiceFactory {
@@ -946,8 +1055,8 @@ async fn missing_fields_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1082,8 +1191,8 @@ async fn missing_typename_and_fragments_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1218,8 +1327,8 @@ async fn missing_typename_and_fragments_in_requires2() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1372,8 +1481,8 @@ async fn null_in_requires() {
   scalar join__FieldSet
 
   enum join__Graph {
-    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
-    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+    SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
   }
 
   scalar link__Import
@@ -1893,8 +2002,8 @@ fn broken_plan_does_not_panic() {
     );
 }
 
-/// Reproduces a bug (RH-1172) where a deferred node's dependency list was missing a
-/// fetch that provides `__typename` and entity keys at the deferred Flatten path.
+/// Reproduces a bug where a deferred node's dependency list was missing a fetch
+/// that provides `__typename` and entity keys at the deferred Flatten path.
 ///
 /// The root cause was in the query planner's `collect_redundant_edges` (transitive
 /// reduction): when a direct edge from a primary fetch to a deferred fetch was also
@@ -2227,5 +2336,456 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     assert_eq!(
         inner_data["target"]["x"], "42",
         "target should have x from Z fetch"
+    );
+}
+
+// Documents that the user-visible "errors" array stays SILENT when the
+// user-asked fields are all nullable. The skipped @requires fetch leaves
+// `computed` and `nickname` null in `data` (existing behavior), but the
+// new approach only emits `RESPONSE_VALIDATION_FAILED` for non-null
+// requested fields. The planner-internal `code: String!` that triggered
+// the skip is not in the user's operation, so no diagnostic surfaces.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query { entity { id computed nickname } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        // Router queries sub1 for entity fields including code and name (needed for @requires)
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // Sub1 returns WITHOUT `code` (simulating coprocessor stripping the field
+                        // from the request, so the subgraph never received it and doesn't return it)
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, default_config()).await;
+
+    let data = &value["data"]["entity"];
+    // `computed` and `nickname` are nullable; they land as null in `data`.
+    assert_eq!(data["computed"], serde_json::Value::Null);
+    assert_eq!(data["nickname"], serde_json::Value::Null);
+
+    // Both fields are nullable, and coercion errors are off in this
+    // harness → no emission anywhere. (`emit_missing_field` only
+    // writes valueCompletion for non-null, and only writes response
+    // errors when coercion is on.)
+    assert_response_diagnostics(&value, serde_json::json!([]), serde_json::json!([]));
+}
+
+// Variant of C.1 with `enable_result_coercion_errors` ON. Nullable missing fields surface
+// `RESPONSE_VALIDATION_FAILED` in `response.errors` when the gate is enabled.
+#[tokio::test]
+async fn missing_nullable_field_in_requires_returns_error_coercion_on() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query { entity { id computed nickname } }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    let data = &value["data"]["entity"];
+    assert_eq!(data["computed"], serde_json::Value::Null);
+    assert_eq!(data["nickname"], serde_json::Value::Null);
+
+    // With coercion errors ON, nullable missing fields emit
+    // `RESPONSE_VALIDATION_FAILED` at the leaf path. No valueCompletion
+    // (that's non-null only).
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+            {
+                "message": "Missing field",
+                "path": ["entity", "nickname"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([]),
+    );
+}
+
+// Variant of `missing_nonnull_field_in_requires_returns_error` where `computed` is a non-nullable
+// field. When the skipped fetch's field is non-nullable, `apply_selection_set` propagates null up
+// to the parent (entity), per the GraphQL spec. The post-fix `format_response` emits a
+// `RESPONSE_VALIDATION_FAILED` error at the leaf path that triggered the null.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String! @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    // `computed: String!` is non-nullable — the missing value bubbles up and nullifies
+    // `data.entity` per GraphQL null-propagation rules.
+    assert_eq!(value["data"]["entity"], serde_json::Value::Null);
+
+    // `RESPONSE_VALIDATION_FAILED` is emitted at the leaf
+    // `[entity, computed]` (the non-null user-asked field). `nickname`
+    // is nullable — the formatter returns `Err(InvalidValue)` at
+    // `computed` and short-circuits before iterating to `nickname`, so
+    // only `computed`'s emission appears. `emit_missing_field` writes
+    // to both sinks for non-null missing, so `valueCompletion` also
+    // carries an entry at the parent path `[entity]`.
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+}
+
+// Variant of `missing_nonnull_field_in_requires_returns_error` where the root `Query.entity`
+// field is non-nullable. With `computed: String!` also non-nullable, the missing value at the
+// leaf bubbles up: `computed` → `entity` (becomes null) → `data` (becomes null, since
+// `Query.entity` is non-null). This tests how null-propagation behaves when there's no
+// nullable ancestor to stop at.
+#[tokio::test]
+async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+            SUB2 @join__graph(name: "sub2", url: "http://localhost/sub2")
+        }
+
+        type Query
+            @join__type(graph: SUB1)
+            @join__type(graph: SUB2)
+        {
+            entity: Entity! @join__field(graph: SUB1)
+        }
+
+        type Entity
+            @join__type(graph: SUB1, key: "id")
+            @join__type(graph: SUB2, key: "id", extension: true)
+        {
+            id: ID!
+            name: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            code: String! @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+            computed: String! @join__field(graph: SUB2, requires: "code")
+            nickname: String @join__field(graph: SUB2, requires: "name")
+        }
+        "#,
+    );
+
+    let query = "query {
+        entity {
+          id
+          computed
+          nickname
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
+                        serde_json::json! {{"data": {
+                            "entity": {
+                              "__typename": "Entity",
+                              "id": "1",
+                              "name": "Alice"
+                            }
+                        } }},
+                    )
+                    .build(),
+            ),
+            ("sub2", MockSubgraph::builder().build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let value = run_query(&schema, subgraphs, query, coercion_errors_config()).await;
+
+    // `computed: String!` missing → nullifies `entity` → `Query.entity: Entity!` is non-null →
+    // the null bubbles up to `data` itself.
+    assert_eq!(value["data"], serde_json::Value::Null);
+
+    // Only ONE `RESPONSE_VALIDATION_FAILED` at the originating leaf
+    // `[entity, computed]`.
+    assert_response_diagnostics(
+        &value,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "computed"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+}
+
+// Symmetry test: the missing and explicit-null branches in `spec/query.rs` response formatting
+// both emit `RESPONSE_VALIDATION_FAILED` in `response.errors` (in addition to the existing
+// `valueCompletion` entry either case still leaves in extensions).
+//
+// Before the fix, only the explicit-null branch surfaced a user-visible error; the missing branch
+// went only to `valueCompletion`. That asymmetry is the reason `@requires`-driven skips (which
+// look like "missing" from the formatter's perspective — the field was never fetched) used to
+// silently drop. With the fix, the symptom is the same regardless of whether the subgraph returned
+// an explicit null or omitted the field.
+#[tokio::test]
+async fn response_formatting_missing_vs_null_nonnull_field_asymmetry() {
+    let schema = supergraph_schema(
+        r#"
+        enum join__Graph {
+            SUB1 @join__graph(name: "sub1", url: "http://localhost/sub1")
+        }
+
+        type Query @join__type(graph: SUB1) {
+            entity: Entity @join__field(graph: SUB1)
+        }
+
+        type Entity @join__type(graph: SUB1, key: "id") {
+            id: ID!
+            name: String! @join__field(graph: SUB1)
+        }
+        "#,
+    );
+
+    let query = "query { entity { id name } }";
+
+    // Helper: build a service whose single subgraph returns the given `entity` payload.
+    async fn run_with_entity(
+        schema: &str,
+        query: &str,
+        entity: serde_json::Value,
+    ) -> serde_json::Value {
+        let subgraphs = MockedSubgraphs(
+            [(
+                "sub1",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query": "{entity{id name}}"}},
+                        serde_json::json! {{"data": {"entity": entity}}},
+                    )
+                    .build(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        // Enable coercion errors so any errors generated by `format_non_nullable_value`
+        // show up in `response.errors`.
+        run_query(schema, subgraphs, query, coercion_errors_config()).await
+    }
+
+    // Case A: `name` is MISSING (absent) from the subgraph response.
+    // `apply_selection_set`'s missing-field branch calls `emit_missing_field`,
+    // which writes RVF to `response.errors` at the leaf, plus a
+    // valueCompletion entry at the **parent** path (it never recursed
+    // into the field).
+    let missing = run_with_entity(&schema, query, serde_json::json!({ "id": "1" })).await;
+    assert_eq!(
+        missing["data"]["entity"],
+        serde_json::Value::Null,
+        "non-null `name` missing → `entity` nullified"
+    );
+    assert_response_diagnostics(
+        &missing,
+        serde_json::json!([
+            {
+                "message": "Missing field",
+                "path": ["entity", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Cannot return null for non-nullable type String", "path": ["entity"] },
+        ]),
+    );
+
+    // Case B: `name` is explicitly NULL in the subgraph response.
+    // `format_value` recurses, `format_non_nullable_value` then notices
+    // the null. Its legacy dual-emission writes RVF to both sinks at
+    // the **leaf** path (the field name was pushed by the caller).
+    let null = run_with_entity(
+        &schema,
+        query,
+        serde_json::json!({ "id": "1", "name": null }),
+    )
+    .await;
+    assert_eq!(
+        null["data"]["entity"],
+        serde_json::Value::Null,
+        "null non-null `name` → `entity` nullified"
+    );
+    assert_response_diagnostics(
+        &null,
+        serde_json::json!([
+            {
+                "message": "Null value found for non-nullable type String",
+                "path": ["entity", "name"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+        ]),
+        serde_json::json!([
+            { "message": "Null value found for non-nullable type String", "path": ["entity", "name"] },
+        ]),
     );
 }

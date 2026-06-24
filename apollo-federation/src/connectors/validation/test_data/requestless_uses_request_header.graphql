@@ -1,0 +1,19 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  # Positive control for the `RequestlessSelectionUsesRequestData` diagnostic.
+  # `$request` refers to the *router's incoming GraphQL request*, which is
+  # available regardless of whether the connector itself performs an outbound
+  # transport call (`handle_mapping_only_response` threads `client_headers`
+  # through to `$request`). This requestless connector should validate clean.
+  forwarded: String
+    @connect(
+      selection: """
+        forwarded: $request.headers.authorization
+      """
+    )
+}

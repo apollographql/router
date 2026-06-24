@@ -274,7 +274,7 @@ impl QueryPlannerService {
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
             query_metrics_in,
-            &self.configuration.limits,
+            &self.configuration.limits.router,
             &query,
             executable,
             operation_name,
@@ -774,7 +774,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
 
         assert_eq!(
-            "spec error: parsing error: syntax error: Unexpected <EOF>.",
+            "spec error: parsing error: [1:1] syntax error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }

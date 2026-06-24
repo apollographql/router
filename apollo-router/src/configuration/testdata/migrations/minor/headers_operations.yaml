@@ -1,0 +1,30 @@
+headers:
+  all:
+    request:
+      - propagate:
+          matching: .*
+      - propagate:
+          named: x-request-id
+  subgraphs:
+    products:
+      request:
+        - insert:
+            name: x-internal
+            value: "true"
+        - propagate:
+            named: authorization
+    reviews:
+      request:
+        - propagate:
+            named: x-user-id
+  connector:
+    all:
+      request:
+        - propagate:
+            named: x-tenant-id
+    sources:
+      products.api:
+        request:
+          - insert:
+              name: x-source
+              value: api

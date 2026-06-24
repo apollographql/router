@@ -510,8 +510,14 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.key.clone()),
-                    move |(context, response_key), future| {
+                    |req: &Request| {
+                        (
+                            req.context.clone(),
+                            req.key.clone(),
+                            req.connector.id.subgraph_name.to_string(),
+                        )
+                    },
+                    move |(context, response_key, subgraph_name), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
@@ -519,6 +525,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Elapsed>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::GatewayTimeout,
                                         "Your request has been timed out",
                                         response_key,
@@ -528,6 +535,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::RateLimited,
                                         "Your request has been rate limited",
                                         response_key,
@@ -545,8 +553,9 @@ impl PluginPrivate for TrafficShaping {
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression {
-                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
@@ -839,11 +848,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -951,7 +960,9 @@ mod test {
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request;
+                let TransportRequest::Http(ref http_request) = req.transport_request else {
+                    panic!("expected Http transport request");
+                };
 
                 assert_eq!(
                     http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),

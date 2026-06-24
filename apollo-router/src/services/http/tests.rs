@@ -1491,15 +1491,18 @@ mod pool_idle_timeout {
 
     use super::*;
 
-    /// Server that counts how many TCP connections are accepted
+    /// Server that counts how many TCP connections are accepted and how many are currently open.
     async fn serve_counting(
         listener: TcpListener,
         connection_count: Arc<AtomicUsize>,
+        live_connection_count: Arc<AtomicUsize>,
     ) -> std::io::Result<()> {
         loop {
             let (stream, _) = listener.accept().await?;
             connection_count.fetch_add(1, Ordering::SeqCst);
+            live_connection_count.fetch_add(1, Ordering::SeqCst);
             let io = TokioIo::new(stream);
+            let live = live_connection_count.clone();
             tokio::spawn(async move {
                 let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                     Ok::<_, Infallible>(
@@ -1513,6 +1516,7 @@ mod pool_idle_timeout {
                 let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                     .serve_connection_with_upgrades(io, svc)
                     .await;
+                live.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
@@ -1555,7 +1559,11 @@ mod pool_idle_timeout {
         let socket_addr = listener.local_addr().unwrap();
         let connection_count = Arc::new(AtomicUsize::new(0));
 
-        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+        tokio::task::spawn(serve_counting(
+            listener,
+            connection_count.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
 
         let mut service = HttpClientService::test_new(
             "test",
@@ -1587,6 +1595,196 @@ mod pool_idle_timeout {
             expected_connections,
             "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
         );
+    }
+
+    /// Regression test: the router does not proactively close idle connections between requests.
+    /// Before this fix, `pool_timer` was unconditionally set, enabling a background eviction task
+    /// that sent TCP closes between requests and caused latency spikes in some network environments.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_idle_connections_not_proactively_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let live_connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(
+            listener,
+            Arc::new(AtomicUsize::new(0)),
+            live_connection_count.clone(),
+        ));
+
+        let client_config = crate::configuration::shared::Client {
+            pool_idle_timeout: Some(Duration::from_millis(50)),
+            ..Default::default()
+        };
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            client_config,
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection is open after first request"
+        );
+
+        // Sleep well past the 50ms idle timeout. Without pool_timer, no background task fires,
+        // so the connection must still be open in the pool.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection must not be proactively closed between requests"
+        );
+    }
+}
+
+mod connection_timing_metrics {
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use http::StatusCode;
+    use http::Uri;
+    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+    use opentelemetry_sdk::metrics::data::MetricData;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    /// Verifies that `apollo.router.connection.acquire.duration` fires once per TCP
+    /// connection established, not once per HTTP request.
+    ///
+    /// Two requests to the same server: the first creates a TCP connection (connector called →
+    /// metric count = 1), the second reuses the pooled connection (connector skipped → count
+    /// stays at 1).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_acquire_duration_fires_for_connections_not_requests() {
+        async {
+            let server = MockServer::start().await;
+            Mock::given(matchers::any())
+                .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data":null}"#))
+                .mount(&server)
+                .await;
+
+            let uri = Uri::from_str(&server.uri()).unwrap();
+
+            let mut service = HttpClientService::test_new(
+                "test",
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("native TLS roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create HttpClientService");
+
+            // First request: establishes a new TCP connection → connector fires.
+            let response = send_request(service.clone(), uri.clone(), r#"{"query":"{ a }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+            // CRITICAL: hyper-util's pool only returns a connection to the pool once the
+            // response body has been fully consumed AND the response is dropped. If we leave
+            // the body undrained, the second request below races against the pool checkout
+            // and may open a second TCP connection — which would (correctly) increment the
+            // metric to 2 and cause the assertion below to fail. The drain + drop here makes
+            // the pool checkout deterministic. See PR #9412/#9406/#9386/#9337 flakes.
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
+            // Even after drain, hyper-util needs the connection task scheduled to
+            // observe body-end and return the connection to its idle set. A short
+            // sleep guarantees this on busy CI runners. Sibling test
+            // `test_pool_idle_timeout_evicts_connections::case::long_timeout_reuses`
+            // uses the same pattern (200ms sleep, expect 1 conn). Well below
+            // the default pool_idle_timeout so the pool keeps the connection.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // Second request: hyper reuses the pooled connection → connector NOT called.
+            tower::ServiceExt::ready(&mut service).await.unwrap();
+            let response = send_request(service, uri, r#"{"query":"{ b }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
+
+            // Metric count = 1, not 2: one connection was established for two HTTP requests.
+            assert_histogram_count!(
+                "apollo.router.connection.acquire.duration",
+                1u64,
+                "subgraph.name" = "test",
+                "network.transport" = "tcp"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Verifies that `apollo.router.connection.acquire.duration` measures only connection
+    /// establishment time, not total request time.
+    ///
+    /// The server delays its response by 200ms. The metric must be recorded before the response
+    /// arrives, and its value must be well under 200ms.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_acquire_duration_does_not_include_response_time() {
+        async {
+            let response_delay = Duration::from_millis(200);
+
+            let server = MockServer::start().await;
+            Mock::given(matchers::any())
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(r#"{"data":null}"#)
+                        .set_delay(response_delay),
+                )
+                .mount(&server)
+                .await;
+
+            let uri = Uri::from_str(&server.uri()).unwrap();
+            let service = HttpClientService::test_new(
+                "test",
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("native TLS roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create HttpClientService");
+
+            let response = send_request(service, uri, r#"{"query":"{ a }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+
+            // Extract the actual recorded histogram sum from the metrics data.
+            let acquire_secs = crate::metrics::collect_metrics()
+                .find("apollo.router.connection.acquire.duration")
+                .and_then(|m| {
+                    if let AggregatedMetrics::F64(MetricData::Histogram(h)) = m.data() {
+                        h.data_points().next().map(|dp| dp.sum())
+                    } else {
+                        None
+                    }
+                })
+                .expect("apollo.router.connection.acquire_duration should be recorded");
+
+            // TCP handshake to localhost is in the low-millisecond range; the 200ms response
+            // delay must NOT appear in the metric.
+            assert!(
+                acquire_secs < response_delay.as_secs_f64(),
+                "acquire_duration ({acquire_secs:.4}s) should be less than the server response delay ({:.3}s)",
+                response_delay.as_secs_f64(),
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
 

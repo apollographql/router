@@ -173,7 +173,6 @@ mod test {
                 condition: Some(Arc::new(Mutex::new(Condition::Exists(
                     SupergraphSelector::ResponseErrors {
                         response_errors: JsonPathInst::from_str("$[0].extensions.code").unwrap(),
-                        redact: None,
                         default: None,
                     },
                 )))),

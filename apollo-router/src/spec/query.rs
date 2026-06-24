@@ -16,6 +16,7 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -177,6 +178,12 @@ impl Query {
                                     .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                             }
 
+                            if let Some(errors) = parameters.coercion_errors.as_mut()
+                                && !errors.is_empty()
+                            {
+                                response.errors.append(errors);
+                            }
+
                             return parameters.nullified;
                         }
                         None => {
@@ -264,8 +271,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<ParsedDocument, SpecError> {
         let parser = &mut apollo_compiler::parser::Parser::new()
-            .recursion_limit(configuration.limits.parser_max_recursion)
-            .token_limit(configuration.limits.parser_max_tokens);
+            .recursion_limit(configuration.limits.router.parser_max_recursion)
+            .token_limit(configuration.limits.router.parser_max_tokens);
         let ast = match parser.parse_ast(query, "query.graphql") {
             Ok(ast) => ast,
             Err(errors) => {
@@ -344,6 +351,8 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
+    /// Format a field's value.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -357,11 +366,13 @@ impl Query {
         // and return Ok(()), because values are optional by default
         match field_type {
             executable::Type::Named(name) => match name.as_str() {
-                "Int" => self.format_integer(parameters, path, input, output),
-                "Float" => self.format_float(parameters, path, input, output),
-                "Boolean" => self.format_boolean(parameters, path, input, output),
-                "String" => self.format_string(parameters, path, input, output),
-                "Id" => self.format_id(parameters, path, input, output),
+                // Scalar formatters return `Err` on coercion failure.  Propagating `Err` here
+                // avoids redundant "Null value found for non-nullable" errors.
+                "Int" => self.format_integer(parameters, path, input, output)?,
+                "Float" => self.format_float(parameters, path, input, output)?,
+                "Boolean" => self.format_boolean(parameters, path, input, output)?,
+                "String" => self.format_string(parameters, path, input, output)?,
+                "Id" => self.format_id(parameters, path, input, output)?,
                 _ => self.format_named_type(
                     parameters,
                     field_type,
@@ -395,6 +406,8 @@ impl Query {
         Ok(())
     }
 
+    /// Format a non-null field's value.
+    /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
@@ -416,24 +429,59 @@ impl Query {
             }
         };
 
-        self.format_value(parameters, &inner_type, input, output, path, selection_set)?;
+        let inner_result =
+            self.format_value(parameters, &inner_type, input, output, path, selection_set);
 
         if output.is_null() {
             let message = format!("Null value found for non-nullable type {inner_type}");
-            parameters.errors.push(
-                Error::builder()
-                    .message(&message)
-                    .path(Path::from_response_slice(path))
-                    .build(),
-            );
-            parameters.insert_coercion_error(
-                Error::builder()
-                    .message(message)
-                    .path(Path::from_response_slice(path))
-                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                    .build(),
-            );
-
+            match inner_result {
+                Ok(()) => {
+                    // Null value from the subgraph (explicit null for a non-null position) without
+                    // coercion error from formatting. Emit errors here.
+                    parameters.errors.push(
+                        Error::builder()
+                            .message(&message)
+                            .path(Path::from_response_slice(path))
+                            .build(),
+                    );
+                    parameters.insert_coercion_error(
+                        Error::builder()
+                            .message(message)
+                            .path(Path::from_response_slice(path))
+                            .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                            .build(),
+                    );
+                }
+                Err(InvalidValue) => {
+                    // The `format_value` errored. Decide based on `inner_type`:
+                    //   - List: `format_list` only returns `Err` when an element's
+                    //     `format_value` returned `Err` with a non-null element type. Skip.
+                    //   - Composite (Object/Interface/Union): the Err came from a child
+                    //     selection set, which already emitted both sinks at the originating
+                    //     leaf. Skip.
+                    //   - Otherwise (primitive scalar / Enum / custom scalar): the scalar
+                    //     formatter emitted coercion errors but does not know it sits in a
+                    //     non-null position; Emit a valueCompletion error here.
+                    let inner_emitted_error = inner_type.is_list()
+                        || matches!(
+                            parameters.schema.types.get(inner_type.inner_named_type()),
+                            Some(
+                                ExtendedType::Object(_)
+                                    | ExtendedType::Interface(_)
+                                    | ExtendedType::Union(_)
+                            )
+                        );
+                    if !inner_emitted_error {
+                        parameters.errors.push(
+                            Error::builder()
+                                .message(message)
+                                .path(Path::from_response_slice(path))
+                                .build(),
+                        );
+                    }
+                }
+            }
+            // Propagate error to parent
             Err(InvalidValue)
         } else {
             Ok(())
@@ -463,32 +511,40 @@ impl Query {
                 .enumerate()
                 .try_for_each(|(i, element)| {
                     path.push(ResponsePathElement::Index(i));
-                    self.format_value(
+                    let res = self.format_value(
                         parameters,
                         inner_type,
                         element,
                         &mut output_array[i],
                         path,
                         selection_set,
-                    )?;
+                    );
                     path.pop();
+                    // Type-aware Err handling: non-null inner type propagates (whole list
+                    // nullifies per spec). Nullable inner type swallows the error (element already
+                    // nullified by child).
+                    if res.is_err() && inner_type.is_non_null() {
+                        return Err(InvalidValue);
+                    }
                     Ok(())
                 })
         {
-            // We pop here because, if an error is found, the path still contains the index of the
-            // invalid value.
-            path.pop();
             parameters.nullified.push(Path::from_response_slice(path));
-            parameters.insert_coercion_error(
-                Error::builder()
-                    .message(format!(
-                        "Invalid value found inside the array of type [{inner_type}]"
-                    ))
-                    .path(Path::from_response_slice(path))
-                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
-                    .build(),
-            );
+            // Emit only at the innermost list level (when inner_type is not a list).
+            // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
+            if !inner_type.is_list() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message(format!(
+                            "Invalid value found inside the array of type [{inner_type}]"
+                        ))
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
+            return Err(InvalidValue);
         }
         Ok(())
     }
@@ -560,23 +616,25 @@ impl Query {
                 _ => field_type,
             };
 
-            if self
-                .apply_selection_set(
-                    selection_set,
-                    parameters,
-                    input_object,
-                    output_object,
-                    path,
-                    current_type,
-                )
-                .is_err()
-            {
+            if let Err(err) = self.apply_selection_set(
+                selection_set,
+                parameters,
+                input_object,
+                output_object,
+                path,
+                current_type,
+            ) {
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
+                // Propagate the Err, since `apply_selection_set` already emitted an error.
+                return Err(err);
             }
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
             *output = Value::Null;
+            // We don't emit errors for null object value nor propagate Err.
+            // Note: `format_non_nullable_value` will emit an error if this object's type is
+            //       non-nullable.
         }
 
         Ok(())
@@ -589,15 +647,19 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
         if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
             || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
         {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Int")
@@ -605,8 +667,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -617,11 +679,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_f64().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Float")
@@ -629,8 +695,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -641,11 +707,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Boolean")
@@ -653,8 +723,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -665,11 +735,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.as_str().is_some() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type String")
@@ -677,8 +751,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -689,11 +763,15 @@ impl Query {
         path: &[ResponsePathElement<'_>],
         input: &mut Value,
         output: &mut Value,
-    ) {
+    ) -> Result<(), InvalidValue> {
         if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
             *output = input.clone();
+            Ok(())
         } else {
-            if !input.is_null() {
+            *output = Value::Null;
+            if input.is_null() {
+                Ok(())
+            } else {
                 parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type ID")
@@ -701,8 +779,8 @@ impl Query {
                         .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                         .build(),
                 );
+                Err(InvalidValue)
             }
-            *output = Value::Null;
         }
     }
 
@@ -745,33 +823,39 @@ impl Query {
                         if let Some(object_type) = object_type {
                             output.insert((*field_name).clone(), object_type.name.as_str().into());
                         } else {
+                            // If the __typename value does not resolve to a known object type in
+                            // the schema nor the current_type is an object type, emit an error.
+                            // TODO: __typename could be an interface type (due to @interfaceObject).
+                            //       That case is currently not handled and results in false error.
+                            emit_missing_field(parameters, field_type, field_name.as_str(), path);
                             return Err(InvalidValue);
                         }
                         continue;
                     }
 
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
-                            continue;
-                        }
-                        // A prior fragment spread may have nullified this field due to a non-null
-                        // constraint violation.  Object-typed inputs are never take()n so
-                        // input_value stays non-null even after nullification; without this guard
-                        // a later fragment would re-enter format_value and overwrite the null.
-                        if output.get(field_name.as_str()).is_some_and(Value::is_null) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
-
                         path.push(ResponsePathElement::Key(field_name.as_str()));
                         let res = self.format_value(
                             parameters,
@@ -782,22 +866,19 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        res?
+                        // Type-aware Err handling: non-null fields propagate Err to continue the
+                        // bubble; nullable fields swallow (the child already reported, the field
+                        // is already nullified).
+                        if res.is_err() && field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
                         }
+                        // Emit error for missing field
+                        emit_missing_field(parameters, field_type, field_name.as_str(), path);
                         if field_type.is_non_null() {
-                            parameters.errors.push(
-                                Error::builder()
-                                    .message(format!(
-                                        "Null value found for non-nullable type {}",
-                                        field_type.0.inner_named_type()
-                                    ))
-                                    .path(Path::from_response_slice(path))
-                                    .build(),
-                            );
-
                             return Err(InvalidValue);
                         }
                     }
@@ -919,6 +1000,35 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+        // Track which named fragments have already been applied during this root
+        // selection-set traversal. Re-applying a `...Frag` at the same (input,
+        // output, root_type_name, path) is idempotent — the same fields would be
+        // written from the same input — so the second application can be skipped.
+        // This collapses exponential fragment-of-fragment blowups (e.g. `L1 = ...L0
+        // ...L0`, `L2 = ...L1 ...L1`, ...) into linear work.
+        let mut applied_fragments: HashSet<&'a str> = HashSet::new();
+        self.apply_root_selection_set_cached(
+            root_type_name,
+            selection_set,
+            parameters,
+            input,
+            output,
+            path,
+            &mut applied_fragments,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_root_selection_set_cached<'a: 'b, 'b>(
+        &'a self,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
+        parameters: &mut FormatParameters,
+        input: &mut Object,
+        output: &mut Object,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        applied_fragments: &mut HashSet<&'a str>,
+    ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -940,26 +1050,28 @@ impl Query {
                             output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        // if there's already a value for that key in the output it means either:
-                        // - the value is a scalar and was moved into output using take(), replacing
-                        // the input value with Null
-                        // - the value was already null and is already present in output
-                        // if we expect an object or list at that key, output will already contain
-                        // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name_str) {
-                            continue;
-                        }
-                        // A prior fragment spread may have nullified this field due to a non-null
-                        // constraint violation.  Object-typed inputs are never take()n so
-                        // input_value stays non-null even after nullification; without this guard
-                        // a later fragment would re-enter format_value and overwrite the null.
-                        if output.get(field_name_str).is_some_and(Value::is_null) {
-                            continue;
-                        }
+                        let output_value = match output.entry((*field_name).clone()) {
+                            Entry::Occupied(entry) => {
+                                // if there's already a value for that key in the output it means either:
+                                // - the value is a scalar and was moved into output using take(), replacing
+                                // the input value with Null
+                                // - the value was already null and is already present in output
+                                // if we expect an object or list at that key, output will already contain
+                                // an object or list and then input_value cannot be null
+
+                                // A prior fragment spread may have nullified this field due to a non-null
+                                // constraint violation.  Object-typed inputs are never take()n so
+                                // input_value stays non-null even after nullification; without this guard
+                                // a later fragment would re-enter format_value and overwrite the null.
+                                if input_value.is_null() || entry.get().is_null() {
+                                    continue;
+                                }
+                                entry.into_mut()
+                            }
+                            Entry::Vacant(entry) => entry.insert(Value::Null),
+                        };
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value =
-                            output.entry((*field_name).clone()).or_insert(Value::Null);
                         path.push(ResponsePathElement::Key(field_name_str));
                         let res = self.format_value(
                             parameters,
@@ -970,19 +1082,18 @@ impl Query {
                             selection_set,
                         );
                         path.pop();
-                        res?
-                    } else if field_type.is_non_null() {
-                        parameters.errors.push(
-                            Error::builder()
-                                .message(format!(
-                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
-                                ))
-                                .path(Path::from_response_slice(path))
-                                .build(),
-                        );
-                        return Err(InvalidValue);
+                        // Type-aware Err handling (mirrors `apply_selection_set`): non-null fields
+                        // propagate Err to continue the bubble; nullable fields swallow (child
+                        // already reported, field is already nullified).
+                        if res.is_err() && field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     } else {
                         output.insert(field_name.clone(), Value::Null);
+                        emit_missing_field(parameters, field_type, field_name_str, path);
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     }
                 }
                 Selection::InlineFragment {
@@ -1001,13 +1112,17 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
-                        self.apply_root_selection_set(
+                        // Inline fragments share the named-fragment cache with their
+                        // parent so an anonymous `... on T { ...Frag }` wrapper still
+                        // benefits from de-duplication of `...Frag`.
+                        self.apply_root_selection_set_cached(
                             root_type_name,
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
+                            applied_fragments,
                         )?;
                     }
                 }
@@ -1022,6 +1137,14 @@ impl Query {
                         continue;
                     }
 
+                    // Skip if we have already applied this named fragment during the
+                    // current root-selection-set traversal. The first application
+                    // wrote every reachable field; a second application would write
+                    // the same values, so it is safe to omit.
+                    if !applied_fragments.insert(name.as_str()) {
+                        continue;
+                    }
+
                     if let Some(Fragment {
                         type_condition,
                         selection_set,
@@ -1033,13 +1156,14 @@ impl Query {
                             || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {
-                            self.apply_root_selection_set(
+                            self.apply_root_selection_set_cached(
                                 root_type_name,
                                 selection_set,
                                 parameters,
                                 input,
                                 output,
                                 path,
+                                applied_fragments,
                             )?;
                         }
                     } else {
@@ -1194,6 +1318,60 @@ impl Query {
 
     pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
+    }
+}
+
+/// Emit a error for a user-asked field that is missing from the merged response. The caller
+/// handles null-bubbling on non-nullable fields; this helper only emits.
+///
+/// Two sinks, asymmetric coverage:
+///
+/// - `parameters.errors` → `extensions.valueCompletion`, at the **parent path** (the path on
+///   entry, without the field name pushed — the formatter never recursed into the missing field,
+///   so the leaf doesn't exist in any meaningful sense for valueCompletion). **Only fires for
+///   non-null fields**, preserving the legacy "valueCompletion is for non-null-coerced positions"
+///   convention.
+/// - `parameters.insert_coercion_error` → `response.errors`, at the **leaf path** `[...,
+///   field_name]` with code `RESPONSE_VALIDATION_FAILED`. Fires for both nullable and non-null
+///   missing fields — gated only by `enable_result_coercion_errors` (i.e.
+///   `coercion_errors.is_some()`).
+///
+/// Net effect: nullable missing surfaces only in `response.errors` when coercion is on (no new
+/// valueCompletion noise); non-null missing behaves as before plus also lands in
+/// `response.errors`.
+fn emit_missing_field<'b>(
+    parameters: &mut FormatParameters,
+    field_type: &crate::spec::FieldType,
+    field_name: &'b str,
+    path: &mut Vec<ResponsePathElement<'b>>,
+) {
+    // valueCompletion: non-null only
+    if field_type.is_non_null() {
+        // Based on historic discussion, we report this missing field error at the parent path (not
+        // the missing field path), since the parent is the one being nullified. Though the field
+        // name/path could be more informative.
+        let message = format!(
+            "Cannot return null for non-nullable type {}",
+            field_type.0.inner_named_type()
+        );
+        let parent_path = Path::from_response_slice(path);
+        parameters
+            .errors
+            .push(Error::builder().message(message).path(parent_path).build());
+    }
+
+    // response.errors: nullable and non-null both, gated by coercion config.
+    if parameters.coercion_errors.is_some() {
+        path.push(ResponsePathElement::Key(field_name));
+        let field_path = Path::from_response_slice(path);
+        path.pop();
+        parameters.insert_coercion_error(
+            Error::builder()
+                .message("Missing field")
+                .path(field_path)
+                .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                .build(),
+        );
     }
 }
 

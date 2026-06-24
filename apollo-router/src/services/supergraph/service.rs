@@ -348,6 +348,13 @@ async fn service_call(
                 let ctx = context.clone();
                 let response_stream = response_stream.inspect(move |_| {
                     if first_event {
+                        // Populate FIRST_EVENT_CONTEXT_KEY so downstream telemetry selectors
+                        // (SupergraphSelector::IsPrimaryResponse) can distinguish the primary
+                        // response chunk from deferred/subscription chunks.
+                        ctx.insert_json_value(
+                            FIRST_EVENT_CONTEXT_KEY,
+                            serde_json_bytes::Value::Bool(true),
+                        );
                         first_event = false;
                     } else if !inserted {
                         ctx.insert_json_value(
@@ -368,9 +375,15 @@ async fn service_call(
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
+                        let header_string = crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Response,
+                            None,
+                            &parts.headers,
+                        );
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.headers"),
-                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                            opentelemetry::Value::String(header_string.into()),
                         ));
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.status"),

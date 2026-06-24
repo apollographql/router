@@ -185,7 +185,7 @@ pub(crate) fn validate_supergraph(
         }
         .into());
     };
-    let link_spec_definition = metadata.link_spec_definition()?;
+    let link_spec_definition = metadata.link_spec_definition();
     let Some(join_link) = metadata.for_identity(&Identity::join_identity()) else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: "Invalid supergraph: must use the join spec".to_owned(),
@@ -349,12 +349,9 @@ fn check_spec_support(
         bail!("Schema must have metadata");
     };
     let mut errors = MultipleFederationErrors::new();
-    let link_spec = metadata.link_spec_definition()?;
+    let link_spec = metadata.link_spec_definition();
     if is_core_version_zero_dot_one(link_spec.url()) {
-        let has_link_with_purpose = metadata
-            .all_links()
-            .iter()
-            .any(|link| link.purpose.is_some());
+        let has_link_with_purpose = metadata.all_links().any(|link| link.purpose.is_some());
         if has_link_with_purpose {
             // PORT_NOTE: This is unreachable since the schema is validated before this check in
             //            Rust and a apollo-compiler error will have been raised already. This is
@@ -372,7 +369,7 @@ fn check_spec_support(
 
     let supported_specs: HashSet<_> = supported_specs.iter().collect();
     errors
-        .and_try(metadata.all_links().iter().try_for_all(|link| {
+        .and_try(metadata.all_links().try_for_all(|link| {
             let Some(purpose) = link.purpose else {
                 return Ok(());
             };

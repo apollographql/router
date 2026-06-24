@@ -12,28 +12,35 @@ JSONSelection {
                             0..3,
                         ),
                     ),
-                    path: PathSelection {
-                        path: WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "a",
+                    path: WithRange {
+                        node: Path(
+                            PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "a",
+                                            ),
+                                            range: Some(
+                                                3..4,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                4..4,
+                                            ),
+                                        },
                                     ),
                                     range: Some(
                                         3..4,
                                     ),
                                 },
-                                WithRange {
-                                    node: Empty,
-                                    range: Some(
-                                        4..4,
-                                    ),
-                                },
-                            ),
-                            range: Some(
-                                3..4,
-                            ),
-                        },
+                            },
+                        ),
+                        range: Some(
+                            3..4,
+                        ),
                     },
                 },
                 NamedSelection {
@@ -42,28 +49,35 @@ JSONSelection {
                             4..7,
                         ),
                     ),
-                    path: PathSelection {
-                        path: WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "b",
+                    path: WithRange {
+                        node: Path(
+                            PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "b",
+                                            ),
+                                            range: Some(
+                                                7..8,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                8..8,
+                                            ),
+                                        },
                                     ),
                                     range: Some(
                                         7..8,
                                     ),
                                 },
-                                WithRange {
-                                    node: Empty,
-                                    range: Some(
-                                        8..8,
-                                    ),
-                                },
-                            ),
-                            range: Some(
-                                7..8,
-                            ),
-                        },
+                            },
+                        ),
+                        range: Some(
+                            7..8,
+                        ),
                     },
                 },
             ],

@@ -663,7 +663,9 @@ impl TestExecution {
             Value::Array(chunks)
         };
 
-        if expected_response != &graphql_response {
+        if expected_response != &graphql_response
+            && !deferred_responses_equivalent(expected_response, &graphql_response)
+        {
             self.print_received_requests(out).await;
 
             writeln!(out, "assertion `left == right` failed").unwrap();
@@ -756,6 +758,43 @@ fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
         f
     })?;
     Ok(s)
+}
+
+/// Due to a race in `filter_stream` (execution/service.rs), deferred responses can arrive in two
+/// equivalent forms depending on whether the channel disconnects before or after `try_recv`:
+///
+///   Fast path: [..., { incremental: [...], hasNext: false }]
+///   Slow path: [..., { incremental: [...], hasNext: true }, { data: null, hasNext: false }]
+///
+/// Both are spec-compliant. This function returns true when `expected` and `received` are the same
+/// deferred response, modulo which of the two forms each happens to be in.
+fn deferred_responses_equivalent(expected: &Value, received: &Value) -> bool {
+    let (Some(expected), Some(received)) = (expected.as_array(), received.as_array()) else {
+        return false;
+    };
+    collapse_terminator(expected) == collapse_terminator(received)
+}
+
+/// Collapses the slow-path `{ data: null, hasNext: false }` terminator into the preceding chunk by
+/// flipping its `hasNext` to `false`, producing the fast-path form. Arrays already in fast-path
+/// form, or that don't end in the terminator, pass through unchanged.
+fn collapse_terminator(chunks: &[Value]) -> Vec<Value> {
+    let terminator = serde_json::json!({ "data": null, "hasNext": false });
+    if chunks.len() >= 2
+        && chunks.last() == Some(&terminator)
+        && let Some(prev) = chunks.get(chunks.len() - 2)
+        && prev.get("hasNext") == Some(&Value::Bool(true))
+    {
+        let mut collapsed: Vec<Value> = chunks[..chunks.len() - 1].to_vec();
+        if let Some(last) = collapsed.last_mut()
+            && let Some(obj) = last.as_object_mut()
+        {
+            obj.insert("hasNext".to_string(), Value::Bool(false));
+        }
+        collapsed
+    } else {
+        chunks.to_vec()
+    }
 }
 
 fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {

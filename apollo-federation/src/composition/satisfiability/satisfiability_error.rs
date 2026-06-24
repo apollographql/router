@@ -157,10 +157,8 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
         subgraphs_with_type_not_in_intersection_string,
     );
     hints.push(CompositionHint {
+        definition: HintCode::InconsistentRuntimeTypesForShareableReturn.definition(),
         message,
-        code: HintCode::InconsistentRuntimeTypesForShareableReturn
-            .code()
-            .to_string(),
         locations: Default::default(), // TODO
     });
     Ok(())
@@ -321,7 +319,7 @@ fn generate_witness_value(
     // Note: We always generate a non-null value, even if the value's type is nullable.
     let value = match value_def.ty.as_ref() {
         executable::Type::Named(type_name) | executable::Type::NonNullNamed(type_name) => {
-            let type_pos = schema.get_type(type_name.clone())?;
+            let type_pos = schema.get_type(type_name)?;
             match type_pos {
                 TypeDefinitionPosition::Scalar(scalar_type_pos) => {
                     match scalar_type_pos.type_name.as_str() {

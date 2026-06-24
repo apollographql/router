@@ -25,7 +25,6 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
-use http::header;
 use http::header::CACHE_CONTROL;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
@@ -327,6 +326,7 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        config.validate_per_exporter_samplers()?;
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
 
@@ -426,10 +426,25 @@ impl PluginPrivate for Telemetry {
 
                 response
             })
-            .option_layer(use_legacy_request_span.then(move || {
-                InstrumentLayer::new(move |request: &router::Request| {
+            .layer(InstrumentLayer::new(move |request: &router::Request| {
+                if use_legacy_request_span {
                     span_mode.create_router(&request.router_request)
-                })
+                } else {
+                    // When running through axum, the TraceLayer holds a "router" span guard
+                    // across the entire synchronous call chain, so Span::current() already
+                    // returns it here — reuse it rather than creating a duplicate SERVER span.
+                    // In tests that bypass axum, there is no active span, so we create one to
+                    // match the behavior users actually see.
+                    let current = Span::current();
+                    if current
+                        .metadata()
+                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                    {
+                        current
+                    } else {
+                        span_mode.create_router(&request.router_request)
+                    }
+                }
             }))
             .checkpoint(move |req: router::Request| {
                 let library_name_valid = req
@@ -524,6 +539,7 @@ impl PluginPrivate for Telemetry {
                         filter_headers(
                             request.router_request.headers(),
                             &config_request.apollo.send_headers,
+                            &request.context,
                         ),
                     ));
 
@@ -1883,14 +1899,23 @@ pub(crate) fn is_valid_client_library_value(value: &str) -> bool {
     VALID_CLIENT_LIBRARY_VALUE_REGEX.is_match(value)
 }
 
-fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+fn filter_headers(
+    headers: &HeaderMap,
+    forward_rules: &ForwardHeaders,
+    context: &Context,
+) -> String {
     if let ForwardHeaders::None = forward_rules {
         return String::from("{}");
     }
     let headers_map = headers
         .iter()
         .filter(|(name, _value)| {
-            name != &header::AUTHORIZATION && name != &header::COOKIE && name != &header::SET_COOKIE
+            // Never forward sensitive headers to Apollo trace exports. Sensitivity
+            // is governed by the shared header-masking config (with the built-in
+            // fail-secure defaults — authorization, cookie, set-cookie, … — when
+            // unconfigured), so a user-configured sensitive header is redacted here
+            // too, rather than only the legacy hardcoded set.
+            !crate::services::header_masking::is_sensitive_request_header(context, name.as_str())
         })
         .filter_map(|(name, value)| {
             let send_header = match &forward_rules {
@@ -2138,6 +2163,28 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
+
+    // Serializes tests that call `plugin.activate()`. `Telemetry::activate()`
+    // -> `Activation::commit()` performs two process-wide writes:
+    //   1. `opentelemetry::global::set_tracer_provider(...)`
+    //   2. `*REGISTRY.lock() = self.prometheus_registry.clone();`
+    //      (the global Prometheus registry pointer in reload/activation.rs)
+    // Neither is covered by `FutureMetricsExt::with_metrics`, which only
+    // isolates the meter provider via a tokio task-local. When multiple
+    // `it_test_prometheus_*` tests run in parallel under nextest, one test's
+    // activate() can clobber another's global state mid-test, causing rare
+    // but observable flakes against the per-plugin Prometheus registry scrape.
+    //
+    // See `src/plugins/telemetry/metrics/apollo/mod.rs` for the same pattern
+    // applied to the apollo_metrics tests.
+    //
+    // Under `cargo nextest`, this set of tests is also serialized by the
+    // `serial-prometheus-telemetry-unit` test-group in `.config/nextest.toml`.
+    // The in-source mutex below is kept so that contributors running plain
+    // `cargo test -p apollo-router` (which does not honour nextest config)
+    // still get the serialization they need.
+    static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
+        once_cell::sync::Lazy::new(Default::default);
 
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
@@ -3141,6 +3188,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -3156,6 +3204,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets.router.yaml"
@@ -3173,6 +3222,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
@@ -3189,6 +3239,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_view_drop() {
+        let _guard = TEST.lock().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_view_drop.router.yaml"
@@ -3201,8 +3252,33 @@ mod tests {
         .await;
     }
 
+    /// End-to-end: a per-view `cardinality_limit: 2` is wired through the
+    /// Prometheus exporter. Recording three distinct attribute sets on the
+    /// instrument should overflow on the third, producing an
+    /// `otel_metric_overflow="true"` series in the scraped output.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_cardinality_limit.router.yaml"
+            ))
+            .await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            make_supergraph_request(plugin.as_ref()).await;
+            assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_units_are_included() {
+        let _guard = TEST.lock().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -3243,12 +3319,13 @@ mod tests {
             HeaderName::from_static("apollo-x-name"),
             HeaderValue::from_static("polaris"),
         );
-        let filtered_headers = super::filter_headers(&headers, &fw_headers);
+        let filtered_headers = super::filter_headers(&headers, &fw_headers, &crate::Context::new());
         assert_eq!(
             filtered_headers.as_str(),
             r#"{"apollo-x-name":["polaris"],"test":["content"]}"#
         );
-        let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
+        let filtered_headers =
+            super::filter_headers(&headers, &ForwardHeaders::None, &crate::Context::new());
         assert_eq!(filtered_headers.as_str(), "{}");
     }
 

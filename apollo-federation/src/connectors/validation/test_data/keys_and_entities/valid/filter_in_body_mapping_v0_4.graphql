@@ -1,0 +1,46 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "api", http: { baseURL: "http://localhost" })
+
+# Regression for RH-1345 / CNN-1093 — a `->filter(...)` arrow method
+# followed by a `{ ... }` subselection inside `@connect(http: { body: })`
+# previously dropped the post-filter subselection from the synthesized
+# `@key(fields: ...)`, surfacing as `CONNECTORS_CANNOT_RESOLVE_KEY` at
+# composition time. The fused-trie `variable_reference` keeps walking
+# through the method into the trailing subselection (and also captures
+# the predicate's own consumption) so the synthesized key matches
+# the entity's declared `@key`.
+
+type Query {
+  cart(id: ID!): Cart
+    @connect(
+      source: "api"
+      http: { GET: "/carts/{$args.id}" }
+      selection: "id items { id name product }"
+      entity: true
+    )
+}
+
+type Cart @key(fields: "id") {
+  id: ID!
+  items: [Item]!
+  result: String
+    @connect(
+      source: "api"
+      http: {
+        POST: "/process"
+        body: "{ items: $this.items->filter(@.product) { id name } }"
+      }
+      selection: "$"
+    )
+}
+
+type Item {
+  id: ID!
+  name: String
+  product: String
+}

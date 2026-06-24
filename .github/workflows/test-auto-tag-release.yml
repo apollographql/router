@@ -1,0 +1,173 @@
+# Auto-tag a release after the version branch merges to main / main-v*.
+#
+# Sandbox naming convention while we're still validating the logic on
+# real release merges.  Once we've seen a few clean dry-runs, this gets
+# renamed to `auto-tag-release.yml` and the dry-run guard comes out.
+#
+# Two trigger paths:
+#
+#   - `push: branches: [main, 'main-v*']` — fires automatically on every
+#     merge to a release line's main branch.  Always dry-run.  Logs the
+#     decision; does not push the tag.  Use this output to confirm the
+#     workflow picks the right SHA + version before we flip the switch.
+#
+#   - `workflow_dispatch` with `dry_run` input (default `true`).  Set to
+#     `false` to actually push the tag.  Use this when the push-triggered
+#     dry-run printed the right answer and you want to commit to it.
+#
+# Safety properties:
+#
+#   - Version gate: skips silently if `apollo-router/Cargo.toml`'s version
+#     at the target SHA matches HEAD~1's version — i.e., no actual release
+#     to tag.
+#
+#   - Idempotency: if the tag already exists at the right SHA, skip
+#     silently.  If at the wrong SHA, error loudly and refuse to retag.
+#
+#   - SIGPIPE-safe under `set -euo pipefail` (no `... | head -1` against
+#     potentially-long git output).
+#
+#   - PAT scoped: uses `APOLLO_BOT2_GITHUB_PAT` so the tag is attributed
+#     to apollo-bot2 and bypasses tag-creation rules.
+
+name: Test auto-tag release
+
+on:
+  push:
+    branches:
+      - main
+      - "main-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run — log what would happen but don't push the tag"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          # Use apollo-bot2's PAT so the tag push is attributed to bot2
+          # (not github-actions[bot]) and bypasses tag-creation rules.
+          # Falls back to the workflow token when the secret isn't set
+          # so push-trigger dry-runs still work in forks / unconfigured
+          # environments.
+          token: ${{ secrets.APOLLO_BOT2_GITHUB_PAT || github.token }}
+
+      - name: Resolve dry-run mode
+        id: vars
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DRY_RUN='${{ inputs.dry_run }}'
+          else
+            # Push trigger is always dry-run.  To actually push the tag,
+            # use workflow_dispatch with dry_run=false.
+            DRY_RUN=true
+          fi
+          echo "Resolved dry_run=$DRY_RUN"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Compute version + tag target
+        id: target
+        run: |
+          set -euo pipefail
+
+          # If HEAD is a merge commit, the release branch's tip is HEAD^2.
+          # Tag that SHA so the tag points to meaningful release content
+          # (matches the convention used for previously hand-pushed tags).
+          # If HEAD is not a merge commit (squash-merge, direct push),
+          # fall back to HEAD itself.
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
+            TARGET_SHA=$(git rev-parse HEAD^2)
+            echo "HEAD is a merge commit; tag target = HEAD^2 = $TARGET_SHA"
+          else
+            TARGET_SHA=$(git rev-parse HEAD)
+            echo "HEAD is not a merge commit; tag target = HEAD = $TARGET_SHA"
+          fi
+
+          # Read versions defensively: awk's `exit` stops processing after
+          # the first match, and `|| true` swallows any SIGPIPE that might
+          # arise under pipefail.
+          NEW_VERSION=$(git show "$TARGET_SHA:apollo-router/Cargo.toml" \
+            | awk -F'"' '/^version = / { print $2; exit }' || true)
+          OLD_VERSION=$(git show "HEAD~1:apollo-router/Cargo.toml" \
+            | awk -F'"' '/^version = / { print $2; exit }' || true)
+
+          if [ -z "$NEW_VERSION" ]; then
+            echo "::error::Could not read version from apollo-router/Cargo.toml at $TARGET_SHA."
+            exit 1
+          fi
+
+          echo "Version at target SHA: $NEW_VERSION"
+          echo "Version at HEAD~1:     ${OLD_VERSION:-<unknown>}"
+
+          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+            echo "Version unchanged ($NEW_VERSION) — skipping (no release to tag)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TAG="v$NEW_VERSION"
+
+          # Idempotency: don't fail if the tag already exists at the right SHA.
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            EXISTING_SHA=$(git rev-parse "$TAG^{commit}")
+            if [ "$EXISTING_SHA" = "$TARGET_SHA" ]; then
+              echo "Tag $TAG already exists at $EXISTING_SHA — idempotent skip."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              echo "::error::Tag $TAG already exists at $EXISTING_SHA, expected $TARGET_SHA.  Refusing to retag."
+              exit 1
+            fi
+          fi
+
+          echo "Decision: TAG $TAG -> $TARGET_SHA  (version delta: $OLD_VERSION -> $NEW_VERSION)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "old_version=$OLD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Dry-run summary
+        if: steps.target.outputs.skip != 'true' && steps.vars.outputs.dry_run == 'true'
+        run: |
+          echo "::group::Auto-tag dry-run summary"
+          echo "Would push tag:   ${{ steps.target.outputs.tag }}"
+          echo "At SHA:           ${{ steps.target.outputs.target_sha }}"
+          echo "Version delta:    ${{ steps.target.outputs.old_version }} -> ${{ steps.target.outputs.new_version }}"
+          echo "Dry-run mode active — not pushing."
+          echo "::endgroup::"
+          echo
+          echo "To execute for real:"
+          echo "  gh workflow run test-auto-tag-release.yml --ref ${{ github.ref_name }} -f dry_run=false"
+
+      - name: Push tag
+        if: steps.target.outputs.skip != 'true' && steps.vars.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          TAG='${{ steps.target.outputs.tag }}'
+          TARGET_SHA='${{ steps.target.outputs.target_sha }}'
+
+          # Configure git identity for the annotated tag.
+          git config user.name "apollo-bot2"
+          git config user.email "apollo-bot2@users.noreply.github.com"
+
+          # Annotated tag — GitHub release UI surfaces tagger metadata.
+          git tag --annotate --message "Release $TAG" "$TAG" "$TARGET_SHA"
+
+          # Push using the checkout-configured remote URL (PAT via http
+          # extraheader).
+          git push origin "refs/tags/$TAG"
+
+          echo "::notice::Pushed tag $TAG -> $TARGET_SHA"

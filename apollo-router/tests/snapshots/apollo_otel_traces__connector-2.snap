@@ -362,7 +362,7 @@ resourceSpans:
                   stringValue: "id\ntitle\nbody"
               - key: apollo.connector.source.detail
                 value:
-                  stringValue: "{\"baseURL\":\"https://jsonplaceholder.typicode.com/\"}"
+                  stringValue: "[redacted]"
               - key: apollo.connector.source.name
                 value:
                   stringValue: jsonPlaceholder

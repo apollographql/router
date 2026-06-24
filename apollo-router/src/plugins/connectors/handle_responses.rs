@@ -19,6 +19,8 @@ use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
 use http::response::Parts;
 use http_body_util::BodyExt;
+use http_body_util::LengthLimitError;
+use http_body_util::Limited;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Map;
@@ -28,6 +30,7 @@ use tracing::Span;
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::plugins::limits::ConnectorResponseSizeLimit;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
@@ -48,12 +51,18 @@ impl From<RuntimeError> for graphql::Error {
     fn from(error: RuntimeError) -> Self {
         let path: Path = (&error.path).into();
 
-        let err = graphql::Error::builder()
+        let mut err = graphql::Error::builder()
             .message(&error.message)
             .extensions(error.extensions())
             .extension_code(error.code())
             .path(path)
             .build();
+
+        // Carry over whether a span event was already emitted for this error at its source site
+        // (set by `process_response`). Errors that reach this conversion without emitting — e.g.
+        // coprocessor `Break` or traffic-shaping timeout/rate-limit — keep the flag `false` so the
+        // catch-all in `count_operation_errors` still emits exactly one event for them.
+        err.set_span_event_emitted(error.span_event_emitted());
 
         if let Some(subgraph_name) = &error.subgraph_name {
             err.with_subgraph_name(subgraph_name)
@@ -66,7 +75,7 @@ impl From<RuntimeError> for graphql::Error {
 // --- handle_responses --------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_response<T: HttpBody>(
+pub(crate) async fn process_response<T>(
     result: Result<http::Response<T>, Error>,
     response_key: ResponseKey,
     connector: Arc<Connector>,
@@ -75,8 +84,12 @@ pub(crate) async fn process_response<T: HttpBody>(
     debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     operation: Option<Arc<Valid<ExecutableDocument>>>,
-) -> connector::request_service::Response {
-    let (mapped_response, result) = match result {
+) -> connector::request_service::Response
+where
+    T: HttpBody,
+    T::Error: Into<tower::BoxError>,
+{
+    let (mut mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -96,13 +109,10 @@ pub(crate) async fn process_response<T: HttpBody>(
                 inner: parts.clone(),
             }));
 
-            let make_err = || {
-                let mut err = RuntimeError::new(
-                    "The server returned data in an unexpected format.".to_string(),
-                    &response_key,
-                );
+            let make_err = |message: String, code: &str| -> Box<RuntimeError> {
+                let mut err = RuntimeError::new(message, &response_key);
                 err.subgraph_name = Some(connector.id.subgraph_name.clone());
-                err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+                err = err.with_code(code);
                 err.coordinate = Some(connector.id.coordinate());
                 err = err.extension(
                     "http",
@@ -111,37 +121,78 @@ pub(crate) async fn process_response<T: HttpBody>(
                         Value::Number(parts.status.as_u16().into()),
                     )])),
                 );
-                err
+                Box::new(err)
             };
 
-            let deserialized_body = body
-                .collect()
-                .await
-                .map_err(|_| ())
-                .and_then(|body| {
-                    let body = body.to_bytes();
-                    let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
-                        if let Some(debug_context) = debug_context {
-                            debug_context.lock().push_invalid_response(
-                                debug_request.0.clone(),
-                                &parts,
-                                &body,
-                                &connector.error_settings,
-                                debug_request.1.clone(),
-                            );
-                        }
-                    });
-                    log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
-                    raw
-                })
-                .map_err(|()| make_err());
+            let make_invalid_response_err = || {
+                make_err(
+                    "The server returned data in an unexpected format.".to_string(),
+                    "CONNECTOR_RESPONSE_INVALID",
+                )
+            };
+
+            let make_limit_err = |limit: usize| {
+                make_err(
+                    format!("connector response body exceeded limit of {limit} bytes"),
+                    "CONNECTOR_RESPONSE_SIZE_LIMIT_EXCEEDED",
+                )
+            };
+
+            let response_size_limit = context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+
+            let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
+                Some(ConnectorResponseSizeLimit(limit)) => {
+                    Limited::new(body, limit)
+                        .collect()
+                        .await
+                        .map_err(|e| {
+                            if e.downcast_ref::<LengthLimitError>().is_some() {
+                                u64_counter!(
+                                    "apollo.router.limits.connector_response_size.exceeded",
+                                    "Number of connector responses aborted because they exceeded the configured response size limit",
+                                    1,
+                                    "connector.source" = connector.source_config_key()
+                                );
+                                tracing::Span::current()
+                                    .record("apollo.connector.response.aborted", "response_size_limit");
+                                make_limit_err(limit)
+                            } else {
+                                make_invalid_response_err()
+                            }
+                        })
+                }
+                None => body
+                    .collect()
+                    .await
+                    .map_err(|_| make_invalid_response_err()),
+            };
+
+            let deserialized_body = body_result.and_then(|body| {
+                let body = body.to_bytes();
+                let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                    if let Some(debug_context) = debug_context {
+                        debug_context.lock().push_invalid_response(
+                            debug_request.0.clone(),
+                            &parts,
+                            &body,
+                            &connector.error_settings,
+                            debug_request.1.clone(),
+                        );
+                    }
+                    make_invalid_response_err()
+                });
+                log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
+                raw
+            });
 
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
             let mapped = match &deserialized_body {
                 Err(error) => MappedResponse::Error {
-                    error: error.clone(),
+                    error: error.as_ref().clone(),
                     key: response_key,
                     problems: Vec::new(),
                 },
@@ -194,12 +245,18 @@ pub(crate) async fn process_response<T: HttpBody>(
         }
     };
 
-    if let MappedResponse::Error { ref error, .. } = mapped_response {
+    if let MappedResponse::Error { ref mut error, .. } = mapped_response {
+        // Emit here so the event picks up the connector request-service span's attributes
+        // (coordinate, source, etc.). Mark the error as emitted so `From<RuntimeError>` carries
+        // the flag through and the centralized catch-all in `count_operation_errors` won't fire a
+        // duplicate.
         emit_error_event(error.code(), &error.message, Some((*error.path).into()));
+        error.set_span_event_emitted(true);
     }
 
     connector::request_service::Response {
         context: context.clone(),
+        subgraph_name: connector.id.subgraph_name.to_string(),
         transport_result: result,
         mapped_response,
     }
@@ -268,6 +325,7 @@ fn log_connectors_event(
 
             let response = connector::request_service::Response {
                 context: context.clone(),
+                subgraph_name: connector.id.subgraph_name.to_string(),
                 transport_result: Ok(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
                 })),
@@ -286,22 +344,17 @@ fn log_connectors_event(
 
     if let Some(level) = log_response_level {
         let mut attrs = Vec::with_capacity(4);
-        #[cfg(test)]
-        let headers = {
-            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
-                .headers
-                .iter()
-                .map(|(name, val)| (name.to_string(), val.clone()))
-                .collect();
-            headers.sort_keys();
-            headers
-        };
-        #[cfg(not(test))]
-        let headers = &parts.headers;
+
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Response,
+            Some(connector.id.subgraph_name.as_str()),
+            &parts.headers,
+        );
 
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_HEADERS,
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(header_string.into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_STATUS,
@@ -343,6 +396,7 @@ mod tests {
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
+    use apollo_federation::connectors::runtime::errors::RuntimeError;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
@@ -354,6 +408,35 @@ mod tests {
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
+
+    #[test]
+    fn from_runtime_error_transfers_span_event_emitted_flag() {
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        // An error that never had a span event emitted at its source (e.g. coprocessor `Break`
+        // or traffic-shaping timeout/rate-limit) must keep the flag `false` so the catch-all in
+        // `count_operation_errors` still emits exactly one event for it.
+        let not_emitted = RuntimeError::new("boom", &response_key);
+        let converted: graphql::Error = not_emitted.into();
+        assert!(
+            !converted.span_event_emitted(),
+            "errors that never emitted a span event must not be marked as emitted"
+        );
+
+        // An error whose source site already emitted (process_response sets this) must carry the
+        // flag through so the catch-all doesn't fire a duplicate.
+        let mut emitted = RuntimeError::new("boom", &response_key);
+        emitted.set_span_event_emitted(true);
+        let converted: graphql::Error = emitted.into();
+        assert!(
+            converted.span_event_emitted(),
+            "errors whose source already emitted must stay marked as emitted"
+        );
+    }
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
@@ -368,11 +451,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -483,11 +566,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -597,13 +680,13 @@ mod tests {
             spec: ConnectSpec::V0_2,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
             schema_subtypes_map: Default::default(),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data { id name }").unwrap(),
             entity_resolver: Some(EntityResolver::TypeBatch),
             config: Default::default(),
@@ -726,11 +809,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
             config: Default::default(),
@@ -857,11 +940,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
             config: Default::default(),
@@ -1039,6 +1122,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                     Error {
                         message: "Request failed",
@@ -1076,6 +1160,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                     Error {
                         message: "Request failed",
@@ -1113,6 +1198,7 @@ mod tests {
                             ),
                         },
                         apollo_id: 00000000-0000-0000-0000-000000000000,
+                        span_event_emitted: true,
                     },
                 ],
                 extensions: {},
@@ -1139,11 +1225,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),
@@ -1237,11 +1323,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: selection.clone(),
             entity_resolver: None,
             config: Default::default(),
@@ -1330,6 +1416,475 @@ mod tests {
         assert_eq!(
             &res_expect_success.body().data,
             &Some(json!({"hello": json!(400)}))
+        );
+    }
+
+    fn make_connector() -> Arc<Connector> {
+        Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        })
+    }
+
+    fn make_supergraph_request() -> Arc<http::Request<graphql::Request>> {
+        Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn process_response_under_size_limit() {
+        use crate::plugins::limits::ConnectorResponseSizeLimit;
+
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(1000)));
+
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let response = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
+            .unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &ctx,
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let graphql_response =
+            super::aggregate_responses(vec![result.mapped_response], Context::new())
+                .unwrap()
+                .response;
+        assert!(
+            graphql_response.body().errors.is_empty(),
+            "expected no errors when response is under the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn process_response_exceeds_size_limit() {
+        use crate::plugins::limits::ConnectorResponseSizeLimit;
+
+        let ctx = Context::new();
+        // Limit of 5 bytes — well under the response body size
+        ctx.extensions()
+            .with_lock(|e| e.insert(ConnectorResponseSizeLimit(5)));
+
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let response = http::Response::builder()
+            .body(router::body::from_bytes(r#"{"data":"world"}"#))
+            .unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &ctx,
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let graphql_response =
+            super::aggregate_responses(vec![result.mapped_response], Context::new())
+                .unwrap()
+                .response;
+        let errors = &graphql_response.body().errors;
+        assert!(!errors.is_empty(), "expected an error for exceeded limit");
+        assert!(
+            errors[0].message.contains("exceeded limit of 5 bytes"),
+            "unexpected error message: {}",
+            errors[0].message
+        );
+    }
+
+    // Reproduction for CNN-1095: when `isSuccess` returns false and the user has
+    // configured `errors.message` and `errors.extensions`, the resulting GraphQL
+    // error should use the mapped values (sourced from the response body) and
+    // still expose the default `http.status` alongside them.
+    //
+    // Per the public docs at
+    // https://www.apollographql.com/docs/graphos/connectors/responses/error-handling,
+    // the `errors.message` mapping expression yields the error message and
+    // `errors.extensions` is merged into `extensions` (overriding defaults like
+    // `code` when keys collide, preserving defaults like `http.status` when they
+    // don't).
+    #[tokio::test]
+    async fn errors_as_data_maps_message_and_extensions_when_is_success_false() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                connect_extensions: Some(
+                    JSONSelection::parse("code: error.code\nhint: error.hint").unwrap(),
+                ),
+                source_extensions: None,
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(
+                r#"{"error":{"message":"no good","code":"BAD_THING","hint":"try again"}}"#,
+            ))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let error = &errors[0];
+
+        assert_eq!(
+            error.message, "no good",
+            "errors.message should be mapped from the response body"
+        );
+
+        let code = error
+            .extensions
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert_eq!(
+            code, "BAD_THING",
+            "errors.extensions.code should override default CONNECTOR_FETCH"
+        );
+
+        let hint = error
+            .extensions
+            .get("hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert_eq!(
+            hint, "try again",
+            "errors.extensions.hint should be mapped from the response body"
+        );
+
+        let http_status = error
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.get("status"))
+            .and_then(|v| v.as_i64());
+        assert_eq!(
+            http_status,
+            Some(500),
+            "default extensions.http.status should be preserved alongside the mapped extensions"
+        );
+    }
+
+    // Reproduction for CNN-1095: when `errors.extensions` writes a nested key
+    // that collides with a default extension (e.g. `http`), the public docs at
+    // https://www.apollographql.com/docs/graphos/connectors/responses/error-handling
+    // say the user-supplied values should be merged into the default object
+    // (so `extensions.http.status` is preserved alongside `extensions.http.myField`).
+    //
+    // The current implementation in `runtime/responses.rs::map_error` calls
+    // `error.extension("http", user_value)` after the default `http: { status }`
+    // is set, which replaces the entire `http` object — so `status` is lost.
+    #[tokio::test]
+    async fn errors_as_data_deep_merges_nested_extensions_with_defaults() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: None,
+                connect_extensions: Some(
+                    JSONSelection::parse("http: { myField: $(\"literal Value\") }").unwrap(),
+                ),
+                source_extensions: None,
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let http = errors[0]
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .expect("extensions.http should be an object");
+
+        assert_eq!(
+            http.get("myField").and_then(|v| v.as_str()),
+            Some("literal Value"),
+            "user-supplied extensions.http.myField should appear in the response"
+        );
+        assert_eq!(
+            http.get("status").and_then(|v| v.as_i64()),
+            Some(500),
+            "default extensions.http.status should be preserved when the user sets sibling keys under extensions.http"
+        );
+    }
+
+    // Covers the nested-collision case across all three contributors to
+    // `extensions`: the default (`http: { status }`), the source-level
+    // `errors.extensions` mapping, and the connect-level `errors.extensions`
+    // mapping. With deep-merge, sibling keys under a shared nested object
+    // (`http`) from each layer should all survive — last-writer-wins only at
+    // a leaf collision, not at the parent object level.
+    #[tokio::test]
+    async fn errors_as_data_deep_merges_nested_extensions_across_source_and_connect() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings {
+                message: None,
+                source_extensions: Some(
+                    JSONSelection::parse("http: { fromSource: $(\"a\") }").unwrap(),
+                ),
+                connect_extensions: Some(
+                    JSONSelection::parse("http: { fromConnect: $(\"b\") }").unwrap(),
+                ),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            },
+            label: "test label".into(),
+        });
+
+        let response: http::Response<RouterBody> = http::Response::builder()
+            .status(500)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let result = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response),
+                    response_key,
+                    connector,
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        let errors = &result.response.body().errors;
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        let http = errors[0]
+            .extensions
+            .get("http")
+            .and_then(|v| v.as_object())
+            .expect("extensions.http should be an object");
+
+        assert_eq!(
+            http.get("status").and_then(|v| v.as_i64()),
+            Some(500),
+            "default extensions.http.status should be preserved alongside source- and connect-supplied siblings"
+        );
+        assert_eq!(
+            http.get("fromSource").and_then(|v| v.as_str()),
+            Some("a"),
+            "source_extensions sibling under extensions.http should survive the connect_extensions merge"
+        );
+        assert_eq!(
+            http.get("fromConnect").and_then(|v| v.as_str()),
+            Some("b"),
+            "connect_extensions sibling under extensions.http should appear alongside the source sibling"
         );
     }
 }
