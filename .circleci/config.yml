@@ -518,6 +518,24 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
+      - run:
+          name: Skip if no source files changed
+          command: |
+            # Always run on dev (post-merge); CIRCLE_BRANCH is 'dev' for nightly triggers too
+            if [ "$CIRCLE_BRANCH" = "dev" ]; then
+              exit 0
+            fi
+            git fetch origin dev --depth=1
+            BASE=$(git merge-base HEAD origin/dev 2>/dev/null || echo "HEAD~1")
+            CHANGED=$(git diff --name-only "$BASE" HEAD)
+            echo "Changed files:"
+            echo "$CHANGED"
+            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches)/|Cargo\.(toml|lock)|rust-toolchain\.toml|xtask/)'; then
+              echo "Source files changed -- running tests"
+              exit 0
+            fi
+            echo "No source files changed -- skipping tests"
+            circleci-agent step halt
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
