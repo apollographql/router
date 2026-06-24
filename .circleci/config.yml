@@ -535,6 +535,7 @@ jobs:
           steps:
             - slack/notify:
                 event: fail
+                channel: "#ii-router-ci-notifications"
                 custom: |
                   {
                     "blocks": [
@@ -553,6 +554,7 @@ jobs:
           steps:
             - slack/notify:
                 event: fail
+                channel: "#ii-router-ci-notifications"
                 custom: |
                   {
                     "blocks": [
@@ -581,6 +583,7 @@ jobs:
                   }
             - slack/notify:
                 event: pass
+                channel: "#ii-router-ci-notifications"
                 custom: |
                   {
                     "blocks": [
