@@ -230,6 +230,20 @@ If you use the `selective` configuration, you must use the new context key names
 
 ### Client configuration
 
+<Caution>
+
+**Breaking changes in 2.16:** The `client` configuration block has been updated. If you use any of the following fields, you must migrate before upgrading:
+
+| Removed field | Replacement |
+|---|---|
+| `client.experimental_http2: enable` | `client.protocol: alpn` |
+| `client.experimental_http2: http2only` | `client.protocol: http2` |
+| `client.experimental_http2: disable` | `client.protocol: http1` |
+| `client.dns_resolution_strategy` | No replacement — remove this field from your config. |
+| `client.pool_idle_timeout` | `client.http1.pool_idle_timeout` |
+
+</Caution>
+
 To use Unix Domain Sockets (UDS) to communicate with a coprocessor, use the following configuration:
 
 ```yaml title="router.yaml"

@@ -10,6 +10,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderMap;
@@ -190,7 +191,7 @@ struct CoprocessorHttpClient(apollo_http_client::HttpClient);
 impl tower::Service<HttpRequest> for CoprocessorHttpClient {
     type Response = HttpResponse;
     type Error = BoxError;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<HttpResponse, BoxError>> + Send>>;
+    type Future = BoxFuture<'static, Result<HttpResponse, BoxError>>;
 
     fn poll_ready(
         &mut self,
