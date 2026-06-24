@@ -59,10 +59,6 @@ pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
         operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -75,40 +71,28 @@ pub(crate) enum SupergraphSelector {
     Query {
         /// The graphql query.
         query: Query,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
     QueryVariable {
         /// The name of a graphql query variable.
         query_variable: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     RequestHeader {
         /// The name of the request header.
         request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
     ResponseHeader {
         /// The name of the response header.
         response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -120,20 +104,12 @@ pub(crate) enum SupergraphSelector {
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseContext {
         /// The response context key.
         response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -143,10 +119,6 @@ pub(crate) enum SupergraphSelector {
         #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_data: JsonPathInst,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -156,30 +128,18 @@ pub(crate) enum SupergraphSelector {
         #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors: JsonPathInst,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Baggage {
         /// The name of the baggage item.
         baggage: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
         env: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -264,14 +224,27 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::RequestHeader {
                 request_header,
                 default,
-                ..
-            } => request
-                .supergraph_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = request
+                    .supergraph_request
+                    .headers()
+                    .get(request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SupergraphSelector::QueryVariable {
                 query_variable,
                 default,
@@ -350,14 +323,27 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::ResponseHeader {
                 response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SupergraphSelector::ResponseStatus { response_status } => match response_status {
                 ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
@@ -378,13 +364,15 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+            SupergraphSelector::OnGraphQLError { on_graphql_error } => {
                 let contains_error = response
                     .context
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
             SupergraphSelector::OperationName {
                 operation_name,
@@ -473,13 +461,9 @@ impl Selector for SupergraphSelector {
                     .flatten()
                     .map(opentelemetry::Value::from),
             },
-            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                let contains_error = ctx
-                    .get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
-            }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } => Some(
+                opentelemetry::Value::Bool(response.contains_errors() == *on_graphql_error),
+            ),
             SupergraphSelector::OperationName {
                 operation_name,
                 default,
@@ -669,6 +653,8 @@ impl Selector for SupergraphSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
     use opentelemetry::baggage::BaggageExt;
@@ -817,7 +803,6 @@ mod test {
     fn supergraph_request_context() {
         let selector = SupergraphSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -885,7 +870,6 @@ mod test {
     fn supergraph_response_context() {
         let selector = SupergraphSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -936,7 +920,6 @@ mod test {
         subscriber::with_default(subscriber, || {
             let selector = SupergraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -981,7 +964,6 @@ mod test {
     fn supergraph_env() {
         let mut selector = SupergraphSelector::Env {
             env: "SELECTOR_SUPERGRAPH_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1030,7 +1012,6 @@ mod test {
     fn supergraph_operation_name_string() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1060,7 +1041,6 @@ mod test {
     fn supergraph_operation_name_hash() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1090,7 +1070,6 @@ mod test {
     fn supergraph_query() {
         let selector = SupergraphSelector::Query {
             query: Query::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -1116,7 +1095,6 @@ mod test {
     fn create_select_and_context(query: Query) -> (SupergraphSelector, crate::Context) {
         let selector = SupergraphSelector::Query {
             query,
-            redact: None,
             default: Some("default".to_string()),
         };
         let limits = OperationLimits {
@@ -1200,7 +1178,6 @@ mod test {
     fn supergraph_query_variable() {
         let selector = SupergraphSelector::QueryVariable {
             query_variable: "key".to_string(),
-            redact: None,
             default: Some(AttributeValue::String("default".to_string())),
         };
         assert_eq!(
@@ -1266,5 +1243,380 @@ mod test {
             .build()
             .unwrap();
         assert!(selector_disabled.on_request(&request).is_none());
+    }
+
+    #[test]
+    fn test_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer secret-token") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked due to global rules
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Authorization header should be masked by global rules"
+        );
+    }
+
+    #[test]
+    fn supergraph_on_graphql_error_on_response() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
+
+        // on_graphql_error: true — returns true when errors present, false when absent
+        let selector_true = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let ctx_with_errors = crate::Context::default();
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors = SupergraphResponse::fake_builder()
+            .context(ctx_with_errors)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_with_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let response_no_errors = SupergraphResponse::fake_builder().build().unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted: true when no errors, false when errors present
+        let selector_false = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let ctx_with_errors2 = crate::Context::default();
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors2 = SupergraphResponse::fake_builder()
+            .context(ctx_with_errors2)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_false.on_response(&response_with_errors2),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_request_header_no_masking_when_not_sensitive() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "user-agent".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("user-agent", "test-agent")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked (not in sensitive list)
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "test-agent",
+            "Non-sensitive header should not be masked"
+        );
+    }
+
+    #[test]
+    fn test_request_header_redact_allow_overrides_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer secret-token") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked because redact: "allow" overrides global rules
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "Bearer secret-token", // gitleaks:allow
+            "redact: allow should override global masking rules"
+        );
+    }
+
+    #[test]
+    fn test_request_header_redact_explicit_mask() {
+        // Create a selector with redact set to any value other than "allow"
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "custom-header".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Mask),
+            default: None,
+        };
+
+        let context = crate::context::Context::new();
+        // No global rules - but explicit redact should still mask
+
+        let request = SupergraphRequest::fake_builder()
+            .header("custom-header", "sensitive-value")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked because redact is set (even without global rules)
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Explicit redact setting should mask the header"
+        );
+    }
+
+    #[test]
+    fn test_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SupergraphSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        let response = SupergraphResponse::fake_builder()
+            .header("set-cookie", "session=secret-session-id") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should be masked due to global rules
+        let result = selector.on_response(&response).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Set-Cookie header should be masked by global rules"
+        );
+    }
+
+    #[test]
+    fn test_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SupergraphSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        let response = SupergraphResponse::fake_builder()
+            .header("set-cookie", "session=secret-session-id") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Header should NOT be masked because of redact: "allow"
+        let result = selector.on_response(&response).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "session=secret-session-id", // gitleaks:allow
+            "redact: allow should override masking for response headers"
+        );
+    }
+
+    #[test]
+    fn test_request_header_masking_without_global_rules() {
+        // Create a selector without redact and without global rules
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        let context = crate::context::Context::new();
+        // No masking rules in context
+
+        let request = SupergraphRequest::fake_builder()
+            .header("authorization", "Bearer token")
+            .context(context)
+            .build()
+            .unwrap();
+
+        // Fail-secure: with no rules in context, the built-in sensitive-header
+        // defaults still mask `authorization`.
+        let result = selector.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Built-in defaults should mask authorization even without configured rules"
+        );
+    }
+
+    #[test]
+    fn test_request_header_case_insensitive_matching() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+
+        // Test with lowercase selector
+        let selector_lowercase = SupergraphSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+
+        // Test with uppercase header name in request
+        let request = SupergraphRequest::fake_builder()
+            .header("Authorization", "Bearer token")
+            .context(context.clone())
+            .build()
+            .unwrap();
+
+        let result = selector_lowercase.on_request(&request).unwrap();
+        assert_eq!(
+            result.as_str(),
+            "***MASKED***",
+            "Case-insensitive matching should work for headers"
+        );
+    }
+
+    #[test]
+    fn supergraph_on_graphql_error_on_response_event() {
+        use crate::graphql;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        // on_graphql_error: true — true when chunk has errors, false when not
+        let selector_true = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let chunk_with_errors = graphql::Response::builder()
+            .error(graphql::Error::builder().message("oops").build())
+            .build();
+        assert_eq!(
+            selector_true.on_response_event(&chunk_with_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let chunk_no_errors = graphql::Response::builder().build();
+        assert_eq!(
+            selector_true.on_response_event(&chunk_no_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = SupergraphSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response_event(&chunk_no_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(true))
+        );
+        assert_eq!(
+            selector_false.on_response_event(&chunk_with_errors, &crate::Context::default()),
+            Some(opentelemetry::Value::Bool(false))
+        );
     }
 }

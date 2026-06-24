@@ -121,32 +121,6 @@ async fn config(
     (task, config)
 }
 
-async fn get_router_service(
-    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
-    use_legacy_request_span: bool,
-    mocked: bool,
-) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
-
-    let builder = TestHarness::builder()
-        .try_log_level("INFO")
-        .configuration_json(config)
-        .expect("test harness had config errors")
-        .schema(include_str!("fixtures/supergraph.graphql"));
-    let builder = if mocked {
-        builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
-    } else {
-        builder.with_subgraph_network_requests()
-    };
-    (
-        task,
-        builder
-            .build_router()
-            .await
-            .expect("could create router test harness"),
-    )
-}
-
 /// Spin up a localhost wiremock server that mimics the subset of the
 /// `https://jsonplaceholder.typicode.com/` REST surface that
 /// `tests/fixtures/supergraph_connect.graphql` exercises:
@@ -210,6 +184,163 @@ async fn start_connector_mock_server() -> MockServer {
         .await;
 
     server
+}
+
+/// Spin up a localhost wiremock server that mimics the three Apollo demo
+/// subgraphs (`accounts`, `products`, `reviews`) referenced by
+/// `tests/fixtures/supergraph.graphql`. The supergraph hardcodes
+/// `https://{name}.demo.starstuff.dev/` for each subgraph, so any test that
+/// uses `with_subgraph_network_requests()` makes a real HTTPS call out to
+/// those public hosts. When that public infrastructure flakes (TLS RST,
+/// transient teardown, etc.) the router surfaces a `SubrequestHttpError`
+/// (`ECONNRESET` / `os error 104`) which then poisons the OTel trace shape
+/// — `http_request` span has status code 2 (ERROR) instead of OK, and the
+/// `apollo_private.ftv1` attribute the subgraph would have emitted is
+/// missing, blowing up the snapshot assertion.
+///
+/// The mock listens on three distinct paths (one per subgraph) so the
+/// router can be pointed at it via `override_subgraph_url`. Each path
+/// returns a fixed payload captured from the live demo deployment,
+/// including a valid base64-encoded FTV1 trace in `extensions.ftv1`. The
+/// FTV1 bytes themselves are redacted by `assert_report!` so any
+/// non-empty blob suffices, but using captured-from-live blobs keeps the
+/// router's federation-trace decoder happy.
+///
+/// The server is leaked (`Box::leak`) so it lives for the duration of the
+/// process — same pattern as `start_connector_mock_server` above. Tests
+/// in this file are serialised by the `serial-apollo-telemetry-integration`
+/// nextest group, so leaking is safe.
+async fn start_demo_subgraphs_mock_server() -> MockServer {
+    let server = wiremock::MockServer::builder().start().await;
+
+    // products: `{ topProducts { __typename upc name } }`.
+    // Response shape captured from `https://products.demo.starstuff.dev/`
+    // — 4 products. Names/upcs don't show up in the snapshot (redacted),
+    // but the count drives the count of downstream `reviews` `_entities`
+    // representations and ultimately how many `accounts` lookups happen.
+    Mock::given(method("POST"))
+        .and(path("/products"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "topProducts": [
+                    {"__typename": "Product", "upc": "1", "name": "Table"},
+                    {"__typename": "Product", "upc": "2", "name": "Couch"},
+                    {"__typename": "Product", "upc": "3", "name": "Chair"},
+                    {"__typename": "Product", "upc": "4", "name": "Bed"},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgwI+Py80AYQwPCHgAIiDAj4/LzQBhDA8IeAAljyuRRywgJivwIKC3RvcFByb2R1Y3RzGglbUHJvZHVjdF1AyK4KSIDhC2JEEABiHwoDdXBjGgdTdHJpbmchQMS8DUju7w1qB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQIS3Dkjwyg5qB1Byb2R1Y3RiRBABYh8KA3VwYxoHU3RyaW5nIUDGqA9IutQPagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0De5g9I7vMPagdQcm9kdWN0YkQQAmIfCgN1cGMaB1N0cmluZyFA4LIQSPC/EGoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdAsOoQSOb7EGoHUHJvZHVjdGJEEANiHwoDdXBjGgdTdHJpbmchQILBEUjI0BFqB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQLLjEUik8BFqB1Byb2R1Y3RqBVF1ZXJ5+QEAAAAAAADwPw=="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // reviews: federation `_entities` fetch over Product. Returns a
+    // review-shaped payload with author User refs. Captured from
+    // `https://reviews.demo.starstuff.dev/` against the exact operation
+    // text the router emits for the `test_send_variable_value` query.
+    Mock::given(method("POST"))
+        .and(path("/reviews"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "_entities": [
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "1"}},
+                        {"author": {"__typename": "User", "id": "2"}},
+                    ]},
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "1"}},
+                    ]},
+                    {"reviews": [
+                        {"author": {"__typename": "User", "id": "2"}},
+                    ]},
+                    {"reviews": []},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgwI+/y80AYQwObxvAMiDAj7/LzQBhDA1P26A1imyfwBcuEDYt4DCglfZW50aXRpZXMaCltfRW50aXR5XSFAjq/wAUjyr/oBYq0BEABiqAEKB3Jldmlld3MaCFtSZXZpZXddQL7h8wFIwuX0AWI/EABiOwoGYXV0aG9yGgRVc2VyQIa/9QFI/tP1AWIZCgJpZBoDSUQhQNyc9gFIrLH2AWoEVXNlcmoGUmV2aWV3Yj8QAWI7CgZhdXRob3IaBFVzZXJAju32AUiO9/YBYhkKAmlkGgNJRCFA7Jz3AUiGpfcBagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiaxABYmcKB3Jldmlld3MaCFtSZXZpZXddQKrG9wFIsuP3AWI/EABiOwoGYXV0aG9yGgRVc2VyQKD99wFI0pb4AWIZCgJpZBoDSUQhQISr+AFIssL4AWoEVXNlcmoGUmV2aWV3agdQcm9kdWN0YmsQAmJnCgdyZXZpZXdzGghbUmV2aWV3XUDG5fgBSKSB+QFiPxAAYjsKBmF1dGhvchoEVXNlckDilvkBSNqw+QFiGQoCaWQaA0lEIUDqwvkBSKLf+QFqBFVzZXJqBlJldmlld2oHUHJvZHVjdGIqEANiJgoHcmV2aWV3cxoIW1Jldmlld11A8v35AUjMiPoBagdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // accounts: federation `_entities` fetch over User. Returns names.
+    // Captured from `https://accounts.demo.starstuff.dev/` — the
+    // subgraph that triggered the ECONNRESET in the CircleCI failure
+    // (apollographql/router job 377214, ROUTER-1814).
+    Mock::given(method("POST"))
+        .and(path("/accounts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "_entities": [
+                    {"name": "Ada Lovelace"},
+                    {"name": "Alan Turing"},
+                ]
+            },
+            "extensions": {
+                "ftv1": "GgsIgv280AYQwPP2NCILCIL9vNAGEMDhgjNY3JDaAXJyYnAKCV9lbnRpdGllcxoKW19FbnRpdHldIUCE/dQBSOqn2AFiIhAAYh4KBG5hbWUaBlN0cmluZ0DUuNcBSPru1wFqBFVzZXJiIhABYh4KBG5hbWUaBlN0cmluZ0DgidgBSNCV2AFqBFVzZXJqBVF1ZXJ5+QEAAAAAAADwPw=="
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    server
+}
+
+/// Routes the three demo subgraph URLs to a localhost wiremock instead of
+/// the public `https://*.demo.starstuff.dev/` hosts. Returns canned
+/// federation responses (including valid FTV1 traces) so the OTel trace
+/// shape matches existing snapshots without off-box network egress.
+///
+/// Introduced to fix ROUTER-1814: `test_send_variable_value` flaked on
+/// Linux CI when the accounts demo subgraph reset the TLS connection
+/// (`ECONNRESET` / `os error 104`). See the
+/// `start_demo_subgraphs_mock_server` doc comment for the broader root
+/// cause.
+async fn get_router_service_with_subgraph_mock(
+    reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
+    use_legacy_request_span: bool,
+    _mocked: bool,
+) -> (JoinHandle<()>, BoxCloneService) {
+    let (task, mut config) = config(use_legacy_request_span, false, reports).await;
+
+    let subgraph_mock = start_demo_subgraphs_mock_server().await;
+    let mock_url = subgraph_mock.uri();
+    // Leak so the wiremock outlives this helper's return — the harness
+    // hangs on to the returned router service, which will fire requests
+    // at the mock during the test body. Same pattern as
+    // `start_connector_mock_server`.
+    let _ = Box::leak(Box::new(subgraph_mock));
+
+    // Wire in `override_subgraph_url` so the router rewrites the
+    // hardcoded `https://*.demo.starstuff.dev/` URIs to our localhost
+    // mock paths. The trailing path segment per subgraph is how the
+    // wiremock distinguishes which canned response to return.
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "override_subgraph_url".to_string(),
+            serde_json::json!({
+                "accounts": format!("{mock_url}/accounts"),
+                "products": format!("{mock_url}/products"),
+                "reviews": format!("{mock_url}/reviews"),
+            }),
+        );
+    }
+
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph.graphql"))
+        .with_subgraph_network_requests();
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
 }
 
 async fn get_connector_router_service(
@@ -305,13 +436,224 @@ async fn get_batch_router_service(
     )
 }
 
+/// Canonicalise span ordering inside an `ExportTraceServiceRequest` so insta
+/// snapshots are stable across runs.
+///
+/// **Why this exists.** The OTLP HTTP exporter ships spans in the order the
+/// tracing-opentelemetry layer hands them to the batch span processor, which
+/// is the order their associated tokio task drops the `EnteredSpan` guard.
+/// Under `flavor = "multi_thread"` two sibling spans (e.g. `parse_query`
+/// scheduled on the compute-job pool and the supergraph-side `compute_job` /
+/// `compute_job.execution` spans on a different worker) can finish in either
+/// relative order, which permutes the `spans` vec the test asserts on. The
+/// snapshot content is byte-for-byte identical otherwise — only the array
+/// ordering changes — so the cure is to canonicalise the order before
+/// asserting. See blog-details.md / T10 (non-deterministic ordering).
+///
+/// **Shape chosen — partition-by-root then DFS.** The naive "sort all spans
+/// by start_time" approach is flaky in batch tests: when the OTLP batch
+/// contains two independent traces (e.g. `test_batch_trace_id` ships two
+/// `supergraph` roots plus a separate compute-job pool tree carrying
+/// `parse_query` / `compute_job` / `compute_job.execution`), siblings of one
+/// trace family can drift between the two `supergraph` subtrees depending on
+/// which worker happened to win the start-time race. This was the root cause
+/// of the observed flake on `test_batch_trace_id-2` (the
+/// `test_batch_send_header` snapshot has the same shape and was a latent
+/// sibling).
+///
+/// We therefore (1) resolve each span's terminal ancestor inside the batch
+/// (walking `parent_span_id` until we hit either an empty parent or a parent
+/// that isn't present here), (2) group spans by that root, (3) sort the
+/// roots by `(start_time_unix_nano, end_time_unix_nano, name)` — dropping
+/// `span_id` from the key since it is a fresh random `Vec<u8>` every run and
+/// would itself be a source of non-determinism, and (4) DFS each group in
+/// turn, sorting siblings within a parent by `(start, end, name,
+/// original_position_within_parent)`. The original-position tiebreak is the
+/// final fallback and only kicks in when two siblings of the SAME parent
+/// inside the SAME trace family share `(start, end, name)` — at that point
+/// they're truly indistinguishable post-redaction and any deterministic
+/// order works. Span timestamps are not yet redacted at this point, so the
+/// sort key carries real temporal information; the insta redactions later
+/// in `assert_report!` collapse the keys to `[start_time]` etc. in the
+/// rendered yaml.
+fn sort_spans_for_snapshot(report: &mut ExportTraceServiceRequest) {
+    use std::collections::HashMap;
+
+    use opentelemetry_proto::tonic::trace::v1::Span;
+
+    // Cap on parent-chain walks. A real trace tree won't exceed a few dozen
+    // levels of nesting; this defends against pathological cycles that
+    // shouldn't exist but would otherwise loop forever.
+    const MAX_PARENT_HOPS: usize = 64;
+
+    for resource_spans in &mut report.resource_spans {
+        for scope_spans in &mut resource_spans.scope_spans {
+            // Take the spans out so we can re-insert them in canonical order.
+            let original: Vec<Span> = std::mem::take(&mut scope_spans.spans);
+            if original.is_empty() {
+                continue;
+            }
+
+            // Stable index from span_id -> position in `original`, so the
+            // DFS can collect indices instead of cloning Spans.
+            let id_to_idx: HashMap<Vec<u8>, usize> = original
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.span_id.clone(), i))
+                .collect();
+
+            // Resolve each span's terminal ancestor inside this batch. A
+            // span is its own root if `parent_span_id` is empty or if the
+            // parent isn't present in this batch (defensive — keeps stray
+            // spans from being dropped). Walk capped at MAX_PARENT_HOPS to
+            // defend against cycles.
+            let resolve_root = |start_idx: usize| -> Vec<u8> {
+                let mut idx = start_idx;
+                for _ in 0..MAX_PARENT_HOPS {
+                    let span = &original[idx];
+                    if span.parent_span_id.is_empty() {
+                        return span.span_id.clone();
+                    }
+                    match id_to_idx.get(&span.parent_span_id) {
+                        Some(&parent_idx) => {
+                            if parent_idx == idx {
+                                // Self-loop. Treat as root.
+                                return span.span_id.clone();
+                            }
+                            idx = parent_idx;
+                        }
+                        None => return span.span_id.clone(),
+                    }
+                }
+                // Hit the hop cap — degenerate input. Use the span we
+                // landed on as the root so the partition is still total.
+                original[idx].span_id.clone()
+            };
+
+            let root_of: HashMap<Vec<u8>, Vec<u8>> = original
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.span_id.clone(), resolve_root(i)))
+                .collect();
+
+            // Group span indices by resolved root.
+            let mut spans_by_root: HashMap<Vec<u8>, Vec<usize>> = HashMap::new();
+            for (idx, span) in original.iter().enumerate() {
+                let root = root_of
+                    .get(&span.span_id)
+                    .cloned()
+                    .unwrap_or_else(|| span.span_id.clone());
+                spans_by_root.entry(root).or_default().push(idx);
+            }
+
+            // Sort the roots by (start_time, end_time, name). No span_id in
+            // the key — it's randomly regenerated per run.
+            let mut roots: Vec<Vec<u8>> = spans_by_root.keys().cloned().collect();
+            roots.sort_by(|a, b| {
+                let ia = id_to_idx.get(a).copied().unwrap_or(0);
+                let ib = id_to_idx.get(b).copied().unwrap_or(0);
+                let sa = &original[ia];
+                let sb = &original[ib];
+                (sa.start_time_unix_nano, sa.end_time_unix_nano, &sa.name).cmp(&(
+                    sb.start_time_unix_nano,
+                    sb.end_time_unix_nano,
+                    &sb.name,
+                ))
+            });
+
+            // Build per-group children_of, indexed by parent_span_id, so
+            // each group's DFS only sees its own family. Within a group, a
+            // root-relative position tracks original ordering for the
+            // final tiebreak when siblings collide on (start, end, name).
+            let mut ordered: Vec<usize> = Vec::with_capacity(original.len());
+            for root in &roots {
+                let member_indices = match spans_by_root.get(root) {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+                // children_of for this group only. The map keys are
+                // parent span_ids; values are (child_idx, original_position)
+                // tuples. `original_position` is the index of the child in
+                // `member_indices`, giving a deterministic in-group tiebreak.
+                let mut children_of: HashMap<Vec<u8>, Vec<(usize, usize)>> = HashMap::new();
+                let mut group_roots: Vec<(usize, usize)> = Vec::new();
+                for (pos, &idx) in member_indices.iter().enumerate() {
+                    let span = &original[idx];
+                    if span.span_id == *root {
+                        group_roots.push((idx, pos));
+                        continue;
+                    }
+                    children_of
+                        .entry(span.parent_span_id.clone())
+                        .or_default()
+                        .push((idx, pos));
+                }
+
+                // Sort siblings by (start, end, name, original_position).
+                // The position tiebreak ensures determinism when truly
+                // identical siblings exist within the same parent in the
+                // same trace family.
+                let sort_siblings = |v: &mut Vec<(usize, usize)>| {
+                    v.sort_by(|&(a_idx, a_pos), &(b_idx, b_pos)| {
+                        let a = &original[a_idx];
+                        let b = &original[b_idx];
+                        (a.start_time_unix_nano, a.end_time_unix_nano, &a.name, a_pos).cmp(&(
+                            b.start_time_unix_nano,
+                            b.end_time_unix_nano,
+                            &b.name,
+                            b_pos,
+                        ))
+                    });
+                };
+                sort_siblings(&mut group_roots);
+                for v in children_of.values_mut() {
+                    sort_siblings(v);
+                }
+
+                // DFS: visit each (group) root, then its children in sorted
+                // order. Iterative to avoid blowing the stack on
+                // pathological trees.
+                let mut stack: Vec<usize> = group_roots.iter().rev().map(|(idx, _)| *idx).collect();
+                while let Some(idx) = stack.pop() {
+                    ordered.push(idx);
+                    let span_id = &original[idx].span_id;
+                    if let Some(kids) = children_of.get(span_id) {
+                        // Push in reverse so they come off the stack in
+                        // sorted order.
+                        for (child_idx, _) in kids.iter().rev() {
+                            stack.push(*child_idx);
+                        }
+                    }
+                }
+            }
+
+            // Reconstruct the spans vec in DFS order. Wrap each span in
+            // Option so we can `.take()` it exactly once even if the input
+            // contains duplicate span_ids (which would be a bug, but the
+            // sort shouldn't silently drop spans on its behalf).
+            let mut slots: Vec<Option<Span>> = original.into_iter().map(Some).collect();
+            scope_spans.spans = ordered
+                .into_iter()
+                .filter_map(|idx| slots[idx].take())
+                .collect();
+        }
+    }
+}
+
 macro_rules! assert_report {
         ($report: expr)=> {
             assert_report!($report, false)
         };
         ($report: expr, $batch: literal)=> {
+            // Take ownership locally so we can canonicalise span ordering
+            // without forcing every call site to declare `let mut report`.
+            // Without the sort, the OTLP exporter's spans vec is permuted
+            // by tokio-task drop order — see `sort_spans_for_snapshot`.
+            let mut report = $report;
+            sort_spans_for_snapshot(&mut report);
             insta::with_settings!({sort_maps => true}, {
-                    insta::assert_yaml_snapshot!($report, {
+                    insta::assert_yaml_snapshot!(report, {
                         ".**.attributes" => insta::sorted_redaction(),
                         ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
                             let mut redacted_attributes = vec![
@@ -406,13 +748,17 @@ async fn traces_handler(
     Ok(Json(()))
 }
 
-async fn get_trace_report(
+/// Routes all subgraph traffic through a localhost wiremock instead of
+/// the public `https://*.demo.starstuff.dev/` hosts, making every caller
+/// hermetic against live-network flakes (ECONNRESET / os error 104/10054).
+/// See `start_demo_subgraphs_mock_server` and `ROUTER-1878`.
+async fn get_trace_report_with_subgraph_mock(
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     request: router::Request,
     use_legacy_request_span: bool,
 ) -> ExportTraceServiceRequest {
     get_traces(
-        get_router_service,
+        get_router_service_with_subgraph_mock,
         reports,
         use_legacy_request_span,
         false,
@@ -644,7 +990,8 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -660,7 +1007,8 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -676,7 +1024,8 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -690,7 +1039,8 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -723,7 +1073,8 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -738,7 +1089,8 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -754,7 +1106,8 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }
@@ -790,7 +1143,8 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report =
+            get_trace_report_with_subgraph_mock(reports, req, use_legacy_request_span).await;
         assert_report!(report);
     }
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="409" height="129">
+<svg xmlns="http://www.w3.org/2000/svg" width="161" height="37">
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
@@ -29,49 +29,16 @@
     polygon.regexp        {fill: #FFF4C7; stroke: #332900; stroke-width: 1;}
   </style>
    </defs>
-   <polygon points="9 61 1 57 1 65"/>
-   <polygon points="17 61 9 57 9 65"/>
-   <rect x="31" y="47" width="28" height="32" rx="10"/>
-   <rect x="29"
-         y="45"
-         width="28"
-         height="32"
-         class="terminal"
-         rx="10"/>
-   <text class="terminal" x="39" y="65">{</text>
+   <polygon points="9 17 1 13 1 21"/>
+   <polygon points="17 17 9 13 9 21"/>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
-      xlink:href="#LitProperty"
-      xlink:title="LitProperty">
-      <rect x="119" y="47" width="90" height="32"/>
-      <rect x="117" y="45" width="90" height="32" class="nonterminal"/>
-      <text class="nonterminal" x="127" y="65">LitProperty</text>
+      xlink:href="#SubSelection"
+      xlink:title="SubSelection">
+      <rect x="31" y="3" width="102" height="32"/>
+      <rect x="29" y="1" width="102" height="32" class="nonterminal"/>
+      <text class="nonterminal" x="39" y="21">SubSelection</text>
    </a>
-   <rect x="119" y="3" width="24" height="32" rx="10"/>
-   <rect x="117"
-         y="1"
-         width="24"
-         height="32"
-         class="terminal"
-         rx="10"/>
-   <text class="terminal" x="127" y="21">,</text>
-   <rect x="269" y="79" width="24" height="32" rx="10"/>
-   <rect x="267"
-         y="77"
-         width="24"
-         height="32"
-         class="terminal"
-         rx="10"/>
-   <text class="terminal" x="277" y="97">,</text>
-   <rect x="353" y="47" width="28" height="32" rx="10"/>
-   <rect x="351"
-         y="45"
-         width="28"
-         height="32"
-         class="terminal"
-         rx="10"/>
-   <text class="terminal" x="361" y="65">}</text>
-   <path class="line"
-         d="m17 61 h2 m0 0 h10 m28 0 h10 m40 0 h10 m90 0 h10 m-130 0 l20 0 m-1 0 q-9 0 -9 -10 l0 -24 q0 -10 10 -10 m110 44 l20 0 m-20 0 q10 0 10 -10 l0 -24 q0 -10 -10 -10 m-110 0 h10 m24 0 h10 m0 0 h66 m40 44 h10 m0 0 h34 m-64 0 h20 m44 0 h20 m-84 0 q10 0 10 10 m64 0 q0 -10 10 -10 m-74 10 v12 m64 0 v-12 m-64 12 q0 10 10 10 m44 0 q10 0 10 -10 m-54 10 h10 m24 0 h10 m-234 -32 h20 m234 0 h20 m-274 0 q10 0 10 10 m254 0 q0 -10 10 -10 m-264 10 v46 m254 0 v-46 m-254 46 q0 10 10 10 m234 0 q10 0 10 -10 m-244 10 h10 m0 0 h224 m20 -66 h10 m28 0 h10 m3 0 h-3"/>
-   <polygon points="399 61 407 57 407 65"/>
-   <polygon points="399 61 391 57 391 65"/>
+   <path class="line" d="m17 17 h2 m0 0 h10 m102 0 h10 m3 0 h-3"/>
+   <polygon points="151 17 159 13 159 21"/>
+   <polygon points="151 17 143 13 143 21"/>
 </svg>

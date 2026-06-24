@@ -359,6 +359,14 @@ impl<'schema> Connect<'schema> {
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
         if let Some(http) = self.http {
             messages.extend(http.type_check(self.schema).err().into_iter().flatten());
+        } else {
+            // Requestless connector: no transport (`http:` is absent, and no
+            // other transport argument has been added yet). Flag any
+            // request-phase consumption (`$root`, `$status`, `$response`)
+            // before the legacy / shape-based selection check runs, so the
+            // user sees the precise reason rather than a downstream
+            // "Variable not found" or null-coalescing failure.
+            messages.extend(self.selection.validate_requestless_consumption(self.schema));
         }
         messages.extend(
             self.errors

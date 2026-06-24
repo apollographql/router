@@ -1003,9 +1003,8 @@ impl QueryGraph {
                     let Some(field) = field_pos.try_get(schema.schema()) else {
                         continue;
                     };
-                    let field_type_pos: CompositeTypeDefinitionPosition = schema
-                        .get_type(field.ty.inner_named_type().clone())?
-                        .try_into()?;
+                    let field_type_pos: CompositeTypeDefinitionPosition =
+                        schema.get_type(field.ty.inner_named_type())?.try_into()?;
                     new_possible_runtime_types
                         .extend(schema.possible_runtime_types(field_type_pos)?);
                 }

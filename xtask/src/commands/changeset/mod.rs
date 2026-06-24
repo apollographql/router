@@ -253,8 +253,7 @@ impl Create {
                     items[selection]
                 };
 
-                let gh_cli_path = which::which("gh");
-                let use_gh_cli = if gh_cli_path.is_err() {
+                let use_gh_cli = if !xtask::gh::available() {
                     println!("{}", style("If you install and authorize the GitHub CLI, we can use information from the PR!").underlined().on_blue().yellow().bright().bold());
                     println!("  Find more details at: {}", style("https://cli.github.com/").bold());
                     false
@@ -352,7 +351,7 @@ impl Create {
                 };
 
                 let context: TemplateContext = if use_gh_cli && let Some(branch_name) = &branch_name {
-                    match get_token_from_gh_cli(gh_cli_path.unwrap()) {
+                    match xtask::gh::token() {
                         Err(_) => default_context,
                         Ok(gh_token) => {
                             // Good for testing. ;)
@@ -525,25 +524,6 @@ impl Create {
 
                 Ok(())
             })
-    }
-}
-
-fn get_token_from_gh_cli(gh_cli_path: PathBuf) -> Result<String, &'static str> {
-    let result = std::process::Command::new(gh_cli_path)
-        .args(["auth", "token"])
-        .output()
-        .expect("this didn't go well");
-    if !result.status.success() {
-        Err("We couldn't run `gh auth token`.  Perhaps run `gh auth login`.")
-    } else {
-        let gh_token_with_nl =
-            String::from_utf8(result.stdout).expect("should have had newline token");
-        let gh_token = gh_token_with_nl.trim().to_string();
-        if gh_token.is_empty() {
-            Err("Doesn't look like you have a valid token. Run `gh auth login`.")
-        } else {
-            Ok(gh_token)
-        }
     }
 }
 

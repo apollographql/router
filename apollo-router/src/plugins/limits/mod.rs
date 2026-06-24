@@ -108,6 +108,12 @@ pub(crate) struct RouterLimitsConfig {
     /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
     pub(crate) max_aliases: Option<u32>,
 
+    /// Limit the total number of selections encountered when recursively expanding
+    /// fragment spreads in an operation. This protects against extremely large or
+    /// deeply nested operations that could consume excessive resources during
+    /// query planning. Default: 10000000 (10 million).
+    pub(crate) max_recursive_selections: u32,
+
     /// If set to true (which is the default is dev mode),
     /// requests that exceed a `max_*` limit are *not* rejected.
     /// Instead they are executed normally, and a warning is logged.
@@ -136,7 +142,7 @@ pub(crate) struct RouterLimitsConfig {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
-    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kb.
+    /// For HTTP2, limit the header list to a threshold of bytes. Default is 16kib.
     ///
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
@@ -159,6 +165,8 @@ impl Default for RouterLimitsConfig {
             max_height: None,
             max_root_fields: None,
             max_aliases: None,
+
+            max_recursive_selections: 10_000_000,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
@@ -824,6 +832,7 @@ mod test {
         let (parts, _) = http::Response::builder().body(()).unwrap().into_parts();
         crate::services::connector::request_service::Response {
             context: req.context.clone(),
+            subgraph_name: req.connector.id.subgraph_name.to_string(),
             transport_result: Ok(TransportResponse::Http(HttpResponse { inner: parts })),
             mapped_response: MappedResponse::Data {
                 data: Value::Null,

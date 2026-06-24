@@ -6,6 +6,11 @@ expression: cache_keys
   {
     "key": "-",
     "invalidationKeys": [],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "rootFields": [
         "currentUser"
@@ -62,6 +67,11 @@ expression: cache_keys
   {
     "key": "-",
     "invalidationKeys": [],
+    "indexes": {
+      "subgraph": true,
+      "type": true,
+      "cache_tag": true
+    },
     "kind": {
       "typename": "",
       "entityKey": {}

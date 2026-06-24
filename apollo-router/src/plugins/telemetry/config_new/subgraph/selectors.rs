@@ -67,10 +67,6 @@ pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
         subgraph_operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -87,20 +83,12 @@ pub(crate) enum SubgraphSelector {
     SubgraphQuery {
         /// The graphql query to the subgraph.
         subgraph_query: SubgraphQuery,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
         subgraph_query_variable: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -110,10 +98,6 @@ pub(crate) enum SubgraphSelector {
         #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_data: JsonPathInst,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -123,20 +107,14 @@ pub(crate) enum SubgraphSelector {
         #[derivative(Debug = "ignore", PartialEq = "ignore")]
         #[serde(deserialize_with = "deserialize_jsonpath")]
         subgraph_response_errors: JsonPathInst,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SubgraphRequestHeader {
         /// The name of a subgraph request header.
         subgraph_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -147,10 +125,8 @@ pub(crate) enum SubgraphSelector {
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
         subgraph_response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -171,10 +147,6 @@ pub(crate) enum SubgraphSelector {
     SupergraphOperationName {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -187,50 +159,32 @@ pub(crate) enum SubgraphSelector {
     SupergraphQuery {
         /// The supergraph query to the subgraph.
         supergraph_query: Query,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
         supergraph_query_variable: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SupergraphRequestHeader {
         /// The supergraph request header name.
         supergraph_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     ResponseContext {
         /// The response context key.
         response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -241,20 +195,12 @@ pub(crate) enum SubgraphSelector {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
         env: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -423,25 +369,55 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::SubgraphRequestHeader {
                 subgraph_request_header,
                 default,
-                ..
-            } => request
-                .subgraph_request
-                .headers()
-                .get(subgraph_request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = request
+                    .subgraph_request
+                    .headers()
+                    .get(subgraph_request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    Some(request.subgraph_name.as_str()),
+                    subgraph_request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::SupergraphRequestHeader {
                 supergraph_request_header,
                 default,
-                ..
-            } => request
-                .supergraph_request
-                .headers()
-                .get(supergraph_request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = request
+                    .supergraph_request
+                    .headers()
+                    .get(supergraph_request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                // Masking scope is the *supergraph* (client-facing) request, so
+                // consult the global request rules — not this subgraph's rules,
+                // which a `masking.enabled: false` subgraph would empty out and
+                // thereby unmask the client header.
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    supergraph_request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::RequestContext {
                 request_context,
                 default,
@@ -502,14 +478,27 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(subgraph_response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string()))
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(subgraph_response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    Some(response.subgraph_name.as_str()),
+                    subgraph_response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::SubgraphResponseStatus {
                 subgraph_response_status: response_status,
             } => match response_status {
@@ -599,7 +588,7 @@ impl Selector for SubgraphSelector {
                 .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::OnGraphQLError {
                 subgraph_on_graphql_error: on_graphql_error,
-            } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            } => Some((response.response.body().errors.is_empty() != *on_graphql_error).into()),
             SubgraphSelector::SubgraphResendCount {
                 subgraph_resend_count,
                 default,
@@ -707,7 +696,7 @@ impl Selector for SubgraphSelector {
                             Some(opentelemetry::Value::String("public".to_string().into()))
                         }
                     }
-                    CacheControlSelector::NoStore => Some(cc.is_no_store().into()),
+                    CacheControlSelector::NoStore => Some(cc.no_store().into()),
                     CacheControlSelector::MaxAge => cc
                         .ttl()
                         .and_then(|ttl| Some(opentelemetry::Value::I64(i64::try_from(ttl).ok()?))),
@@ -1137,10 +1126,171 @@ mod test {
     }
 
     #[test]
+    fn subgraph_subgraph_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SubgraphSelector::SubgraphRequestHeader {
+            subgraph_request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::fake_builder().build())
+                    .unwrap(),
+            )
+            .context(context)
+            .build();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SubgraphSelector::SubgraphRequestHeader {
+            subgraph_request_header: "authorization".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::fake_builder().build())
+                    .unwrap(),
+            )
+            .context(context)
+            .build();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
+    }
+
+    #[test]
+    fn subgraph_supergraph_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SubgraphSelector::SupergraphRequestHeader {
+            supergraph_request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::SubgraphRequest::fake_builder()
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .header("authorization", "Bearer secret") // gitleaks:allow
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .context(context)
+            .build();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SubgraphSelector::SubgraphResponseHeader {
+            subgraph_response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::SubgraphResponse::fake2_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = SubgraphSelector::SubgraphResponseHeader {
+            subgraph_response_header: "set-cookie".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::SubgraphResponse::fake2_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "session=abc123".into()
+        );
+    }
+
+    #[test]
     fn subgraph_request_context() {
         let selector = SubgraphSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -1177,7 +1327,6 @@ mod test {
     fn subgraph_response_context() {
         let selector = SubgraphSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -1263,7 +1412,6 @@ mod test {
         subscriber::with_default(subscriber, || {
             let selector = SubgraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -1301,7 +1449,6 @@ mod test {
     fn subgraph_env() {
         let mut selector = SubgraphSelector::Env {
             env: "SELECTOR_SUBGRAPH_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1758,7 +1905,7 @@ mod test {
         header_map.insert(CACHE_CONTROL, HeaderValue::from_static("public,max-age=60"));
 
         let cache_control =
-            crate::plugins::response_cache::cache_control::CacheControl::new(&header_map, None)
+            crate::plugins::response_cache::cache_control::CacheControl::try_from(&header_map)
                 .unwrap();
         let context = crate::context::Context::new();
         let mut cache_controls: CacheControls = HashMap::new();
@@ -1809,7 +1956,6 @@ mod test {
     fn subgraph_supergraph_operation_name_string() {
         let selector = SubgraphSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1845,7 +1991,6 @@ mod test {
     fn subgraph_subgraph_operation_name_string() {
         let selector = SubgraphSelector::SubgraphOperationName {
             subgraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         assert_eq!(
@@ -1875,7 +2020,6 @@ mod test {
     fn subgraph_supergraph_operation_name_hash() {
         let selector = SubgraphSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1903,7 +2047,6 @@ mod test {
     fn subgraph_subgraph_operation_name_hash() {
         let selector = SubgraphSelector::SubgraphOperationName {
             subgraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         assert_eq!(
@@ -1934,7 +2077,6 @@ mod test {
     fn subgraph_supergraph_query() {
         let selector = SubgraphSelector::SupergraphQuery {
             supergraph_query: Query::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -1964,7 +2106,6 @@ mod test {
     fn subgraph_subgraph_query() {
         let selector = SubgraphSelector::SubgraphQuery {
             subgraph_query: SubgraphQuery::String,
-            redact: None,
             default: Some("default".to_string()),
         };
         assert_eq!(
@@ -2011,7 +2152,6 @@ mod test {
     fn subgraph_subgraph_response_data() {
         let selector = SubgraphSelector::SubgraphResponseData {
             subgraph_response_data: JsonPathInst::from_str("$.hello").unwrap(),
-            redact: None,
             default: None,
         };
         assert_eq!(
@@ -2061,7 +2201,6 @@ mod test {
 
         let selector = SubgraphSelector::SubgraphResponseData {
             subgraph_response_data: JsonPathInst::from_str("$.hello.*.greeting").unwrap(),
-            redact: None,
             default: None,
         };
         assert_eq!(
@@ -2097,35 +2236,41 @@ mod test {
 
     #[test]
     fn subgraph_on_graphql_error() {
-        let selector = SubgraphSelector::OnGraphQLError {
+        let selector_true = SubgraphSelector::OnGraphQLError {
             subgraph_on_graphql_error: true,
         };
+        let response_with_error = crate::services::SubgraphResponse::fake_builder()
+            .error(
+                graphql::Error::builder()
+                    .message("not found")
+                    .extension_code("NOT_FOUND")
+                    .build(),
+            )
+            .build();
+        let response_no_error = crate::services::SubgraphResponse::fake_builder()
+            .data(serde_json_bytes::json!({"hello": ["bonjour", "hello", "ciao"]}))
+            .build();
+
+        // on_graphql_error: true — true when errors present, false when not
         assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake_builder()
-                        .error(
-                            graphql::Error::builder()
-                                .message("not found")
-                                .extension_code("NOT_FOUND")
-                                .build()
-                        )
-                        .build()
-                )
-                .unwrap(),
+            selector_true.on_response(&response_with_error).unwrap(),
             opentelemetry::Value::Bool(true)
         );
-
         assert_eq!(
-            selector
-                .on_response(
-                    &crate::services::SubgraphResponse::fake_builder()
-                        .data(serde_json_bytes::json!({
-                            "hello": ["bonjour", "hello", "ciao"]
-                        }))
-                        .build()
-                )
-                .unwrap(),
+            selector_true.on_response(&response_no_error).unwrap(),
+            opentelemetry::Value::Bool(false)
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = SubgraphSelector::OnGraphQLError {
+            subgraph_on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_error).unwrap(),
+            opentelemetry::Value::Bool(true)
+        );
+        assert_eq!(
+            selector_false.on_response(&response_with_error).unwrap(),
             opentelemetry::Value::Bool(false)
         );
     }
@@ -2151,7 +2296,6 @@ mod test {
     fn subgraph_supergraph_query_variable() {
         let selector = SubgraphSelector::SupergraphQueryVariable {
             supergraph_query_variable: "key".to_string(),
-            redact: None,
             default: Some(AttributeValue::String("default".to_string())),
         };
         assert_eq!(
@@ -2181,7 +2325,6 @@ mod test {
     fn subgraph_subgraph_query_variable() {
         let selector = SubgraphSelector::SubgraphQueryVariable {
             subgraph_query_variable: "key".to_string(),
-            redact: None,
             default: Some("default".into()),
         };
         assert_eq!(

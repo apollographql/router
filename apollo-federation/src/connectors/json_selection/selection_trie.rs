@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -5,71 +6,19 @@ use std::ops::Range;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use shape::name::Name;
+use shape::name::NameCase;
 
-use super::JSONSelection;
-use super::Key;
-use super::PathList;
-use super::PathSelection;
-use super::Ranged;
-use super::SubSelection;
+use super::Ref;
 use super::helpers::quote_if_necessary;
-use super::location::WithRange;
-
-impl JSONSelection {
-    #[cfg(test)]
-    pub(crate) fn compute_selection_trie(&self) -> SelectionTrie {
-        let mut trie = SelectionTrie::new();
-
-        // TODO Neither external_var_paths nor the root_trie logic below
-        // properly considers "internal" variables like $ and @, even though
-        // they could potentially refer to external input data. This state of
-        // affairs could be improved by examining the tail of each
-        // &PathSelection for those variables, even if we cannot (yet)
-        // understand their usage in all cases, such as after an -> method call.
-        // Ultimately, getting this completely right will require support from
-        // the shape library tracking the names of all shapes.
-
-        use super::VarPaths;
-        use crate::connectors::json_selection::TopLevelSelection;
-        for path in self.external_var_paths() {
-            if let PathList::Var(known_var, tail) = path.path.as_ref() {
-                trie.add_str_with_ranges(known_var.as_str(), path.range())
-                    .add_path_list(tail);
-            } else {
-                // The self.external_var_paths() method should only return
-                // PathSelection elements whose path starts with PathList::Var.
-            }
-        }
-
-        let mut root_trie = SelectionTrie::new();
-        match &self.inner {
-            TopLevelSelection::Path(path) => {
-                root_trie.add_path_list(&path.path);
-            }
-            TopLevelSelection::Named(selection) => {
-                root_trie.add_subselection(selection);
-            }
-        };
-        trie.add_str("$root").extend(&root_trie);
-
-        trie
-    }
-}
-
-impl WithRange<PathList> {
-    pub(super) fn compute_selection_trie(&self) -> SelectionTrie {
-        let mut trie = SelectionTrie::new();
-        trie.add_path_list(self);
-        trie
-    }
-}
-
-type Ref<T> = std::sync::Arc<T>;
 
 #[derive(Debug, Eq, Clone)]
 pub(crate) struct SelectionTrie {
-    /// The top-level sub-selections of this [`SelectionTrie`].
-    selections: IndexMap<String, Ref<SelectionTrie>>,
+    /// The top-level sub-selections of this [`SelectionTrie`]. Stored in a
+    /// [`BTreeMap`] so iteration is naturally alphabetical: the [`Display`]
+    /// impl, equality-via-`to_string`, and snapshot output are all stable
+    /// without an explicit sort step at render time.
+    selections: BTreeMap<String, Ref<SelectionTrie>>,
 
     /// Whether the path terminating with this [`SelectionTrie`] node was
     /// explicitly added to the trie, rather than existing only as a prefix of
@@ -82,8 +31,8 @@ pub(crate) struct SelectionTrie {
 
 impl Display for SelectionTrie {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `selections` is a BTreeMap, so this iterates in alphabetical order.
         let mut need_space = false;
-
         for (key, sub) in self.selections.iter() {
             if need_space {
                 write!(f, " ")?;
@@ -127,7 +76,7 @@ impl SelectionTrie {
     pub(crate) fn new() -> Self {
         Self {
             is_leaf: false,
-            selections: IndexMap::default(),
+            selections: BTreeMap::new(),
             key_ranges: IndexMap::default(),
         }
     }
@@ -181,28 +130,74 @@ impl SelectionTrie {
             .set_leaf()
     }
 
-    pub(crate) fn add_path_selection(&mut self, path: &PathSelection) -> &mut Self {
-        self.add_path_list(&path.path)
-    }
-
-    fn add_path_list(&mut self, path_list: &WithRange<PathList>) -> &mut Self {
-        match path_list.as_ref() {
-            PathList::Key(key, tail) => self.add_key(key).add_path_list(tail),
-            PathList::Selection(sub) => self.add_subselection(sub),
-            // If we get to the end of the PathList, mark the path used.
-            PathList::Empty => self.set_leaf(),
-            // TODO Support PathList::Method and inputs used within method
-            // arguments. For now, assume we use the whole path up to the
-            // unhandled PathList element.
-            _ => self.set_leaf(),
+    /// Walk a [`shape::name::Name`] chain into this trie, creating subtrie
+    /// entries for each path-component segment of the name. Used by
+    /// `compute_output_shape` to record consumption byproducts: every shape
+    /// produced during the recursion exposes the input paths it came from
+    /// via its [`shape::Name`] metadata, and feeding those names through this
+    /// method accumulates them into a single per-namespace consumption trie.
+    ///
+    /// Mapping from [`NameCase`] segments to trie keys:
+    ///
+    /// | NameCase            | Trie key                            |
+    /// |---------------------|-------------------------------------|
+    /// | `Base(name)`        | `name` (e.g. `"$root"`)             |
+    /// | `Field(_, key)`     | `key`                               |
+    /// | `Item(_, idx)`      | `idx.to_string()`                   |
+    /// | `AnyField(_)`       | `"**"`                              |
+    /// | `AnyItem(_)`        | (skipped — array iteration marker)  |
+    /// | `Question(_)`       | (skipped — operator)                |
+    /// | `NotNone(_)`        | (skipped — operator)                |
+    ///
+    /// `Question` and `NotNone` are presence-modifiers that constrain the
+    /// shape of an existing path; they do not introduce a new trie key.
+    /// `AnyItem` is the "for each element" wildcard that the shape system
+    /// inserts whenever a [`SubSelection`] (or other implicit array map)
+    /// crosses an array boundary: `users { name }` produces shape names like
+    /// `$root.users.*.name`, but the *consumed input path* is `users.name`,
+    /// matching how a downstream upstream-query would express it.
+    pub(crate) fn add_name(&mut self, name: &Name) -> &mut Self {
+        let mut current: &mut SelectionTrie = self;
+        // Ranges specific to each name segment (not inherited from parent
+        // segments). `Name::locations()` (public) returns the parent chain's
+        // locations followed by the segment's own, deduplicated in insertion
+        // order; `Name::locs()` (the per-segment accessor) is `pub(crate)` in
+        // shape@0.7.0, so we recover the per-segment slice by tracking the
+        // previous segment's accumulated location count.
+        let mut prev_count = 0;
+        for part in name.iter() {
+            let all_locs: Vec<_> = part.locations().collect();
+            let ranges: Vec<Range<usize>> = all_locs
+                .iter()
+                .skip(prev_count)
+                .map(|loc| loc.span.clone())
+                .collect();
+            prev_count = all_locs.len();
+            match part.case() {
+                NameCase::Base(base) => current = current.add_str_with_ranges(base, ranges),
+                NameCase::Field(_, field) => {
+                    current = current.add_str_with_ranges(field, ranges);
+                }
+                NameCase::Item(_, idx) => {
+                    current = current.add_str_with_ranges(&idx.to_string(), ranges);
+                }
+                NameCase::AnyField(_) => current = current.add_str_with_ranges("**", ranges),
+                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => {
+                    // `*` is an iteration marker, not a path component; `?`
+                    // and `!` are presence operators that constrain the shape
+                    // of the value at the current trie position. None of them
+                    // introduce a new trie key.
+                }
+            }
         }
-    }
-
-    pub(crate) fn add_subselection(&mut self, sub: &SubSelection) -> &mut Self {
-        for selection in sub.selections_iter() {
-            self.add_path_selection(&selection.path);
-        }
-        self
+        // Note: this returns the deepest node *without* marking it as a
+        // leaf. Callers that record a *terminal* consumption (`Empty` /
+        // `Method` boundary) chain `.set_leaf()` themselves; intermediate
+        // navigation records (e.g. structural traversal through `Key`) keep
+        // the navigated nodes as non-leaf so the trie's `is_leaf` flag
+        // continues to mean "explicitly consumed" rather than "navigated
+        // through."
+        current
     }
 
     pub(crate) fn extend(&mut self, other: &SelectionTrie) -> &mut Self {
@@ -259,11 +254,7 @@ impl SelectionTrie {
         self.add_str(key)
     }
 
-    fn add_key(&mut self, key: &WithRange<Key>) -> &mut Self {
-        self.add_str_with_ranges(key.as_str(), key.range())
-    }
-
-    fn set_leaf(&mut self) -> &mut Self {
+    pub(crate) fn set_leaf(&mut self) -> &mut Self {
         self.is_leaf = true;
         self
     }
@@ -276,7 +267,16 @@ impl SelectionTrie {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::selection;
+    use crate::connectors::json_selection::Key;
+    use crate::connectors::json_selection::Ranged;
+    use crate::connectors::json_selection::location::WithRange;
+
+    // Legacy walker, retained for cross-checks in tests.
+    impl SelectionTrie {
+        fn add_key(&mut self, key: &WithRange<Key>) -> &mut Self {
+            self.add_str_with_ranges(key.as_str(), key.range())
+        }
+    }
 
     #[test]
     fn test_empty() {
@@ -399,7 +399,7 @@ mod tests {
         let merged_2_with_1 = trie2.merge(&trie1);
         assert_eq!(
             merged_2_with_1.to_string(),
-            "a { b { f c } d { e } } g { h }",
+            "a { b { c f } d { e } } g { h }",
         );
 
         merged.add_str_path(["a", "b", "x", "y"]);
@@ -410,26 +410,9 @@ mod tests {
         );
         assert_eq!(
             merged_2_with_1.to_string(),
-            "a { b { f c } d { e } } g { h }",
+            "a { b { c f } d { e } } g { h }",
         );
         assert_eq!(trie1.to_string(), "a { b { c } d { e } }");
         assert_eq!(trie2.to_string(), "a { b { f } } g { h }");
-    }
-
-    #[test]
-    fn test_whole_selection_trie() {
-        assert_eq!(
-            selection!("a { b { c } d { e } }")
-                .compute_selection_trie()
-                .to_string(),
-            "$root { a { b { c } d { e } } }",
-        );
-
-        assert_eq!(
-            selection!("a { b { c: $args.c } d { e: $this.e } }")
-                .compute_selection_trie()
-                .to_string(),
-            "$args { c } $this { e } $root { a { b d } }",
-        );
     }
 }

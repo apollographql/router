@@ -808,11 +808,13 @@ pub async fn start_callback_subgraph_server(
     nb_events: usize,
     interval_ms: u64,
     callback_url: String,
+    subscription_ids: Arc<Mutex<Vec<String>>>,
 ) -> wiremock::MockServer {
     start_callback_subgraph_server_with_payloads(
         generate_default_payloads(nb_events),
         interval_ms,
         callback_url,
+        subscription_ids,
     )
     .await
 }
@@ -821,6 +823,7 @@ pub async fn start_callback_subgraph_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
     callback_url: String,
+    subscription_ids: Arc<Mutex<Vec<String>>>,
 ) -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
 
@@ -850,6 +853,12 @@ pub async fn start_callback_subgraph_server_with_payloads(
                             callback_url
                         );
                         info!("Subscription ID: {}", subscription_id);
+
+                        // Register the subscription ID so handle_callback returns
+                        // the correct 200/202 (not 404) for subsequent next/complete
+                        // callbacks. Without this the mock returns NOT_FOUND, which
+                        // is what a real subgraph would treat as "subscription gone".
+                        subscription_ids.lock().push(subscription_id.to_string());
 
                         tokio::spawn(send_callback_events_with_payloads(
                             callback_url.to_string(),

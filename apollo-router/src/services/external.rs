@@ -324,7 +324,7 @@ where
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
+                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
 
@@ -381,6 +381,9 @@ where
 }
 
 /// Convert a HeaderMap into a HashMap
+/// This is used to send headers to external services (coprocessors, subgraphs)
+/// Headers are NOT masked here - they are sent with full values for functionality.
+/// Masking should be applied only in logging/tracing statements.
 pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> HashMap<String, Vec<String>> {

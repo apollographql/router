@@ -1,0 +1,46 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.13", import: ["@key"])
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "api", http: { baseURL: "http://localhost" })
+
+# Companion to `valid/filter_in_body_mapping_v0_{3,4}.graphql`. Although
+# `->filter` was introduced in connect/v0.3 (CNN-831), the v0.2-spec
+# `compute_output_shape` short-circuits arrow-method results to
+# `Shape::unknown` (apply_to.rs:909) — it doesn't run the method's
+# shape analysis, so `->filter` parses and the surrounding selection
+# composes cleanly. Validation is shallower at v0.2 than at v0.3+, but
+# it isn't *more* permissive than the pre-fix behavior, so this file
+# passes for the same reason its v0.3 / v0.4 siblings do.
+
+type Query {
+  cart(id: ID!): Cart
+    @connect(
+      source: "api"
+      http: { GET: "/carts/{$args.id}" }
+      selection: "id items { id name product }"
+      entity: true
+    )
+}
+
+type Cart @key(fields: "id") {
+  id: ID!
+  items: [Item]!
+  result: String
+    @connect(
+      source: "api"
+      http: {
+        POST: "/process"
+        body: "$({ items: $this.items->filter(@.product) { id name } })"
+      }
+      selection: "$"
+    )
+}
+
+type Item {
+  id: ID!
+  name: String
+  product: String
+}

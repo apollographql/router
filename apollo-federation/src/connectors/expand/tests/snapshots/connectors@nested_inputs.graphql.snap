@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_inputs.graphql
 ---
@@ -44,42 +45,49 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
                         Expression(
                             Expression {
                                 expression: JSONSelection {
-                                    inner: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
-                                                    WithRange {
-                                                        node: $args,
-                                                        range: Some(
-                                                            0..5,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Key(
+                                    inner: Value(
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
                                                             WithRange {
-                                                                node: Field(
-                                                                    "bar",
-                                                                ),
+                                                                node: $args,
                                                                 range: Some(
-                                                                    6..9,
+                                                                    0..5,
                                                                 ),
                                                             },
                                                             WithRange {
-                                                                node: Empty,
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "bar",
+                                                                        ),
+                                                                        range: Some(
+                                                                            6..9,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            9..9,
+                                                                        ),
+                                                                    },
+                                                                ),
                                                                 range: Some(
-                                                                    9..9,
+                                                                    5..9,
                                                                 ),
                                                             },
                                                         ),
                                                         range: Some(
-                                                            5..9,
+                                                            0..9,
                                                         ),
                                                     },
-                                                ),
-                                                range: Some(
-                                                    0..9,
-                                                ),
-                                            },
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..9,
+                                            ),
                                         },
                                     ),
                                     spec: V0_1,
@@ -96,57 +104,64 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
                         Expression(
                             Expression {
                                 expression: JSONSelection {
-                                    inner: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
-                                                    WithRange {
-                                                        node: $args,
-                                                        range: Some(
-                                                            0..5,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Key(
+                                    inner: Value(
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
                                                             WithRange {
-                                                                node: Field(
-                                                                    "doubleBaz",
-                                                                ),
+                                                                node: $args,
                                                                 range: Some(
-                                                                    6..15,
+                                                                    0..5,
                                                                 ),
                                                             },
                                                             WithRange {
                                                                 node: Key(
                                                                     WithRange {
                                                                         node: Field(
-                                                                            "buzz",
+                                                                            "doubleBaz",
                                                                         ),
                                                                         range: Some(
-                                                                            16..20,
+                                                                            6..15,
                                                                         ),
                                                                     },
                                                                     WithRange {
-                                                                        node: Empty,
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "buzz",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    16..20,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Empty,
+                                                                                range: Some(
+                                                                                    20..20,
+                                                                                ),
+                                                                            },
+                                                                        ),
                                                                         range: Some(
-                                                                            20..20,
+                                                                            15..20,
                                                                         ),
                                                                     },
                                                                 ),
                                                                 range: Some(
-                                                                    15..20,
+                                                                    5..20,
                                                                 ),
                                                             },
                                                         ),
                                                         range: Some(
-                                                            5..20,
+                                                            0..20,
                                                         ),
                                                     },
-                                                ),
-                                                range: Some(
-                                                    0..20,
-                                                ),
-                                            },
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..20,
+                                            ),
                                         },
                                     ),
                                     spec: V0_1,
@@ -163,72 +178,79 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
                         Expression(
                             Expression {
                                 expression: JSONSelection {
-                                    inner: Path(
-                                        PathSelection {
-                                            path: WithRange {
-                                                node: Var(
-                                                    WithRange {
-                                                        node: $args,
-                                                        range: Some(
-                                                            0..5,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Key(
+                                    inner: Value(
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
                                                             WithRange {
-                                                                node: Field(
-                                                                    "baz",
-                                                                ),
+                                                                node: $args,
                                                                 range: Some(
-                                                                    6..9,
+                                                                    0..5,
                                                                 ),
                                                             },
                                                             WithRange {
                                                                 node: Key(
                                                                     WithRange {
                                                                         node: Field(
-                                                                            "quux",
+                                                                            "baz",
                                                                         ),
                                                                         range: Some(
-                                                                            10..14,
+                                                                            6..9,
                                                                         ),
                                                                     },
                                                                     WithRange {
                                                                         node: Key(
                                                                             WithRange {
                                                                                 node: Field(
-                                                                                    "quaz",
+                                                                                    "quux",
                                                                                 ),
                                                                                 range: Some(
-                                                                                    15..19,
+                                                                                    10..14,
                                                                                 ),
                                                                             },
                                                                             WithRange {
-                                                                                node: Empty,
+                                                                                node: Key(
+                                                                                    WithRange {
+                                                                                        node: Field(
+                                                                                            "quaz",
+                                                                                        ),
+                                                                                        range: Some(
+                                                                                            15..19,
+                                                                                        ),
+                                                                                    },
+                                                                                    WithRange {
+                                                                                        node: Empty,
+                                                                                        range: Some(
+                                                                                            19..19,
+                                                                                        ),
+                                                                                    },
+                                                                                ),
                                                                                 range: Some(
-                                                                                    19..19,
+                                                                                    14..19,
                                                                                 ),
                                                                             },
                                                                         ),
                                                                         range: Some(
-                                                                            14..19,
+                                                                            9..19,
                                                                         ),
                                                                     },
                                                                 ),
                                                                 range: Some(
-                                                                    9..19,
+                                                                    5..19,
                                                                 ),
                                                             },
                                                         ),
                                                         range: Some(
-                                                            5..19,
+                                                            0..19,
                                                         ),
                                                     },
-                                                ),
-                                                range: Some(
-                                                    0..19,
-                                                ),
-                                            },
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..19,
+                                            ),
                                         },
                                     ),
                                     spec: V0_1,
@@ -248,27 +270,34 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
             },
         ),
         selection: JSONSelection {
-            inner: Path(
-                PathSelection {
-                    path: WithRange {
-                        node: Var(
-                            WithRange {
-                                node: $,
+            inner: Value(
+                WithRange {
+                    node: Path(
+                        PathSelection {
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $,
+                                        range: Some(
+                                            0..1,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            1..1,
+                                        ),
+                                    },
+                                ),
                                 range: Some(
                                     0..1,
                                 ),
                             },
-                            WithRange {
-                                node: Empty,
-                                range: Some(
-                                    1..1,
-                                ),
-                            },
-                        ),
-                        range: Some(
-                            0..1,
-                        ),
-                    },
+                        },
+                    ),
+                    range: Some(
+                        0..1,
+                    ),
                 },
             ),
             spec: V0_1,

@@ -510,8 +510,14 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.key.clone()),
-                    move |(context, response_key), future| {
+                    |req: &Request| {
+                        (
+                            req.context.clone(),
+                            req.key.clone(),
+                            req.connector.id.subgraph_name.to_string(),
+                        )
+                    },
+                    move |(context, response_key, subgraph_name), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
@@ -519,6 +525,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Elapsed>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::GatewayTimeout,
                                         "Your request has been timed out",
                                         response_key,
@@ -528,6 +535,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::RateLimited,
                                         "Your request has been rate limited",
                                         response_key,

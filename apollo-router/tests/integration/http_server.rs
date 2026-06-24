@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use http::StatusCode;
 use hyper_util::rt::TokioExecutor;
@@ -76,6 +77,12 @@ async fn test_router_server_negotiates_http2_with_client() -> Result<(), BoxErro
         "Expected HTTP/2 to be negotiated"
     );
 
+    // T17: drop client before shutdown so the keep-alive pool releases its idle
+    // inbound socket before SIGTERM (matches the pattern in
+    // test_http2_max_header_list_size_exceeded). The 20 s default budget in
+    // `graceful_shutdown()` absorbs slow-runner shutdown variance.
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -126,6 +133,12 @@ async fn test_router_server_falls_back_to_http1_with_client() -> Result<(), BoxE
         "Expected HTTP/1.1 to be negotiated as fallback"
     );
 
+    // T17: drop client before shutdown so the HTTP/1 keep-alive pool closes its
+    // idle inbound socket before SIGTERM. Same shape as the
+    // test_http2_negotiates_with_client fix above. The 20 s default budget in
+    // `graceful_shutdown()` absorbs slow-runner shutdown variance.
+    drop(response);
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -184,7 +197,17 @@ async fn test_http2_max_header_list_size_exceeded() -> Result<(), BoxError> {
     // drain its connections cleanly — otherwise graceful_shutdown hangs waiting for the open conn.
     drop(response);
     drop(client);
-    router.graceful_shutdown().await;
+    // Widen the shutdown budget on top of the dropped client: even after the
+    // hyper pool is dropped, the server-side h2 connection still goes through
+    // GOAWAY + the harness's 5 s `connection_shutdown_timeout` before the
+    // process can exit. On macOS arm64 CI the 21 MiB header upload leaves the
+    // kernel TCP/TLS path with enough residual work that the 10 s default
+    // assert_shutdown budget trips ~10% of the time. Pair the 20 s deadline
+    // with the upstream timeout to keep the test honest about real hangs while
+    // absorbing macOS scheduling jitter.
+    router
+        .graceful_shutdown_with_deadline(Duration::from_secs(20))
+        .await;
     Ok(())
 }
 
@@ -453,12 +476,22 @@ async fn test_http1_connection_persistence(
         num_requests
     );
 
+    // T17: drop client before shutdown so its pooled keep-alive connections
+    // close and the router can drain. Without this, the server-side
+    // per-connection tasks block waiting for the local-half close — originally
+    // observed as the harness's then-10 s assert_shutdown budget firing at ~16 s
+    // wall clock on arm_linux the day after #9418 merged. Same shape as the
+    // fixes in test_http2_max_header_list_size_exceeded and
+    // test_unix_socket_max_header_list_size. The default budget is now 20 s
+    // (see `graceful_shutdown`), so bare `graceful_shutdown()` suffices.
+    drop(client);
     router.graceful_shutdown().await;
     Ok(())
 }
 
 #[cfg(unix)]
 mod unix_tests {
+    use http_body_util::BodyExt as _;
     use hyper_util::rt::TokioIo;
 
     use super::*;
@@ -507,19 +540,57 @@ mod unix_tests {
 
         let response = sender.send_request(request).await?;
 
+        let (parts, body) = response.into_parts();
+
         assert_eq!(
-            response.status(),
-            status_code,
+            parts.status, status_code,
             "Expected status code {:?} for Unix socket with header size test",
             status_code
         );
         assert_eq!(
-            response.version(),
+            parts.version,
             http::Version::HTTP_2,
             "Expected HTTP/2 to be negotiated for Unix socket"
         );
 
-        router.graceful_shutdown().await;
+        // Drain the response body to its natural END_STREAM before dropping it.
+        //
+        // This addresses a flake specific to `case_1_header_within_limits_of_config`
+        // (CircleCI 376297 vs passing 376324 on macOS arm64): the success path
+        // returns a full GraphQL JSON body that the test previously never read.
+        // Dropping an unread h2 `Incoming` body sends `RST_STREAM` on the
+        // response stream, which forces the server's response-writer task to
+        // unwind through an error path instead of the END_STREAM happy path. On
+        // a busy macOS arm64 runner that extra cleanup work — combined with the
+        // 10 MiB request-header parse still completing on the server side —
+        // pushed the shutdown drain past the 10 s `assert_shutdown` default
+        // budget. `case_2_header_bigger_than_config` does not exhibit this
+        // shoulder because the 431 response carries no body to leave unread.
+        //
+        // Draining is unconditional (both cases) because the 431 path either
+        // has no body or has a trivially small one, so the await is essentially
+        // free; the conditional would just be noise. Bound the drain itself
+        // with a 5 s timeout and panic loudly on error/timeout so a real bug
+        // here surfaces instead of being silently swallowed by `let _ =`.
+        match tokio::time::timeout(Duration::from_secs(5), body.collect()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!("body drain error (non-fatal): {e:?}"),
+            Err(_) => panic!("body drain timed out after 5s (non-fatal)"),
+        }
+
+        // Drop the h2 sender before shutdown so the spawned `conn` task
+        // observes the local-half close and the router can drain. Even then
+        // the server-side h2 connection still has to flush GOAWAY and run out
+        // the harness's 5 s `connection_shutdown_timeout` before the process
+        // can exit — and on macOS arm64 CI the
+        // `case_2_header_bigger_than_config` variant (21 MiB header) trips the
+        // default 10 s `assert_shutdown` budget ~10% of the time. Use a 20 s
+        // deadline to absorb macOS scheduling jitter while keeping the
+        // upstream timeout honest.
+        drop(sender);
+        router
+            .graceful_shutdown_with_deadline(Duration::from_secs(20))
+            .await;
 
         // clean up the socket file
         let _ = std::fs::remove_file(&socket_path);
