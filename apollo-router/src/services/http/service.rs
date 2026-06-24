@@ -35,7 +35,6 @@ use tower::ServiceBuilder;
 use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
-use tracing::Instrument;
 use tracing::Span;
 
 use super::HttpRequest;
@@ -527,49 +526,46 @@ impl tower::Service<HttpRequest> for HttpClientService {
         };
 
         let service_name = self.service.clone();
-        let http_req_span = Span::current();
-
-        get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &prepare_context(http_req_span.context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
-            );
-        });
-
-        let (parts, body) = http_request.into_parts();
-        let content_encoding = parts.headers.get(&CONTENT_ENCODING);
-
-        let opt_compressor = content_encoding
-            .as_ref()
-            .and_then(|value| value.to_str().ok())
-            .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
-
-        let body = match opt_compressor {
-            None => body,
-            Some(compressor) => router::body::from_result_stream(compressor.process(body)),
-        };
-
-        let mut http_request = http::Request::from_parts(parts, body);
-
-        http_request
-            .headers_mut()
-            .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
-
-        let signing_params = http_request
-            .extensions()
-            .get::<Arc<SigningParamsConfig>>()
-            .cloned();
 
         Box::pin(async move {
+            get_text_map_propagator(|propagator| {
+                propagator.inject_context(
+                    &prepare_context(Span::current().context()),
+                    &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                );
+            });
+
+            let (parts, body) = http_request.into_parts();
+            let content_encoding = parts.headers.get(&CONTENT_ENCODING);
+
+            let opt_compressor = content_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => router::body::from_result_stream(compressor.process(body)),
+            };
+
+            let mut http_request = http::Request::from_parts(parts, body);
+
+            http_request
+                .headers_mut()
+                .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
+
+            let signing_params = http_request
+                .extensions()
+                .get::<Arc<SigningParamsConfig>>()
+                .cloned();
+
             let http_request = if let Some(signing_params) = signing_params {
                 signing_params.sign(http_request, &service_name).await?
             } else {
                 http_request
             };
 
-            let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
-                .await?;
+            let http_response = do_fetch(client, &service_name, http_request).await?;
 
             Ok(HttpResponse {
                 http_response,
