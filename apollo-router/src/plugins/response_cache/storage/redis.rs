@@ -32,7 +32,7 @@ use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::response_cache::cache_control::CacheControl;
-use crate::plugins::response_cache::metrics::record_maintenance_deduplicated_commands;
+use crate::plugins::response_cache::metrics::record_maintenance_commands;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
@@ -205,9 +205,10 @@ impl Storage {
                                 }
                             }
 
-                            if deduplicated_commands > 0 {
-                                record_maintenance_deduplicated_commands(deduplicated_commands);
-                            }
+                            record_maintenance_commands(
+                                deduplicated_commands,
+                                keys.len() as u64,
+                            );
 
                             for key in keys {
                                 storage.perform_maintenance_on_cache_tag(key).await
@@ -1861,11 +1862,10 @@ mod tests {
             .await
         }
 
-        /// When duplicates are collapsed in the drain loop, the deduplicated_commands metric
-        /// must increment by exactly (raw - unique). Sending 10 identical keys synchronously
-        /// guarantees they all land in one batch; 10 → 1 unique means 9 deduplicated.
+        /// Sending 10 identical keys synchronously guarantees they land in one batch:
+        /// 10 raw → 1 unique executed, 9 deduplicated. Both sides of the ratio must be recorded.
         #[tokio::test]
-        async fn deduplication_records_deduplicated_commands_metric() -> Result<(), BoxError> {
+        async fn deduplication_records_commands_metric() -> Result<(), BoxError> {
             async move {
                 let mock = Arc::new(RecordingMocks::default());
                 let (_drop_tx, drop_rx) = broadcast::channel(2);
@@ -1880,8 +1880,14 @@ mod tests {
                 wait_for(|| mock.total_calls() >= 1).await;
 
                 assert_counter!(
-                    "experimental.apollo.router.operations.response_cache.maintenance.deduplicated_commands",
-                    9
+                    "experimental.apollo.router.operations.response_cache.maintenance.commands",
+                    9,
+                    "deduplicated" = "true"
+                );
+                assert_counter!(
+                    "experimental.apollo.router.operations.response_cache.maintenance.commands",
+                    1,
+                    "deduplicated" = "false"
                 );
 
                 Ok(())

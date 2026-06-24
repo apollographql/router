@@ -74,7 +74,7 @@ telemetry:
 
 ### Experimental maintenance metrics
 
-- `experimental.apollo.router.operations.response_cache.maintenance.deduplicated_commands`: Redis `ZREMRANGEBYSCORE` commands avoided per drain cycle because the same cache tag appeared multiple times in the maintenance queue. Non-zero values indicate the deduplication logic is reducing Redis pressure — expected at high insert rates when many requests write to the same subgraph simultaneously.
+- `experimental.apollo.router.operations.response_cache.maintenance.commands`: Counter of Redis `ZREMRANGEBYSCORE` commands per drain cycle, split by a `deduplicated` attribute (`true` = avoided by deduplication, `false` = actually executed). Use the ratio `deduplicated=true / (true + false)` to measure how much Redis pressure the deduplication is relieving. A high ratio at scale indicates many inserts are concentrating on the same cache tags.
 
 ### Internal
 | Name | Description | Unit |
