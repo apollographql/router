@@ -72,6 +72,10 @@ telemetry:
 | `apollo.router.operations.response_cache.invalidation.request.entry` | Number of invalidated entries per invalidation request. | `{entry}` |
 | `apollo.router.operations.response_cache.invalidation.duration` | Duration of the invalidation event execution, in seconds. | `s` |
 
+### Experimental maintenance metrics
+
+- `experimental.apollo.router.operations.response_cache.maintenance.commands`: Counter of Redis `ZREMRANGEBYSCORE` commands per drain cycle, split by a `deduplicated` attribute (`true` = avoided by deduplication, `false` = actually executed). Use the ratio `deduplicated=true / (true + false)` to measure how much Redis pressure the deduplication is relieving. A high ratio at scale indicates many inserts are concentrating on the same cache tags.
+
 ### Internal
 | Name | Description | Unit |
 | --- | --- | --- |
@@ -88,6 +92,8 @@ The latency metrics are marked as experimental because Apollo might change them 
   - `apollo.router.cache.redis.commands_executed`: Total number of Redis commands executed
   - `apollo.router.cache.redis.redelivery_count`: Commands retried due to connection issues
   - `apollo.router.cache.redis.errors`: Redis errors by type (auth, timeout, io, etc.)
+  - `apollo.router.cache.redis.reconnection`: Number of Redis client reconnections
+  - `apollo.router.cache.redis.unresponsive`: Number of times a Redis server became unresponsive
 
 #### Experimental Redis performance metrics
   - `experimental.apollo.router.cache.redis.network_latency_avg`: Average network latency to Redis

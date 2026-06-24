@@ -8,3 +8,4 @@ limits:
     parser_max_recursion: 500
     max_height: 2
     max_aliases: 2
+    max_recursive_selections: 10000000

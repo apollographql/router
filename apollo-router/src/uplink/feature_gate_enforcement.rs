@@ -103,28 +103,18 @@ impl FeatureGateEnforcementReport {
     }
 
     fn schema_restrictions() -> Vec<FeatureRestriction> {
-        // @link(url: "https://specs.apollo.dev/connect/v0.4") requires `connectors.preview_connect_v0_4: true`
-        // This uses join__directives to find specs because the we're looking
-        // at links within individual subgraphs.
-        vec![FeatureRestriction::SpecInJoinDirective {
-            name: "Connect v0.4".to_string(),
-            spec_url: "https://specs.apollo.dev/connect".to_string(),
-            version_req: semver::VersionReq {
-                comparators: vec![semver::Comparator {
-                    op: semver::Op::Exact,
-                    major: 0,
-                    minor: 4.into(),
-                    patch: 0.into(),
-                    pre: semver::Prerelease::EMPTY,
-                }],
-            },
-            feature_gate_configuration_path: "$.connectors.preview_connect_v0_4".to_string(),
-            expected_value: Value::Bool(true),
-            to_enable: "  connectors:
-    preview_connect_v0_4: true"
-                .to_string(),
-            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.4\") is in preview. See https://go.apollo.dev/connectors/preview for more information.".to_string())
-        }]
+        // No connect spec version is currently feature-gated.
+        //
+        // connect/v0.4 used to require `connectors.preview_connect_v0_4: true` in
+        // router.yaml, but that opt-in was removed: `@link`-ing connect/v0.4 in a
+        // subgraph is itself a sufficient opt-in, and the extra config hoop was
+        // just friction we'd want to drop eventually anyway.
+        //
+        // The enforcement machinery below is intentionally retained. To gate a
+        // future preview spec (e.g. connect/v0.5), push a `FeatureRestriction`
+        // entry here with `feature_gate_configuration_path` pointing at that
+        // version's own config key (e.g. `$.connectors.preview_connect_v0_5`).
+        vec![]
     }
 }
 
@@ -144,7 +134,12 @@ impl Display for FeatureGateEnforcementReport {
     }
 }
 
-/// An individual check for the supergraph schema
+/// An individual check for the supergraph schema.
+///
+/// No variant is constructed while `schema_restrictions` is empty, but the
+/// machinery is retained for gating future preview specs — see the comment in
+/// [`FeatureGateEnforcementReport::schema_restrictions`].
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum FeatureRestriction {
     SpecInJoinDirective {
@@ -190,6 +185,7 @@ mod test {
 
     use super::FeatureGateEnforcementReport;
     use super::FeatureGateViolation;
+    use super::FeatureRestriction;
     use crate::Configuration;
     use crate::spec::Schema;
 
@@ -201,25 +197,25 @@ mod test {
     }
 
     #[test]
-    fn feature_gate_connectors_v0_3() {
+    fn connect_v0_4_no_longer_gated() {
+        // connect/v0.4 used to require `connectors.preview_connect_v0_4: true`.
+        // With the opt-in removed it must load with no flag and no violation.
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/feature_enforcement_connect_v0_4.graphql"),
         );
 
         assert_eq!(
-            1,
+            0,
             report.gated_features_in_use.len(),
-            "should have found restricted connect feature"
+            "connect/v0.4 should no longer be feature-gated"
         );
-        let FeatureGateViolation::Spec { url, name, .. } = &report.gated_features_in_use[0];
-
-        assert_eq!("https://specs.apollo.dev/connect/v0.4", url);
-        assert_eq!("Connect v0.4", name);
     }
 
     #[test]
-    fn feature_gate_connectors_v0_3_enabled() {
+    fn preview_connect_v0_4_flag_is_a_noop() {
+        // The flag is now a deprecated no-op, but configs that still set it must
+        // continue to parse and load without a violation.
         let report = check(
             include_str!("testdata/connectv0_4.router.yaml"),
             include_str!("testdata/feature_enforcement_connect_v0_4.graphql"),
@@ -228,7 +224,7 @@ mod test {
         assert_eq!(
             0,
             report.gated_features_in_use.len(),
-            "should not have found restricted connect feature"
+            "setting the deprecated flag should not produce a violation"
         );
     }
 
@@ -243,6 +239,66 @@ mod test {
             0,
             report.gated_features_in_use.len(),
             "should not have found restricted connect feature"
+        );
+    }
+
+    fn connect_v0_4_restriction() -> FeatureRestriction {
+        FeatureRestriction::SpecInJoinDirective {
+            name: "Connect v0.4".to_string(),
+            spec_url: "https://specs.apollo.dev/connect".to_string(),
+            version_req: semver::VersionReq {
+                comparators: vec![semver::Comparator {
+                    op: semver::Op::Exact,
+                    major: 0,
+                    minor: 4.into(),
+                    patch: 0.into(),
+                    pre: semver::Prerelease::EMPTY,
+                }],
+            },
+            feature_gate_configuration_path: "$.connectors.preview_connect_v0_4".to_string(),
+            expected_value: serde_json::Value::Bool(true),
+            to_enable: "  connectors:\n    preview_connect_v0_4: true".to_string(),
+            warning: None,
+        }
+    }
+
+    fn violations(
+        router_yaml: &str,
+        restrictions: &[FeatureRestriction],
+    ) -> Vec<FeatureGateViolation> {
+        let config = Configuration::from_str(router_yaml).expect("router config must be valid");
+        let schema = Schema::parse(
+            include_str!("testdata/feature_enforcement_connect_v0_4.graphql"),
+            &config,
+        )
+        .expect("supergraph schema must be valid");
+        FeatureGateEnforcementReport::validate_schema(&schema, &restrictions.to_vec(), &config)
+    }
+
+    /// `schema_restrictions` is currently empty, so exercise the enforcement
+    /// machinery directly to prove it still gates a spec when configured — the
+    /// shape a future connect/v0.5 gate would take.
+    #[test]
+    fn machinery_still_gates_when_a_restriction_is_present() {
+        let restrictions = [connect_v0_4_restriction()];
+
+        let without_flag = violations(include_str!("testdata/oss.router.yaml"), &restrictions);
+        assert_eq!(
+            1,
+            without_flag.len(),
+            "a configured restriction should still flag the gated spec"
+        );
+        let FeatureGateViolation::Spec { url, name, .. } = &without_flag[0];
+        assert_eq!("https://specs.apollo.dev/connect/v0.4", url);
+        assert_eq!("Connect v0.4", name);
+
+        let with_flag = violations(
+            include_str!("testdata/connectv0_4.router.yaml"),
+            &restrictions,
+        );
+        assert!(
+            with_flag.is_empty(),
+            "enabling the gate's config key should clear the violation"
         );
     }
 }

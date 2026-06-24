@@ -201,7 +201,7 @@ impl SchemaUpgrader {
         orphan_extension_types
             .into_iter()
             .filter(|type_name| {
-                schema.try_get_type((*type_name).clone()).is_some_and(|ty| {
+                schema.try_get_type(type_name).is_some_and(|ty| {
                     let Ok(ty) = ty.get(schema.schema()) else {
                         return false;
                     };
@@ -247,14 +247,13 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            let is_orphan =
-                                other_subgraph.is_orphan_extension_type(extended_type.name());
-                            let has_extends_directive = other_subgraph
-                                .extends_directive_name()
-                                .is_some_and(|extends_name| {
-                                    extended_type.directives().has(extends_name.as_str())
-                                });
-                            Ok::<bool, FederationError>(!is_orphan && !has_extends_directive)
+                            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+                            //   extensions defined using federation @extends directive. Since fixing it would be
+                            //   a breaking change that could affect some customers, we are keeping current behavior
+                            //   to match JavaScript logic. We should fix this in the future versions.
+                            Ok::<bool, FederationError>(
+                                !other_subgraph.is_orphan_extension_type(extended_type.name()),
+                            )
                         })
                 })
                 .unwrap_or(Ok(false))?;
@@ -656,7 +655,7 @@ impl SchemaUpgrader {
             let field = obj_field_pos.get(schema.schema())?;
             let return_type = field.ty.inner_named_type();
             if schema
-                .try_get_type(return_type.clone())
+                .try_get_type(return_type)
                 .is_some_and(|t| !t.is_composite_type())
             {
                 candidates.insert(obj_field_pos.clone());

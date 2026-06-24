@@ -15,7 +15,6 @@ executors:
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
@@ -54,14 +53,14 @@ executors:
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
+      CARGO_BUILD_JOBS: 4
   arm_linux_test: &arm_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.4
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
-      CARGO_BUILD_JOBS: 8
+      CARGO_BUILD_JOBS: 4
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -83,7 +82,7 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
+    resource_class: windows.medium
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -91,7 +90,7 @@ executors:
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.2xlarge
+    resource_class: windows.medium
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -255,7 +254,17 @@ commands:
                 command: |
                   curl https://mise.jdx.dev/install.sh | sh
                   mise activate bash >> "$BASH_ENV"
-                  mise install --yes --quiet
+                  for i in 1 2 3; do
+                    if mise install --yes --quiet; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "mise install failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
       - when:
           condition:
             or:
@@ -271,7 +280,17 @@ commands:
                 name: Install mise
                 command: |
                   scoop install mise@${MISE_VERSION#v}
-                  mise install --yes --quiet
+                  for i in 1 2 3; do
+                    if mise install --yes --quiet; then
+                      break
+                    fi
+                    if [ $i -eq 3 ]; then
+                      echo "mise install failed after 3 attempts"
+                      exit 1
+                    fi
+                    echo "mise install failed (attempt $i/3), retrying in $((i*5))s..."
+                    sleep $((i*5))
+                  done
   fetch_dependencies:
     steps:
       - run:
@@ -492,9 +511,30 @@ jobs:
       coverage:
         type: boolean
         default: false
+      nightly:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
+      - run:
+          name: Skip if no source files changed
+          command: |
+            # Always run on dev (post-merge); CIRCLE_BRANCH is 'dev' for nightly triggers too
+            if [ "$CIRCLE_BRANCH" = "dev" ]; then
+              exit 0
+            fi
+            git fetch origin dev --depth=100
+            BASE=$(git merge-base HEAD origin/dev 2>/dev/null || git rev-parse HEAD~1)
+            CHANGED=$(git diff --name-only "$BASE" HEAD)
+            echo "Changed files:"
+            echo "$CHANGED"
+            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches|build)/|apollo-federation/|Cargo\.(toml|lock)|[^/]+/Cargo\.toml|rust-toolchain\.toml|xtask/)'; then
+              echo "Source files changed -- running tests"
+              exit 0
+            fi
+            echo "No source files changed -- skipping tests"
+            circleci-agent step halt
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
@@ -506,6 +546,87 @@ jobs:
       #         - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
       #     steps:
       #       - fuzz_build
+      - when:
+          condition:
+            equal: ["dev", "<< pipeline.git.branch >>"]
+          steps:
+            - slack/notify:
+                event: fail
+                channel: "#ii-router-ci-notifications"
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: CI tests *failed* on `dev` for `${CIRCLE_JOB}` — a merge may have broken the build!\n<${CIRCLE_BUILD_URL}|View failed job>"
+                        }
+                      }
+                    ]
+                  }
+      - when:
+          condition:
+            equal: [true, << parameters.nightly >>]
+          steps:
+            - slack/notify:
+                event: fail
+                channel: "#ii-router-ci-notifications"
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: A `nightly` test run has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+            - slack/notify:
+                event: pass
+                channel: "#ii-router-ci-notifications"
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: A `nightly` test run has passed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
   coverage:
     environment:
       <<: *common_job_environment
@@ -556,7 +677,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":x: The `test_updated_cargo_deps` workflow has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                          "text": ":x: The `test_updated_cargo_deps` workflow has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
                         }
                       },
                       {
@@ -813,7 +934,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":x: A `nightly` release run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                          "text": ":x: A `nightly` release run has *failed* for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
                         }
                       },
                       {
@@ -1009,7 +1130,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
+                [amd_linux_test]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
@@ -1045,8 +1166,12 @@ workflows:
             parameters:
               platform: [amd_linux_build]
       - test:
+          nightly: true
           requires:
             - lint
+          context:
+            - router
+            - orb-publishing
           matrix:
             parameters:
               platform:

@@ -19,7 +19,7 @@ use crate::schema::position::TypeDefinitionPosition;
 impl Merger {
     #[instrument(skip(self))]
     pub(in crate::merger) fn merge_type(&mut self, type_def: &Name) -> Result<(), FederationError> {
-        let Ok(dest) = self.merged.get_type(type_def.clone()) else {
+        let Ok(dest) = self.merged.get_type(type_def) else {
             bail!(
                 "Type \"{}\" is missing, but it should have been shallow-copied to the supergraph schema",
                 type_def
@@ -28,7 +28,7 @@ impl Merger {
         let mut sources =
             IndexMap::with_capacity_and_hasher(self.subgraphs.len(), Default::default());
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            let source = subgraph.schema().get_type(type_def.clone()).ok();
+            let source = subgraph.schema().try_get_type(type_def);
             sources.insert(idx, source);
         }
 
@@ -51,7 +51,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Union(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -62,7 +62,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::Enum(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -73,7 +73,7 @@ impl Merger {
                 let sources = map_sources_with_index(sources, |idx, pos| {
                     if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
                         let schema = self.subgraphs[idx].schema().schema();
-                        p.get(schema).ok().cloned()
+                        p.try_get(schema).cloned()
                     } else {
                         None
                     }
@@ -108,11 +108,11 @@ impl Merger {
                 continue;
             };
 
-            let is_orphan = subgraph.is_orphan_extension_type(element.name());
-            let has_extends_directive = subgraph
-                .extends_directive_name()
-                .is_some_and(|extends_name| element.directives().has(extends_name.as_str()));
-            if is_orphan || has_extends_directive {
+            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+            //   extensions defined using federation @extends directive. Since fixing it would be
+            //   a breaking change that could affect some customers, we are keeping current behavior
+            //   to match JavaScript logic. We should fix this in the future versions.
+            if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));
@@ -176,7 +176,8 @@ impl Merger {
 
                 for key in keys {
                     let extension = key.origin.extension_id().is_some()
-                        || source.has_applied_directive(subgraph.schema(), &extends_directive_name);
+                        || source.has_applied_directive(subgraph.schema(), &extends_directive_name)
+                        || subgraph.is_orphan_extension_type(source.type_name());
                     let key_fields =
                         key.specified_argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME);
                     let key_resolvable =

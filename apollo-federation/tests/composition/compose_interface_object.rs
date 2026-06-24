@@ -937,3 +937,103 @@ fn interface_object_partial_overlap_needs_join_field() {
          but has {partial_join_count}"
     );
 }
+
+#[test]
+fn interface_object_type_kind_mismatch_labels_correctly_when_object_processed_first() {
+    // Regression test for a bug where `mismatched_types` and `subgraphs_with_interface_obj`
+    // used TypeDefinitionPosition (kind-carrying enum) as keys. When a plain object subgraph
+    // was processed before an @interfaceObject subgraph, the merged schema stored Object("I")
+    // but the @interfaceObject map was keyed by Interface("I"), causing lookup failures.
+    // This produced: (1) wrong labels in TYPE_KIND_MISMATCH (both subgraphs shown as
+    // "Object Type"), and (2) a spurious INTERFACE_OBJECT_USAGE_ERROR because the
+    // mismatch-suppression check also failed.
+
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          iFromA: I
+        }
+
+        type I @key(fields: "id") {
+          id: ID!
+          x: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          iFromB: I
+        }
+
+        type I @interfaceObject @key(fields: "id") {
+          id: ID!
+          y: Int
+        }
+        "#,
+    };
+
+    // Compose with the plain object subgraph processed first (alphabetical ordering).
+    // Before the fix, this produced:
+    // 1. TYPE_KIND_MISMATCH with wrong label (both shown as "Object Type")
+    // 2. Spurious INTERFACE_OBJECT_USAGE_ERROR
+    // After the fix, only TYPE_KIND_MISMATCH with correct labeling is produced.
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "TYPE_KIND_MISMATCH",
+            r#"Type "I" has mismatched kind: it is defined as Object Type in subgraph "subgraphA" but Interface Object Type (Object Type with @interfaceObject) in subgraph "subgraphB""#,
+        )],
+    );
+}
+
+#[test]
+fn validate_multiple_overlapping_interface_object_types_in_same_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query { t: T }
+            interface I1 { id: ID! }
+            interface I2 { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type I1 @key(fields: "id") @interfaceObject {
+              id: ID!
+              a: String!
+            }
+            type I2 @key(fields: "id") @interfaceObject {
+              id: ID!
+              b: String!
+            }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+            interface I1 @key(fields: "id") { id: ID! }
+            interface I2 @key(fields: "id") { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") { id: ID!, t: String }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type "T". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
+        )],
+    );
+}

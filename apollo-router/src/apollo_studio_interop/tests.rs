@@ -541,6 +541,31 @@ fn test_get_operation_name() {
 }
 
 #[test(tokio::test)]
+async fn test_enums_from_response_deduplicated_fragments() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_deduplicated_fragments.graphql");
+    let response_str =
+        include_str!("testdata/enums_from_response_deduplicated_fragments_response.json");
+    let op_name = Some("DeduplicatedFragmentQuery");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_from_response_fragment_in_two_field_contexts() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str =
+        include_str!("testdata/enums_from_response_fragment_two_field_contexts.graphql");
+    let response_str =
+        include_str!("testdata/enums_from_response_fragment_two_field_contexts_response.json");
+    let op_name = Some("FragmentTwoFieldContextsQuery");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
+}
+
+#[test(tokio::test)]
 async fn test_enums_with_nested_query_fragment() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
     let query_str = include_str!("testdata/enums_from_response_with_nested_query_fragment.graphql");

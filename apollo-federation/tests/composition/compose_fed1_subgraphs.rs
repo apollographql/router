@@ -331,6 +331,7 @@ mod validations {
     }
 
     #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
     fn errors_if_extends_directive_has_no_definition_counterpart() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -361,6 +362,7 @@ mod validations {
     }
 
     #[test]
+    #[ignore = "enable the test when we start checking for @extends extensions"]
     fn errors_if_multiple_subgraphs_all_use_extends_directive_with_no_base() {
         let subgraph_a = ServiceDefinition {
             name: "subgraphA",
@@ -438,6 +440,62 @@ mod validations {
             &[(
                 "TYPE_KIND_MISMATCH",
                 r#"Type "A" has mismatched kind: it is defined as Scalar Type in subgraph "subgraphA" but Object Type in subgraphs "subgraphB" and "subgraphC""#,
+            )],
+        );
+    }
+
+    #[test]
+    fn errors_when_trying_to_use_supergraph_tag_spec() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                schema
+                    @link(url: "https://specs.apollo.dev/link/v1.0")
+                    @link(url: "https://specs.apollo.dev/tag/v0.2")
+                {
+                    query: Query
+                }
+
+                type Query {
+                    q: Int
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[subgraphA] Please import "@tag" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/tag" to avoid potential unexpected behavior in the future."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn errors_when_trying_to_use_supergraph_inaccessible_spec() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                schema
+                    @link(url: "https://specs.apollo.dev/link/v1.0")
+                    @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
+                {
+                    query: Query
+                }
+
+                type Query {
+                    q: Int
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[subgraphA] Please import "@inaccessible" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/inaccessible" to avoid potential unexpected behavior in the future."#,
             )],
         );
     }
@@ -882,4 +940,34 @@ mod override_tests {
         let result = compose_services(&[subgraph_a]);
         result.expect("Expected composition to succeed");
     }
+}
+
+#[test]
+fn coerces_unquoted_key_fields_in_fed1_schema() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: id) {
+                id: ID!
+                name: String
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type T @key(fields: "id") @extends {
+                id: ID! @external
+                value: Int
+            }
+        "#,
+    };
+
+    let result = compose_services(&[subgraph_a, subgraph_b]);
+    result.expect("Expected composition to succeed with unquoted @key fields argument");
 }

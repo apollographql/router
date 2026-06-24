@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
+assertion_line: 27
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.graphql
 ---
@@ -56,7 +57,7 @@ enum join__Graph {
   GRAPHQL @join__graph(name: "graphql", url: "https://graphql")
 }
 
-type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_0, key: "c b") @join__type(graph: GRAPHQL, key: "id") {
+type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_0, key: "b c") @join__type(graph: GRAPHQL, key: "id") {
   a: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERS_0, type: "String")
   b: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_USER_D_0, type: "String")
   id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_USERS_0, type: "ID!") @join__field(graph: GRAPHQL, type: "ID!")

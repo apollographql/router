@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/integration/demand_control.rs
+assertion_line: 389
 expression: parse_result_for_snapshot(response).await
 ---
 {
@@ -39,7 +40,7 @@ expression: parse_result_for_snapshot(response).await
     "extensions": {
       "valueCompletion": [
         {
-          "message": "Cannot return null for non-nullable field Query.ships",
+          "message": "Cannot return null for non-nullable type Ship",
           "path": []
         }
       ]

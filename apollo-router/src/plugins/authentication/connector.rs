@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::ServiceBuilder;
@@ -22,7 +23,7 @@ impl ConnectorAuth {
     ) -> connector::request_service::BoxService {
         let signing_params = self.signing_params.clone();
         ServiceBuilder::new()
-            .map_request(move |req: connector::request_service::Request| {
+            .map_request(move |mut req: connector::request_service::Request| {
                 if let Some(ref source_name) = req.connector.id.source_name
                     && let Some(signing_params) = signing_params
                         .get(&ConnectorSourceRef::new(
@@ -30,10 +31,9 @@ impl ConnectorAuth {
                             source_name.clone(),
                         ))
                         .cloned()
+                    && let TransportRequest::Http(ref mut http_request) = req.transport_request
                 {
-                    req.context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(signing_params));
+                    http_request.inner.extensions_mut().insert(signing_params);
                 }
                 req
             })

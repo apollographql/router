@@ -30,12 +30,12 @@ use crate::connectors::validation::Message;
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::link::Purpose;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::link::spec_registry::APOLLO_SPEC_DOMAIN;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const CONNECT_IDENTITY_NAME: Name = name!("connect");
@@ -142,7 +142,7 @@ impl ConnectSpec {
     pub(crate) fn identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: CONNECT_IDENTITY_NAME,
+            name: CONNECT_IDENTITY_NAME.into(),
         }
     }
 
@@ -211,7 +211,9 @@ impl ConnectSpecDefinition {
         };
 
         let url: Url = url.parse()?;
-        if url.identity.domain != APOLLO_SPEC_DOMAIN || url.identity.name != CONNECT_IDENTITY_NAME {
+        if url.identity.domain != APOLLO_SPEC_DOMAIN
+            || url.identity.name.as_ref() != CONNECT_IDENTITY_NAME.as_str()
+        {
             return Ok(None);
         }
 

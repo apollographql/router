@@ -19,9 +19,8 @@ use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
-use crate::link::LinkError;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::AppliedFederationLink;
@@ -67,18 +66,22 @@ impl Subgraph {
 
         let mut imported_federation_definitions: Option<FederationSpecDefinitions> = None;
         let mut imported_link_definitions: Option<LinkSpecDefinitions> = None;
-        let default_link_name = DEFAULT_LINK_NAME;
+        let default_link_name = LINK_DIRECTIVE_NAME_IN_SPEC;
         let link_directives = schema
             .schema_definition
             .directives
             .get_all(&default_link_name);
 
         for directive in link_directives {
-            let link_directive = Link::from_directive_application(directive, &schema)?;
+            let link_directive =
+                Link::from_directive_application_when_link_spec_unknown(directive, &schema)?;
             if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
-                    let msg = "invalid graphql schema - multiple @link imports for the federation specification are not supported";
-                    return Err(LinkError::BootstrapError(msg.to_owned()).into());
+                    let msg = "Invalid use of @link in schema: invalid graphql schema - multiple @link imports for the federation specification are not supported";
+                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: msg.to_owned(),
+                    }
+                    .into());
                 }
 
                 imported_federation_definitions =
@@ -86,8 +89,11 @@ impl Subgraph {
             } else if link_directive.url.identity == Identity::link_identity() {
                 // user manually imported @link specification
                 if imported_link_definitions.is_some() {
-                    let msg = "invalid graphql schema - multiple @link imports for the link specification are not supported";
-                    return Err(LinkError::BootstrapError(msg.to_owned()).into());
+                    let msg = "Invalid use of @link in schema: invalid graphql schema - multiple @link imports for the link specification are not supported";
+                    return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                        message: msg.to_owned(),
+                    }
+                    .into());
                 }
 
                 imported_link_definitions = Some(LinkSpecDefinitions::new(link_directive));
@@ -170,7 +176,10 @@ impl Subgraph {
                     .import_scalar_definition(import_scalar_name.clone())
                     .into()
             });
-        if let Entry::Vacant(entry) = schema.directive_definitions.entry(DEFAULT_LINK_NAME) {
+        if let Entry::Vacant(entry) = schema
+            .directive_definitions
+            .entry(LINK_DIRECTIVE_NAME_IN_SPEC)
+        {
             entry.insert(link_spec_definitions.link_directive_definition()?.into());
         }
         Ok(())

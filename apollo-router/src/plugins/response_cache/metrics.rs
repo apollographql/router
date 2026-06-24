@@ -82,6 +82,23 @@ pub(super) fn record_maintenance_success(entries: u64) {
     );
 }
 
+pub(super) fn record_maintenance_commands(deduplicated: u64, executed: u64) {
+    u64_counter_with_unit!(
+        "experimental.apollo.router.operations.response_cache.maintenance.commands",
+        "Cache tag maintenance commands sent to or avoided by Redis deduplication within a drain cycle",
+        "{command}",
+        executed,
+        "deduplicated" = "false"
+    );
+    u64_counter_with_unit!(
+        "experimental.apollo.router.operations.response_cache.maintenance.commands",
+        "Cache tag maintenance commands sent to or avoided by Redis deduplication within a drain cycle",
+        "{command}",
+        deduplicated,
+        "deduplicated" = "true"
+    );
+}
+
 pub(super) fn record_maintenance_error(error: &storage::Error) {
     u64_counter_with_unit!(
         "apollo.router.operations.response_cache.maintenance.error",
