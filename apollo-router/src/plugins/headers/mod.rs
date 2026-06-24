@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -555,42 +556,56 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
 
 impl<S> Service<SubgraphRequest> for HeadersService<S>
 where
-    S: Service<SubgraphRequest>,
+    S: Service<SubgraphRequest> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        self.modify_subgraph_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_subgraph_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> Service<connector::request_service::Request> for HeadersService<S>
 where
-    S: Service<connector::request_service::Request>,
+    S: Service<connector::request_service::Request> + Clone + Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: connector::request_service::Request) -> Self::Future {
-        self.modify_connector_request(&mut req);
-        self.inner.call(req)
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let operations = self.operations.clone();
+
+        Box::pin(async move {
+            Self::modify_connector_request(&operations, &mut req);
+            inner.call(req).await
+        })
     }
 }
 
 impl<S> HeadersService<S> {
-    fn modify_subgraph_request(&self, req: &mut SubgraphRequest) {
+    fn modify_subgraph_request(operations: &Arc<Vec<Operation>>, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let body_to_value = serde_json_bytes::value::to_value(req.supergraph_request.body()).ok();
@@ -598,7 +613,7 @@ impl<S> HeadersService<S> {
         let context = &req.context;
         let headers_mut = req.subgraph_request.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -610,7 +625,10 @@ impl<S> HeadersService<S> {
         }
     }
 
-    fn modify_connector_request(&self, req: &mut connector::request_service::Request) {
+    fn modify_connector_request(
+        operations: &Arc<Vec<Operation>>,
+        req: &mut connector::request_service::Request,
+    ) {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let TransportRequest::Http(ref mut http_request) = req.transport_request else {
@@ -623,7 +641,7 @@ impl<S> HeadersService<S> {
         let existing_headers = http_request.inner.headers().clone();
         let headers_mut = http_request.inner.headers_mut();
 
-        for operation in &*self.operations {
+        for operation in &**operations {
             operation.process_header_rules(
                 &mut already_propagated,
                 supergraph_headers,
@@ -1192,6 +1210,7 @@ mod test {
     #[tokio::test]
     async fn test_insert_static() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1219,6 +1238,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_insert_static() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1250,6 +1270,7 @@ mod test {
     #[tokio::test]
     async fn test_insert_from_context() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1277,6 +1298,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_insert_from_context() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1308,6 +1330,7 @@ mod test {
     #[tokio::test]
     async fn test_insert_from_request_body() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1336,6 +1359,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1368,6 +1392,7 @@ mod test {
     #[tokio::test]
     async fn test_insert_from_request_body_with_old_access_json_notation() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1397,6 +1422,7 @@ mod test {
     async fn test_connector_insert_from_request_body_with_old_access_json_notation()
     -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1429,6 +1455,7 @@ mod test {
     #[tokio::test]
     async fn test_remove_exact() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
@@ -1446,6 +1473,7 @@ mod test {
     #[tokio::test]
     async fn test_remove_exact_multiple() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
@@ -1506,6 +1534,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_remove_exact() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
@@ -1527,6 +1556,7 @@ mod test {
     #[tokio::test]
     async fn test_remove_matching() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
@@ -1544,6 +1574,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_remove_matching() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
@@ -1565,6 +1596,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_matching() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1592,6 +1624,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_propagate_matching() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1623,6 +1656,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_exact() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1650,6 +1684,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_propagate_exact() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1681,6 +1716,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_exact_rename() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1708,6 +1744,7 @@ mod test {
     #[tokio::test]
     async fn test_connect_propagate_exact_rename() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1739,6 +1776,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_multiple() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1779,6 +1817,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_propagate_multiple() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1823,6 +1862,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_exact_default() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
+        mock.expect_clone().return_once(MockSubgraphService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1850,6 +1890,7 @@ mod test {
     #[tokio::test]
     async fn test_connector_propagate_exact_default() -> Result<(), BoxError> {
         let mut mock = MockConnectorService::new();
+        mock.expect_clone().return_once(MockConnectorService::new);
         mock.expect_call()
             .times(1)
             .withf(|request| {
@@ -1927,7 +1968,10 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<MockSubgraphService>::modify_subgraph_request(
+            &service.operations,
+            &mut request,
+        );
         let headers = request
             .subgraph_request
             .headers()
@@ -1999,7 +2043,10 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        service.modify_subgraph_request(&mut request);
+        HeadersService::<MockSubgraphService>::modify_subgraph_request(
+            &service.operations,
+            &mut request,
+        );
         let headers = request
             .subgraph_request
             .headers()
