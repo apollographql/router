@@ -1103,6 +1103,9 @@ async fn cache_key_metadata() {
         .schema(CACHE_KEY_SCHEMA)
         .subgraph_hook(|_name, _service| {
             let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service
+                .expect_clone()
+                .return_once(MockSubgraphService::new);
             mock_subgraph_service.expect_call().times(1).returning(
                 move |req: subgraph::Request| {
                     assert_eq!(
