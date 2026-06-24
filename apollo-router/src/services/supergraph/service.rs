@@ -30,7 +30,6 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
@@ -592,14 +591,10 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
             .map(|t| t.config.apollo.clone());
 
-        // The buffer between SubscriptionExecutionLayer and the inner plugin/execution
-        // pipeline provides backpressure: if the execution pipeline is busy, callers
-        // block here rather than propagating poll_ready latency upward.
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
-            .buffered()
             .service(
                 self.plugins.iter().rev().fold(
                     ExecutionService {
