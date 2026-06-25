@@ -79,10 +79,6 @@ mod tests {
     use crate::json_ext::Object;
     use crate::json_ext::Value;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockInternalHttpClientService;
-    use crate::plugin::test::MockRouterService;
-    use crate::plugin::test::MockSubgraphService;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::BodyConf;
     use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::RouterRequestConf;
@@ -265,11 +261,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
+        let (mock_router_service, _handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -333,11 +326,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
+        let (mock_router_service, _handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -401,11 +391,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
+        let (mock_router_service, _handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -463,11 +450,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
+        let (mock_subgraph_service, _handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -527,54 +511,45 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.subgraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            // The subgraph uri should have changed
+            assert_eq!(
+                "http://thisurihaschanged/",
+                req.subgraph_request.uri().to_string()
+            );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.subgraph_request.into_body().query.unwrap()
+            );
+            // this should be the same as the initial request id
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -656,6 +631,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -673,53 +649,45 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.subgraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            // The subgraph uri should have changed
+            assert_eq!(
+                "http://thisurihaschanged/",
+                req.subgraph_request.uri().to_string()
+            );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.subgraph_request.into_body().query.unwrap()
+            );
+            // this should be the same as the initial request id
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -821,6 +789,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -836,60 +805,52 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, String>("apollo::supergraph::operation_name")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    "New".to_string()
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.subgraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, String>("apollo::supergraph::operation_name")
+                    .expect("context key should be there")
+                    .expect("context key should have the right format"),
+                "New".to_string()
+            );
+            // The subgraph uri should have changed
+            assert_eq!(
+                "http://thisurihaschanged/",
+                req.subgraph_request.uri().to_string()
+            );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.subgraph_request.into_body().query.unwrap()
+            );
+            // this should be the same as the initial request id
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -992,6 +953,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1012,26 +974,21 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!("/", req.subgraph_request.uri().to_string());
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!("/", req.subgraph_request.uri().to_string());
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1075,6 +1032,7 @@ mod tests {
                 .data
                 .unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1089,11 +1047,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
+        let (mock_subgraph_service, _handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1160,11 +1115,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
+        let (mock_subgraph_service, _handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1225,26 +1177,22 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -1338,6 +1286,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1352,25 +1301,21 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(serde_json_bytes::Value::Null)
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -1444,6 +1389,7 @@ mod tests {
             serde_json_bytes::Value::Null,
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1461,26 +1407,22 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -1598,6 +1540,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1613,26 +1556,22 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -1759,6 +1698,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1776,27 +1716,23 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                req.context
-                    .insert("context_value", "content".to_string())
-                    .unwrap();
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            req.context
+                .insert("context_value", "content".to_string())
+                .unwrap();
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1881,6 +1817,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1898,24 +1835,18 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
-                ))
-            });
+        let (mock_supergraph_service, mut handle_supergraph) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_supergraph.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(Value::Null)
+                    .subscribed(true)
+                    .build(),
+                req.context,
+            ));
+        });
 
         let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1949,6 +1880,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
+        supergraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -1968,20 +1900,18 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
-                ))
-            });
+        let (mock_supergraph_service, mut handle_supergraph) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_supergraph.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(Value::Null)
+                    .subscribed(true)
+                    .build(),
+                req.context,
+            ));
+        });
 
         let mock_http_client =
             mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
@@ -2057,6 +1987,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
+        supergraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -2074,20 +2005,18 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
-                ))
-            });
+        let (mock_supergraph_service, mut handle_supergraph) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_supergraph.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(Value::Null)
+                    .subscribed(true)
+                    .build(),
+                req.context,
+            ));
+        });
 
         let mock_http_client =
             mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
@@ -2160,6 +2089,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
+        supergraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -2718,11 +2648,8 @@ mod tests {
             response: Default::default(),
         };
 
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
+        let (mock_router_service, _handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -2818,11 +2745,8 @@ mod tests {
             response: Default::default(),
         };
 
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
+        let (mock_router_service, _handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
@@ -3305,29 +3229,29 @@ mod tests {
     }
 
     // Helper function to create working router service mock
-    fn create_mock_router_service() -> MockRouterService {
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        mock_router_service
-            .expect_call()
-            .returning(|req: router::Request| {
-                Ok(router::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_router_service
+    fn create_mock_router_service() -> tower_test::mock::Mock<router::Request, router::Response> {
+        let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            }
+        });
+        mock
     }
 
     // Helper function to create mock http client that returns valid GraphQL response for RouterRequest
-    fn create_mock_http_client_router_request_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_router_request_valid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3348,7 +3272,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_router_response_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_router_response_valid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3368,7 +3295,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_router_response_invalid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_router_response_invalid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3387,7 +3317,10 @@ mod tests {
         })
     }
 
-    fn create_mock_http_client_empty_router_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_empty_router_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 // Return empty GraphQL break response - passes serde but fails GraphQL validation
@@ -3427,7 +3360,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL response
-    fn create_mock_http_client_router_response_empty_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_router_response_empty_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3712,26 +3648,24 @@ mod tests {
     }
 
     // Helper function to create mock subgraph service
-    fn create_mock_subgraph_service() -> MockSubgraphService {
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                Ok(subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .subgraph_name("coprocessorMockSubgraph")
-                    .context(req.context)
-                    .id(req.id)
-                    .build())
-            });
-        mock_subgraph_service
+    fn create_mock_subgraph_service()
+    -> tower_test::mock::Mock<subgraph::Request, subgraph::Response> {
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .subgraph_name("coprocessorMockSubgraph")
+                        .context(req.context)
+                        .id(req.id)
+                        .build(),
+                );
+            }
+        });
+        mock
     }
 
     // Helper functions for subgraph request validation tests
@@ -3788,7 +3722,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
-    fn create_mock_http_client_subgraph_request_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_subgraph_request_valid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3812,7 +3749,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL break response
-    fn create_mock_http_client_subgraph_request_empty_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_subgraph_request_empty_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3834,8 +3774,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_subgraph_request_invalid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_subgraph_request_invalid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -3859,7 +3801,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_subgraph_response_valid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_subgraph_response_valid_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -3880,7 +3825,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL response
-    fn create_mock_http_client_subgraph_response_empty_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_subgraph_response_empty_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -3899,7 +3847,10 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_invalid_subgraph_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_invalid_subgraph_response() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -3919,16 +3870,19 @@ mod tests {
         })
     }
 
-    fn create_mock_http_client_hard_error() -> MockInternalHttpClientService {
-        let mut mock = MockInternalHttpClientService::new();
-
-        // Make clone() always return another mock with the same behavior:
-        mock.expect_clone()
-            .returning(create_mock_http_client_hard_error);
-
-        mock.expect_call()
-            .returning(|_| Box::pin(async move { Err("hard error from mock http client".into()) }));
-
+    fn create_mock_http_client_hard_error() -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        tokio::spawn(async move {
+            while let Some((_req, responder)) = handle.next_request().await {
+                drop(responder); // sends ClosedError to caller
+            }
+        });
         mock
     }
 
@@ -4194,17 +4148,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                use crate::graphql::Error;
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            use crate::graphql::Error;
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
                         Error::builder()
@@ -4219,8 +4169,9 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -4267,6 +4218,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -4284,17 +4236,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                use crate::graphql::Error;
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            use crate::graphql::Error;
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
                         Error::builder()
@@ -4309,8 +4257,9 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -4362,6 +4311,7 @@ mod tests {
         );
         // Original errors should be preserved since they weren't sent to coprocessor
         assert_eq!(response.response.body().errors[0].message, "test error");
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -4379,22 +4329,20 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -4432,6 +4380,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -4450,24 +4399,22 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Response with data but NO errors
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Response with data but NO errors
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -4523,6 +4470,7 @@ mod tests {
         );
         // Errors should remain empty
         assert!(response.response.body().errors.is_empty());
+        subgraph_driver.await.unwrap();
     }
 
     #[tokio::test]
@@ -4542,17 +4490,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Response with data and extensions
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Response with data and extensions
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 5678_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::from_iter(vec![(
@@ -4562,8 +4506,9 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
             Box::pin(async move {
@@ -4627,10 +4572,16 @@ mod tests {
             response.response.body().extensions.get("processor"),
             Some(&json!("modified"))
         );
+        subgraph_driver.await.unwrap();
     }
 
     #[allow(clippy::type_complexity)]
-    fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+    fn mock_with_callback<F>(
+        callback: F,
+    ) -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    >
     where
         F: Fn(
                 http::Request<RouterBody>,
@@ -4640,33 +4591,25 @@ mod tests {
             + 'static,
     {
         let callback = Arc::new(callback);
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let callback = callback.clone();
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
                 let callback = callback.clone();
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(
-                    move |req: crate::services::http::HttpRequest| {
-                        let callback = callback.clone();
-                        let context = req.context.clone();
-                        let fut = callback(req.http_request);
-                        Box::pin(async move {
-                            let response = fut.await?;
-                            Ok(crate::services::http::HttpResponse {
-                                http_response: response,
-                                context,
-                            })
-                        })
-                    },
-                );
-                mock_http_client
-            });
-            mock_http_client
+                let context = req.context.clone();
+                let fut = callback(req.http_request);
+                match fut.await {
+                    Ok(response) => responder.send_response(crate::services::http::HttpResponse {
+                        http_response: response,
+                        context,
+                    }),
+                    Err(_) => drop(responder),
+                }
+            }
         });
-
-        mock_http_client
+        mock
     }
 
     #[allow(clippy::type_complexity)]
@@ -4674,35 +4617,28 @@ mod tests {
         callback: fn(
             http::Request<RouterBody>,
         ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(
-                        move |req: crate::services::http::HttpRequest| {
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(crate::services::http::HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        },
-                    );
-                    mock_http_client
-                });
-                mock_http_client
-            });
-            mock_http_client
+    ) -> tower_test::mock::Mock<
+        crate::services::http::HttpRequest,
+        crate::services::http::HttpResponse,
+    > {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                let context = req.context.clone();
+                let fut = callback(req.http_request);
+                match fut.await {
+                    Ok(response) => responder.send_response(crate::services::http::HttpResponse {
+                        http_response: response,
+                        context,
+                    }),
+                    Err(_) => drop(responder),
+                }
+            }
         });
-
-        mock_http_client
+        mock
     }
 
     // Tests for conditional validation based on incoming payload validity
@@ -6026,50 +5962,52 @@ mod tests {
             //
             //   Chunk 1: no errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = false
             //   Chunk 2: has errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = true
-            let mut mock_router_service = MockRouterService::new();
-            mock_router_service
-                .expect_call()
-                .returning(move |req: router::Request| {
-                    let ctx = req.context.clone();
+            let (mock_router_service, mut handle_router) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = handle_router.next_request().await.unwrap();
+                let ctx = req.context.clone();
 
-                    let graphql_chunks = vec![
-                        // Chunk 1: successful response — condition will not fire
-                        Response::builder()
-                            .data(serde_json_bytes::json!({"hello": "world"}))
-                            .build(),
-                        // Chunk 2: response with errors — condition will fire
-                        Response::builder()
-                            .errors(vec![
-                                GraphQLError::builder().message("deferred error").build(),
-                            ])
-                            .build(),
-                    ];
+                let graphql_chunks = vec![
+                    // Chunk 1: successful response — condition will not fire
+                    Response::builder()
+                        .data(serde_json_bytes::json!({"hello": "world"}))
+                        .build(),
+                    // Chunk 2: response with errors — condition will fire
+                    Response::builder()
+                        .errors(vec![
+                            GraphQLError::builder().message("deferred error").build(),
+                        ])
+                        .build(),
+                ];
 
-                    // new_from_response applies check_for_errors, which lazily sets
-                    // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
-                    let sg_response = supergraph::Response::new_from_response(
-                        http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
-                        ctx.clone(),
-                    );
+                // new_from_response applies check_for_errors, which lazily sets
+                // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
+                let sg_response = supergraph::Response::new_from_response(
+                    http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
+                    ctx.clone(),
+                );
 
-                    // Serialize the graphql stream to bytes. CHUNK_CONTAINS_GRAPHQL_ERROR is
-                    // set by check_for_errors before each chunk is yielded, so downstream
-                    // condition evaluation in process_router_response_stage reads accurate values.
-                    let bytes_stream = sg_response.response.into_body().map(|graphql_resp| {
-                        Ok::<bytes::Bytes, tower::BoxError>(
-                            serde_json::to_vec(&graphql_resp)
-                                .expect("graphql::Response serializes without error")
-                                .into(),
-                        )
-                    });
+                // Serialize the graphql stream to bytes. CHUNK_CONTAINS_GRAPHQL_ERROR is
+                // set by check_for_errors before each chunk is yielded, so downstream
+                // condition evaluation in process_router_response_stage reads accurate values.
+                let bytes_stream = sg_response.response.into_body().map(|graphql_resp| {
+                    Ok::<bytes::Bytes, tower::BoxError>(
+                        serde_json::to_vec(&graphql_resp)
+                            .expect("graphql::Response serializes without error")
+                            .into(),
+                    )
+                });
 
-                    let body = router::body::from_result_stream(bytes_stream);
-                    Ok(router::Response::http_response_builder()
+                let body = router::body::from_result_stream(bytes_stream);
+                responder.send_response(
+                    router::Response::http_response_builder()
                         .response(http::Response::new(body))
                         .context(ctx)
                         .build()
-                        .unwrap())
-                });
+                        .unwrap(),
+                );
+            });
 
             let service_stack = router_stage
                 .as_service(
@@ -6091,6 +6029,7 @@ mod tests {
             // chunk that contained GraphQL errors. Before the fix, the metric was silently
             // dropped because `executed` was already checked (as false) before the stream ran.
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
+            router_driver.await.unwrap();
         }
         .with_metrics()
         .await;
@@ -6614,7 +6553,6 @@ mod tests {
         use tower::ServiceExt;
 
         use crate::metrics::FutureMetricsExt;
-        use crate::plugin::test::MockInternalHttpClientService;
         use crate::plugins::coprocessor::ContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
         use crate::plugins::coprocessor::connector::ConnectorResponseConf;
@@ -6628,7 +6566,7 @@ mod tests {
         use crate::services::router;
 
         #[allow(clippy::type_complexity)]
-        fn mock_with_callback<F>(callback: F) -> MockInternalHttpClientService
+        fn mock_with_callback<F>(callback: F) -> tower_test::mock::Mock<HttpRequest, HttpResponse>
         where
             F: Fn(
                     http::Request<RouterBody>,
@@ -6639,33 +6577,22 @@ mod tests {
                 + 'static,
         {
             let callback = Arc::new(callback);
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let callback = callback.clone();
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            tokio::spawn(async move {
+                while let Some((req, responder)) = handle.next_request().await {
                     let callback = callback.clone();
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client
-                        .expect_call()
-                        .returning(move |req: HttpRequest| {
-                            let callback = callback.clone();
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        });
-                    mock_http_client
-                });
-                mock_http_client
+                    let context = req.context.clone();
+                    let fut = callback(req.http_request);
+                    match fut.await {
+                        Ok(response) => responder.send_response(HttpResponse {
+                            http_response: response,
+                            context,
+                        }),
+                        Err(_) => drop(responder),
+                    }
+                }
             });
-
-            mock_http_client
+            mock
         }
 
         fn create_test_connector() -> Arc<Connector> {
@@ -7863,23 +7790,20 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mut mock_subgraph_service = MockSubgraphService::new();
-
-            mock_subgraph_service
-                .expect_clone()
-                .returning(MockSubgraphService::new);
-
-            mock_subgraph_service
-                .expect_call()
-                .returning(|req: subgraph::Request| {
-                    Ok(subgraph::Response::builder()
+            let (mock_subgraph_service, mut handle_subgraph) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let subgraph_driver = tokio::spawn(async move {
+                let (req, responder) = handle_subgraph.next_request().await.unwrap();
+                responder.send_response(
+                    subgraph::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
                         .extensions(Object::new())
                         .context(req.context)
                         .subgraph_name("test_subgraph".to_string())
-                        .build())
-                });
+                        .build(),
+                );
+            });
 
             // Mock coprocessor that captures headers
             let received_headers = Arc::new(std::sync::Mutex::new(None));
@@ -7961,6 +7885,7 @@ mod tests {
                 "secret-api-key-67890", // gitleaks:allow
                 "API key should be sent unmasked to coprocessor"
             );
+            subgraph_driver.await.unwrap();
         }
 
         #[tokio::test]
