@@ -220,7 +220,7 @@ dependencies = [
  "either",
  "encoding_rs",
  "form_urlencoded",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "heck",
  "hex",
  "http 1.4.0",
