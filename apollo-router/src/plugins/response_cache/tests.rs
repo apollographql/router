@@ -22,7 +22,6 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::invalidation_endpoint::SubgraphInvalidationConfig;
@@ -2787,16 +2786,13 @@ async fn no_data() {
         .extra_private_plugin(response_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
-                fn mock_orga_service() -> MockSubgraphService {
-                    let mut subgraph = MockSubgraphService::new();
-                    subgraph.expect_clone().returning(mock_orga_service);
-                    subgraph
-                        .expect_call()
-                        .times(0..=1)
-                        .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                    subgraph
-                }
-                mock_orga_service().boxed_clone()
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                tokio::spawn(async move {
+                    // Drop each responder to send ClosedError, simulating a subgraph error.
+                    while let Some((_req, _responder)) = handle.next_request().await {}
+                });
+                mock.boxed_clone()
             } else {
                 service
             }
@@ -2844,7 +2840,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed: orga not found",
+          "message": "HTTP fetch failed: service closed",
           "path": [
             "currentUser",
             "allOrganizations",
@@ -2853,7 +2849,7 @@ async fn no_data() {
           "extensions": {
             "code": "SUBREQUEST_HTTP_ERROR",
             "service": "orga",
-            "reason": "orga not found"
+            "reason": "service closed"
           }
         }
       ]
