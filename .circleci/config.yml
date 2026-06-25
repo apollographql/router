@@ -107,9 +107,6 @@ parameters:
   nightly:
     type: boolean
     default: false
-  coverage:
-    type: boolean
-    default: false
   # quick_nightly will skip testing and only build the release artifacts.
   quick_nightly:
     type: boolean
@@ -422,25 +419,6 @@ commands:
   # fuzz_build:
   #   steps:
   #     - run: cargo +nightly fuzz build
-  do_coverage:
-    parameters:
-      variant:
-        type: string
-        default: "default"
-    steps:
-      - run:
-          name: Run coverage
-          environment:
-            # Use the settings from the "ci" profile in nextest configuration.
-            NEXTEST_PROFILE: ci
-          command: cargo llvm-cov nextest --ignore-run-fail --codecov --output-path codecov_report.json
-      - run:
-          name: Upload coverage report
-          command: |
-            # Upload the coverage report to Codecov.
-            codecov-cli --auto-load-params-from CircleCI upload-process --file ./codecov_report.json --token "${CODECOV_TOKEN}"
-      - store_artifacts:
-          path: ./codecov_report.json
 
 jobs:
   fmt_check:
@@ -506,9 +484,6 @@ jobs:
       platform:
         type: executor
       fuzz:
-        type: boolean
-        default: false
-      coverage:
         type: boolean
         default: false
       nightly:
@@ -627,19 +602,6 @@ jobs:
                       }
                     ]
                   }
-  coverage:
-    environment:
-      <<: *common_job_environment
-    parameters:
-      platform:
-        type: executor
-    executor: << parameters.platform >>
-    steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - do_coverage
-
   test_updated:
     environment:
       <<: *common_job_environment
@@ -1143,13 +1105,6 @@ workflows:
             parameters:
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
-  coverage_only:
-    when: << pipeline.parameters.coverage >>
-    jobs:
-      - coverage:
-          matrix:
-            parameters:
-              platform: [macos_test]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -1176,10 +1131,6 @@ workflows:
             parameters:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
-      - coverage:
-          matrix:
-            parameters:
-              platform: [macos_test]
       - build_release:
           requires:
             - test
