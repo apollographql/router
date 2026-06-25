@@ -1,0 +1,16 @@
+# Minimal router config for startup-memory measurement.
+# No traffic is sent at startup, so non-routable connector hosts never matter.
+supergraph:
+  listen: 127.0.0.1:4010
+health_check:
+  listen: 127.0.0.1:8098
+  enabled: true
+sandbox:
+  enabled: false
+homepage:
+  enabled: false
+# keep telemetry minimal; also set APOLLO_TELEMETRY_DISABLED=true in the env.
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant

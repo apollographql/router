@@ -88,3 +88,8 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+# Investigation (branch smyrick/6817694b): parametric connectors startup heap profiling.
+[[test]]
+name = "connectors_startup_profiling"
+path = "tests/dhat_profiling/connectors_startup.rs"

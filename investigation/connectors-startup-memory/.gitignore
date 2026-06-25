@@ -1,0 +1,6 @@
+# Heavy/transient measurement outputs (regenerable via scripts/measure_all.sh).
+# dhat-heap.json is ~18MB each (~229MB total) — kept on disk for Phase 3 attribution
+# but not committed. Summarized numbers live in artifacts/*.tsv.
+artifacts/*/run/dhat-heap.json
+artifacts/*/run/router.log
+artifacts/*/run/time.txt
