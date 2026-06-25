@@ -863,8 +863,6 @@ mod test {
     use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
-    use crate::plugin::test::MockConnectorService;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
@@ -1209,19 +1207,7 @@ mod test {
 
     #[tokio::test]
     async fn test_insert_static() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("c", "d"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
@@ -1231,25 +1217,25 @@ mod test {
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("c", "d"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_static() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("c", "d"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
@@ -1259,29 +1245,22 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("c", "d"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_context() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_context", "my_value_from_context"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
             Insert::FromContext(InsertFromContext {
@@ -1291,25 +1270,25 @@ mod test {
         )]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_context", "my_value_from_context"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_context() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_context", "my_value_from_context"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
             Insert::FromContext(InsertFromContext {
@@ -1319,29 +1298,22 @@ mod test {
         )]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_context", "my_value_from_context"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_request_body() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "my_operation_name"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -1352,25 +1324,25 @@ mod test {
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "my_operation_name"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "myCoolValue"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -1381,29 +1353,22 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "myCoolValue"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_insert_from_request_body_with_old_access_json_notation() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "my_operation_name"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -1414,26 +1379,26 @@ mod test {
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "my_operation_name"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_insert_from_request_body_with_old_access_json_notation()
     -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("header_from_request", "myCoolValue"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
             InsertFromBody {
@@ -1444,40 +1409,39 @@ mod test {
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("header_from_request", "myCoolValue"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_exact() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_exact_multiple() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
@@ -1527,89 +1491,74 @@ mod test {
             id: SubgraphRequestId(String::new()),
         };
 
-        service.ready().await?.call(req).await?;
+        let call = service.ready().await?.call(req);
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_remove_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Named(
             "aa".try_into()?,
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_remove_matching() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac")]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_remove_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Remove(Remove::Matching(
             Regex::from_str("a[ab]")?,
         ))]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![("ac", "vac")]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_matching() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                    ("db", "vdb"),
-                    ("db", "vdb2"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
@@ -1617,27 +1566,27 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+            ("db", "vdb"),
+            ("db", "vdb2"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_matching() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                    ("db", "vdb"),
-                    ("db", "vdb2"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Matching {
@@ -1645,29 +1594,24 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+            ("db", "vdb"),
+            ("db", "vdb2"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1677,25 +1621,25 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_exact() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("da", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1705,29 +1649,22 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("da", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact_rename() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1737,25 +1674,25 @@ mod test {
             })]))
             .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connect_propagate_exact_rename() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1765,30 +1702,22 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_multiple() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ra", "vda"),
-                    ("rb", "vda"),
-                ])
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut service = HeadersLayer::new(Arc::new(vec![
             Operation::Propagate(Propagate::Named {
@@ -1810,26 +1739,26 @@ mod test {
         ]))
         .layer(mock);
 
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ra", "vda"),
+            ("rb", "vda"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_multiple() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ra", "vda"),
-                    ("rb", "vda"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service = HeadersLayer::new(Arc::new(vec![
             Operation::Propagate(Propagate::Named {
@@ -1851,30 +1780,23 @@ mod test {
         ]))
         .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ra", "vda"),
+            ("rb", "vda"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_exact_default() -> Result<(), BoxError> {
-        let mut mock = MockSubgraphService::new();
-        mock.expect_clone().return_once(MockSubgraphService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "defaulted"),
-                ])
-            })
-            .returning(example_response);
-
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
@@ -1882,26 +1804,25 @@ mod test {
                 default: Some("defaulted".try_into()?),
             })]))
             .layer(mock);
-
-        service.ready().await?.call(example_request()).await?;
+        let call = service.ready().await?.call(example_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "defaulted"),
+        ]);
+        responder.send_response(example_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_connector_propagate_exact_default() -> Result<(), BoxError> {
-        let mut mock = MockConnectorService::new();
-        mock.expect_clone().return_once(MockConnectorService::new);
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                request.assert_headers(vec![
-                    ("aa", "vaa"),
-                    ("ab", "vab"),
-                    ("ac", "vac"),
-                    ("ea", "defaulted"),
-                ])
-            })
-            .returning(example_connector_response);
+        let (mock, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
 
         let mut service =
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
@@ -1911,18 +1832,23 @@ mod test {
             })]))
             .layer(mock);
 
-        service
-            .ready()
-            .await?
-            .call(example_connector_request())
-            .await?;
+        let call = service.ready().await?.call(example_connector_request());
+        let (request, responder) = handle.next_request().await.unwrap();
+        request.assert_headers(vec![
+            ("aa", "vaa"),
+            ("ab", "vab"),
+            ("ac", "vac"),
+            ("ea", "defaulted"),
+        ]);
+        responder.send_response(example_connector_response(request).unwrap());
+        call.await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_propagate_reserved() -> Result<(), BoxError> {
         let service = HeadersService {
-            inner: MockSubgraphService::new(),
+            inner: tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>().0,
             operations: Arc::new(vec![Operation::Propagate(Propagate::Matching {
                 matching: Regex::from_str(".*")?,
             })]),
@@ -1968,10 +1894,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        HeadersService::<MockSubgraphService>::modify_subgraph_request(
-            &service.operations,
-            &mut request,
-        );
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
@@ -2000,7 +1923,7 @@ mod test {
     #[tokio::test]
     async fn test_propagate_multiple_matching_rules() -> Result<(), BoxError> {
         let service = HeadersService {
-            inner: MockSubgraphService::new(),
+            inner: tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>().0,
             operations: Arc::new(vec![
                 Operation::Propagate(Propagate::Named {
                     named: HeaderName::from_static("dc"),
@@ -2043,10 +1966,7 @@ mod test {
             executable_document: None,
             id: SubgraphRequestId(String::new()),
         };
-        HeadersService::<MockSubgraphService>::modify_subgraph_request(
-            &service.operations,
-            &mut request,
-        );
+        HeadersService::<tower_test::mock::Mock<SubgraphRequest, SubgraphResponse>>::modify_subgraph_request(&service.operations, &mut request);
         let headers = request
             .subgraph_request
             .headers()
