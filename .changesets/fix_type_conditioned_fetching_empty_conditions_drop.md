@@ -6,4 +6,4 @@ The root cause was a change to `FetchDataPathElement` that made type conditions 
 
 The fix restores the pre-change semantics: an empty conditions list means "no type filtering" and is converted to `None` at the federation-to-router boundary. The query planner is also updated to emit `None` directly when the computed type conditions set is empty, preventing the bad value from being generated in the first place.
 
-By [@zachfettersmoore](https://github.com/zachfettersmoore) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@zachfettersmoore](https://github.com/zachfettersmoore) in https://github.com/apollographql/router/pull/9670
