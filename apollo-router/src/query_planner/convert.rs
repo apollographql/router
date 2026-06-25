@@ -348,9 +348,6 @@ mod tests {
     fn none_conditions_are_preserved_for_key() {
         let element = next::FetchDataPathElement::Key(name!("sub"), None);
         let path_element = PathElement::from(&element);
-        assert_eq!(
-            path_element,
-            PathElement::Key("sub".to_string(), None),
-        );
+        assert_eq!(path_element, PathElement::Key("sub".to_string(), None),);
     }
 }
