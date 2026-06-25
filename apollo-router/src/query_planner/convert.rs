@@ -254,14 +254,22 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
         match value {
             next::FetchDataPathElement::Key(name, conditions) => Self::Key(
                 name.to_string(),
-                conditions
-                    .as_ref()
-                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
+                conditions.as_ref().and_then(|conditions| {
+                    if conditions.is_empty() {
+                        None
+                    } else {
+                        Some(conditions.iter().map(|c| c.to_string()).collect())
+                    }
+                }),
             ),
             next::FetchDataPathElement::AnyIndex(conditions) => Self::Flatten(
-                conditions
-                    .as_ref()
-                    .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
+                conditions.as_ref().and_then(|conditions| {
+                    if conditions.is_empty() {
+                        None
+                    } else {
+                        Some(conditions.iter().map(|c| c.to_string()).collect())
+                    }
+                }),
             ),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
             next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
@@ -291,5 +299,61 @@ where
         None
     } else {
         Some(vec(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+
+    use super::*;
+    use crate::json_ext::PathElement;
+
+    // Regression test for RH-1382.
+    // Some([]) from the query planner must convert to None (no type filtering),
+    // not Some([]) (filter everything). Before the fix, the .map() conversion
+    // preserved Some([]) which caused iterate_path to silently drop all entities
+    // at that path position.
+    #[test]
+    fn empty_conditions_convert_to_none_for_key() {
+        let element = next::FetchDataPathElement::Key(name!("sub"), Some(vec![]));
+        let path_element = PathElement::from(&element);
+        assert_eq!(
+            path_element,
+            PathElement::Key("sub".to_string(), None),
+            "Some([]) conditions must convert to None, not Some(vec![]), \
+             to avoid silently dropping entity representations"
+        );
+    }
+
+    #[test]
+    fn empty_conditions_convert_to_none_for_any_index() {
+        let element = next::FetchDataPathElement::AnyIndex(Some(vec![]));
+        let path_element = PathElement::from(&element);
+        assert_eq!(
+            path_element,
+            PathElement::Flatten(None),
+            "Some([]) conditions on AnyIndex must convert to Flatten(None)"
+        );
+    }
+
+    #[test]
+    fn non_empty_conditions_are_preserved_for_key() {
+        let element = next::FetchDataPathElement::Key(name!("sub"), Some(vec![name!("Foo")]));
+        let path_element = PathElement::from(&element);
+        assert_eq!(
+            path_element,
+            PathElement::Key("sub".to_string(), Some(vec!["Foo".to_string()])),
+        );
+    }
+
+    #[test]
+    fn none_conditions_are_preserved_for_key() {
+        let element = next::FetchDataPathElement::Key(name!("sub"), None);
+        let path_element = PathElement::from(&element);
+        assert_eq!(
+            path_element,
+            PathElement::Key("sub".to_string(), None),
+        );
     }
 }

@@ -653,14 +653,22 @@ impl FetchDependencyGraphNodePath {
 
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
-                            new_path.push(FetchDataPathElement::AnyIndex(Some(
-                                conditions.iter().cloned().collect(),
-                            )));
+                            new_path.push(FetchDataPathElement::AnyIndex(
+                                if conditions.is_empty() {
+                                    None
+                                } else {
+                                    Some(conditions.iter().cloned().collect())
+                                },
+                            ));
                         }
                         Some(FetchDataPathElement::Key(name, _)) => {
                             new_path.push(FetchDataPathElement::Key(
                                 name,
-                                Some(conditions.iter().cloned().collect()),
+                                if conditions.is_empty() {
+                                    None
+                                } else {
+                                    Some(conditions.iter().cloned().collect())
+                                },
                             ));
                         }
                         Some(other) => new_path.push(other),
@@ -5487,6 +5495,83 @@ mod tests {
         let path = path.add(Arc::new(frag2)).unwrap();
         let path = path.add(Arc::new(baz)).unwrap();
 
+        assert_eq!(".|[Foo_1]foo.bar.baz", &to_string(&path.response_path));
+    }
+
+    // Regression test for RH-1382.
+    // When an inline fragment's type condition has no intersection with the
+    // current possible_types (an "impossible" fragment), possible_types becomes
+    // empty. Before the fix, updated_response_path would wrap that empty set in
+    // Some([]) and stamp it onto the previous path element, which iterate_path
+    // treats as "filter everything" — silently dropping all entity
+    // representations. After the fix, an empty conditions set produces None
+    // (no filtering) instead.
+    #[test]
+    fn type_condition_fetching_impossible_fragment_emits_none_not_empty_conditions() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    foo: Foo
+                }
+                interface Foo {
+                    bar: Bar
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Foo_1 implements Foo {
+                    bar: Bar_1
+                    a: Int
+                }
+                type Foo_2 implements Foo {
+                    bar: Bar_2
+                    b: Int
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                    a: Int
+                }
+                type Bar_2 implements Bar {
+                    baz: String
+                    b: Int
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
+
+        let foo = object_field_element(&valid_schema, name!("Query"), name!("foo"));
+        let frag = inline_fragment_element(&valid_schema, name!("Foo"), Some(name!("Foo_1")));
+        let bar = object_field_element(&valid_schema, name!("Foo_1"), name!("bar"));
+        // Bar_3 is an impossible type condition inside a Foo_1 context:
+        // Foo_1.bar returns Bar_1 specifically, so Bar_3 ∩ {Bar_1} = {}.
+        // This makes possible_types empty after the fragment, which before the
+        // fix caused Some([]) to be stamped onto Key("bar").
+        let impossible_frag =
+            inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_3")));
+        let baz = object_field_element(&valid_schema, name!("Bar_3"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(&name!("Query"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root).unwrap();
+
+        let path = path.add(Arc::new(foo)).unwrap();
+        let path = path.add(Arc::new(frag)).unwrap();
+        let path = path.add(Arc::new(bar)).unwrap();
+        let path = path.add(Arc::new(impossible_frag)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        // Key("bar") must carry None (no type condition), not Some([]) (filter
+        // everything). Before the fix this asserted ".|[Foo_1]foo.|[]bar.baz".
         assert_eq!(".|[Foo_1]foo.bar.baz", &to_string(&path.response_path));
     }
 
