@@ -590,8 +590,6 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
-    use crate::plugin::test::MockHttpClientService;
-    use crate::plugin::test::MockRouterService;
     use crate::services::router::Body;
 
     #[tokio::test]
@@ -599,42 +597,36 @@ mod tests {
         async {
             let plugin = FleetDetector::default();
 
-            // GIVEN a router service request
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req: router::Request| {
-                    router::Response::http_response_builder()
-                        .context(req.context)
-                        .response(
-                            http::Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .header("content-type", "application/json")
-                                // making sure the request body is consumed
-                                .body(req.router_request.into_body())
-                                .unwrap(),
-                        )
-                        .build()
-                });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed_clone());
+            let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+            let mut bad_request_router_service = plugin.router_service(mock.boxed_clone());
+
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("request"))
                 .build()
                 .unwrap();
-            let _router_response = bad_request_router_service
+
+            // map_request/map_response are sync, so the request enters the channel during call().
+            let call = bad_request_router_service
                 .ready()
                 .await
                 .unwrap()
-                .call(router_req)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
+                .call(router_req);
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::http_response_builder()
+                    .context(req.context)
+                    .response(
+                        http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .body(req.router_request.into_body())
+                            .unwrap(),
+                    )
+                    .build()
+                    .unwrap(),
+            );
+            let _router_response = call.await.unwrap().next_response().await.unwrap();
 
-            // THEN operation size metrics should exist
             assert_counter!("apollo.router.operations.request_size", 7, &[]);
             assert_counter!("apollo.router.operations.response_size", 7, &[]);
         }
@@ -648,43 +640,32 @@ mod tests {
             let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a complete body
-            let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req| {
-                    Box::pin(async {
-                        Ok(http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.into_body())
-                            .unwrap())
-                    })
-                });
-            let mut bad_request_http_client_service = plugin.http_client_service(
-                "subgraph",
-                mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request)
-                    .map_response(|res| HttpResponse {
-                        http_response: res,
-                        context: Default::default(),
-                    })
-                    .boxed_clone(),
-            );
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let mut bad_request_http_client_service =
+                plugin.http_client_service("subgraph", mock.boxed_clone());
+
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
                     .body(router::body::from_bytes("request"))
                     .unwrap(),
                 context: Default::default(),
             };
-            let http_client_response = bad_request_http_client_service
+
+            let call = bad_request_http_client_service
                 .ready()
                 .await
                 .unwrap()
-                .call(http_client_req)
-                .await
-                .unwrap();
+                .call(http_client_req);
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header("content-type", "application/json")
+                    .body(req.http_request.into_body())
+                    .unwrap(),
+                context: Default::default(),
+            });
+            let http_client_response = call.await.unwrap();
 
             // making sure the response body is consumed
             let _data = http_client_response
@@ -725,30 +706,10 @@ mod tests {
             let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a streaming body
-            let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                |req: http::Request<Body>| {
-                    Box::pin(async {
-                        // making sure the request body is consumed
-                        let data = router::body::into_bytes(req.into_body()).await?;
-                        Ok(http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            .body(router::body::from_bytes(data))
-                            .unwrap())
-                    })
-                },
-            );
-            let mut bad_request_http_client_service = plugin.http_client_service(
-                "subgraph",
-                mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request)
-                    .map_response(|res: http::Response<Body>| HttpResponse {
-                        http_response: res.map(Body::from),
-                        context: Default::default(),
-                    })
-                    .boxed_clone(),
-            );
+            let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let mut bad_request_http_client_service =
+                plugin.http_client_service("subgraph", mock.boxed_clone());
+
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
                     .body(router::body::from_result_stream(futures::stream::once(
@@ -757,13 +718,26 @@ mod tests {
                     .unwrap(),
                 context: Default::default(),
             };
-            let http_client_response = bad_request_http_client_service
+
+            let call = bad_request_http_client_service
                 .ready()
                 .await
                 .unwrap()
-                .call(http_client_req)
+                .call(http_client_req);
+            let (req, responder) = handle.next_request().await.unwrap();
+            // Consume the streaming request body before sending a response.
+            let data = router::body::into_bytes(req.http_request.into_body())
                 .await
                 .unwrap();
+            responder.send_response(HttpResponse {
+                http_response: http::Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header("content-type", "application/json")
+                    .body(router::body::from_bytes(data))
+                    .unwrap(),
+                context: Default::default(),
+            });
+            let http_client_response = call.await.unwrap();
 
             // making sure the response body is consumed
             let _data = router::body::into_bytes(http_client_response.http_response.into_body())
@@ -880,65 +854,51 @@ nodev   cgroup
             let plugin = FleetDetector::default();
 
             // GIVEN a router service with request and response bodies that have exact size hints
-            let mut mock_service = MockRouterService::new();
-            mock_service
-                .expect_call()
-                .times(1)
-                .returning(|req: router::Request| {
-                    // Verify the request body still has size hint after plugin processing
-                    let body = req.router_request.into_body();
-                    let size_hint = body.size_hint();
-                    assert!(
-                        size_hint.exact().is_some(),
-                        "Request body size hint should be preserved to enable content-length headers"
-                    );
-                    assert_eq!(size_hint.exact().unwrap(), 12); // "test request".len()
+            let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+            let mut router_service = plugin.router_service(mock.boxed_clone());
 
-                    // Create a response body with exact size hint (Full body)
-                    let response_body = router::body::from_bytes("test response");
-
-                    // Verify the response body has exact size hint before returning
-                    let response_size_hint = response_body.size_hint();
-                    assert!(
-                        response_size_hint.exact().is_some(),
-                        "Response body should have exact size hint to enable content-length headers"
-                    );
-                    assert_eq!(response_size_hint.exact().unwrap(), 13); // "test response".len()
-
-                    router::Response::http_response_builder()
-                        .context(req.context)
-                        .response(
-                            http::Response::builder()
-                                .status(StatusCode::OK)
-                                .header("content-type", "application/json")
-                                .body(response_body)
-                                .unwrap(),
-                        )
-                        .build()
-                });
-
-            let mut router_service = plugin.router_service(mock_service.boxed_clone());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_bytes("test request"))
                 .build()
                 .unwrap();
 
-            let _router_response = router_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
+            let call = router_service.ready().await.unwrap().call(router_req);
+            let (req, responder) = handle.next_request().await.unwrap();
 
-            // THEN operation size metrics should exist with exact sizes (not streaming)
-            // This indicates size hints were preserved for both request and response.
-            // When Hyper sees these preserved size hints later in the pipeline, it will
-            // use content-length headers instead of transfer-encoding: chunked
-            // If size hints were lost, we'd see byte-by-byte counting instead of single exact metrics
+            // Verify request body size hint is preserved after plugin processing.
+            let body = req.router_request.into_body();
+            let size_hint = body.size_hint();
+            assert!(
+                size_hint.exact().is_some(),
+                "Request body size hint should be preserved to enable content-length headers"
+            );
+            assert_eq!(size_hint.exact().unwrap(), 12); // "test request".len()
+
+            let response_body = router::body::from_bytes("test response");
+            let response_size_hint = response_body.size_hint();
+            assert!(
+                response_size_hint.exact().is_some(),
+                "Response body should have exact size hint to enable content-length headers"
+            );
+            assert_eq!(response_size_hint.exact().unwrap(), 13); // "test response".len()
+
+            responder.send_response(
+                router::Response::http_response_builder()
+                    .context(req.context)
+                    .response(
+                        http::Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(response_body)
+                            .unwrap(),
+                    )
+                    .build()
+                    .unwrap(),
+            );
+            let _router_response = call.await.unwrap().next_response().await.unwrap();
+
+            // THEN operation size metrics should exist with exact sizes (not streaming).
+            // If size hints were lost, we'd see byte-by-byte counting instead of single exact metrics.
             assert_counter!("apollo.router.operations.request_size", 12, &[]); // "test request".len()
             assert_counter!("apollo.router.operations.response_size", 13, &[]); // "test response".len()
         }
@@ -952,29 +912,9 @@ nodev   cgroup
             let plugin = FleetDetector::default();
 
             // GIVEN a router service with a streaming body (no exact size hint)
-            let mut mock_service = MockRouterService::new();
-            mock_service
-                .expect_call()
-                .times(1)
-                .returning(|req: router::Request| {
-                    // Create a streaming response body without exact size hint
-                    let response_body =
-                        router::body::from_result_stream(futures::stream::once(async {
-                            Ok::<_, Infallible>(bytes::Bytes::from("streaming response"))
-                        }));
-                    router::Response::http_response_builder()
-                        .context(req.context)
-                        .response(
-                            http::Response::builder()
-                                .status(StatusCode::OK)
-                                .header("content-type", "application/json")
-                                .body(response_body)
-                                .unwrap(),
-                        )
-                        .build()
-                });
+            let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+            let mut router_service = plugin.router_service(mock.boxed_clone());
 
-            let mut router_service = plugin.router_service(mock_service.boxed_clone());
             let router_req = router::Request::fake_builder()
                 .body(router::body::from_result_stream(futures::stream::once(
                     async { Ok::<_, Infallible>(bytes::Bytes::from("streaming request")) },
@@ -982,19 +922,29 @@ nodev   cgroup
                 .build()
                 .unwrap();
 
-            let _router_response = router_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
+            let call = router_service.ready().await.unwrap().call(router_req);
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::http_response_builder()
+                    .context(req.context)
+                    .response(
+                        http::Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(router::body::from_result_stream(futures::stream::once(
+                                async {
+                                    Ok::<_, Infallible>(bytes::Bytes::from("streaming response"))
+                                },
+                            )))
+                            .unwrap(),
+                    )
+                    .build()
+                    .unwrap(),
+            );
+            let _router_response = call.await.unwrap().next_response().await.unwrap();
 
-            // THEN operation size metrics should exist for streaming bodies
-            // Note: streaming bodies record bytes incrementally as they're consumed
+            // THEN operation size metrics should exist for streaming bodies.
+            // Note: streaming bodies record bytes incrementally as they're consumed.
             assert_counter!("apollo.router.operations.response_size", 18, &[]);
         }
         .with_metrics()
