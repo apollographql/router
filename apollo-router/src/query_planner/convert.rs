@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_federation::query_plan as next;
 
 use crate::query_planner::plan;
@@ -251,26 +252,22 @@ impl From<&'_ next::FetchDataKeyRenamer> for rewrites::DataKeyRenamer {
 impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
     fn from(value: &'_ next::FetchDataPathElement) -> Self {
         // TODO: Go all in on Name eventually
+        let to_conditions = |c: &Option<Vec<Name>>| {
+            c.as_ref().and_then(|v| {
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v.iter().map(|n| n.to_string()).collect::<Vec<String>>())
+                }
+            })
+        };
         match value {
-            next::FetchDataPathElement::Key(name, conditions) => Self::Key(
-                name.to_string(),
-                conditions.as_ref().and_then(|conditions| {
-                    if conditions.is_empty() {
-                        None
-                    } else {
-                        Some(conditions.iter().map(|c| c.to_string()).collect())
-                    }
-                }),
-            ),
-            next::FetchDataPathElement::AnyIndex(conditions) => Self::Flatten(
-                conditions.as_ref().and_then(|conditions| {
-                    if conditions.is_empty() {
-                        None
-                    } else {
-                        Some(conditions.iter().map(|c| c.to_string()).collect())
-                    }
-                }),
-            ),
+            next::FetchDataPathElement::Key(name, conditions) => {
+                Self::Key(name.to_string(), to_conditions(conditions))
+            }
+            next::FetchDataPathElement::AnyIndex(conditions) => {
+                Self::Flatten(to_conditions(conditions))
+            }
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
             next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
         }

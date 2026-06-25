@@ -650,26 +650,15 @@ impl FetchDependencyGraphNodePath {
                 // foo.bar|[baz, qux].quux # |[baz, qux] apply to the parents, they are necessary
                 if self.possible_types_after_last_field.len() != self.possible_types.len() {
                     let conditions = &self.possible_types;
+                    let type_conditions = (!conditions.is_empty())
+                        .then(|| conditions.iter().cloned().collect::<Vec<Name>>());
 
                     match new_path.pop() {
                         Some(FetchDataPathElement::AnyIndex(_)) => {
-                            new_path.push(FetchDataPathElement::AnyIndex(
-                                if conditions.is_empty() {
-                                    None
-                                } else {
-                                    Some(conditions.iter().cloned().collect())
-                                },
-                            ));
+                            new_path.push(FetchDataPathElement::AnyIndex(type_conditions));
                         }
                         Some(FetchDataPathElement::Key(name, _)) => {
-                            new_path.push(FetchDataPathElement::Key(
-                                name,
-                                if conditions.is_empty() {
-                                    None
-                                } else {
-                                    Some(conditions.iter().cloned().collect())
-                                },
-                            ));
+                            new_path.push(FetchDataPathElement::Key(name, type_conditions));
                         }
                         Some(other) => new_path.push(other),
                         // TODO: We should be emitting type conditions here on no element like the
@@ -5573,6 +5562,60 @@ mod tests {
         // Key("bar") must carry None (no type condition), not Some([]) (filter
         // everything). Before the fix this asserted ".|[Foo_1]foo.|[]bar.baz".
         assert_eq!(".|[Foo_1]foo.bar.baz", &to_string(&path.response_path));
+    }
+
+    // Regression test for RH-1382 — AnyIndex variant.
+    // Same bug class as the Key test above but exercises the AnyIndex arm of
+    // updated_response_path. When navigating a list field ([Bar_1]) followed by an
+    // impossible fragment (... on Bar_3 where {Bar_1} ∩ {Bar_3} = {}), the AnyIndex
+    // element must receive None (no filtering), not Some([]) (filter everything).
+    #[test]
+    fn type_condition_fetching_impossible_fragment_any_index_emits_none_not_empty_conditions() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+                type Query {
+                    items: [Bar_1]
+                }
+                interface Bar {
+                    baz: String
+                }
+                type Bar_1 implements Bar {
+                    baz: String
+                }
+                type Bar_3 implements Bar {
+                    baz: String
+                }
+            "#,
+            "schema.graphql",
+        )
+        .unwrap();
+
+        let valid_schema = ValidFederationSchema::new(schema).unwrap();
+
+        // Navigate items: [Bar_1] — adds Key("items") then AnyIndex to the path.
+        let items = object_field_element(&valid_schema, name!("Query"), name!("items"));
+        // Bar_3 is impossible inside a [Bar_1] list context: {Bar_1} ∩ {Bar_3} = {}.
+        // This makes possible_types empty, which before the fix caused Some([]) to
+        // be stamped onto AnyIndex(@).
+        let impossible_frag =
+            inline_fragment_element(&valid_schema, name!("Bar"), Some(name!("Bar_3")));
+        let baz = object_field_element(&valid_schema, name!("Bar_3"), name!("baz"));
+
+        let query_root = valid_schema
+            .get_type(&name!("Query"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let path = FetchDependencyGraphNodePath::new(valid_schema, true, query_root).unwrap();
+
+        let path = path.add(Arc::new(items)).unwrap();
+        let path = path.add(Arc::new(impossible_frag)).unwrap();
+        let path = path.add(Arc::new(baz)).unwrap();
+
+        // AnyIndex(@) must carry None (no type condition), not Some([]) (filter
+        // everything). Before the fix this asserted ".items.|[]@.baz".
+        assert_eq!(".items.@.baz", &to_string(&path.response_path));
     }
 
     fn object_field_element(
