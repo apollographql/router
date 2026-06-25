@@ -1,0 +1,166 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"])
+  @source(name: "svc_39", http: { baseURL: "https://svc39.example.com" })
+
+type Query {
+  svc39_item0(id: ID!): Svc39Item0
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items0/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item1(id: ID!): Svc39Item1
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items1/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item2(id: ID!): Svc39Item2
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items2/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item3(id: ID!): Svc39Item3
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items3/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item4(id: ID!): Svc39Item4
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items4/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item5(id: ID!): Svc39Item5
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items5/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item6(id: ID!): Svc39Item6
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items6/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_item7(id: ID!): Svc39Item7
+    @connect(
+      source: "svc_39"
+      http: { GET: "/items7/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc39_shared0(id: ID!): Shared0
+    @connect(
+      source: "svc_39"
+      http: { GET: "/shared0/{$args.id}" }
+      entity: true
+      selection: "id s39_a s39_b"
+    )
+
+  svc39_shared1(id: ID!): Shared1
+    @connect(
+      source: "svc_39"
+      http: { GET: "/shared1/{$args.id}" }
+      entity: true
+      selection: "id s39_a s39_b"
+    )
+
+  svc39_shared2(id: ID!): Shared2
+    @connect(
+      source: "svc_39"
+      http: { GET: "/shared2/{$args.id}" }
+      entity: true
+      selection: "id s39_a s39_b"
+    )
+
+  svc39_shared3(id: ID!): Shared3
+    @connect(
+      source: "svc_39"
+      http: { GET: "/shared3/{$args.id}" }
+      entity: true
+      selection: "id s39_a s39_b"
+    )
+}
+
+type Svc39Item0 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item1 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item2 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item3 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item4 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item5 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item6 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item7 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Shared0 @key(fields: "id") {
+  id: ID!
+  s39_a: String
+  s39_b: String
+}
+
+type Shared1 @key(fields: "id") {
+  id: ID!
+  s39_a: String
+  s39_b: String
+}
+
+type Shared2 @key(fields: "id") {
+  id: ID!
+  s39_a: String
+  s39_b: String
+}
+
+type Shared3 @key(fields: "id") {
+  id: ID!
+  s39_a: String
+  s39_b: String
+}

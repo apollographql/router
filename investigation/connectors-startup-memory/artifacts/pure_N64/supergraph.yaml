@@ -1,0 +1,258 @@
+federation_version: =2.12.0
+subgraphs:
+  svc0:
+    routing_url: https://svc0.example.com
+    schema:
+      file: svc0.graphql
+  svc1:
+    routing_url: https://svc1.example.com
+    schema:
+      file: svc1.graphql
+  svc2:
+    routing_url: https://svc2.example.com
+    schema:
+      file: svc2.graphql
+  svc3:
+    routing_url: https://svc3.example.com
+    schema:
+      file: svc3.graphql
+  svc4:
+    routing_url: https://svc4.example.com
+    schema:
+      file: svc4.graphql
+  svc5:
+    routing_url: https://svc5.example.com
+    schema:
+      file: svc5.graphql
+  svc6:
+    routing_url: https://svc6.example.com
+    schema:
+      file: svc6.graphql
+  svc7:
+    routing_url: https://svc7.example.com
+    schema:
+      file: svc7.graphql
+  svc8:
+    routing_url: https://svc8.example.com
+    schema:
+      file: svc8.graphql
+  svc9:
+    routing_url: https://svc9.example.com
+    schema:
+      file: svc9.graphql
+  svc10:
+    routing_url: https://svc10.example.com
+    schema:
+      file: svc10.graphql
+  svc11:
+    routing_url: https://svc11.example.com
+    schema:
+      file: svc11.graphql
+  svc12:
+    routing_url: https://svc12.example.com
+    schema:
+      file: svc12.graphql
+  svc13:
+    routing_url: https://svc13.example.com
+    schema:
+      file: svc13.graphql
+  svc14:
+    routing_url: https://svc14.example.com
+    schema:
+      file: svc14.graphql
+  svc15:
+    routing_url: https://svc15.example.com
+    schema:
+      file: svc15.graphql
+  svc16:
+    routing_url: https://svc16.example.com
+    schema:
+      file: svc16.graphql
+  svc17:
+    routing_url: https://svc17.example.com
+    schema:
+      file: svc17.graphql
+  svc18:
+    routing_url: https://svc18.example.com
+    schema:
+      file: svc18.graphql
+  svc19:
+    routing_url: https://svc19.example.com
+    schema:
+      file: svc19.graphql
+  svc20:
+    routing_url: https://svc20.example.com
+    schema:
+      file: svc20.graphql
+  svc21:
+    routing_url: https://svc21.example.com
+    schema:
+      file: svc21.graphql
+  svc22:
+    routing_url: https://svc22.example.com
+    schema:
+      file: svc22.graphql
+  svc23:
+    routing_url: https://svc23.example.com
+    schema:
+      file: svc23.graphql
+  svc24:
+    routing_url: https://svc24.example.com
+    schema:
+      file: svc24.graphql
+  svc25:
+    routing_url: https://svc25.example.com
+    schema:
+      file: svc25.graphql
+  svc26:
+    routing_url: https://svc26.example.com
+    schema:
+      file: svc26.graphql
+  svc27:
+    routing_url: https://svc27.example.com
+    schema:
+      file: svc27.graphql
+  svc28:
+    routing_url: https://svc28.example.com
+    schema:
+      file: svc28.graphql
+  svc29:
+    routing_url: https://svc29.example.com
+    schema:
+      file: svc29.graphql
+  svc30:
+    routing_url: https://svc30.example.com
+    schema:
+      file: svc30.graphql
+  svc31:
+    routing_url: https://svc31.example.com
+    schema:
+      file: svc31.graphql
+  svc32:
+    routing_url: https://svc32.example.com
+    schema:
+      file: svc32.graphql
+  svc33:
+    routing_url: https://svc33.example.com
+    schema:
+      file: svc33.graphql
+  svc34:
+    routing_url: https://svc34.example.com
+    schema:
+      file: svc34.graphql
+  svc35:
+    routing_url: https://svc35.example.com
+    schema:
+      file: svc35.graphql
+  svc36:
+    routing_url: https://svc36.example.com
+    schema:
+      file: svc36.graphql
+  svc37:
+    routing_url: https://svc37.example.com
+    schema:
+      file: svc37.graphql
+  svc38:
+    routing_url: https://svc38.example.com
+    schema:
+      file: svc38.graphql
+  svc39:
+    routing_url: https://svc39.example.com
+    schema:
+      file: svc39.graphql
+  svc40:
+    routing_url: https://svc40.example.com
+    schema:
+      file: svc40.graphql
+  svc41:
+    routing_url: https://svc41.example.com
+    schema:
+      file: svc41.graphql
+  svc42:
+    routing_url: https://svc42.example.com
+    schema:
+      file: svc42.graphql
+  svc43:
+    routing_url: https://svc43.example.com
+    schema:
+      file: svc43.graphql
+  svc44:
+    routing_url: https://svc44.example.com
+    schema:
+      file: svc44.graphql
+  svc45:
+    routing_url: https://svc45.example.com
+    schema:
+      file: svc45.graphql
+  svc46:
+    routing_url: https://svc46.example.com
+    schema:
+      file: svc46.graphql
+  svc47:
+    routing_url: https://svc47.example.com
+    schema:
+      file: svc47.graphql
+  svc48:
+    routing_url: https://svc48.example.com
+    schema:
+      file: svc48.graphql
+  svc49:
+    routing_url: https://svc49.example.com
+    schema:
+      file: svc49.graphql
+  svc50:
+    routing_url: https://svc50.example.com
+    schema:
+      file: svc50.graphql
+  svc51:
+    routing_url: https://svc51.example.com
+    schema:
+      file: svc51.graphql
+  svc52:
+    routing_url: https://svc52.example.com
+    schema:
+      file: svc52.graphql
+  svc53:
+    routing_url: https://svc53.example.com
+    schema:
+      file: svc53.graphql
+  svc54:
+    routing_url: https://svc54.example.com
+    schema:
+      file: svc54.graphql
+  svc55:
+    routing_url: https://svc55.example.com
+    schema:
+      file: svc55.graphql
+  svc56:
+    routing_url: https://svc56.example.com
+    schema:
+      file: svc56.graphql
+  svc57:
+    routing_url: https://svc57.example.com
+    schema:
+      file: svc57.graphql
+  svc58:
+    routing_url: https://svc58.example.com
+    schema:
+      file: svc58.graphql
+  svc59:
+    routing_url: https://svc59.example.com
+    schema:
+      file: svc59.graphql
+  svc60:
+    routing_url: https://svc60.example.com
+    schema:
+      file: svc60.graphql
+  svc61:
+    routing_url: https://svc61.example.com
+    schema:
+      file: svc61.graphql
+  svc62:
+    routing_url: https://svc62.example.com
+    schema:
+      file: svc62.graphql
+  svc63:
+    routing_url: https://svc63.example.com
+    schema:
+      file: svc63.graphql

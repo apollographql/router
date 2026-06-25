@@ -1,0 +1,89 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+
+type Query {
+  svc11_item0(id: ID!): Svc11Item0
+  svc11_item1(id: ID!): Svc11Item1
+  svc11_item2(id: ID!): Svc11Item2
+  svc11_item3(id: ID!): Svc11Item3
+  svc11_item4(id: ID!): Svc11Item4
+  svc11_item5(id: ID!): Svc11Item5
+  svc11_item6(id: ID!): Svc11Item6
+  svc11_item7(id: ID!): Svc11Item7
+  svc11_shared0(id: ID!): Shared0
+  svc11_shared1(id: ID!): Shared1
+  svc11_shared2(id: ID!): Shared2
+  svc11_shared3(id: ID!): Shared3
+}
+
+type Svc11Item0 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item1 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item2 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item3 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item4 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item5 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item6 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item7 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Shared0 @key(fields: "id") {
+  id: ID!
+  s11_a: String
+  s11_b: String
+}
+
+type Shared1 @key(fields: "id") {
+  id: ID!
+  s11_a: String
+  s11_b: String
+}
+
+type Shared2 @key(fields: "id") {
+  id: ID!
+  s11_a: String
+  s11_b: String
+}
+
+type Shared3 @key(fields: "id") {
+  id: ID!
+  s11_a: String
+  s11_b: String
+}

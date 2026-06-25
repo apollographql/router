@@ -1,0 +1,4 @@
+merging supergraph schema files
+downloading the 'supergraph' plugin from https://rover.apollo.dev/tar/supergraph/aarch64-apple-darwin/latest-2
+the 'supergraph' plugin was successfully installed to /Users/shanemyrick/.nvm/versions/node/v22.19.0/lib/node_modules/@apollo/rover/binary/supergraph-v2.14.1
+ERROR: error sending request for url (https://svc0.example.com/items0/1)

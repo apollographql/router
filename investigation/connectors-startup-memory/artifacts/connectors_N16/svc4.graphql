@@ -1,0 +1,166 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"])
+  @source(name: "svc_4", http: { baseURL: "https://svc4.example.com" })
+
+type Query {
+  svc4_item0(id: ID!): Svc4Item0
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items0/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item1(id: ID!): Svc4Item1
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items1/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item2(id: ID!): Svc4Item2
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items2/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item3(id: ID!): Svc4Item3
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items3/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item4(id: ID!): Svc4Item4
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items4/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item5(id: ID!): Svc4Item5
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items5/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item6(id: ID!): Svc4Item6
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items6/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_item7(id: ID!): Svc4Item7
+    @connect(
+      source: "svc_4"
+      http: { GET: "/items7/{$args.id}" }
+      selection: "id name value"
+    )
+
+  svc4_shared0(id: ID!): Shared0
+    @connect(
+      source: "svc_4"
+      http: { GET: "/shared0/{$args.id}" }
+      entity: true
+      selection: "id s4_a s4_b"
+    )
+
+  svc4_shared1(id: ID!): Shared1
+    @connect(
+      source: "svc_4"
+      http: { GET: "/shared1/{$args.id}" }
+      entity: true
+      selection: "id s4_a s4_b"
+    )
+
+  svc4_shared2(id: ID!): Shared2
+    @connect(
+      source: "svc_4"
+      http: { GET: "/shared2/{$args.id}" }
+      entity: true
+      selection: "id s4_a s4_b"
+    )
+
+  svc4_shared3(id: ID!): Shared3
+    @connect(
+      source: "svc_4"
+      http: { GET: "/shared3/{$args.id}" }
+      entity: true
+      selection: "id s4_a s4_b"
+    )
+}
+
+type Svc4Item0 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item1 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item2 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item3 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item4 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item5 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item6 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item7 {
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Shared0 @key(fields: "id") {
+  id: ID!
+  s4_a: String
+  s4_b: String
+}
+
+type Shared1 @key(fields: "id") {
+  id: ID!
+  s4_a: String
+  s4_b: String
+}
+
+type Shared2 @key(fields: "id") {
+  id: ID!
+  s4_a: String
+  s4_b: String
+}
+
+type Shared3 @key(fields: "id") {
+  id: ID!
+  s4_a: String
+  s4_b: String
+}

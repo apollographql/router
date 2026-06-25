@@ -1,0 +1,1534 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.3", for: EXECUTION)
+  @join__directive(graphs: [SVC0, SVC1, SVC10, SVC11, SVC12, SVC13, SVC14, SVC15, SVC2, SVC3, SVC4, SVC5, SVC6, SVC7, SVC8, SVC9], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]})
+  @join__directive(graphs: [SVC0], name: "source", args: {name: "svc_0", http: {baseURL: "https://svc0.example.com"}})
+  @join__directive(graphs: [SVC1], name: "source", args: {name: "svc_1", http: {baseURL: "https://svc1.example.com"}})
+  @join__directive(graphs: [SVC10], name: "source", args: {name: "svc_10", http: {baseURL: "https://svc10.example.com"}})
+  @join__directive(graphs: [SVC11], name: "source", args: {name: "svc_11", http: {baseURL: "https://svc11.example.com"}})
+  @join__directive(graphs: [SVC12], name: "source", args: {name: "svc_12", http: {baseURL: "https://svc12.example.com"}})
+  @join__directive(graphs: [SVC13], name: "source", args: {name: "svc_13", http: {baseURL: "https://svc13.example.com"}})
+  @join__directive(graphs: [SVC14], name: "source", args: {name: "svc_14", http: {baseURL: "https://svc14.example.com"}})
+  @join__directive(graphs: [SVC15], name: "source", args: {name: "svc_15", http: {baseURL: "https://svc15.example.com"}})
+  @join__directive(graphs: [SVC2], name: "source", args: {name: "svc_2", http: {baseURL: "https://svc2.example.com"}})
+  @join__directive(graphs: [SVC3], name: "source", args: {name: "svc_3", http: {baseURL: "https://svc3.example.com"}})
+  @join__directive(graphs: [SVC4], name: "source", args: {name: "svc_4", http: {baseURL: "https://svc4.example.com"}})
+  @join__directive(graphs: [SVC5], name: "source", args: {name: "svc_5", http: {baseURL: "https://svc5.example.com"}})
+  @join__directive(graphs: [SVC6], name: "source", args: {name: "svc_6", http: {baseURL: "https://svc6.example.com"}})
+  @join__directive(graphs: [SVC7], name: "source", args: {name: "svc_7", http: {baseURL: "https://svc7.example.com"}})
+  @join__directive(graphs: [SVC8], name: "source", args: {name: "svc_8", http: {baseURL: "https://svc8.example.com"}})
+  @join__directive(graphs: [SVC9], name: "source", args: {name: "svc_9", http: {baseURL: "https://svc9.example.com"}})
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  SVC0 @join__graph(name: "svc0", url: "https://svc0.example.com")
+  SVC1 @join__graph(name: "svc1", url: "https://svc1.example.com")
+  SVC10 @join__graph(name: "svc10", url: "https://svc10.example.com")
+  SVC11 @join__graph(name: "svc11", url: "https://svc11.example.com")
+  SVC12 @join__graph(name: "svc12", url: "https://svc12.example.com")
+  SVC13 @join__graph(name: "svc13", url: "https://svc13.example.com")
+  SVC14 @join__graph(name: "svc14", url: "https://svc14.example.com")
+  SVC15 @join__graph(name: "svc15", url: "https://svc15.example.com")
+  SVC2 @join__graph(name: "svc2", url: "https://svc2.example.com")
+  SVC3 @join__graph(name: "svc3", url: "https://svc3.example.com")
+  SVC4 @join__graph(name: "svc4", url: "https://svc4.example.com")
+  SVC5 @join__graph(name: "svc5", url: "https://svc5.example.com")
+  SVC6 @join__graph(name: "svc6", url: "https://svc6.example.com")
+  SVC7 @join__graph(name: "svc7", url: "https://svc7.example.com")
+  SVC8 @join__graph(name: "svc8", url: "https://svc8.example.com")
+  SVC9 @join__graph(name: "svc9", url: "https://svc9.example.com")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SVC0)
+  @join__type(graph: SVC1)
+  @join__type(graph: SVC10)
+  @join__type(graph: SVC11)
+  @join__type(graph: SVC12)
+  @join__type(graph: SVC13)
+  @join__type(graph: SVC14)
+  @join__type(graph: SVC15)
+  @join__type(graph: SVC2)
+  @join__type(graph: SVC3)
+  @join__type(graph: SVC4)
+  @join__type(graph: SVC5)
+  @join__type(graph: SVC6)
+  @join__type(graph: SVC7)
+  @join__type(graph: SVC8)
+  @join__type(graph: SVC9)
+{
+  svc0_item0(id: ID!): Svc0Item0 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc0_item1(id: ID!): Svc0Item1 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc0_item2(id: ID!): Svc0Item2 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc0_item3(id: ID!): Svc0Item3 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc0_item4(id: ID!): Svc0Item4 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc0_item5(id: ID!): Svc0Item5 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc0_item6(id: ID!): Svc0Item6 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc0_item7(id: ID!): Svc0Item7 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc0_shared0(id: ID!): Shared0 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s0_a s0_b"})
+  svc0_shared1(id: ID!): Shared1 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s0_a s0_b"})
+  svc0_shared2(id: ID!): Shared2 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s0_a s0_b"})
+  svc0_shared3(id: ID!): Shared3 @join__field(graph: SVC0) @join__directive(graphs: [SVC0], name: "connect", args: {source: "svc_0", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s0_a s0_b"})
+  svc1_item0(id: ID!): Svc1Item0 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc1_item1(id: ID!): Svc1Item1 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc1_item2(id: ID!): Svc1Item2 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc1_item3(id: ID!): Svc1Item3 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc1_item4(id: ID!): Svc1Item4 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc1_item5(id: ID!): Svc1Item5 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc1_item6(id: ID!): Svc1Item6 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc1_item7(id: ID!): Svc1Item7 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc1_shared0(id: ID!): Shared0 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s1_a s1_b"})
+  svc1_shared1(id: ID!): Shared1 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s1_a s1_b"})
+  svc1_shared2(id: ID!): Shared2 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s1_a s1_b"})
+  svc1_shared3(id: ID!): Shared3 @join__field(graph: SVC1) @join__directive(graphs: [SVC1], name: "connect", args: {source: "svc_1", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s1_a s1_b"})
+  svc10_item0(id: ID!): Svc10Item0 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc10_item1(id: ID!): Svc10Item1 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc10_item2(id: ID!): Svc10Item2 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc10_item3(id: ID!): Svc10Item3 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc10_item4(id: ID!): Svc10Item4 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc10_item5(id: ID!): Svc10Item5 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc10_item6(id: ID!): Svc10Item6 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc10_item7(id: ID!): Svc10Item7 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc10_shared0(id: ID!): Shared0 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s10_a s10_b"})
+  svc10_shared1(id: ID!): Shared1 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s10_a s10_b"})
+  svc10_shared2(id: ID!): Shared2 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s10_a s10_b"})
+  svc10_shared3(id: ID!): Shared3 @join__field(graph: SVC10) @join__directive(graphs: [SVC10], name: "connect", args: {source: "svc_10", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s10_a s10_b"})
+  svc11_item0(id: ID!): Svc11Item0 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc11_item1(id: ID!): Svc11Item1 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc11_item2(id: ID!): Svc11Item2 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc11_item3(id: ID!): Svc11Item3 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc11_item4(id: ID!): Svc11Item4 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc11_item5(id: ID!): Svc11Item5 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc11_item6(id: ID!): Svc11Item6 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc11_item7(id: ID!): Svc11Item7 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc11_shared0(id: ID!): Shared0 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s11_a s11_b"})
+  svc11_shared1(id: ID!): Shared1 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s11_a s11_b"})
+  svc11_shared2(id: ID!): Shared2 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s11_a s11_b"})
+  svc11_shared3(id: ID!): Shared3 @join__field(graph: SVC11) @join__directive(graphs: [SVC11], name: "connect", args: {source: "svc_11", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s11_a s11_b"})
+  svc12_item0(id: ID!): Svc12Item0 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc12_item1(id: ID!): Svc12Item1 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc12_item2(id: ID!): Svc12Item2 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc12_item3(id: ID!): Svc12Item3 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc12_item4(id: ID!): Svc12Item4 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc12_item5(id: ID!): Svc12Item5 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc12_item6(id: ID!): Svc12Item6 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc12_item7(id: ID!): Svc12Item7 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc12_shared0(id: ID!): Shared0 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s12_a s12_b"})
+  svc12_shared1(id: ID!): Shared1 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s12_a s12_b"})
+  svc12_shared2(id: ID!): Shared2 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s12_a s12_b"})
+  svc12_shared3(id: ID!): Shared3 @join__field(graph: SVC12) @join__directive(graphs: [SVC12], name: "connect", args: {source: "svc_12", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s12_a s12_b"})
+  svc13_item0(id: ID!): Svc13Item0 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc13_item1(id: ID!): Svc13Item1 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc13_item2(id: ID!): Svc13Item2 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc13_item3(id: ID!): Svc13Item3 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc13_item4(id: ID!): Svc13Item4 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc13_item5(id: ID!): Svc13Item5 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc13_item6(id: ID!): Svc13Item6 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc13_item7(id: ID!): Svc13Item7 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc13_shared0(id: ID!): Shared0 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s13_a s13_b"})
+  svc13_shared1(id: ID!): Shared1 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s13_a s13_b"})
+  svc13_shared2(id: ID!): Shared2 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s13_a s13_b"})
+  svc13_shared3(id: ID!): Shared3 @join__field(graph: SVC13) @join__directive(graphs: [SVC13], name: "connect", args: {source: "svc_13", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s13_a s13_b"})
+  svc14_item0(id: ID!): Svc14Item0 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc14_item1(id: ID!): Svc14Item1 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc14_item2(id: ID!): Svc14Item2 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc14_item3(id: ID!): Svc14Item3 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc14_item4(id: ID!): Svc14Item4 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc14_item5(id: ID!): Svc14Item5 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc14_item6(id: ID!): Svc14Item6 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc14_item7(id: ID!): Svc14Item7 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc14_shared0(id: ID!): Shared0 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s14_a s14_b"})
+  svc14_shared1(id: ID!): Shared1 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s14_a s14_b"})
+  svc14_shared2(id: ID!): Shared2 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s14_a s14_b"})
+  svc14_shared3(id: ID!): Shared3 @join__field(graph: SVC14) @join__directive(graphs: [SVC14], name: "connect", args: {source: "svc_14", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s14_a s14_b"})
+  svc15_item0(id: ID!): Svc15Item0 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc15_item1(id: ID!): Svc15Item1 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc15_item2(id: ID!): Svc15Item2 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc15_item3(id: ID!): Svc15Item3 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc15_item4(id: ID!): Svc15Item4 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc15_item5(id: ID!): Svc15Item5 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc15_item6(id: ID!): Svc15Item6 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc15_item7(id: ID!): Svc15Item7 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc15_shared0(id: ID!): Shared0 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s15_a s15_b"})
+  svc15_shared1(id: ID!): Shared1 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s15_a s15_b"})
+  svc15_shared2(id: ID!): Shared2 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s15_a s15_b"})
+  svc15_shared3(id: ID!): Shared3 @join__field(graph: SVC15) @join__directive(graphs: [SVC15], name: "connect", args: {source: "svc_15", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s15_a s15_b"})
+  svc2_item0(id: ID!): Svc2Item0 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc2_item1(id: ID!): Svc2Item1 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc2_item2(id: ID!): Svc2Item2 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc2_item3(id: ID!): Svc2Item3 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc2_item4(id: ID!): Svc2Item4 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc2_item5(id: ID!): Svc2Item5 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc2_item6(id: ID!): Svc2Item6 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc2_item7(id: ID!): Svc2Item7 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc2_shared0(id: ID!): Shared0 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s2_a s2_b"})
+  svc2_shared1(id: ID!): Shared1 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s2_a s2_b"})
+  svc2_shared2(id: ID!): Shared2 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s2_a s2_b"})
+  svc2_shared3(id: ID!): Shared3 @join__field(graph: SVC2) @join__directive(graphs: [SVC2], name: "connect", args: {source: "svc_2", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s2_a s2_b"})
+  svc3_item0(id: ID!): Svc3Item0 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc3_item1(id: ID!): Svc3Item1 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc3_item2(id: ID!): Svc3Item2 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc3_item3(id: ID!): Svc3Item3 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc3_item4(id: ID!): Svc3Item4 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc3_item5(id: ID!): Svc3Item5 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc3_item6(id: ID!): Svc3Item6 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc3_item7(id: ID!): Svc3Item7 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc3_shared0(id: ID!): Shared0 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s3_a s3_b"})
+  svc3_shared1(id: ID!): Shared1 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s3_a s3_b"})
+  svc3_shared2(id: ID!): Shared2 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s3_a s3_b"})
+  svc3_shared3(id: ID!): Shared3 @join__field(graph: SVC3) @join__directive(graphs: [SVC3], name: "connect", args: {source: "svc_3", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s3_a s3_b"})
+  svc4_item0(id: ID!): Svc4Item0 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc4_item1(id: ID!): Svc4Item1 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc4_item2(id: ID!): Svc4Item2 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc4_item3(id: ID!): Svc4Item3 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc4_item4(id: ID!): Svc4Item4 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc4_item5(id: ID!): Svc4Item5 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc4_item6(id: ID!): Svc4Item6 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc4_item7(id: ID!): Svc4Item7 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc4_shared0(id: ID!): Shared0 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s4_a s4_b"})
+  svc4_shared1(id: ID!): Shared1 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s4_a s4_b"})
+  svc4_shared2(id: ID!): Shared2 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s4_a s4_b"})
+  svc4_shared3(id: ID!): Shared3 @join__field(graph: SVC4) @join__directive(graphs: [SVC4], name: "connect", args: {source: "svc_4", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s4_a s4_b"})
+  svc5_item0(id: ID!): Svc5Item0 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc5_item1(id: ID!): Svc5Item1 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc5_item2(id: ID!): Svc5Item2 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc5_item3(id: ID!): Svc5Item3 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc5_item4(id: ID!): Svc5Item4 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc5_item5(id: ID!): Svc5Item5 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc5_item6(id: ID!): Svc5Item6 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc5_item7(id: ID!): Svc5Item7 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc5_shared0(id: ID!): Shared0 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s5_a s5_b"})
+  svc5_shared1(id: ID!): Shared1 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s5_a s5_b"})
+  svc5_shared2(id: ID!): Shared2 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s5_a s5_b"})
+  svc5_shared3(id: ID!): Shared3 @join__field(graph: SVC5) @join__directive(graphs: [SVC5], name: "connect", args: {source: "svc_5", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s5_a s5_b"})
+  svc6_item0(id: ID!): Svc6Item0 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc6_item1(id: ID!): Svc6Item1 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc6_item2(id: ID!): Svc6Item2 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc6_item3(id: ID!): Svc6Item3 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc6_item4(id: ID!): Svc6Item4 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc6_item5(id: ID!): Svc6Item5 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc6_item6(id: ID!): Svc6Item6 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc6_item7(id: ID!): Svc6Item7 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc6_shared0(id: ID!): Shared0 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s6_a s6_b"})
+  svc6_shared1(id: ID!): Shared1 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s6_a s6_b"})
+  svc6_shared2(id: ID!): Shared2 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s6_a s6_b"})
+  svc6_shared3(id: ID!): Shared3 @join__field(graph: SVC6) @join__directive(graphs: [SVC6], name: "connect", args: {source: "svc_6", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s6_a s6_b"})
+  svc7_item0(id: ID!): Svc7Item0 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc7_item1(id: ID!): Svc7Item1 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc7_item2(id: ID!): Svc7Item2 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc7_item3(id: ID!): Svc7Item3 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc7_item4(id: ID!): Svc7Item4 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc7_item5(id: ID!): Svc7Item5 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc7_item6(id: ID!): Svc7Item6 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc7_item7(id: ID!): Svc7Item7 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc7_shared0(id: ID!): Shared0 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s7_a s7_b"})
+  svc7_shared1(id: ID!): Shared1 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s7_a s7_b"})
+  svc7_shared2(id: ID!): Shared2 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s7_a s7_b"})
+  svc7_shared3(id: ID!): Shared3 @join__field(graph: SVC7) @join__directive(graphs: [SVC7], name: "connect", args: {source: "svc_7", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s7_a s7_b"})
+  svc8_item0(id: ID!): Svc8Item0 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc8_item1(id: ID!): Svc8Item1 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc8_item2(id: ID!): Svc8Item2 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc8_item3(id: ID!): Svc8Item3 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc8_item4(id: ID!): Svc8Item4 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc8_item5(id: ID!): Svc8Item5 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc8_item6(id: ID!): Svc8Item6 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc8_item7(id: ID!): Svc8Item7 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc8_shared0(id: ID!): Shared0 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s8_a s8_b"})
+  svc8_shared1(id: ID!): Shared1 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s8_a s8_b"})
+  svc8_shared2(id: ID!): Shared2 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s8_a s8_b"})
+  svc8_shared3(id: ID!): Shared3 @join__field(graph: SVC8) @join__directive(graphs: [SVC8], name: "connect", args: {source: "svc_8", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s8_a s8_b"})
+  svc9_item0(id: ID!): Svc9Item0 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items0/{$args.id}"}, selection: "id name value"})
+  svc9_item1(id: ID!): Svc9Item1 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items1/{$args.id}"}, selection: "id name value"})
+  svc9_item2(id: ID!): Svc9Item2 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items2/{$args.id}"}, selection: "id name value"})
+  svc9_item3(id: ID!): Svc9Item3 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items3/{$args.id}"}, selection: "id name value"})
+  svc9_item4(id: ID!): Svc9Item4 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items4/{$args.id}"}, selection: "id name value"})
+  svc9_item5(id: ID!): Svc9Item5 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items5/{$args.id}"}, selection: "id name value"})
+  svc9_item6(id: ID!): Svc9Item6 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items6/{$args.id}"}, selection: "id name value"})
+  svc9_item7(id: ID!): Svc9Item7 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/items7/{$args.id}"}, selection: "id name value"})
+  svc9_shared0(id: ID!): Shared0 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/shared0/{$args.id}"}, entity: true, selection: "id s9_a s9_b"})
+  svc9_shared1(id: ID!): Shared1 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/shared1/{$args.id}"}, entity: true, selection: "id s9_a s9_b"})
+  svc9_shared2(id: ID!): Shared2 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/shared2/{$args.id}"}, entity: true, selection: "id s9_a s9_b"})
+  svc9_shared3(id: ID!): Shared3 @join__field(graph: SVC9) @join__directive(graphs: [SVC9], name: "connect", args: {source: "svc_9", http: {GET: "/shared3/{$args.id}"}, entity: true, selection: "id s9_a s9_b"})
+}
+
+type Shared0
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared1
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared2
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared3
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Svc0Item0
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item1
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item2
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item3
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item4
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item5
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item6
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item7
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item0
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item1
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item2
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item3
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item4
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item5
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item6
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item7
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item0
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item1
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item2
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item3
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item4
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item5
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item6
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item7
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item0
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item1
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item2
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item3
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item4
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item5
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item6
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item7
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item0
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item1
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item2
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item3
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item4
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item5
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item6
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item7
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item0
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item1
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item2
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item3
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item4
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item5
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item6
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item7
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item0
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item1
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item2
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item3
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item4
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item5
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item6
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item7
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item0
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item1
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item2
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item3
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item4
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item5
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item6
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item7
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item0
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item1
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item2
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item3
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item4
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item5
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item6
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item7
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item0
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item1
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item2
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item3
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item4
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item5
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item6
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item7
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item0
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item1
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item2
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item3
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item4
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item5
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item6
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item7
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item0
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item1
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item2
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item3
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item4
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item5
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item6
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item7
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item0
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item1
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item2
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item3
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item4
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item5
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item6
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item7
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item0
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item1
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item2
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item3
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item4
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item5
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item6
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item7
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item0
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item1
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item2
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item3
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item4
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item5
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item6
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item7
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item0
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item1
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item2
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item3
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item4
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item5
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item6
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item7
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}

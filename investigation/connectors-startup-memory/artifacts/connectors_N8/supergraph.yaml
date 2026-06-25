@@ -1,0 +1,34 @@
+federation_version: =2.12.0
+subgraphs:
+  svc0:
+    routing_url: https://svc0.example.com
+    schema:
+      file: svc0.graphql
+  svc1:
+    routing_url: https://svc1.example.com
+    schema:
+      file: svc1.graphql
+  svc2:
+    routing_url: https://svc2.example.com
+    schema:
+      file: svc2.graphql
+  svc3:
+    routing_url: https://svc3.example.com
+    schema:
+      file: svc3.graphql
+  svc4:
+    routing_url: https://svc4.example.com
+    schema:
+      file: svc4.graphql
+  svc5:
+    routing_url: https://svc5.example.com
+    schema:
+      file: svc5.graphql
+  svc6:
+    routing_url: https://svc6.example.com
+    schema:
+      file: svc6.graphql
+  svc7:
+    routing_url: https://svc7.example.com
+    schema:
+      file: svc7.graphql

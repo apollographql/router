@@ -1,0 +1,66 @@
+federation_version: =2.12.0
+subgraphs:
+  svc0:
+    routing_url: https://svc0.example.com
+    schema:
+      file: svc0.graphql
+  svc1:
+    routing_url: https://svc1.example.com
+    schema:
+      file: svc1.graphql
+  svc2:
+    routing_url: https://svc2.example.com
+    schema:
+      file: svc2.graphql
+  svc3:
+    routing_url: https://svc3.example.com
+    schema:
+      file: svc3.graphql
+  svc4:
+    routing_url: https://svc4.example.com
+    schema:
+      file: svc4.graphql
+  svc5:
+    routing_url: https://svc5.example.com
+    schema:
+      file: svc5.graphql
+  svc6:
+    routing_url: https://svc6.example.com
+    schema:
+      file: svc6.graphql
+  svc7:
+    routing_url: https://svc7.example.com
+    schema:
+      file: svc7.graphql
+  svc8:
+    routing_url: https://svc8.example.com
+    schema:
+      file: svc8.graphql
+  svc9:
+    routing_url: https://svc9.example.com
+    schema:
+      file: svc9.graphql
+  svc10:
+    routing_url: https://svc10.example.com
+    schema:
+      file: svc10.graphql
+  svc11:
+    routing_url: https://svc11.example.com
+    schema:
+      file: svc11.graphql
+  svc12:
+    routing_url: https://svc12.example.com
+    schema:
+      file: svc12.graphql
+  svc13:
+    routing_url: https://svc13.example.com
+    schema:
+      file: svc13.graphql
+  svc14:
+    routing_url: https://svc14.example.com
+    schema:
+      file: svc14.graphql
+  svc15:
+    routing_url: https://svc15.example.com
+    schema:
+      file: svc15.graphql

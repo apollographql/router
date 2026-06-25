@@ -1,0 +1,15 @@
+family	N	K	E	connects	source_graphs	synthetic_subgraphs	supergraph_path	compose_status
+connectors	1	8	4	12	1	12	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N1/supergraph.graphql	ok
+connectors	2	8	4	24	2	24	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N2/supergraph.graphql	ok
+connectors	4	8	4	48	4	48	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N4/supergraph.graphql	ok
+connectors	8	8	4	96	8	96	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N8/supergraph.graphql	ok
+connectors	16	8	4	192	16	192	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N16/supergraph.graphql	ok
+connectors	32	8	4	384	32	384	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N32/supergraph.graphql	ok
+connectors	64	8	4	768	64	768	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/connectors_N64/supergraph.graphql	ok
+pure	1	8	4	0	1	1	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N1/supergraph.graphql	ok
+pure	2	8	4	0	2	2	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N2/supergraph.graphql	ok
+pure	4	8	4	0	4	4	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N4/supergraph.graphql	ok
+pure	8	8	4	0	8	8	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N8/supergraph.graphql	ok
+pure	16	8	4	0	16	16	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N16/supergraph.graphql	ok
+pure	32	8	4	0	32	32	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N32/supergraph.graphql	ok
+pure	64	8	4	0	64	64	/Users/shanemyrick/.cursor/worktrees/router/wkfz/investigation/connectors-startup-memory/artifacts/pure_N64/supergraph.graphql	ok

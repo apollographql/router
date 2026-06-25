@@ -89,7 +89,8 @@ Entry points for the connectors startup path:
 
 ## Environment (this machine)
 
-- macOS (darwin 25.5.0), rover 0.36.2, cargo 1.95.0, python 3.14.
+- macOS (darwin 25.5.0), rover 0.40.0 (upgraded from 0.36.2; 0.36.2 had a `connector run`
+  plugin-arg bug), cargo 1.95.0, python 3.14.
 - Customer OOMs on Linux; allocation **shape** is platform-independent (dhat attribution
   transfers; absolute RSS may differ).
 

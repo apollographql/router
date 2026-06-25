@@ -1,0 +1,5836 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  SVC0 @join__graph(name: "svc0", url: "https://svc0.example.com")
+  SVC1 @join__graph(name: "svc1", url: "https://svc1.example.com")
+  SVC10 @join__graph(name: "svc10", url: "https://svc10.example.com")
+  SVC11 @join__graph(name: "svc11", url: "https://svc11.example.com")
+  SVC12 @join__graph(name: "svc12", url: "https://svc12.example.com")
+  SVC13 @join__graph(name: "svc13", url: "https://svc13.example.com")
+  SVC14 @join__graph(name: "svc14", url: "https://svc14.example.com")
+  SVC15 @join__graph(name: "svc15", url: "https://svc15.example.com")
+  SVC16 @join__graph(name: "svc16", url: "https://svc16.example.com")
+  SVC17 @join__graph(name: "svc17", url: "https://svc17.example.com")
+  SVC18 @join__graph(name: "svc18", url: "https://svc18.example.com")
+  SVC19 @join__graph(name: "svc19", url: "https://svc19.example.com")
+  SVC2 @join__graph(name: "svc2", url: "https://svc2.example.com")
+  SVC20 @join__graph(name: "svc20", url: "https://svc20.example.com")
+  SVC21 @join__graph(name: "svc21", url: "https://svc21.example.com")
+  SVC22 @join__graph(name: "svc22", url: "https://svc22.example.com")
+  SVC23 @join__graph(name: "svc23", url: "https://svc23.example.com")
+  SVC24 @join__graph(name: "svc24", url: "https://svc24.example.com")
+  SVC25 @join__graph(name: "svc25", url: "https://svc25.example.com")
+  SVC26 @join__graph(name: "svc26", url: "https://svc26.example.com")
+  SVC27 @join__graph(name: "svc27", url: "https://svc27.example.com")
+  SVC28 @join__graph(name: "svc28", url: "https://svc28.example.com")
+  SVC29 @join__graph(name: "svc29", url: "https://svc29.example.com")
+  SVC3 @join__graph(name: "svc3", url: "https://svc3.example.com")
+  SVC30 @join__graph(name: "svc30", url: "https://svc30.example.com")
+  SVC31 @join__graph(name: "svc31", url: "https://svc31.example.com")
+  SVC32 @join__graph(name: "svc32", url: "https://svc32.example.com")
+  SVC33 @join__graph(name: "svc33", url: "https://svc33.example.com")
+  SVC34 @join__graph(name: "svc34", url: "https://svc34.example.com")
+  SVC35 @join__graph(name: "svc35", url: "https://svc35.example.com")
+  SVC36 @join__graph(name: "svc36", url: "https://svc36.example.com")
+  SVC37 @join__graph(name: "svc37", url: "https://svc37.example.com")
+  SVC38 @join__graph(name: "svc38", url: "https://svc38.example.com")
+  SVC39 @join__graph(name: "svc39", url: "https://svc39.example.com")
+  SVC4 @join__graph(name: "svc4", url: "https://svc4.example.com")
+  SVC40 @join__graph(name: "svc40", url: "https://svc40.example.com")
+  SVC41 @join__graph(name: "svc41", url: "https://svc41.example.com")
+  SVC42 @join__graph(name: "svc42", url: "https://svc42.example.com")
+  SVC43 @join__graph(name: "svc43", url: "https://svc43.example.com")
+  SVC44 @join__graph(name: "svc44", url: "https://svc44.example.com")
+  SVC45 @join__graph(name: "svc45", url: "https://svc45.example.com")
+  SVC46 @join__graph(name: "svc46", url: "https://svc46.example.com")
+  SVC47 @join__graph(name: "svc47", url: "https://svc47.example.com")
+  SVC48 @join__graph(name: "svc48", url: "https://svc48.example.com")
+  SVC49 @join__graph(name: "svc49", url: "https://svc49.example.com")
+  SVC5 @join__graph(name: "svc5", url: "https://svc5.example.com")
+  SVC50 @join__graph(name: "svc50", url: "https://svc50.example.com")
+  SVC51 @join__graph(name: "svc51", url: "https://svc51.example.com")
+  SVC52 @join__graph(name: "svc52", url: "https://svc52.example.com")
+  SVC53 @join__graph(name: "svc53", url: "https://svc53.example.com")
+  SVC54 @join__graph(name: "svc54", url: "https://svc54.example.com")
+  SVC55 @join__graph(name: "svc55", url: "https://svc55.example.com")
+  SVC56 @join__graph(name: "svc56", url: "https://svc56.example.com")
+  SVC57 @join__graph(name: "svc57", url: "https://svc57.example.com")
+  SVC58 @join__graph(name: "svc58", url: "https://svc58.example.com")
+  SVC59 @join__graph(name: "svc59", url: "https://svc59.example.com")
+  SVC6 @join__graph(name: "svc6", url: "https://svc6.example.com")
+  SVC60 @join__graph(name: "svc60", url: "https://svc60.example.com")
+  SVC61 @join__graph(name: "svc61", url: "https://svc61.example.com")
+  SVC62 @join__graph(name: "svc62", url: "https://svc62.example.com")
+  SVC63 @join__graph(name: "svc63", url: "https://svc63.example.com")
+  SVC7 @join__graph(name: "svc7", url: "https://svc7.example.com")
+  SVC8 @join__graph(name: "svc8", url: "https://svc8.example.com")
+  SVC9 @join__graph(name: "svc9", url: "https://svc9.example.com")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SVC0)
+  @join__type(graph: SVC1)
+  @join__type(graph: SVC10)
+  @join__type(graph: SVC11)
+  @join__type(graph: SVC12)
+  @join__type(graph: SVC13)
+  @join__type(graph: SVC14)
+  @join__type(graph: SVC15)
+  @join__type(graph: SVC16)
+  @join__type(graph: SVC17)
+  @join__type(graph: SVC18)
+  @join__type(graph: SVC19)
+  @join__type(graph: SVC2)
+  @join__type(graph: SVC20)
+  @join__type(graph: SVC21)
+  @join__type(graph: SVC22)
+  @join__type(graph: SVC23)
+  @join__type(graph: SVC24)
+  @join__type(graph: SVC25)
+  @join__type(graph: SVC26)
+  @join__type(graph: SVC27)
+  @join__type(graph: SVC28)
+  @join__type(graph: SVC29)
+  @join__type(graph: SVC3)
+  @join__type(graph: SVC30)
+  @join__type(graph: SVC31)
+  @join__type(graph: SVC32)
+  @join__type(graph: SVC33)
+  @join__type(graph: SVC34)
+  @join__type(graph: SVC35)
+  @join__type(graph: SVC36)
+  @join__type(graph: SVC37)
+  @join__type(graph: SVC38)
+  @join__type(graph: SVC39)
+  @join__type(graph: SVC4)
+  @join__type(graph: SVC40)
+  @join__type(graph: SVC41)
+  @join__type(graph: SVC42)
+  @join__type(graph: SVC43)
+  @join__type(graph: SVC44)
+  @join__type(graph: SVC45)
+  @join__type(graph: SVC46)
+  @join__type(graph: SVC47)
+  @join__type(graph: SVC48)
+  @join__type(graph: SVC49)
+  @join__type(graph: SVC5)
+  @join__type(graph: SVC50)
+  @join__type(graph: SVC51)
+  @join__type(graph: SVC52)
+  @join__type(graph: SVC53)
+  @join__type(graph: SVC54)
+  @join__type(graph: SVC55)
+  @join__type(graph: SVC56)
+  @join__type(graph: SVC57)
+  @join__type(graph: SVC58)
+  @join__type(graph: SVC59)
+  @join__type(graph: SVC6)
+  @join__type(graph: SVC60)
+  @join__type(graph: SVC61)
+  @join__type(graph: SVC62)
+  @join__type(graph: SVC63)
+  @join__type(graph: SVC7)
+  @join__type(graph: SVC8)
+  @join__type(graph: SVC9)
+{
+  svc0_item0(id: ID!): Svc0Item0 @join__field(graph: SVC0)
+  svc0_item1(id: ID!): Svc0Item1 @join__field(graph: SVC0)
+  svc0_item2(id: ID!): Svc0Item2 @join__field(graph: SVC0)
+  svc0_item3(id: ID!): Svc0Item3 @join__field(graph: SVC0)
+  svc0_item4(id: ID!): Svc0Item4 @join__field(graph: SVC0)
+  svc0_item5(id: ID!): Svc0Item5 @join__field(graph: SVC0)
+  svc0_item6(id: ID!): Svc0Item6 @join__field(graph: SVC0)
+  svc0_item7(id: ID!): Svc0Item7 @join__field(graph: SVC0)
+  svc0_shared0(id: ID!): Shared0 @join__field(graph: SVC0)
+  svc0_shared1(id: ID!): Shared1 @join__field(graph: SVC0)
+  svc0_shared2(id: ID!): Shared2 @join__field(graph: SVC0)
+  svc0_shared3(id: ID!): Shared3 @join__field(graph: SVC0)
+  svc1_item0(id: ID!): Svc1Item0 @join__field(graph: SVC1)
+  svc1_item1(id: ID!): Svc1Item1 @join__field(graph: SVC1)
+  svc1_item2(id: ID!): Svc1Item2 @join__field(graph: SVC1)
+  svc1_item3(id: ID!): Svc1Item3 @join__field(graph: SVC1)
+  svc1_item4(id: ID!): Svc1Item4 @join__field(graph: SVC1)
+  svc1_item5(id: ID!): Svc1Item5 @join__field(graph: SVC1)
+  svc1_item6(id: ID!): Svc1Item6 @join__field(graph: SVC1)
+  svc1_item7(id: ID!): Svc1Item7 @join__field(graph: SVC1)
+  svc1_shared0(id: ID!): Shared0 @join__field(graph: SVC1)
+  svc1_shared1(id: ID!): Shared1 @join__field(graph: SVC1)
+  svc1_shared2(id: ID!): Shared2 @join__field(graph: SVC1)
+  svc1_shared3(id: ID!): Shared3 @join__field(graph: SVC1)
+  svc10_item0(id: ID!): Svc10Item0 @join__field(graph: SVC10)
+  svc10_item1(id: ID!): Svc10Item1 @join__field(graph: SVC10)
+  svc10_item2(id: ID!): Svc10Item2 @join__field(graph: SVC10)
+  svc10_item3(id: ID!): Svc10Item3 @join__field(graph: SVC10)
+  svc10_item4(id: ID!): Svc10Item4 @join__field(graph: SVC10)
+  svc10_item5(id: ID!): Svc10Item5 @join__field(graph: SVC10)
+  svc10_item6(id: ID!): Svc10Item6 @join__field(graph: SVC10)
+  svc10_item7(id: ID!): Svc10Item7 @join__field(graph: SVC10)
+  svc10_shared0(id: ID!): Shared0 @join__field(graph: SVC10)
+  svc10_shared1(id: ID!): Shared1 @join__field(graph: SVC10)
+  svc10_shared2(id: ID!): Shared2 @join__field(graph: SVC10)
+  svc10_shared3(id: ID!): Shared3 @join__field(graph: SVC10)
+  svc11_item0(id: ID!): Svc11Item0 @join__field(graph: SVC11)
+  svc11_item1(id: ID!): Svc11Item1 @join__field(graph: SVC11)
+  svc11_item2(id: ID!): Svc11Item2 @join__field(graph: SVC11)
+  svc11_item3(id: ID!): Svc11Item3 @join__field(graph: SVC11)
+  svc11_item4(id: ID!): Svc11Item4 @join__field(graph: SVC11)
+  svc11_item5(id: ID!): Svc11Item5 @join__field(graph: SVC11)
+  svc11_item6(id: ID!): Svc11Item6 @join__field(graph: SVC11)
+  svc11_item7(id: ID!): Svc11Item7 @join__field(graph: SVC11)
+  svc11_shared0(id: ID!): Shared0 @join__field(graph: SVC11)
+  svc11_shared1(id: ID!): Shared1 @join__field(graph: SVC11)
+  svc11_shared2(id: ID!): Shared2 @join__field(graph: SVC11)
+  svc11_shared3(id: ID!): Shared3 @join__field(graph: SVC11)
+  svc12_item0(id: ID!): Svc12Item0 @join__field(graph: SVC12)
+  svc12_item1(id: ID!): Svc12Item1 @join__field(graph: SVC12)
+  svc12_item2(id: ID!): Svc12Item2 @join__field(graph: SVC12)
+  svc12_item3(id: ID!): Svc12Item3 @join__field(graph: SVC12)
+  svc12_item4(id: ID!): Svc12Item4 @join__field(graph: SVC12)
+  svc12_item5(id: ID!): Svc12Item5 @join__field(graph: SVC12)
+  svc12_item6(id: ID!): Svc12Item6 @join__field(graph: SVC12)
+  svc12_item7(id: ID!): Svc12Item7 @join__field(graph: SVC12)
+  svc12_shared0(id: ID!): Shared0 @join__field(graph: SVC12)
+  svc12_shared1(id: ID!): Shared1 @join__field(graph: SVC12)
+  svc12_shared2(id: ID!): Shared2 @join__field(graph: SVC12)
+  svc12_shared3(id: ID!): Shared3 @join__field(graph: SVC12)
+  svc13_item0(id: ID!): Svc13Item0 @join__field(graph: SVC13)
+  svc13_item1(id: ID!): Svc13Item1 @join__field(graph: SVC13)
+  svc13_item2(id: ID!): Svc13Item2 @join__field(graph: SVC13)
+  svc13_item3(id: ID!): Svc13Item3 @join__field(graph: SVC13)
+  svc13_item4(id: ID!): Svc13Item4 @join__field(graph: SVC13)
+  svc13_item5(id: ID!): Svc13Item5 @join__field(graph: SVC13)
+  svc13_item6(id: ID!): Svc13Item6 @join__field(graph: SVC13)
+  svc13_item7(id: ID!): Svc13Item7 @join__field(graph: SVC13)
+  svc13_shared0(id: ID!): Shared0 @join__field(graph: SVC13)
+  svc13_shared1(id: ID!): Shared1 @join__field(graph: SVC13)
+  svc13_shared2(id: ID!): Shared2 @join__field(graph: SVC13)
+  svc13_shared3(id: ID!): Shared3 @join__field(graph: SVC13)
+  svc14_item0(id: ID!): Svc14Item0 @join__field(graph: SVC14)
+  svc14_item1(id: ID!): Svc14Item1 @join__field(graph: SVC14)
+  svc14_item2(id: ID!): Svc14Item2 @join__field(graph: SVC14)
+  svc14_item3(id: ID!): Svc14Item3 @join__field(graph: SVC14)
+  svc14_item4(id: ID!): Svc14Item4 @join__field(graph: SVC14)
+  svc14_item5(id: ID!): Svc14Item5 @join__field(graph: SVC14)
+  svc14_item6(id: ID!): Svc14Item6 @join__field(graph: SVC14)
+  svc14_item7(id: ID!): Svc14Item7 @join__field(graph: SVC14)
+  svc14_shared0(id: ID!): Shared0 @join__field(graph: SVC14)
+  svc14_shared1(id: ID!): Shared1 @join__field(graph: SVC14)
+  svc14_shared2(id: ID!): Shared2 @join__field(graph: SVC14)
+  svc14_shared3(id: ID!): Shared3 @join__field(graph: SVC14)
+  svc15_item0(id: ID!): Svc15Item0 @join__field(graph: SVC15)
+  svc15_item1(id: ID!): Svc15Item1 @join__field(graph: SVC15)
+  svc15_item2(id: ID!): Svc15Item2 @join__field(graph: SVC15)
+  svc15_item3(id: ID!): Svc15Item3 @join__field(graph: SVC15)
+  svc15_item4(id: ID!): Svc15Item4 @join__field(graph: SVC15)
+  svc15_item5(id: ID!): Svc15Item5 @join__field(graph: SVC15)
+  svc15_item6(id: ID!): Svc15Item6 @join__field(graph: SVC15)
+  svc15_item7(id: ID!): Svc15Item7 @join__field(graph: SVC15)
+  svc15_shared0(id: ID!): Shared0 @join__field(graph: SVC15)
+  svc15_shared1(id: ID!): Shared1 @join__field(graph: SVC15)
+  svc15_shared2(id: ID!): Shared2 @join__field(graph: SVC15)
+  svc15_shared3(id: ID!): Shared3 @join__field(graph: SVC15)
+  svc16_item0(id: ID!): Svc16Item0 @join__field(graph: SVC16)
+  svc16_item1(id: ID!): Svc16Item1 @join__field(graph: SVC16)
+  svc16_item2(id: ID!): Svc16Item2 @join__field(graph: SVC16)
+  svc16_item3(id: ID!): Svc16Item3 @join__field(graph: SVC16)
+  svc16_item4(id: ID!): Svc16Item4 @join__field(graph: SVC16)
+  svc16_item5(id: ID!): Svc16Item5 @join__field(graph: SVC16)
+  svc16_item6(id: ID!): Svc16Item6 @join__field(graph: SVC16)
+  svc16_item7(id: ID!): Svc16Item7 @join__field(graph: SVC16)
+  svc16_shared0(id: ID!): Shared0 @join__field(graph: SVC16)
+  svc16_shared1(id: ID!): Shared1 @join__field(graph: SVC16)
+  svc16_shared2(id: ID!): Shared2 @join__field(graph: SVC16)
+  svc16_shared3(id: ID!): Shared3 @join__field(graph: SVC16)
+  svc17_item0(id: ID!): Svc17Item0 @join__field(graph: SVC17)
+  svc17_item1(id: ID!): Svc17Item1 @join__field(graph: SVC17)
+  svc17_item2(id: ID!): Svc17Item2 @join__field(graph: SVC17)
+  svc17_item3(id: ID!): Svc17Item3 @join__field(graph: SVC17)
+  svc17_item4(id: ID!): Svc17Item4 @join__field(graph: SVC17)
+  svc17_item5(id: ID!): Svc17Item5 @join__field(graph: SVC17)
+  svc17_item6(id: ID!): Svc17Item6 @join__field(graph: SVC17)
+  svc17_item7(id: ID!): Svc17Item7 @join__field(graph: SVC17)
+  svc17_shared0(id: ID!): Shared0 @join__field(graph: SVC17)
+  svc17_shared1(id: ID!): Shared1 @join__field(graph: SVC17)
+  svc17_shared2(id: ID!): Shared2 @join__field(graph: SVC17)
+  svc17_shared3(id: ID!): Shared3 @join__field(graph: SVC17)
+  svc18_item0(id: ID!): Svc18Item0 @join__field(graph: SVC18)
+  svc18_item1(id: ID!): Svc18Item1 @join__field(graph: SVC18)
+  svc18_item2(id: ID!): Svc18Item2 @join__field(graph: SVC18)
+  svc18_item3(id: ID!): Svc18Item3 @join__field(graph: SVC18)
+  svc18_item4(id: ID!): Svc18Item4 @join__field(graph: SVC18)
+  svc18_item5(id: ID!): Svc18Item5 @join__field(graph: SVC18)
+  svc18_item6(id: ID!): Svc18Item6 @join__field(graph: SVC18)
+  svc18_item7(id: ID!): Svc18Item7 @join__field(graph: SVC18)
+  svc18_shared0(id: ID!): Shared0 @join__field(graph: SVC18)
+  svc18_shared1(id: ID!): Shared1 @join__field(graph: SVC18)
+  svc18_shared2(id: ID!): Shared2 @join__field(graph: SVC18)
+  svc18_shared3(id: ID!): Shared3 @join__field(graph: SVC18)
+  svc19_item0(id: ID!): Svc19Item0 @join__field(graph: SVC19)
+  svc19_item1(id: ID!): Svc19Item1 @join__field(graph: SVC19)
+  svc19_item2(id: ID!): Svc19Item2 @join__field(graph: SVC19)
+  svc19_item3(id: ID!): Svc19Item3 @join__field(graph: SVC19)
+  svc19_item4(id: ID!): Svc19Item4 @join__field(graph: SVC19)
+  svc19_item5(id: ID!): Svc19Item5 @join__field(graph: SVC19)
+  svc19_item6(id: ID!): Svc19Item6 @join__field(graph: SVC19)
+  svc19_item7(id: ID!): Svc19Item7 @join__field(graph: SVC19)
+  svc19_shared0(id: ID!): Shared0 @join__field(graph: SVC19)
+  svc19_shared1(id: ID!): Shared1 @join__field(graph: SVC19)
+  svc19_shared2(id: ID!): Shared2 @join__field(graph: SVC19)
+  svc19_shared3(id: ID!): Shared3 @join__field(graph: SVC19)
+  svc2_item0(id: ID!): Svc2Item0 @join__field(graph: SVC2)
+  svc2_item1(id: ID!): Svc2Item1 @join__field(graph: SVC2)
+  svc2_item2(id: ID!): Svc2Item2 @join__field(graph: SVC2)
+  svc2_item3(id: ID!): Svc2Item3 @join__field(graph: SVC2)
+  svc2_item4(id: ID!): Svc2Item4 @join__field(graph: SVC2)
+  svc2_item5(id: ID!): Svc2Item5 @join__field(graph: SVC2)
+  svc2_item6(id: ID!): Svc2Item6 @join__field(graph: SVC2)
+  svc2_item7(id: ID!): Svc2Item7 @join__field(graph: SVC2)
+  svc2_shared0(id: ID!): Shared0 @join__field(graph: SVC2)
+  svc2_shared1(id: ID!): Shared1 @join__field(graph: SVC2)
+  svc2_shared2(id: ID!): Shared2 @join__field(graph: SVC2)
+  svc2_shared3(id: ID!): Shared3 @join__field(graph: SVC2)
+  svc20_item0(id: ID!): Svc20Item0 @join__field(graph: SVC20)
+  svc20_item1(id: ID!): Svc20Item1 @join__field(graph: SVC20)
+  svc20_item2(id: ID!): Svc20Item2 @join__field(graph: SVC20)
+  svc20_item3(id: ID!): Svc20Item3 @join__field(graph: SVC20)
+  svc20_item4(id: ID!): Svc20Item4 @join__field(graph: SVC20)
+  svc20_item5(id: ID!): Svc20Item5 @join__field(graph: SVC20)
+  svc20_item6(id: ID!): Svc20Item6 @join__field(graph: SVC20)
+  svc20_item7(id: ID!): Svc20Item7 @join__field(graph: SVC20)
+  svc20_shared0(id: ID!): Shared0 @join__field(graph: SVC20)
+  svc20_shared1(id: ID!): Shared1 @join__field(graph: SVC20)
+  svc20_shared2(id: ID!): Shared2 @join__field(graph: SVC20)
+  svc20_shared3(id: ID!): Shared3 @join__field(graph: SVC20)
+  svc21_item0(id: ID!): Svc21Item0 @join__field(graph: SVC21)
+  svc21_item1(id: ID!): Svc21Item1 @join__field(graph: SVC21)
+  svc21_item2(id: ID!): Svc21Item2 @join__field(graph: SVC21)
+  svc21_item3(id: ID!): Svc21Item3 @join__field(graph: SVC21)
+  svc21_item4(id: ID!): Svc21Item4 @join__field(graph: SVC21)
+  svc21_item5(id: ID!): Svc21Item5 @join__field(graph: SVC21)
+  svc21_item6(id: ID!): Svc21Item6 @join__field(graph: SVC21)
+  svc21_item7(id: ID!): Svc21Item7 @join__field(graph: SVC21)
+  svc21_shared0(id: ID!): Shared0 @join__field(graph: SVC21)
+  svc21_shared1(id: ID!): Shared1 @join__field(graph: SVC21)
+  svc21_shared2(id: ID!): Shared2 @join__field(graph: SVC21)
+  svc21_shared3(id: ID!): Shared3 @join__field(graph: SVC21)
+  svc22_item0(id: ID!): Svc22Item0 @join__field(graph: SVC22)
+  svc22_item1(id: ID!): Svc22Item1 @join__field(graph: SVC22)
+  svc22_item2(id: ID!): Svc22Item2 @join__field(graph: SVC22)
+  svc22_item3(id: ID!): Svc22Item3 @join__field(graph: SVC22)
+  svc22_item4(id: ID!): Svc22Item4 @join__field(graph: SVC22)
+  svc22_item5(id: ID!): Svc22Item5 @join__field(graph: SVC22)
+  svc22_item6(id: ID!): Svc22Item6 @join__field(graph: SVC22)
+  svc22_item7(id: ID!): Svc22Item7 @join__field(graph: SVC22)
+  svc22_shared0(id: ID!): Shared0 @join__field(graph: SVC22)
+  svc22_shared1(id: ID!): Shared1 @join__field(graph: SVC22)
+  svc22_shared2(id: ID!): Shared2 @join__field(graph: SVC22)
+  svc22_shared3(id: ID!): Shared3 @join__field(graph: SVC22)
+  svc23_item0(id: ID!): Svc23Item0 @join__field(graph: SVC23)
+  svc23_item1(id: ID!): Svc23Item1 @join__field(graph: SVC23)
+  svc23_item2(id: ID!): Svc23Item2 @join__field(graph: SVC23)
+  svc23_item3(id: ID!): Svc23Item3 @join__field(graph: SVC23)
+  svc23_item4(id: ID!): Svc23Item4 @join__field(graph: SVC23)
+  svc23_item5(id: ID!): Svc23Item5 @join__field(graph: SVC23)
+  svc23_item6(id: ID!): Svc23Item6 @join__field(graph: SVC23)
+  svc23_item7(id: ID!): Svc23Item7 @join__field(graph: SVC23)
+  svc23_shared0(id: ID!): Shared0 @join__field(graph: SVC23)
+  svc23_shared1(id: ID!): Shared1 @join__field(graph: SVC23)
+  svc23_shared2(id: ID!): Shared2 @join__field(graph: SVC23)
+  svc23_shared3(id: ID!): Shared3 @join__field(graph: SVC23)
+  svc24_item0(id: ID!): Svc24Item0 @join__field(graph: SVC24)
+  svc24_item1(id: ID!): Svc24Item1 @join__field(graph: SVC24)
+  svc24_item2(id: ID!): Svc24Item2 @join__field(graph: SVC24)
+  svc24_item3(id: ID!): Svc24Item3 @join__field(graph: SVC24)
+  svc24_item4(id: ID!): Svc24Item4 @join__field(graph: SVC24)
+  svc24_item5(id: ID!): Svc24Item5 @join__field(graph: SVC24)
+  svc24_item6(id: ID!): Svc24Item6 @join__field(graph: SVC24)
+  svc24_item7(id: ID!): Svc24Item7 @join__field(graph: SVC24)
+  svc24_shared0(id: ID!): Shared0 @join__field(graph: SVC24)
+  svc24_shared1(id: ID!): Shared1 @join__field(graph: SVC24)
+  svc24_shared2(id: ID!): Shared2 @join__field(graph: SVC24)
+  svc24_shared3(id: ID!): Shared3 @join__field(graph: SVC24)
+  svc25_item0(id: ID!): Svc25Item0 @join__field(graph: SVC25)
+  svc25_item1(id: ID!): Svc25Item1 @join__field(graph: SVC25)
+  svc25_item2(id: ID!): Svc25Item2 @join__field(graph: SVC25)
+  svc25_item3(id: ID!): Svc25Item3 @join__field(graph: SVC25)
+  svc25_item4(id: ID!): Svc25Item4 @join__field(graph: SVC25)
+  svc25_item5(id: ID!): Svc25Item5 @join__field(graph: SVC25)
+  svc25_item6(id: ID!): Svc25Item6 @join__field(graph: SVC25)
+  svc25_item7(id: ID!): Svc25Item7 @join__field(graph: SVC25)
+  svc25_shared0(id: ID!): Shared0 @join__field(graph: SVC25)
+  svc25_shared1(id: ID!): Shared1 @join__field(graph: SVC25)
+  svc25_shared2(id: ID!): Shared2 @join__field(graph: SVC25)
+  svc25_shared3(id: ID!): Shared3 @join__field(graph: SVC25)
+  svc26_item0(id: ID!): Svc26Item0 @join__field(graph: SVC26)
+  svc26_item1(id: ID!): Svc26Item1 @join__field(graph: SVC26)
+  svc26_item2(id: ID!): Svc26Item2 @join__field(graph: SVC26)
+  svc26_item3(id: ID!): Svc26Item3 @join__field(graph: SVC26)
+  svc26_item4(id: ID!): Svc26Item4 @join__field(graph: SVC26)
+  svc26_item5(id: ID!): Svc26Item5 @join__field(graph: SVC26)
+  svc26_item6(id: ID!): Svc26Item6 @join__field(graph: SVC26)
+  svc26_item7(id: ID!): Svc26Item7 @join__field(graph: SVC26)
+  svc26_shared0(id: ID!): Shared0 @join__field(graph: SVC26)
+  svc26_shared1(id: ID!): Shared1 @join__field(graph: SVC26)
+  svc26_shared2(id: ID!): Shared2 @join__field(graph: SVC26)
+  svc26_shared3(id: ID!): Shared3 @join__field(graph: SVC26)
+  svc27_item0(id: ID!): Svc27Item0 @join__field(graph: SVC27)
+  svc27_item1(id: ID!): Svc27Item1 @join__field(graph: SVC27)
+  svc27_item2(id: ID!): Svc27Item2 @join__field(graph: SVC27)
+  svc27_item3(id: ID!): Svc27Item3 @join__field(graph: SVC27)
+  svc27_item4(id: ID!): Svc27Item4 @join__field(graph: SVC27)
+  svc27_item5(id: ID!): Svc27Item5 @join__field(graph: SVC27)
+  svc27_item6(id: ID!): Svc27Item6 @join__field(graph: SVC27)
+  svc27_item7(id: ID!): Svc27Item7 @join__field(graph: SVC27)
+  svc27_shared0(id: ID!): Shared0 @join__field(graph: SVC27)
+  svc27_shared1(id: ID!): Shared1 @join__field(graph: SVC27)
+  svc27_shared2(id: ID!): Shared2 @join__field(graph: SVC27)
+  svc27_shared3(id: ID!): Shared3 @join__field(graph: SVC27)
+  svc28_item0(id: ID!): Svc28Item0 @join__field(graph: SVC28)
+  svc28_item1(id: ID!): Svc28Item1 @join__field(graph: SVC28)
+  svc28_item2(id: ID!): Svc28Item2 @join__field(graph: SVC28)
+  svc28_item3(id: ID!): Svc28Item3 @join__field(graph: SVC28)
+  svc28_item4(id: ID!): Svc28Item4 @join__field(graph: SVC28)
+  svc28_item5(id: ID!): Svc28Item5 @join__field(graph: SVC28)
+  svc28_item6(id: ID!): Svc28Item6 @join__field(graph: SVC28)
+  svc28_item7(id: ID!): Svc28Item7 @join__field(graph: SVC28)
+  svc28_shared0(id: ID!): Shared0 @join__field(graph: SVC28)
+  svc28_shared1(id: ID!): Shared1 @join__field(graph: SVC28)
+  svc28_shared2(id: ID!): Shared2 @join__field(graph: SVC28)
+  svc28_shared3(id: ID!): Shared3 @join__field(graph: SVC28)
+  svc29_item0(id: ID!): Svc29Item0 @join__field(graph: SVC29)
+  svc29_item1(id: ID!): Svc29Item1 @join__field(graph: SVC29)
+  svc29_item2(id: ID!): Svc29Item2 @join__field(graph: SVC29)
+  svc29_item3(id: ID!): Svc29Item3 @join__field(graph: SVC29)
+  svc29_item4(id: ID!): Svc29Item4 @join__field(graph: SVC29)
+  svc29_item5(id: ID!): Svc29Item5 @join__field(graph: SVC29)
+  svc29_item6(id: ID!): Svc29Item6 @join__field(graph: SVC29)
+  svc29_item7(id: ID!): Svc29Item7 @join__field(graph: SVC29)
+  svc29_shared0(id: ID!): Shared0 @join__field(graph: SVC29)
+  svc29_shared1(id: ID!): Shared1 @join__field(graph: SVC29)
+  svc29_shared2(id: ID!): Shared2 @join__field(graph: SVC29)
+  svc29_shared3(id: ID!): Shared3 @join__field(graph: SVC29)
+  svc3_item0(id: ID!): Svc3Item0 @join__field(graph: SVC3)
+  svc3_item1(id: ID!): Svc3Item1 @join__field(graph: SVC3)
+  svc3_item2(id: ID!): Svc3Item2 @join__field(graph: SVC3)
+  svc3_item3(id: ID!): Svc3Item3 @join__field(graph: SVC3)
+  svc3_item4(id: ID!): Svc3Item4 @join__field(graph: SVC3)
+  svc3_item5(id: ID!): Svc3Item5 @join__field(graph: SVC3)
+  svc3_item6(id: ID!): Svc3Item6 @join__field(graph: SVC3)
+  svc3_item7(id: ID!): Svc3Item7 @join__field(graph: SVC3)
+  svc3_shared0(id: ID!): Shared0 @join__field(graph: SVC3)
+  svc3_shared1(id: ID!): Shared1 @join__field(graph: SVC3)
+  svc3_shared2(id: ID!): Shared2 @join__field(graph: SVC3)
+  svc3_shared3(id: ID!): Shared3 @join__field(graph: SVC3)
+  svc30_item0(id: ID!): Svc30Item0 @join__field(graph: SVC30)
+  svc30_item1(id: ID!): Svc30Item1 @join__field(graph: SVC30)
+  svc30_item2(id: ID!): Svc30Item2 @join__field(graph: SVC30)
+  svc30_item3(id: ID!): Svc30Item3 @join__field(graph: SVC30)
+  svc30_item4(id: ID!): Svc30Item4 @join__field(graph: SVC30)
+  svc30_item5(id: ID!): Svc30Item5 @join__field(graph: SVC30)
+  svc30_item6(id: ID!): Svc30Item6 @join__field(graph: SVC30)
+  svc30_item7(id: ID!): Svc30Item7 @join__field(graph: SVC30)
+  svc30_shared0(id: ID!): Shared0 @join__field(graph: SVC30)
+  svc30_shared1(id: ID!): Shared1 @join__field(graph: SVC30)
+  svc30_shared2(id: ID!): Shared2 @join__field(graph: SVC30)
+  svc30_shared3(id: ID!): Shared3 @join__field(graph: SVC30)
+  svc31_item0(id: ID!): Svc31Item0 @join__field(graph: SVC31)
+  svc31_item1(id: ID!): Svc31Item1 @join__field(graph: SVC31)
+  svc31_item2(id: ID!): Svc31Item2 @join__field(graph: SVC31)
+  svc31_item3(id: ID!): Svc31Item3 @join__field(graph: SVC31)
+  svc31_item4(id: ID!): Svc31Item4 @join__field(graph: SVC31)
+  svc31_item5(id: ID!): Svc31Item5 @join__field(graph: SVC31)
+  svc31_item6(id: ID!): Svc31Item6 @join__field(graph: SVC31)
+  svc31_item7(id: ID!): Svc31Item7 @join__field(graph: SVC31)
+  svc31_shared0(id: ID!): Shared0 @join__field(graph: SVC31)
+  svc31_shared1(id: ID!): Shared1 @join__field(graph: SVC31)
+  svc31_shared2(id: ID!): Shared2 @join__field(graph: SVC31)
+  svc31_shared3(id: ID!): Shared3 @join__field(graph: SVC31)
+  svc32_item0(id: ID!): Svc32Item0 @join__field(graph: SVC32)
+  svc32_item1(id: ID!): Svc32Item1 @join__field(graph: SVC32)
+  svc32_item2(id: ID!): Svc32Item2 @join__field(graph: SVC32)
+  svc32_item3(id: ID!): Svc32Item3 @join__field(graph: SVC32)
+  svc32_item4(id: ID!): Svc32Item4 @join__field(graph: SVC32)
+  svc32_item5(id: ID!): Svc32Item5 @join__field(graph: SVC32)
+  svc32_item6(id: ID!): Svc32Item6 @join__field(graph: SVC32)
+  svc32_item7(id: ID!): Svc32Item7 @join__field(graph: SVC32)
+  svc32_shared0(id: ID!): Shared0 @join__field(graph: SVC32)
+  svc32_shared1(id: ID!): Shared1 @join__field(graph: SVC32)
+  svc32_shared2(id: ID!): Shared2 @join__field(graph: SVC32)
+  svc32_shared3(id: ID!): Shared3 @join__field(graph: SVC32)
+  svc33_item0(id: ID!): Svc33Item0 @join__field(graph: SVC33)
+  svc33_item1(id: ID!): Svc33Item1 @join__field(graph: SVC33)
+  svc33_item2(id: ID!): Svc33Item2 @join__field(graph: SVC33)
+  svc33_item3(id: ID!): Svc33Item3 @join__field(graph: SVC33)
+  svc33_item4(id: ID!): Svc33Item4 @join__field(graph: SVC33)
+  svc33_item5(id: ID!): Svc33Item5 @join__field(graph: SVC33)
+  svc33_item6(id: ID!): Svc33Item6 @join__field(graph: SVC33)
+  svc33_item7(id: ID!): Svc33Item7 @join__field(graph: SVC33)
+  svc33_shared0(id: ID!): Shared0 @join__field(graph: SVC33)
+  svc33_shared1(id: ID!): Shared1 @join__field(graph: SVC33)
+  svc33_shared2(id: ID!): Shared2 @join__field(graph: SVC33)
+  svc33_shared3(id: ID!): Shared3 @join__field(graph: SVC33)
+  svc34_item0(id: ID!): Svc34Item0 @join__field(graph: SVC34)
+  svc34_item1(id: ID!): Svc34Item1 @join__field(graph: SVC34)
+  svc34_item2(id: ID!): Svc34Item2 @join__field(graph: SVC34)
+  svc34_item3(id: ID!): Svc34Item3 @join__field(graph: SVC34)
+  svc34_item4(id: ID!): Svc34Item4 @join__field(graph: SVC34)
+  svc34_item5(id: ID!): Svc34Item5 @join__field(graph: SVC34)
+  svc34_item6(id: ID!): Svc34Item6 @join__field(graph: SVC34)
+  svc34_item7(id: ID!): Svc34Item7 @join__field(graph: SVC34)
+  svc34_shared0(id: ID!): Shared0 @join__field(graph: SVC34)
+  svc34_shared1(id: ID!): Shared1 @join__field(graph: SVC34)
+  svc34_shared2(id: ID!): Shared2 @join__field(graph: SVC34)
+  svc34_shared3(id: ID!): Shared3 @join__field(graph: SVC34)
+  svc35_item0(id: ID!): Svc35Item0 @join__field(graph: SVC35)
+  svc35_item1(id: ID!): Svc35Item1 @join__field(graph: SVC35)
+  svc35_item2(id: ID!): Svc35Item2 @join__field(graph: SVC35)
+  svc35_item3(id: ID!): Svc35Item3 @join__field(graph: SVC35)
+  svc35_item4(id: ID!): Svc35Item4 @join__field(graph: SVC35)
+  svc35_item5(id: ID!): Svc35Item5 @join__field(graph: SVC35)
+  svc35_item6(id: ID!): Svc35Item6 @join__field(graph: SVC35)
+  svc35_item7(id: ID!): Svc35Item7 @join__field(graph: SVC35)
+  svc35_shared0(id: ID!): Shared0 @join__field(graph: SVC35)
+  svc35_shared1(id: ID!): Shared1 @join__field(graph: SVC35)
+  svc35_shared2(id: ID!): Shared2 @join__field(graph: SVC35)
+  svc35_shared3(id: ID!): Shared3 @join__field(graph: SVC35)
+  svc36_item0(id: ID!): Svc36Item0 @join__field(graph: SVC36)
+  svc36_item1(id: ID!): Svc36Item1 @join__field(graph: SVC36)
+  svc36_item2(id: ID!): Svc36Item2 @join__field(graph: SVC36)
+  svc36_item3(id: ID!): Svc36Item3 @join__field(graph: SVC36)
+  svc36_item4(id: ID!): Svc36Item4 @join__field(graph: SVC36)
+  svc36_item5(id: ID!): Svc36Item5 @join__field(graph: SVC36)
+  svc36_item6(id: ID!): Svc36Item6 @join__field(graph: SVC36)
+  svc36_item7(id: ID!): Svc36Item7 @join__field(graph: SVC36)
+  svc36_shared0(id: ID!): Shared0 @join__field(graph: SVC36)
+  svc36_shared1(id: ID!): Shared1 @join__field(graph: SVC36)
+  svc36_shared2(id: ID!): Shared2 @join__field(graph: SVC36)
+  svc36_shared3(id: ID!): Shared3 @join__field(graph: SVC36)
+  svc37_item0(id: ID!): Svc37Item0 @join__field(graph: SVC37)
+  svc37_item1(id: ID!): Svc37Item1 @join__field(graph: SVC37)
+  svc37_item2(id: ID!): Svc37Item2 @join__field(graph: SVC37)
+  svc37_item3(id: ID!): Svc37Item3 @join__field(graph: SVC37)
+  svc37_item4(id: ID!): Svc37Item4 @join__field(graph: SVC37)
+  svc37_item5(id: ID!): Svc37Item5 @join__field(graph: SVC37)
+  svc37_item6(id: ID!): Svc37Item6 @join__field(graph: SVC37)
+  svc37_item7(id: ID!): Svc37Item7 @join__field(graph: SVC37)
+  svc37_shared0(id: ID!): Shared0 @join__field(graph: SVC37)
+  svc37_shared1(id: ID!): Shared1 @join__field(graph: SVC37)
+  svc37_shared2(id: ID!): Shared2 @join__field(graph: SVC37)
+  svc37_shared3(id: ID!): Shared3 @join__field(graph: SVC37)
+  svc38_item0(id: ID!): Svc38Item0 @join__field(graph: SVC38)
+  svc38_item1(id: ID!): Svc38Item1 @join__field(graph: SVC38)
+  svc38_item2(id: ID!): Svc38Item2 @join__field(graph: SVC38)
+  svc38_item3(id: ID!): Svc38Item3 @join__field(graph: SVC38)
+  svc38_item4(id: ID!): Svc38Item4 @join__field(graph: SVC38)
+  svc38_item5(id: ID!): Svc38Item5 @join__field(graph: SVC38)
+  svc38_item6(id: ID!): Svc38Item6 @join__field(graph: SVC38)
+  svc38_item7(id: ID!): Svc38Item7 @join__field(graph: SVC38)
+  svc38_shared0(id: ID!): Shared0 @join__field(graph: SVC38)
+  svc38_shared1(id: ID!): Shared1 @join__field(graph: SVC38)
+  svc38_shared2(id: ID!): Shared2 @join__field(graph: SVC38)
+  svc38_shared3(id: ID!): Shared3 @join__field(graph: SVC38)
+  svc39_item0(id: ID!): Svc39Item0 @join__field(graph: SVC39)
+  svc39_item1(id: ID!): Svc39Item1 @join__field(graph: SVC39)
+  svc39_item2(id: ID!): Svc39Item2 @join__field(graph: SVC39)
+  svc39_item3(id: ID!): Svc39Item3 @join__field(graph: SVC39)
+  svc39_item4(id: ID!): Svc39Item4 @join__field(graph: SVC39)
+  svc39_item5(id: ID!): Svc39Item5 @join__field(graph: SVC39)
+  svc39_item6(id: ID!): Svc39Item6 @join__field(graph: SVC39)
+  svc39_item7(id: ID!): Svc39Item7 @join__field(graph: SVC39)
+  svc39_shared0(id: ID!): Shared0 @join__field(graph: SVC39)
+  svc39_shared1(id: ID!): Shared1 @join__field(graph: SVC39)
+  svc39_shared2(id: ID!): Shared2 @join__field(graph: SVC39)
+  svc39_shared3(id: ID!): Shared3 @join__field(graph: SVC39)
+  svc4_item0(id: ID!): Svc4Item0 @join__field(graph: SVC4)
+  svc4_item1(id: ID!): Svc4Item1 @join__field(graph: SVC4)
+  svc4_item2(id: ID!): Svc4Item2 @join__field(graph: SVC4)
+  svc4_item3(id: ID!): Svc4Item3 @join__field(graph: SVC4)
+  svc4_item4(id: ID!): Svc4Item4 @join__field(graph: SVC4)
+  svc4_item5(id: ID!): Svc4Item5 @join__field(graph: SVC4)
+  svc4_item6(id: ID!): Svc4Item6 @join__field(graph: SVC4)
+  svc4_item7(id: ID!): Svc4Item7 @join__field(graph: SVC4)
+  svc4_shared0(id: ID!): Shared0 @join__field(graph: SVC4)
+  svc4_shared1(id: ID!): Shared1 @join__field(graph: SVC4)
+  svc4_shared2(id: ID!): Shared2 @join__field(graph: SVC4)
+  svc4_shared3(id: ID!): Shared3 @join__field(graph: SVC4)
+  svc40_item0(id: ID!): Svc40Item0 @join__field(graph: SVC40)
+  svc40_item1(id: ID!): Svc40Item1 @join__field(graph: SVC40)
+  svc40_item2(id: ID!): Svc40Item2 @join__field(graph: SVC40)
+  svc40_item3(id: ID!): Svc40Item3 @join__field(graph: SVC40)
+  svc40_item4(id: ID!): Svc40Item4 @join__field(graph: SVC40)
+  svc40_item5(id: ID!): Svc40Item5 @join__field(graph: SVC40)
+  svc40_item6(id: ID!): Svc40Item6 @join__field(graph: SVC40)
+  svc40_item7(id: ID!): Svc40Item7 @join__field(graph: SVC40)
+  svc40_shared0(id: ID!): Shared0 @join__field(graph: SVC40)
+  svc40_shared1(id: ID!): Shared1 @join__field(graph: SVC40)
+  svc40_shared2(id: ID!): Shared2 @join__field(graph: SVC40)
+  svc40_shared3(id: ID!): Shared3 @join__field(graph: SVC40)
+  svc41_item0(id: ID!): Svc41Item0 @join__field(graph: SVC41)
+  svc41_item1(id: ID!): Svc41Item1 @join__field(graph: SVC41)
+  svc41_item2(id: ID!): Svc41Item2 @join__field(graph: SVC41)
+  svc41_item3(id: ID!): Svc41Item3 @join__field(graph: SVC41)
+  svc41_item4(id: ID!): Svc41Item4 @join__field(graph: SVC41)
+  svc41_item5(id: ID!): Svc41Item5 @join__field(graph: SVC41)
+  svc41_item6(id: ID!): Svc41Item6 @join__field(graph: SVC41)
+  svc41_item7(id: ID!): Svc41Item7 @join__field(graph: SVC41)
+  svc41_shared0(id: ID!): Shared0 @join__field(graph: SVC41)
+  svc41_shared1(id: ID!): Shared1 @join__field(graph: SVC41)
+  svc41_shared2(id: ID!): Shared2 @join__field(graph: SVC41)
+  svc41_shared3(id: ID!): Shared3 @join__field(graph: SVC41)
+  svc42_item0(id: ID!): Svc42Item0 @join__field(graph: SVC42)
+  svc42_item1(id: ID!): Svc42Item1 @join__field(graph: SVC42)
+  svc42_item2(id: ID!): Svc42Item2 @join__field(graph: SVC42)
+  svc42_item3(id: ID!): Svc42Item3 @join__field(graph: SVC42)
+  svc42_item4(id: ID!): Svc42Item4 @join__field(graph: SVC42)
+  svc42_item5(id: ID!): Svc42Item5 @join__field(graph: SVC42)
+  svc42_item6(id: ID!): Svc42Item6 @join__field(graph: SVC42)
+  svc42_item7(id: ID!): Svc42Item7 @join__field(graph: SVC42)
+  svc42_shared0(id: ID!): Shared0 @join__field(graph: SVC42)
+  svc42_shared1(id: ID!): Shared1 @join__field(graph: SVC42)
+  svc42_shared2(id: ID!): Shared2 @join__field(graph: SVC42)
+  svc42_shared3(id: ID!): Shared3 @join__field(graph: SVC42)
+  svc43_item0(id: ID!): Svc43Item0 @join__field(graph: SVC43)
+  svc43_item1(id: ID!): Svc43Item1 @join__field(graph: SVC43)
+  svc43_item2(id: ID!): Svc43Item2 @join__field(graph: SVC43)
+  svc43_item3(id: ID!): Svc43Item3 @join__field(graph: SVC43)
+  svc43_item4(id: ID!): Svc43Item4 @join__field(graph: SVC43)
+  svc43_item5(id: ID!): Svc43Item5 @join__field(graph: SVC43)
+  svc43_item6(id: ID!): Svc43Item6 @join__field(graph: SVC43)
+  svc43_item7(id: ID!): Svc43Item7 @join__field(graph: SVC43)
+  svc43_shared0(id: ID!): Shared0 @join__field(graph: SVC43)
+  svc43_shared1(id: ID!): Shared1 @join__field(graph: SVC43)
+  svc43_shared2(id: ID!): Shared2 @join__field(graph: SVC43)
+  svc43_shared3(id: ID!): Shared3 @join__field(graph: SVC43)
+  svc44_item0(id: ID!): Svc44Item0 @join__field(graph: SVC44)
+  svc44_item1(id: ID!): Svc44Item1 @join__field(graph: SVC44)
+  svc44_item2(id: ID!): Svc44Item2 @join__field(graph: SVC44)
+  svc44_item3(id: ID!): Svc44Item3 @join__field(graph: SVC44)
+  svc44_item4(id: ID!): Svc44Item4 @join__field(graph: SVC44)
+  svc44_item5(id: ID!): Svc44Item5 @join__field(graph: SVC44)
+  svc44_item6(id: ID!): Svc44Item6 @join__field(graph: SVC44)
+  svc44_item7(id: ID!): Svc44Item7 @join__field(graph: SVC44)
+  svc44_shared0(id: ID!): Shared0 @join__field(graph: SVC44)
+  svc44_shared1(id: ID!): Shared1 @join__field(graph: SVC44)
+  svc44_shared2(id: ID!): Shared2 @join__field(graph: SVC44)
+  svc44_shared3(id: ID!): Shared3 @join__field(graph: SVC44)
+  svc45_item0(id: ID!): Svc45Item0 @join__field(graph: SVC45)
+  svc45_item1(id: ID!): Svc45Item1 @join__field(graph: SVC45)
+  svc45_item2(id: ID!): Svc45Item2 @join__field(graph: SVC45)
+  svc45_item3(id: ID!): Svc45Item3 @join__field(graph: SVC45)
+  svc45_item4(id: ID!): Svc45Item4 @join__field(graph: SVC45)
+  svc45_item5(id: ID!): Svc45Item5 @join__field(graph: SVC45)
+  svc45_item6(id: ID!): Svc45Item6 @join__field(graph: SVC45)
+  svc45_item7(id: ID!): Svc45Item7 @join__field(graph: SVC45)
+  svc45_shared0(id: ID!): Shared0 @join__field(graph: SVC45)
+  svc45_shared1(id: ID!): Shared1 @join__field(graph: SVC45)
+  svc45_shared2(id: ID!): Shared2 @join__field(graph: SVC45)
+  svc45_shared3(id: ID!): Shared3 @join__field(graph: SVC45)
+  svc46_item0(id: ID!): Svc46Item0 @join__field(graph: SVC46)
+  svc46_item1(id: ID!): Svc46Item1 @join__field(graph: SVC46)
+  svc46_item2(id: ID!): Svc46Item2 @join__field(graph: SVC46)
+  svc46_item3(id: ID!): Svc46Item3 @join__field(graph: SVC46)
+  svc46_item4(id: ID!): Svc46Item4 @join__field(graph: SVC46)
+  svc46_item5(id: ID!): Svc46Item5 @join__field(graph: SVC46)
+  svc46_item6(id: ID!): Svc46Item6 @join__field(graph: SVC46)
+  svc46_item7(id: ID!): Svc46Item7 @join__field(graph: SVC46)
+  svc46_shared0(id: ID!): Shared0 @join__field(graph: SVC46)
+  svc46_shared1(id: ID!): Shared1 @join__field(graph: SVC46)
+  svc46_shared2(id: ID!): Shared2 @join__field(graph: SVC46)
+  svc46_shared3(id: ID!): Shared3 @join__field(graph: SVC46)
+  svc47_item0(id: ID!): Svc47Item0 @join__field(graph: SVC47)
+  svc47_item1(id: ID!): Svc47Item1 @join__field(graph: SVC47)
+  svc47_item2(id: ID!): Svc47Item2 @join__field(graph: SVC47)
+  svc47_item3(id: ID!): Svc47Item3 @join__field(graph: SVC47)
+  svc47_item4(id: ID!): Svc47Item4 @join__field(graph: SVC47)
+  svc47_item5(id: ID!): Svc47Item5 @join__field(graph: SVC47)
+  svc47_item6(id: ID!): Svc47Item6 @join__field(graph: SVC47)
+  svc47_item7(id: ID!): Svc47Item7 @join__field(graph: SVC47)
+  svc47_shared0(id: ID!): Shared0 @join__field(graph: SVC47)
+  svc47_shared1(id: ID!): Shared1 @join__field(graph: SVC47)
+  svc47_shared2(id: ID!): Shared2 @join__field(graph: SVC47)
+  svc47_shared3(id: ID!): Shared3 @join__field(graph: SVC47)
+  svc48_item0(id: ID!): Svc48Item0 @join__field(graph: SVC48)
+  svc48_item1(id: ID!): Svc48Item1 @join__field(graph: SVC48)
+  svc48_item2(id: ID!): Svc48Item2 @join__field(graph: SVC48)
+  svc48_item3(id: ID!): Svc48Item3 @join__field(graph: SVC48)
+  svc48_item4(id: ID!): Svc48Item4 @join__field(graph: SVC48)
+  svc48_item5(id: ID!): Svc48Item5 @join__field(graph: SVC48)
+  svc48_item6(id: ID!): Svc48Item6 @join__field(graph: SVC48)
+  svc48_item7(id: ID!): Svc48Item7 @join__field(graph: SVC48)
+  svc48_shared0(id: ID!): Shared0 @join__field(graph: SVC48)
+  svc48_shared1(id: ID!): Shared1 @join__field(graph: SVC48)
+  svc48_shared2(id: ID!): Shared2 @join__field(graph: SVC48)
+  svc48_shared3(id: ID!): Shared3 @join__field(graph: SVC48)
+  svc49_item0(id: ID!): Svc49Item0 @join__field(graph: SVC49)
+  svc49_item1(id: ID!): Svc49Item1 @join__field(graph: SVC49)
+  svc49_item2(id: ID!): Svc49Item2 @join__field(graph: SVC49)
+  svc49_item3(id: ID!): Svc49Item3 @join__field(graph: SVC49)
+  svc49_item4(id: ID!): Svc49Item4 @join__field(graph: SVC49)
+  svc49_item5(id: ID!): Svc49Item5 @join__field(graph: SVC49)
+  svc49_item6(id: ID!): Svc49Item6 @join__field(graph: SVC49)
+  svc49_item7(id: ID!): Svc49Item7 @join__field(graph: SVC49)
+  svc49_shared0(id: ID!): Shared0 @join__field(graph: SVC49)
+  svc49_shared1(id: ID!): Shared1 @join__field(graph: SVC49)
+  svc49_shared2(id: ID!): Shared2 @join__field(graph: SVC49)
+  svc49_shared3(id: ID!): Shared3 @join__field(graph: SVC49)
+  svc5_item0(id: ID!): Svc5Item0 @join__field(graph: SVC5)
+  svc5_item1(id: ID!): Svc5Item1 @join__field(graph: SVC5)
+  svc5_item2(id: ID!): Svc5Item2 @join__field(graph: SVC5)
+  svc5_item3(id: ID!): Svc5Item3 @join__field(graph: SVC5)
+  svc5_item4(id: ID!): Svc5Item4 @join__field(graph: SVC5)
+  svc5_item5(id: ID!): Svc5Item5 @join__field(graph: SVC5)
+  svc5_item6(id: ID!): Svc5Item6 @join__field(graph: SVC5)
+  svc5_item7(id: ID!): Svc5Item7 @join__field(graph: SVC5)
+  svc5_shared0(id: ID!): Shared0 @join__field(graph: SVC5)
+  svc5_shared1(id: ID!): Shared1 @join__field(graph: SVC5)
+  svc5_shared2(id: ID!): Shared2 @join__field(graph: SVC5)
+  svc5_shared3(id: ID!): Shared3 @join__field(graph: SVC5)
+  svc50_item0(id: ID!): Svc50Item0 @join__field(graph: SVC50)
+  svc50_item1(id: ID!): Svc50Item1 @join__field(graph: SVC50)
+  svc50_item2(id: ID!): Svc50Item2 @join__field(graph: SVC50)
+  svc50_item3(id: ID!): Svc50Item3 @join__field(graph: SVC50)
+  svc50_item4(id: ID!): Svc50Item4 @join__field(graph: SVC50)
+  svc50_item5(id: ID!): Svc50Item5 @join__field(graph: SVC50)
+  svc50_item6(id: ID!): Svc50Item6 @join__field(graph: SVC50)
+  svc50_item7(id: ID!): Svc50Item7 @join__field(graph: SVC50)
+  svc50_shared0(id: ID!): Shared0 @join__field(graph: SVC50)
+  svc50_shared1(id: ID!): Shared1 @join__field(graph: SVC50)
+  svc50_shared2(id: ID!): Shared2 @join__field(graph: SVC50)
+  svc50_shared3(id: ID!): Shared3 @join__field(graph: SVC50)
+  svc51_item0(id: ID!): Svc51Item0 @join__field(graph: SVC51)
+  svc51_item1(id: ID!): Svc51Item1 @join__field(graph: SVC51)
+  svc51_item2(id: ID!): Svc51Item2 @join__field(graph: SVC51)
+  svc51_item3(id: ID!): Svc51Item3 @join__field(graph: SVC51)
+  svc51_item4(id: ID!): Svc51Item4 @join__field(graph: SVC51)
+  svc51_item5(id: ID!): Svc51Item5 @join__field(graph: SVC51)
+  svc51_item6(id: ID!): Svc51Item6 @join__field(graph: SVC51)
+  svc51_item7(id: ID!): Svc51Item7 @join__field(graph: SVC51)
+  svc51_shared0(id: ID!): Shared0 @join__field(graph: SVC51)
+  svc51_shared1(id: ID!): Shared1 @join__field(graph: SVC51)
+  svc51_shared2(id: ID!): Shared2 @join__field(graph: SVC51)
+  svc51_shared3(id: ID!): Shared3 @join__field(graph: SVC51)
+  svc52_item0(id: ID!): Svc52Item0 @join__field(graph: SVC52)
+  svc52_item1(id: ID!): Svc52Item1 @join__field(graph: SVC52)
+  svc52_item2(id: ID!): Svc52Item2 @join__field(graph: SVC52)
+  svc52_item3(id: ID!): Svc52Item3 @join__field(graph: SVC52)
+  svc52_item4(id: ID!): Svc52Item4 @join__field(graph: SVC52)
+  svc52_item5(id: ID!): Svc52Item5 @join__field(graph: SVC52)
+  svc52_item6(id: ID!): Svc52Item6 @join__field(graph: SVC52)
+  svc52_item7(id: ID!): Svc52Item7 @join__field(graph: SVC52)
+  svc52_shared0(id: ID!): Shared0 @join__field(graph: SVC52)
+  svc52_shared1(id: ID!): Shared1 @join__field(graph: SVC52)
+  svc52_shared2(id: ID!): Shared2 @join__field(graph: SVC52)
+  svc52_shared3(id: ID!): Shared3 @join__field(graph: SVC52)
+  svc53_item0(id: ID!): Svc53Item0 @join__field(graph: SVC53)
+  svc53_item1(id: ID!): Svc53Item1 @join__field(graph: SVC53)
+  svc53_item2(id: ID!): Svc53Item2 @join__field(graph: SVC53)
+  svc53_item3(id: ID!): Svc53Item3 @join__field(graph: SVC53)
+  svc53_item4(id: ID!): Svc53Item4 @join__field(graph: SVC53)
+  svc53_item5(id: ID!): Svc53Item5 @join__field(graph: SVC53)
+  svc53_item6(id: ID!): Svc53Item6 @join__field(graph: SVC53)
+  svc53_item7(id: ID!): Svc53Item7 @join__field(graph: SVC53)
+  svc53_shared0(id: ID!): Shared0 @join__field(graph: SVC53)
+  svc53_shared1(id: ID!): Shared1 @join__field(graph: SVC53)
+  svc53_shared2(id: ID!): Shared2 @join__field(graph: SVC53)
+  svc53_shared3(id: ID!): Shared3 @join__field(graph: SVC53)
+  svc54_item0(id: ID!): Svc54Item0 @join__field(graph: SVC54)
+  svc54_item1(id: ID!): Svc54Item1 @join__field(graph: SVC54)
+  svc54_item2(id: ID!): Svc54Item2 @join__field(graph: SVC54)
+  svc54_item3(id: ID!): Svc54Item3 @join__field(graph: SVC54)
+  svc54_item4(id: ID!): Svc54Item4 @join__field(graph: SVC54)
+  svc54_item5(id: ID!): Svc54Item5 @join__field(graph: SVC54)
+  svc54_item6(id: ID!): Svc54Item6 @join__field(graph: SVC54)
+  svc54_item7(id: ID!): Svc54Item7 @join__field(graph: SVC54)
+  svc54_shared0(id: ID!): Shared0 @join__field(graph: SVC54)
+  svc54_shared1(id: ID!): Shared1 @join__field(graph: SVC54)
+  svc54_shared2(id: ID!): Shared2 @join__field(graph: SVC54)
+  svc54_shared3(id: ID!): Shared3 @join__field(graph: SVC54)
+  svc55_item0(id: ID!): Svc55Item0 @join__field(graph: SVC55)
+  svc55_item1(id: ID!): Svc55Item1 @join__field(graph: SVC55)
+  svc55_item2(id: ID!): Svc55Item2 @join__field(graph: SVC55)
+  svc55_item3(id: ID!): Svc55Item3 @join__field(graph: SVC55)
+  svc55_item4(id: ID!): Svc55Item4 @join__field(graph: SVC55)
+  svc55_item5(id: ID!): Svc55Item5 @join__field(graph: SVC55)
+  svc55_item6(id: ID!): Svc55Item6 @join__field(graph: SVC55)
+  svc55_item7(id: ID!): Svc55Item7 @join__field(graph: SVC55)
+  svc55_shared0(id: ID!): Shared0 @join__field(graph: SVC55)
+  svc55_shared1(id: ID!): Shared1 @join__field(graph: SVC55)
+  svc55_shared2(id: ID!): Shared2 @join__field(graph: SVC55)
+  svc55_shared3(id: ID!): Shared3 @join__field(graph: SVC55)
+  svc56_item0(id: ID!): Svc56Item0 @join__field(graph: SVC56)
+  svc56_item1(id: ID!): Svc56Item1 @join__field(graph: SVC56)
+  svc56_item2(id: ID!): Svc56Item2 @join__field(graph: SVC56)
+  svc56_item3(id: ID!): Svc56Item3 @join__field(graph: SVC56)
+  svc56_item4(id: ID!): Svc56Item4 @join__field(graph: SVC56)
+  svc56_item5(id: ID!): Svc56Item5 @join__field(graph: SVC56)
+  svc56_item6(id: ID!): Svc56Item6 @join__field(graph: SVC56)
+  svc56_item7(id: ID!): Svc56Item7 @join__field(graph: SVC56)
+  svc56_shared0(id: ID!): Shared0 @join__field(graph: SVC56)
+  svc56_shared1(id: ID!): Shared1 @join__field(graph: SVC56)
+  svc56_shared2(id: ID!): Shared2 @join__field(graph: SVC56)
+  svc56_shared3(id: ID!): Shared3 @join__field(graph: SVC56)
+  svc57_item0(id: ID!): Svc57Item0 @join__field(graph: SVC57)
+  svc57_item1(id: ID!): Svc57Item1 @join__field(graph: SVC57)
+  svc57_item2(id: ID!): Svc57Item2 @join__field(graph: SVC57)
+  svc57_item3(id: ID!): Svc57Item3 @join__field(graph: SVC57)
+  svc57_item4(id: ID!): Svc57Item4 @join__field(graph: SVC57)
+  svc57_item5(id: ID!): Svc57Item5 @join__field(graph: SVC57)
+  svc57_item6(id: ID!): Svc57Item6 @join__field(graph: SVC57)
+  svc57_item7(id: ID!): Svc57Item7 @join__field(graph: SVC57)
+  svc57_shared0(id: ID!): Shared0 @join__field(graph: SVC57)
+  svc57_shared1(id: ID!): Shared1 @join__field(graph: SVC57)
+  svc57_shared2(id: ID!): Shared2 @join__field(graph: SVC57)
+  svc57_shared3(id: ID!): Shared3 @join__field(graph: SVC57)
+  svc58_item0(id: ID!): Svc58Item0 @join__field(graph: SVC58)
+  svc58_item1(id: ID!): Svc58Item1 @join__field(graph: SVC58)
+  svc58_item2(id: ID!): Svc58Item2 @join__field(graph: SVC58)
+  svc58_item3(id: ID!): Svc58Item3 @join__field(graph: SVC58)
+  svc58_item4(id: ID!): Svc58Item4 @join__field(graph: SVC58)
+  svc58_item5(id: ID!): Svc58Item5 @join__field(graph: SVC58)
+  svc58_item6(id: ID!): Svc58Item6 @join__field(graph: SVC58)
+  svc58_item7(id: ID!): Svc58Item7 @join__field(graph: SVC58)
+  svc58_shared0(id: ID!): Shared0 @join__field(graph: SVC58)
+  svc58_shared1(id: ID!): Shared1 @join__field(graph: SVC58)
+  svc58_shared2(id: ID!): Shared2 @join__field(graph: SVC58)
+  svc58_shared3(id: ID!): Shared3 @join__field(graph: SVC58)
+  svc59_item0(id: ID!): Svc59Item0 @join__field(graph: SVC59)
+  svc59_item1(id: ID!): Svc59Item1 @join__field(graph: SVC59)
+  svc59_item2(id: ID!): Svc59Item2 @join__field(graph: SVC59)
+  svc59_item3(id: ID!): Svc59Item3 @join__field(graph: SVC59)
+  svc59_item4(id: ID!): Svc59Item4 @join__field(graph: SVC59)
+  svc59_item5(id: ID!): Svc59Item5 @join__field(graph: SVC59)
+  svc59_item6(id: ID!): Svc59Item6 @join__field(graph: SVC59)
+  svc59_item7(id: ID!): Svc59Item7 @join__field(graph: SVC59)
+  svc59_shared0(id: ID!): Shared0 @join__field(graph: SVC59)
+  svc59_shared1(id: ID!): Shared1 @join__field(graph: SVC59)
+  svc59_shared2(id: ID!): Shared2 @join__field(graph: SVC59)
+  svc59_shared3(id: ID!): Shared3 @join__field(graph: SVC59)
+  svc6_item0(id: ID!): Svc6Item0 @join__field(graph: SVC6)
+  svc6_item1(id: ID!): Svc6Item1 @join__field(graph: SVC6)
+  svc6_item2(id: ID!): Svc6Item2 @join__field(graph: SVC6)
+  svc6_item3(id: ID!): Svc6Item3 @join__field(graph: SVC6)
+  svc6_item4(id: ID!): Svc6Item4 @join__field(graph: SVC6)
+  svc6_item5(id: ID!): Svc6Item5 @join__field(graph: SVC6)
+  svc6_item6(id: ID!): Svc6Item6 @join__field(graph: SVC6)
+  svc6_item7(id: ID!): Svc6Item7 @join__field(graph: SVC6)
+  svc6_shared0(id: ID!): Shared0 @join__field(graph: SVC6)
+  svc6_shared1(id: ID!): Shared1 @join__field(graph: SVC6)
+  svc6_shared2(id: ID!): Shared2 @join__field(graph: SVC6)
+  svc6_shared3(id: ID!): Shared3 @join__field(graph: SVC6)
+  svc60_item0(id: ID!): Svc60Item0 @join__field(graph: SVC60)
+  svc60_item1(id: ID!): Svc60Item1 @join__field(graph: SVC60)
+  svc60_item2(id: ID!): Svc60Item2 @join__field(graph: SVC60)
+  svc60_item3(id: ID!): Svc60Item3 @join__field(graph: SVC60)
+  svc60_item4(id: ID!): Svc60Item4 @join__field(graph: SVC60)
+  svc60_item5(id: ID!): Svc60Item5 @join__field(graph: SVC60)
+  svc60_item6(id: ID!): Svc60Item6 @join__field(graph: SVC60)
+  svc60_item7(id: ID!): Svc60Item7 @join__field(graph: SVC60)
+  svc60_shared0(id: ID!): Shared0 @join__field(graph: SVC60)
+  svc60_shared1(id: ID!): Shared1 @join__field(graph: SVC60)
+  svc60_shared2(id: ID!): Shared2 @join__field(graph: SVC60)
+  svc60_shared3(id: ID!): Shared3 @join__field(graph: SVC60)
+  svc61_item0(id: ID!): Svc61Item0 @join__field(graph: SVC61)
+  svc61_item1(id: ID!): Svc61Item1 @join__field(graph: SVC61)
+  svc61_item2(id: ID!): Svc61Item2 @join__field(graph: SVC61)
+  svc61_item3(id: ID!): Svc61Item3 @join__field(graph: SVC61)
+  svc61_item4(id: ID!): Svc61Item4 @join__field(graph: SVC61)
+  svc61_item5(id: ID!): Svc61Item5 @join__field(graph: SVC61)
+  svc61_item6(id: ID!): Svc61Item6 @join__field(graph: SVC61)
+  svc61_item7(id: ID!): Svc61Item7 @join__field(graph: SVC61)
+  svc61_shared0(id: ID!): Shared0 @join__field(graph: SVC61)
+  svc61_shared1(id: ID!): Shared1 @join__field(graph: SVC61)
+  svc61_shared2(id: ID!): Shared2 @join__field(graph: SVC61)
+  svc61_shared3(id: ID!): Shared3 @join__field(graph: SVC61)
+  svc62_item0(id: ID!): Svc62Item0 @join__field(graph: SVC62)
+  svc62_item1(id: ID!): Svc62Item1 @join__field(graph: SVC62)
+  svc62_item2(id: ID!): Svc62Item2 @join__field(graph: SVC62)
+  svc62_item3(id: ID!): Svc62Item3 @join__field(graph: SVC62)
+  svc62_item4(id: ID!): Svc62Item4 @join__field(graph: SVC62)
+  svc62_item5(id: ID!): Svc62Item5 @join__field(graph: SVC62)
+  svc62_item6(id: ID!): Svc62Item6 @join__field(graph: SVC62)
+  svc62_item7(id: ID!): Svc62Item7 @join__field(graph: SVC62)
+  svc62_shared0(id: ID!): Shared0 @join__field(graph: SVC62)
+  svc62_shared1(id: ID!): Shared1 @join__field(graph: SVC62)
+  svc62_shared2(id: ID!): Shared2 @join__field(graph: SVC62)
+  svc62_shared3(id: ID!): Shared3 @join__field(graph: SVC62)
+  svc63_item0(id: ID!): Svc63Item0 @join__field(graph: SVC63)
+  svc63_item1(id: ID!): Svc63Item1 @join__field(graph: SVC63)
+  svc63_item2(id: ID!): Svc63Item2 @join__field(graph: SVC63)
+  svc63_item3(id: ID!): Svc63Item3 @join__field(graph: SVC63)
+  svc63_item4(id: ID!): Svc63Item4 @join__field(graph: SVC63)
+  svc63_item5(id: ID!): Svc63Item5 @join__field(graph: SVC63)
+  svc63_item6(id: ID!): Svc63Item6 @join__field(graph: SVC63)
+  svc63_item7(id: ID!): Svc63Item7 @join__field(graph: SVC63)
+  svc63_shared0(id: ID!): Shared0 @join__field(graph: SVC63)
+  svc63_shared1(id: ID!): Shared1 @join__field(graph: SVC63)
+  svc63_shared2(id: ID!): Shared2 @join__field(graph: SVC63)
+  svc63_shared3(id: ID!): Shared3 @join__field(graph: SVC63)
+  svc7_item0(id: ID!): Svc7Item0 @join__field(graph: SVC7)
+  svc7_item1(id: ID!): Svc7Item1 @join__field(graph: SVC7)
+  svc7_item2(id: ID!): Svc7Item2 @join__field(graph: SVC7)
+  svc7_item3(id: ID!): Svc7Item3 @join__field(graph: SVC7)
+  svc7_item4(id: ID!): Svc7Item4 @join__field(graph: SVC7)
+  svc7_item5(id: ID!): Svc7Item5 @join__field(graph: SVC7)
+  svc7_item6(id: ID!): Svc7Item6 @join__field(graph: SVC7)
+  svc7_item7(id: ID!): Svc7Item7 @join__field(graph: SVC7)
+  svc7_shared0(id: ID!): Shared0 @join__field(graph: SVC7)
+  svc7_shared1(id: ID!): Shared1 @join__field(graph: SVC7)
+  svc7_shared2(id: ID!): Shared2 @join__field(graph: SVC7)
+  svc7_shared3(id: ID!): Shared3 @join__field(graph: SVC7)
+  svc8_item0(id: ID!): Svc8Item0 @join__field(graph: SVC8)
+  svc8_item1(id: ID!): Svc8Item1 @join__field(graph: SVC8)
+  svc8_item2(id: ID!): Svc8Item2 @join__field(graph: SVC8)
+  svc8_item3(id: ID!): Svc8Item3 @join__field(graph: SVC8)
+  svc8_item4(id: ID!): Svc8Item4 @join__field(graph: SVC8)
+  svc8_item5(id: ID!): Svc8Item5 @join__field(graph: SVC8)
+  svc8_item6(id: ID!): Svc8Item6 @join__field(graph: SVC8)
+  svc8_item7(id: ID!): Svc8Item7 @join__field(graph: SVC8)
+  svc8_shared0(id: ID!): Shared0 @join__field(graph: SVC8)
+  svc8_shared1(id: ID!): Shared1 @join__field(graph: SVC8)
+  svc8_shared2(id: ID!): Shared2 @join__field(graph: SVC8)
+  svc8_shared3(id: ID!): Shared3 @join__field(graph: SVC8)
+  svc9_item0(id: ID!): Svc9Item0 @join__field(graph: SVC9)
+  svc9_item1(id: ID!): Svc9Item1 @join__field(graph: SVC9)
+  svc9_item2(id: ID!): Svc9Item2 @join__field(graph: SVC9)
+  svc9_item3(id: ID!): Svc9Item3 @join__field(graph: SVC9)
+  svc9_item4(id: ID!): Svc9Item4 @join__field(graph: SVC9)
+  svc9_item5(id: ID!): Svc9Item5 @join__field(graph: SVC9)
+  svc9_item6(id: ID!): Svc9Item6 @join__field(graph: SVC9)
+  svc9_item7(id: ID!): Svc9Item7 @join__field(graph: SVC9)
+  svc9_shared0(id: ID!): Shared0 @join__field(graph: SVC9)
+  svc9_shared1(id: ID!): Shared1 @join__field(graph: SVC9)
+  svc9_shared2(id: ID!): Shared2 @join__field(graph: SVC9)
+  svc9_shared3(id: ID!): Shared3 @join__field(graph: SVC9)
+}
+
+type Shared0
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC16, key: "id")
+  @join__type(graph: SVC17, key: "id")
+  @join__type(graph: SVC18, key: "id")
+  @join__type(graph: SVC19, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC20, key: "id")
+  @join__type(graph: SVC21, key: "id")
+  @join__type(graph: SVC22, key: "id")
+  @join__type(graph: SVC23, key: "id")
+  @join__type(graph: SVC24, key: "id")
+  @join__type(graph: SVC25, key: "id")
+  @join__type(graph: SVC26, key: "id")
+  @join__type(graph: SVC27, key: "id")
+  @join__type(graph: SVC28, key: "id")
+  @join__type(graph: SVC29, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC30, key: "id")
+  @join__type(graph: SVC31, key: "id")
+  @join__type(graph: SVC32, key: "id")
+  @join__type(graph: SVC33, key: "id")
+  @join__type(graph: SVC34, key: "id")
+  @join__type(graph: SVC35, key: "id")
+  @join__type(graph: SVC36, key: "id")
+  @join__type(graph: SVC37, key: "id")
+  @join__type(graph: SVC38, key: "id")
+  @join__type(graph: SVC39, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC40, key: "id")
+  @join__type(graph: SVC41, key: "id")
+  @join__type(graph: SVC42, key: "id")
+  @join__type(graph: SVC43, key: "id")
+  @join__type(graph: SVC44, key: "id")
+  @join__type(graph: SVC45, key: "id")
+  @join__type(graph: SVC46, key: "id")
+  @join__type(graph: SVC47, key: "id")
+  @join__type(graph: SVC48, key: "id")
+  @join__type(graph: SVC49, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC50, key: "id")
+  @join__type(graph: SVC51, key: "id")
+  @join__type(graph: SVC52, key: "id")
+  @join__type(graph: SVC53, key: "id")
+  @join__type(graph: SVC54, key: "id")
+  @join__type(graph: SVC55, key: "id")
+  @join__type(graph: SVC56, key: "id")
+  @join__type(graph: SVC57, key: "id")
+  @join__type(graph: SVC58, key: "id")
+  @join__type(graph: SVC59, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC60, key: "id")
+  @join__type(graph: SVC61, key: "id")
+  @join__type(graph: SVC62, key: "id")
+  @join__type(graph: SVC63, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s16_a: String @join__field(graph: SVC16)
+  s16_b: String @join__field(graph: SVC16)
+  s17_a: String @join__field(graph: SVC17)
+  s17_b: String @join__field(graph: SVC17)
+  s18_a: String @join__field(graph: SVC18)
+  s18_b: String @join__field(graph: SVC18)
+  s19_a: String @join__field(graph: SVC19)
+  s19_b: String @join__field(graph: SVC19)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s20_a: String @join__field(graph: SVC20)
+  s20_b: String @join__field(graph: SVC20)
+  s21_a: String @join__field(graph: SVC21)
+  s21_b: String @join__field(graph: SVC21)
+  s22_a: String @join__field(graph: SVC22)
+  s22_b: String @join__field(graph: SVC22)
+  s23_a: String @join__field(graph: SVC23)
+  s23_b: String @join__field(graph: SVC23)
+  s24_a: String @join__field(graph: SVC24)
+  s24_b: String @join__field(graph: SVC24)
+  s25_a: String @join__field(graph: SVC25)
+  s25_b: String @join__field(graph: SVC25)
+  s26_a: String @join__field(graph: SVC26)
+  s26_b: String @join__field(graph: SVC26)
+  s27_a: String @join__field(graph: SVC27)
+  s27_b: String @join__field(graph: SVC27)
+  s28_a: String @join__field(graph: SVC28)
+  s28_b: String @join__field(graph: SVC28)
+  s29_a: String @join__field(graph: SVC29)
+  s29_b: String @join__field(graph: SVC29)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s30_a: String @join__field(graph: SVC30)
+  s30_b: String @join__field(graph: SVC30)
+  s31_a: String @join__field(graph: SVC31)
+  s31_b: String @join__field(graph: SVC31)
+  s32_a: String @join__field(graph: SVC32)
+  s32_b: String @join__field(graph: SVC32)
+  s33_a: String @join__field(graph: SVC33)
+  s33_b: String @join__field(graph: SVC33)
+  s34_a: String @join__field(graph: SVC34)
+  s34_b: String @join__field(graph: SVC34)
+  s35_a: String @join__field(graph: SVC35)
+  s35_b: String @join__field(graph: SVC35)
+  s36_a: String @join__field(graph: SVC36)
+  s36_b: String @join__field(graph: SVC36)
+  s37_a: String @join__field(graph: SVC37)
+  s37_b: String @join__field(graph: SVC37)
+  s38_a: String @join__field(graph: SVC38)
+  s38_b: String @join__field(graph: SVC38)
+  s39_a: String @join__field(graph: SVC39)
+  s39_b: String @join__field(graph: SVC39)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s40_a: String @join__field(graph: SVC40)
+  s40_b: String @join__field(graph: SVC40)
+  s41_a: String @join__field(graph: SVC41)
+  s41_b: String @join__field(graph: SVC41)
+  s42_a: String @join__field(graph: SVC42)
+  s42_b: String @join__field(graph: SVC42)
+  s43_a: String @join__field(graph: SVC43)
+  s43_b: String @join__field(graph: SVC43)
+  s44_a: String @join__field(graph: SVC44)
+  s44_b: String @join__field(graph: SVC44)
+  s45_a: String @join__field(graph: SVC45)
+  s45_b: String @join__field(graph: SVC45)
+  s46_a: String @join__field(graph: SVC46)
+  s46_b: String @join__field(graph: SVC46)
+  s47_a: String @join__field(graph: SVC47)
+  s47_b: String @join__field(graph: SVC47)
+  s48_a: String @join__field(graph: SVC48)
+  s48_b: String @join__field(graph: SVC48)
+  s49_a: String @join__field(graph: SVC49)
+  s49_b: String @join__field(graph: SVC49)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s50_a: String @join__field(graph: SVC50)
+  s50_b: String @join__field(graph: SVC50)
+  s51_a: String @join__field(graph: SVC51)
+  s51_b: String @join__field(graph: SVC51)
+  s52_a: String @join__field(graph: SVC52)
+  s52_b: String @join__field(graph: SVC52)
+  s53_a: String @join__field(graph: SVC53)
+  s53_b: String @join__field(graph: SVC53)
+  s54_a: String @join__field(graph: SVC54)
+  s54_b: String @join__field(graph: SVC54)
+  s55_a: String @join__field(graph: SVC55)
+  s55_b: String @join__field(graph: SVC55)
+  s56_a: String @join__field(graph: SVC56)
+  s56_b: String @join__field(graph: SVC56)
+  s57_a: String @join__field(graph: SVC57)
+  s57_b: String @join__field(graph: SVC57)
+  s58_a: String @join__field(graph: SVC58)
+  s58_b: String @join__field(graph: SVC58)
+  s59_a: String @join__field(graph: SVC59)
+  s59_b: String @join__field(graph: SVC59)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s60_a: String @join__field(graph: SVC60)
+  s60_b: String @join__field(graph: SVC60)
+  s61_a: String @join__field(graph: SVC61)
+  s61_b: String @join__field(graph: SVC61)
+  s62_a: String @join__field(graph: SVC62)
+  s62_b: String @join__field(graph: SVC62)
+  s63_a: String @join__field(graph: SVC63)
+  s63_b: String @join__field(graph: SVC63)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared1
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC16, key: "id")
+  @join__type(graph: SVC17, key: "id")
+  @join__type(graph: SVC18, key: "id")
+  @join__type(graph: SVC19, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC20, key: "id")
+  @join__type(graph: SVC21, key: "id")
+  @join__type(graph: SVC22, key: "id")
+  @join__type(graph: SVC23, key: "id")
+  @join__type(graph: SVC24, key: "id")
+  @join__type(graph: SVC25, key: "id")
+  @join__type(graph: SVC26, key: "id")
+  @join__type(graph: SVC27, key: "id")
+  @join__type(graph: SVC28, key: "id")
+  @join__type(graph: SVC29, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC30, key: "id")
+  @join__type(graph: SVC31, key: "id")
+  @join__type(graph: SVC32, key: "id")
+  @join__type(graph: SVC33, key: "id")
+  @join__type(graph: SVC34, key: "id")
+  @join__type(graph: SVC35, key: "id")
+  @join__type(graph: SVC36, key: "id")
+  @join__type(graph: SVC37, key: "id")
+  @join__type(graph: SVC38, key: "id")
+  @join__type(graph: SVC39, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC40, key: "id")
+  @join__type(graph: SVC41, key: "id")
+  @join__type(graph: SVC42, key: "id")
+  @join__type(graph: SVC43, key: "id")
+  @join__type(graph: SVC44, key: "id")
+  @join__type(graph: SVC45, key: "id")
+  @join__type(graph: SVC46, key: "id")
+  @join__type(graph: SVC47, key: "id")
+  @join__type(graph: SVC48, key: "id")
+  @join__type(graph: SVC49, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC50, key: "id")
+  @join__type(graph: SVC51, key: "id")
+  @join__type(graph: SVC52, key: "id")
+  @join__type(graph: SVC53, key: "id")
+  @join__type(graph: SVC54, key: "id")
+  @join__type(graph: SVC55, key: "id")
+  @join__type(graph: SVC56, key: "id")
+  @join__type(graph: SVC57, key: "id")
+  @join__type(graph: SVC58, key: "id")
+  @join__type(graph: SVC59, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC60, key: "id")
+  @join__type(graph: SVC61, key: "id")
+  @join__type(graph: SVC62, key: "id")
+  @join__type(graph: SVC63, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s16_a: String @join__field(graph: SVC16)
+  s16_b: String @join__field(graph: SVC16)
+  s17_a: String @join__field(graph: SVC17)
+  s17_b: String @join__field(graph: SVC17)
+  s18_a: String @join__field(graph: SVC18)
+  s18_b: String @join__field(graph: SVC18)
+  s19_a: String @join__field(graph: SVC19)
+  s19_b: String @join__field(graph: SVC19)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s20_a: String @join__field(graph: SVC20)
+  s20_b: String @join__field(graph: SVC20)
+  s21_a: String @join__field(graph: SVC21)
+  s21_b: String @join__field(graph: SVC21)
+  s22_a: String @join__field(graph: SVC22)
+  s22_b: String @join__field(graph: SVC22)
+  s23_a: String @join__field(graph: SVC23)
+  s23_b: String @join__field(graph: SVC23)
+  s24_a: String @join__field(graph: SVC24)
+  s24_b: String @join__field(graph: SVC24)
+  s25_a: String @join__field(graph: SVC25)
+  s25_b: String @join__field(graph: SVC25)
+  s26_a: String @join__field(graph: SVC26)
+  s26_b: String @join__field(graph: SVC26)
+  s27_a: String @join__field(graph: SVC27)
+  s27_b: String @join__field(graph: SVC27)
+  s28_a: String @join__field(graph: SVC28)
+  s28_b: String @join__field(graph: SVC28)
+  s29_a: String @join__field(graph: SVC29)
+  s29_b: String @join__field(graph: SVC29)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s30_a: String @join__field(graph: SVC30)
+  s30_b: String @join__field(graph: SVC30)
+  s31_a: String @join__field(graph: SVC31)
+  s31_b: String @join__field(graph: SVC31)
+  s32_a: String @join__field(graph: SVC32)
+  s32_b: String @join__field(graph: SVC32)
+  s33_a: String @join__field(graph: SVC33)
+  s33_b: String @join__field(graph: SVC33)
+  s34_a: String @join__field(graph: SVC34)
+  s34_b: String @join__field(graph: SVC34)
+  s35_a: String @join__field(graph: SVC35)
+  s35_b: String @join__field(graph: SVC35)
+  s36_a: String @join__field(graph: SVC36)
+  s36_b: String @join__field(graph: SVC36)
+  s37_a: String @join__field(graph: SVC37)
+  s37_b: String @join__field(graph: SVC37)
+  s38_a: String @join__field(graph: SVC38)
+  s38_b: String @join__field(graph: SVC38)
+  s39_a: String @join__field(graph: SVC39)
+  s39_b: String @join__field(graph: SVC39)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s40_a: String @join__field(graph: SVC40)
+  s40_b: String @join__field(graph: SVC40)
+  s41_a: String @join__field(graph: SVC41)
+  s41_b: String @join__field(graph: SVC41)
+  s42_a: String @join__field(graph: SVC42)
+  s42_b: String @join__field(graph: SVC42)
+  s43_a: String @join__field(graph: SVC43)
+  s43_b: String @join__field(graph: SVC43)
+  s44_a: String @join__field(graph: SVC44)
+  s44_b: String @join__field(graph: SVC44)
+  s45_a: String @join__field(graph: SVC45)
+  s45_b: String @join__field(graph: SVC45)
+  s46_a: String @join__field(graph: SVC46)
+  s46_b: String @join__field(graph: SVC46)
+  s47_a: String @join__field(graph: SVC47)
+  s47_b: String @join__field(graph: SVC47)
+  s48_a: String @join__field(graph: SVC48)
+  s48_b: String @join__field(graph: SVC48)
+  s49_a: String @join__field(graph: SVC49)
+  s49_b: String @join__field(graph: SVC49)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s50_a: String @join__field(graph: SVC50)
+  s50_b: String @join__field(graph: SVC50)
+  s51_a: String @join__field(graph: SVC51)
+  s51_b: String @join__field(graph: SVC51)
+  s52_a: String @join__field(graph: SVC52)
+  s52_b: String @join__field(graph: SVC52)
+  s53_a: String @join__field(graph: SVC53)
+  s53_b: String @join__field(graph: SVC53)
+  s54_a: String @join__field(graph: SVC54)
+  s54_b: String @join__field(graph: SVC54)
+  s55_a: String @join__field(graph: SVC55)
+  s55_b: String @join__field(graph: SVC55)
+  s56_a: String @join__field(graph: SVC56)
+  s56_b: String @join__field(graph: SVC56)
+  s57_a: String @join__field(graph: SVC57)
+  s57_b: String @join__field(graph: SVC57)
+  s58_a: String @join__field(graph: SVC58)
+  s58_b: String @join__field(graph: SVC58)
+  s59_a: String @join__field(graph: SVC59)
+  s59_b: String @join__field(graph: SVC59)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s60_a: String @join__field(graph: SVC60)
+  s60_b: String @join__field(graph: SVC60)
+  s61_a: String @join__field(graph: SVC61)
+  s61_b: String @join__field(graph: SVC61)
+  s62_a: String @join__field(graph: SVC62)
+  s62_b: String @join__field(graph: SVC62)
+  s63_a: String @join__field(graph: SVC63)
+  s63_b: String @join__field(graph: SVC63)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared2
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC16, key: "id")
+  @join__type(graph: SVC17, key: "id")
+  @join__type(graph: SVC18, key: "id")
+  @join__type(graph: SVC19, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC20, key: "id")
+  @join__type(graph: SVC21, key: "id")
+  @join__type(graph: SVC22, key: "id")
+  @join__type(graph: SVC23, key: "id")
+  @join__type(graph: SVC24, key: "id")
+  @join__type(graph: SVC25, key: "id")
+  @join__type(graph: SVC26, key: "id")
+  @join__type(graph: SVC27, key: "id")
+  @join__type(graph: SVC28, key: "id")
+  @join__type(graph: SVC29, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC30, key: "id")
+  @join__type(graph: SVC31, key: "id")
+  @join__type(graph: SVC32, key: "id")
+  @join__type(graph: SVC33, key: "id")
+  @join__type(graph: SVC34, key: "id")
+  @join__type(graph: SVC35, key: "id")
+  @join__type(graph: SVC36, key: "id")
+  @join__type(graph: SVC37, key: "id")
+  @join__type(graph: SVC38, key: "id")
+  @join__type(graph: SVC39, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC40, key: "id")
+  @join__type(graph: SVC41, key: "id")
+  @join__type(graph: SVC42, key: "id")
+  @join__type(graph: SVC43, key: "id")
+  @join__type(graph: SVC44, key: "id")
+  @join__type(graph: SVC45, key: "id")
+  @join__type(graph: SVC46, key: "id")
+  @join__type(graph: SVC47, key: "id")
+  @join__type(graph: SVC48, key: "id")
+  @join__type(graph: SVC49, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC50, key: "id")
+  @join__type(graph: SVC51, key: "id")
+  @join__type(graph: SVC52, key: "id")
+  @join__type(graph: SVC53, key: "id")
+  @join__type(graph: SVC54, key: "id")
+  @join__type(graph: SVC55, key: "id")
+  @join__type(graph: SVC56, key: "id")
+  @join__type(graph: SVC57, key: "id")
+  @join__type(graph: SVC58, key: "id")
+  @join__type(graph: SVC59, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC60, key: "id")
+  @join__type(graph: SVC61, key: "id")
+  @join__type(graph: SVC62, key: "id")
+  @join__type(graph: SVC63, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s16_a: String @join__field(graph: SVC16)
+  s16_b: String @join__field(graph: SVC16)
+  s17_a: String @join__field(graph: SVC17)
+  s17_b: String @join__field(graph: SVC17)
+  s18_a: String @join__field(graph: SVC18)
+  s18_b: String @join__field(graph: SVC18)
+  s19_a: String @join__field(graph: SVC19)
+  s19_b: String @join__field(graph: SVC19)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s20_a: String @join__field(graph: SVC20)
+  s20_b: String @join__field(graph: SVC20)
+  s21_a: String @join__field(graph: SVC21)
+  s21_b: String @join__field(graph: SVC21)
+  s22_a: String @join__field(graph: SVC22)
+  s22_b: String @join__field(graph: SVC22)
+  s23_a: String @join__field(graph: SVC23)
+  s23_b: String @join__field(graph: SVC23)
+  s24_a: String @join__field(graph: SVC24)
+  s24_b: String @join__field(graph: SVC24)
+  s25_a: String @join__field(graph: SVC25)
+  s25_b: String @join__field(graph: SVC25)
+  s26_a: String @join__field(graph: SVC26)
+  s26_b: String @join__field(graph: SVC26)
+  s27_a: String @join__field(graph: SVC27)
+  s27_b: String @join__field(graph: SVC27)
+  s28_a: String @join__field(graph: SVC28)
+  s28_b: String @join__field(graph: SVC28)
+  s29_a: String @join__field(graph: SVC29)
+  s29_b: String @join__field(graph: SVC29)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s30_a: String @join__field(graph: SVC30)
+  s30_b: String @join__field(graph: SVC30)
+  s31_a: String @join__field(graph: SVC31)
+  s31_b: String @join__field(graph: SVC31)
+  s32_a: String @join__field(graph: SVC32)
+  s32_b: String @join__field(graph: SVC32)
+  s33_a: String @join__field(graph: SVC33)
+  s33_b: String @join__field(graph: SVC33)
+  s34_a: String @join__field(graph: SVC34)
+  s34_b: String @join__field(graph: SVC34)
+  s35_a: String @join__field(graph: SVC35)
+  s35_b: String @join__field(graph: SVC35)
+  s36_a: String @join__field(graph: SVC36)
+  s36_b: String @join__field(graph: SVC36)
+  s37_a: String @join__field(graph: SVC37)
+  s37_b: String @join__field(graph: SVC37)
+  s38_a: String @join__field(graph: SVC38)
+  s38_b: String @join__field(graph: SVC38)
+  s39_a: String @join__field(graph: SVC39)
+  s39_b: String @join__field(graph: SVC39)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s40_a: String @join__field(graph: SVC40)
+  s40_b: String @join__field(graph: SVC40)
+  s41_a: String @join__field(graph: SVC41)
+  s41_b: String @join__field(graph: SVC41)
+  s42_a: String @join__field(graph: SVC42)
+  s42_b: String @join__field(graph: SVC42)
+  s43_a: String @join__field(graph: SVC43)
+  s43_b: String @join__field(graph: SVC43)
+  s44_a: String @join__field(graph: SVC44)
+  s44_b: String @join__field(graph: SVC44)
+  s45_a: String @join__field(graph: SVC45)
+  s45_b: String @join__field(graph: SVC45)
+  s46_a: String @join__field(graph: SVC46)
+  s46_b: String @join__field(graph: SVC46)
+  s47_a: String @join__field(graph: SVC47)
+  s47_b: String @join__field(graph: SVC47)
+  s48_a: String @join__field(graph: SVC48)
+  s48_b: String @join__field(graph: SVC48)
+  s49_a: String @join__field(graph: SVC49)
+  s49_b: String @join__field(graph: SVC49)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s50_a: String @join__field(graph: SVC50)
+  s50_b: String @join__field(graph: SVC50)
+  s51_a: String @join__field(graph: SVC51)
+  s51_b: String @join__field(graph: SVC51)
+  s52_a: String @join__field(graph: SVC52)
+  s52_b: String @join__field(graph: SVC52)
+  s53_a: String @join__field(graph: SVC53)
+  s53_b: String @join__field(graph: SVC53)
+  s54_a: String @join__field(graph: SVC54)
+  s54_b: String @join__field(graph: SVC54)
+  s55_a: String @join__field(graph: SVC55)
+  s55_b: String @join__field(graph: SVC55)
+  s56_a: String @join__field(graph: SVC56)
+  s56_b: String @join__field(graph: SVC56)
+  s57_a: String @join__field(graph: SVC57)
+  s57_b: String @join__field(graph: SVC57)
+  s58_a: String @join__field(graph: SVC58)
+  s58_b: String @join__field(graph: SVC58)
+  s59_a: String @join__field(graph: SVC59)
+  s59_b: String @join__field(graph: SVC59)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s60_a: String @join__field(graph: SVC60)
+  s60_b: String @join__field(graph: SVC60)
+  s61_a: String @join__field(graph: SVC61)
+  s61_b: String @join__field(graph: SVC61)
+  s62_a: String @join__field(graph: SVC62)
+  s62_b: String @join__field(graph: SVC62)
+  s63_a: String @join__field(graph: SVC63)
+  s63_b: String @join__field(graph: SVC63)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Shared3
+  @join__type(graph: SVC0, key: "id")
+  @join__type(graph: SVC1, key: "id")
+  @join__type(graph: SVC10, key: "id")
+  @join__type(graph: SVC11, key: "id")
+  @join__type(graph: SVC12, key: "id")
+  @join__type(graph: SVC13, key: "id")
+  @join__type(graph: SVC14, key: "id")
+  @join__type(graph: SVC15, key: "id")
+  @join__type(graph: SVC16, key: "id")
+  @join__type(graph: SVC17, key: "id")
+  @join__type(graph: SVC18, key: "id")
+  @join__type(graph: SVC19, key: "id")
+  @join__type(graph: SVC2, key: "id")
+  @join__type(graph: SVC20, key: "id")
+  @join__type(graph: SVC21, key: "id")
+  @join__type(graph: SVC22, key: "id")
+  @join__type(graph: SVC23, key: "id")
+  @join__type(graph: SVC24, key: "id")
+  @join__type(graph: SVC25, key: "id")
+  @join__type(graph: SVC26, key: "id")
+  @join__type(graph: SVC27, key: "id")
+  @join__type(graph: SVC28, key: "id")
+  @join__type(graph: SVC29, key: "id")
+  @join__type(graph: SVC3, key: "id")
+  @join__type(graph: SVC30, key: "id")
+  @join__type(graph: SVC31, key: "id")
+  @join__type(graph: SVC32, key: "id")
+  @join__type(graph: SVC33, key: "id")
+  @join__type(graph: SVC34, key: "id")
+  @join__type(graph: SVC35, key: "id")
+  @join__type(graph: SVC36, key: "id")
+  @join__type(graph: SVC37, key: "id")
+  @join__type(graph: SVC38, key: "id")
+  @join__type(graph: SVC39, key: "id")
+  @join__type(graph: SVC4, key: "id")
+  @join__type(graph: SVC40, key: "id")
+  @join__type(graph: SVC41, key: "id")
+  @join__type(graph: SVC42, key: "id")
+  @join__type(graph: SVC43, key: "id")
+  @join__type(graph: SVC44, key: "id")
+  @join__type(graph: SVC45, key: "id")
+  @join__type(graph: SVC46, key: "id")
+  @join__type(graph: SVC47, key: "id")
+  @join__type(graph: SVC48, key: "id")
+  @join__type(graph: SVC49, key: "id")
+  @join__type(graph: SVC5, key: "id")
+  @join__type(graph: SVC50, key: "id")
+  @join__type(graph: SVC51, key: "id")
+  @join__type(graph: SVC52, key: "id")
+  @join__type(graph: SVC53, key: "id")
+  @join__type(graph: SVC54, key: "id")
+  @join__type(graph: SVC55, key: "id")
+  @join__type(graph: SVC56, key: "id")
+  @join__type(graph: SVC57, key: "id")
+  @join__type(graph: SVC58, key: "id")
+  @join__type(graph: SVC59, key: "id")
+  @join__type(graph: SVC6, key: "id")
+  @join__type(graph: SVC60, key: "id")
+  @join__type(graph: SVC61, key: "id")
+  @join__type(graph: SVC62, key: "id")
+  @join__type(graph: SVC63, key: "id")
+  @join__type(graph: SVC7, key: "id")
+  @join__type(graph: SVC8, key: "id")
+  @join__type(graph: SVC9, key: "id")
+{
+  id: ID!
+  s0_a: String @join__field(graph: SVC0)
+  s0_b: String @join__field(graph: SVC0)
+  s1_a: String @join__field(graph: SVC1)
+  s1_b: String @join__field(graph: SVC1)
+  s10_a: String @join__field(graph: SVC10)
+  s10_b: String @join__field(graph: SVC10)
+  s11_a: String @join__field(graph: SVC11)
+  s11_b: String @join__field(graph: SVC11)
+  s12_a: String @join__field(graph: SVC12)
+  s12_b: String @join__field(graph: SVC12)
+  s13_a: String @join__field(graph: SVC13)
+  s13_b: String @join__field(graph: SVC13)
+  s14_a: String @join__field(graph: SVC14)
+  s14_b: String @join__field(graph: SVC14)
+  s15_a: String @join__field(graph: SVC15)
+  s15_b: String @join__field(graph: SVC15)
+  s16_a: String @join__field(graph: SVC16)
+  s16_b: String @join__field(graph: SVC16)
+  s17_a: String @join__field(graph: SVC17)
+  s17_b: String @join__field(graph: SVC17)
+  s18_a: String @join__field(graph: SVC18)
+  s18_b: String @join__field(graph: SVC18)
+  s19_a: String @join__field(graph: SVC19)
+  s19_b: String @join__field(graph: SVC19)
+  s2_a: String @join__field(graph: SVC2)
+  s2_b: String @join__field(graph: SVC2)
+  s20_a: String @join__field(graph: SVC20)
+  s20_b: String @join__field(graph: SVC20)
+  s21_a: String @join__field(graph: SVC21)
+  s21_b: String @join__field(graph: SVC21)
+  s22_a: String @join__field(graph: SVC22)
+  s22_b: String @join__field(graph: SVC22)
+  s23_a: String @join__field(graph: SVC23)
+  s23_b: String @join__field(graph: SVC23)
+  s24_a: String @join__field(graph: SVC24)
+  s24_b: String @join__field(graph: SVC24)
+  s25_a: String @join__field(graph: SVC25)
+  s25_b: String @join__field(graph: SVC25)
+  s26_a: String @join__field(graph: SVC26)
+  s26_b: String @join__field(graph: SVC26)
+  s27_a: String @join__field(graph: SVC27)
+  s27_b: String @join__field(graph: SVC27)
+  s28_a: String @join__field(graph: SVC28)
+  s28_b: String @join__field(graph: SVC28)
+  s29_a: String @join__field(graph: SVC29)
+  s29_b: String @join__field(graph: SVC29)
+  s3_a: String @join__field(graph: SVC3)
+  s3_b: String @join__field(graph: SVC3)
+  s30_a: String @join__field(graph: SVC30)
+  s30_b: String @join__field(graph: SVC30)
+  s31_a: String @join__field(graph: SVC31)
+  s31_b: String @join__field(graph: SVC31)
+  s32_a: String @join__field(graph: SVC32)
+  s32_b: String @join__field(graph: SVC32)
+  s33_a: String @join__field(graph: SVC33)
+  s33_b: String @join__field(graph: SVC33)
+  s34_a: String @join__field(graph: SVC34)
+  s34_b: String @join__field(graph: SVC34)
+  s35_a: String @join__field(graph: SVC35)
+  s35_b: String @join__field(graph: SVC35)
+  s36_a: String @join__field(graph: SVC36)
+  s36_b: String @join__field(graph: SVC36)
+  s37_a: String @join__field(graph: SVC37)
+  s37_b: String @join__field(graph: SVC37)
+  s38_a: String @join__field(graph: SVC38)
+  s38_b: String @join__field(graph: SVC38)
+  s39_a: String @join__field(graph: SVC39)
+  s39_b: String @join__field(graph: SVC39)
+  s4_a: String @join__field(graph: SVC4)
+  s4_b: String @join__field(graph: SVC4)
+  s40_a: String @join__field(graph: SVC40)
+  s40_b: String @join__field(graph: SVC40)
+  s41_a: String @join__field(graph: SVC41)
+  s41_b: String @join__field(graph: SVC41)
+  s42_a: String @join__field(graph: SVC42)
+  s42_b: String @join__field(graph: SVC42)
+  s43_a: String @join__field(graph: SVC43)
+  s43_b: String @join__field(graph: SVC43)
+  s44_a: String @join__field(graph: SVC44)
+  s44_b: String @join__field(graph: SVC44)
+  s45_a: String @join__field(graph: SVC45)
+  s45_b: String @join__field(graph: SVC45)
+  s46_a: String @join__field(graph: SVC46)
+  s46_b: String @join__field(graph: SVC46)
+  s47_a: String @join__field(graph: SVC47)
+  s47_b: String @join__field(graph: SVC47)
+  s48_a: String @join__field(graph: SVC48)
+  s48_b: String @join__field(graph: SVC48)
+  s49_a: String @join__field(graph: SVC49)
+  s49_b: String @join__field(graph: SVC49)
+  s5_a: String @join__field(graph: SVC5)
+  s5_b: String @join__field(graph: SVC5)
+  s50_a: String @join__field(graph: SVC50)
+  s50_b: String @join__field(graph: SVC50)
+  s51_a: String @join__field(graph: SVC51)
+  s51_b: String @join__field(graph: SVC51)
+  s52_a: String @join__field(graph: SVC52)
+  s52_b: String @join__field(graph: SVC52)
+  s53_a: String @join__field(graph: SVC53)
+  s53_b: String @join__field(graph: SVC53)
+  s54_a: String @join__field(graph: SVC54)
+  s54_b: String @join__field(graph: SVC54)
+  s55_a: String @join__field(graph: SVC55)
+  s55_b: String @join__field(graph: SVC55)
+  s56_a: String @join__field(graph: SVC56)
+  s56_b: String @join__field(graph: SVC56)
+  s57_a: String @join__field(graph: SVC57)
+  s57_b: String @join__field(graph: SVC57)
+  s58_a: String @join__field(graph: SVC58)
+  s58_b: String @join__field(graph: SVC58)
+  s59_a: String @join__field(graph: SVC59)
+  s59_b: String @join__field(graph: SVC59)
+  s6_a: String @join__field(graph: SVC6)
+  s6_b: String @join__field(graph: SVC6)
+  s60_a: String @join__field(graph: SVC60)
+  s60_b: String @join__field(graph: SVC60)
+  s61_a: String @join__field(graph: SVC61)
+  s61_b: String @join__field(graph: SVC61)
+  s62_a: String @join__field(graph: SVC62)
+  s62_b: String @join__field(graph: SVC62)
+  s63_a: String @join__field(graph: SVC63)
+  s63_b: String @join__field(graph: SVC63)
+  s7_a: String @join__field(graph: SVC7)
+  s7_b: String @join__field(graph: SVC7)
+  s8_a: String @join__field(graph: SVC8)
+  s8_b: String @join__field(graph: SVC8)
+  s9_a: String @join__field(graph: SVC9)
+  s9_b: String @join__field(graph: SVC9)
+}
+
+type Svc0Item0
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item1
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item2
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item3
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item4
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item5
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item6
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc0Item7
+  @join__type(graph: SVC0)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item0
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item1
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item2
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item3
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item4
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item5
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item6
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc10Item7
+  @join__type(graph: SVC10)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item0
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item1
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item2
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item3
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item4
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item5
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item6
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc11Item7
+  @join__type(graph: SVC11)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item0
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item1
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item2
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item3
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item4
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item5
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item6
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc12Item7
+  @join__type(graph: SVC12)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item0
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item1
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item2
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item3
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item4
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item5
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item6
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc13Item7
+  @join__type(graph: SVC13)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item0
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item1
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item2
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item3
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item4
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item5
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item6
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc14Item7
+  @join__type(graph: SVC14)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item0
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item1
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item2
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item3
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item4
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item5
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item6
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc15Item7
+  @join__type(graph: SVC15)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item0
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item1
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item2
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item3
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item4
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item5
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item6
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc16Item7
+  @join__type(graph: SVC16)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item0
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item1
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item2
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item3
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item4
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item5
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item6
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc17Item7
+  @join__type(graph: SVC17)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item0
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item1
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item2
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item3
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item4
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item5
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item6
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc18Item7
+  @join__type(graph: SVC18)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item0
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item1
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item2
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item3
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item4
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item5
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item6
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc19Item7
+  @join__type(graph: SVC19)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item0
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item1
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item2
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item3
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item4
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item5
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item6
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc1Item7
+  @join__type(graph: SVC1)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item0
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item1
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item2
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item3
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item4
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item5
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item6
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc20Item7
+  @join__type(graph: SVC20)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item0
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item1
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item2
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item3
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item4
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item5
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item6
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc21Item7
+  @join__type(graph: SVC21)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item0
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item1
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item2
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item3
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item4
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item5
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item6
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc22Item7
+  @join__type(graph: SVC22)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item0
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item1
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item2
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item3
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item4
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item5
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item6
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc23Item7
+  @join__type(graph: SVC23)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item0
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item1
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item2
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item3
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item4
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item5
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item6
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc24Item7
+  @join__type(graph: SVC24)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item0
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item1
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item2
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item3
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item4
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item5
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item6
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc25Item7
+  @join__type(graph: SVC25)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item0
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item1
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item2
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item3
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item4
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item5
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item6
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc26Item7
+  @join__type(graph: SVC26)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item0
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item1
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item2
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item3
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item4
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item5
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item6
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc27Item7
+  @join__type(graph: SVC27)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item0
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item1
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item2
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item3
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item4
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item5
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item6
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc28Item7
+  @join__type(graph: SVC28)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item0
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item1
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item2
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item3
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item4
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item5
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item6
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc29Item7
+  @join__type(graph: SVC29)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item0
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item1
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item2
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item3
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item4
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item5
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item6
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc2Item7
+  @join__type(graph: SVC2)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item0
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item1
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item2
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item3
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item4
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item5
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item6
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc30Item7
+  @join__type(graph: SVC30)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item0
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item1
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item2
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item3
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item4
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item5
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item6
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc31Item7
+  @join__type(graph: SVC31)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item0
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item1
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item2
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item3
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item4
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item5
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item6
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc32Item7
+  @join__type(graph: SVC32)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item0
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item1
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item2
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item3
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item4
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item5
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item6
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc33Item7
+  @join__type(graph: SVC33)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item0
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item1
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item2
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item3
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item4
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item5
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item6
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc34Item7
+  @join__type(graph: SVC34)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item0
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item1
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item2
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item3
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item4
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item5
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item6
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc35Item7
+  @join__type(graph: SVC35)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item0
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item1
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item2
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item3
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item4
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item5
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item6
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc36Item7
+  @join__type(graph: SVC36)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item0
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item1
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item2
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item3
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item4
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item5
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item6
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc37Item7
+  @join__type(graph: SVC37)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item0
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item1
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item2
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item3
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item4
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item5
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item6
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc38Item7
+  @join__type(graph: SVC38)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item0
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item1
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item2
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item3
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item4
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item5
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item6
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc39Item7
+  @join__type(graph: SVC39)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item0
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item1
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item2
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item3
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item4
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item5
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item6
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc3Item7
+  @join__type(graph: SVC3)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item0
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item1
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item2
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item3
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item4
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item5
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item6
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc40Item7
+  @join__type(graph: SVC40)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item0
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item1
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item2
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item3
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item4
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item5
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item6
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc41Item7
+  @join__type(graph: SVC41)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item0
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item1
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item2
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item3
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item4
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item5
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item6
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc42Item7
+  @join__type(graph: SVC42)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item0
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item1
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item2
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item3
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item4
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item5
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item6
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc43Item7
+  @join__type(graph: SVC43)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item0
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item1
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item2
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item3
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item4
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item5
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item6
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc44Item7
+  @join__type(graph: SVC44)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item0
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item1
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item2
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item3
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item4
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item5
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item6
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc45Item7
+  @join__type(graph: SVC45)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item0
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item1
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item2
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item3
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item4
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item5
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item6
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc46Item7
+  @join__type(graph: SVC46)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item0
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item1
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item2
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item3
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item4
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item5
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item6
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc47Item7
+  @join__type(graph: SVC47)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item0
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item1
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item2
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item3
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item4
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item5
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item6
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc48Item7
+  @join__type(graph: SVC48)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item0
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item1
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item2
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item3
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item4
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item5
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item6
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc49Item7
+  @join__type(graph: SVC49)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item0
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item1
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item2
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item3
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item4
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item5
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item6
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc4Item7
+  @join__type(graph: SVC4)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item0
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item1
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item2
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item3
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item4
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item5
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item6
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc50Item7
+  @join__type(graph: SVC50)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item0
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item1
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item2
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item3
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item4
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item5
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item6
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc51Item7
+  @join__type(graph: SVC51)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item0
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item1
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item2
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item3
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item4
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item5
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item6
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc52Item7
+  @join__type(graph: SVC52)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item0
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item1
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item2
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item3
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item4
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item5
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item6
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc53Item7
+  @join__type(graph: SVC53)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item0
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item1
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item2
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item3
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item4
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item5
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item6
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc54Item7
+  @join__type(graph: SVC54)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item0
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item1
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item2
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item3
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item4
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item5
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item6
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc55Item7
+  @join__type(graph: SVC55)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item0
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item1
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item2
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item3
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item4
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item5
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item6
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc56Item7
+  @join__type(graph: SVC56)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item0
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item1
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item2
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item3
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item4
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item5
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item6
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc57Item7
+  @join__type(graph: SVC57)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item0
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item1
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item2
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item3
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item4
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item5
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item6
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc58Item7
+  @join__type(graph: SVC58)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item0
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item1
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item2
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item3
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item4
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item5
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item6
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc59Item7
+  @join__type(graph: SVC59)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item0
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item1
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item2
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item3
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item4
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item5
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item6
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc5Item7
+  @join__type(graph: SVC5)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item0
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item1
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item2
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item3
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item4
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item5
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item6
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc60Item7
+  @join__type(graph: SVC60)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item0
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item1
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item2
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item3
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item4
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item5
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item6
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc61Item7
+  @join__type(graph: SVC61)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item0
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item1
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item2
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item3
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item4
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item5
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item6
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc62Item7
+  @join__type(graph: SVC62)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item0
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item1
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item2
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item3
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item4
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item5
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item6
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc63Item7
+  @join__type(graph: SVC63)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item0
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item1
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item2
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item3
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item4
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item5
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item6
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc6Item7
+  @join__type(graph: SVC6)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item0
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item1
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item2
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item3
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item4
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item5
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item6
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc7Item7
+  @join__type(graph: SVC7)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item0
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item1
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item2
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item3
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item4
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item5
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item6
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc8Item7
+  @join__type(graph: SVC8)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item0
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item1
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item2
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item3
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item4
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item5
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item6
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
+
+type Svc9Item7
+  @join__type(graph: SVC9)
+{
+  id: ID!
+  name: String
+  value: Int
+}
