@@ -206,6 +206,7 @@ prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
 rhai = { version = "~1.23.6", features = ["sync", "serde", "internals"] }
+rhai_codegen = "=3.1.0" # rhai_codegen 3.2.0 breaks #[export_module]; pin until upstream fix
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls",
