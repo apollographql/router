@@ -43,8 +43,6 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -157,18 +155,22 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let mut supergraph_service = MockSupergraphService::new();
+    let (mock, mut handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-    supergraph_service.expect_clone().returning(move || {
-        let cloned_callback = supergraph_callback.clone();
-        let mut supergraph_service = MockSupergraphService::new();
-        supergraph_service.expect_call().returning(cloned_callback);
-        supergraph_service
+    // Drive the handle in a background task so each request is fulfilled by the callback.
+    let mut cb = supergraph_callback;
+    tokio::spawn(async move {
+        while let Some((req, responder)) = handle.next_request().await {
+            if let Ok(response) = cb(req) {
+                responder.send_response(response);
+            }
+        }
     });
 
+    // Capture `mock` (Send + Sync) rather than a BoxCloneService (Send only).
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -212,14 +214,13 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    let mut supergraph_service = MockSupergraphService::new();
-    supergraph_service
-        .expect_clone()
-        .returning(MockSupergraphService::new);
+    // The handle is intentionally discarded — empty() creates a service that is never expected
+    // to be called. Any call would block indefinitely.
+    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
