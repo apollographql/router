@@ -1,0 +1,559 @@
+//! APQ retry/error-detection Tower layer for subgraph calls.
+
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
+use std::task::Poll;
+
+use futures::future::BoxFuture;
+use serde_json_bytes::json;
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+
+use super::calculate_hash_for_query;
+use crate::graphql;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+
+const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
+const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
+const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
+const PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE: &str = "PersistedQueryNotSupported";
+const CODE_STRING: &str = "code";
+pub(crate) const PERSISTED_QUERY_KEY: &str = "persistedQuery";
+const HASH_VERSION_KEY: &str = "version";
+const HASH_VERSION_VALUE: i32 = 1;
+const HASH_KEY: &str = "sha256Hash";
+
+enum ApqError {
+    PersistedQueryNotSupported,
+    PersistedQueryNotFound,
+    Other,
+}
+
+fn get_apq_error(gql_response: &graphql::Response) -> ApqError {
+    for error in &gql_response.errors {
+        match error.message.as_str() {
+            PERSISTED_QUERY_NOT_FOUND_MESSAGE => return ApqError::PersistedQueryNotFound,
+            PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE => return ApqError::PersistedQueryNotSupported,
+            _ => {}
+        }
+        if let Some(value) = error.extensions.get(CODE_STRING) {
+            if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
+                return ApqError::PersistedQueryNotFound;
+            } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
+                return ApqError::PersistedQueryNotSupported;
+            }
+        }
+    }
+    ApqError::Other
+}
+
+/// Tower [`Layer`] that adds APQ retry logic for subgraph calls.
+///
+/// On the first request it sends only the query hash. If the subgraph
+/// returns `PERSISTED_QUERY_NOT_FOUND`, it retries with the full query and hash.
+/// If it returns `PERSISTED_QUERY_NOT_SUPPORTED`, APQ is disabled for this instance
+/// and the retry is sent as a plain request without the `persistedQuery` extension.
+pub(crate) struct SubgraphApqLayer {
+    enabled: bool,
+}
+
+impl SubgraphApqLayer {
+    pub(crate) fn new(enabled: bool) -> Self {
+        Self { enabled }
+    }
+}
+
+impl<S> Layer<S> for SubgraphApqLayer {
+    type Service = SubgraphApqService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SubgraphApqService {
+            inner,
+            apq: Arc::new(AtomicBool::new(self.enabled)),
+        }
+    }
+}
+
+/// Tower service wrapping an inner subgraph service with APQ retry logic.
+pub(crate) struct SubgraphApqService<S> {
+    inner: S,
+    pub(crate) apq: Arc<AtomicBool>,
+}
+
+impl<S: Clone> Clone for SubgraphApqService<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            apq: self.apq.clone(),
+        }
+    }
+}
+
+impl<S> Service<SubgraphRequest> for SubgraphApqService<S>
+where
+    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = SubgraphResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
+        let apq = self.apq.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            if !apq.load(Relaxed) {
+                return inner.call(request).await;
+            }
+
+            // APQ: send only the hash on the first attempt, preserving all other body fields.
+            let body = request.subgraph_request.body_mut();
+            let original_query = body.query.take();
+            let hash_value =
+                calculate_hash_for_query(original_query.as_deref().unwrap_or_default());
+            body.extensions.insert(
+                PERSISTED_QUERY_KEY,
+                json!({
+                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                    HASH_KEY: hash_value
+                }),
+            );
+
+            let response = inner.call(request.clone()).await?;
+
+            match get_apq_error(response.response.body()) {
+                ApqError::PersistedQueryNotSupported => {
+                    apq.store(false, Relaxed);
+                    let body = request.subgraph_request.body_mut();
+                    body.query = original_query;
+                    body.extensions.remove(PERSISTED_QUERY_KEY);
+                    inner.call(request).await
+                }
+                ApqError::PersistedQueryNotFound => {
+                    request.subgraph_request.body_mut().query = original_query;
+                    inner.call(request).await
+                }
+                ApqError::Other => Ok(response),
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::Relaxed;
+
+    use serde_json_bytes::ByteString;
+    use serde_json_bytes::Value;
+    use tower::BoxError;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::Context;
+    use crate::graphql::Error;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
+
+    fn make_request() -> SubgraphRequest {
+        SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().query("query").build())
+                    .unwrap(),
+            )
+            .context(Context::new())
+            .build()
+    }
+
+    fn success_response(context: Context) -> SubgraphResponse {
+        SubgraphResponse::fake_builder()
+            .data(Value::String(ByteString::from("test")))
+            .context(context)
+            .build()
+    }
+
+    fn pqnf_message_response(context: Context) -> SubgraphResponse {
+        SubgraphResponse::fake_builder()
+            .errors(vec![
+                Error::builder()
+                    .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
+                    .build(),
+            ])
+            .context(context)
+            .build()
+    }
+
+    fn pqns_message_response(context: Context) -> SubgraphResponse {
+        SubgraphResponse::fake_builder()
+            .errors(vec![
+                Error::builder()
+                    .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
+                    .build(),
+            ])
+            .context(context)
+            .build()
+    }
+
+    fn pqnf_extension_code_response(context: Context) -> SubgraphResponse {
+        SubgraphResponse::fake_builder()
+            .errors(vec![
+                Error::builder()
+                    .message("Random message")
+                    .extension_code(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE)
+                    .build(),
+            ])
+            .context(context)
+            .build()
+    }
+
+    fn pqns_extension_code_response(context: Context) -> SubgraphResponse {
+        SubgraphResponse::fake_builder()
+            .errors(vec![
+                Error::builder()
+                    .message("Random message")
+                    .extension_code(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE)
+                    .build(),
+            ])
+            .context(context)
+            .build()
+    }
+
+    #[tokio::test]
+    async fn test_apq_disabled_passes_query_through_unchanged() {
+        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+            assert!(
+                req.subgraph_request.body().query.is_some(),
+                "query should be present when APQ is disabled"
+            );
+            assert!(
+                !req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY),
+                "no persistedQuery extension expected when APQ is disabled"
+            );
+            Ok::<_, BoxError>(success_response(req.context))
+        });
+
+        let svc = SubgraphApqLayer::new(false).layer(inner);
+        let resp = svc.oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apq_enabled_sends_hash_only_on_first_attempt() {
+        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+            assert!(
+                req.subgraph_request.body().query.is_none(),
+                "query should be absent on first APQ attempt"
+            );
+            assert!(
+                req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY),
+                "persistedQuery hash should be present"
+            );
+            Ok::<_, BoxError>(success_response(req.context))
+        });
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_persisted_query_not_found_message_retries_with_query() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqnf_message_response(req.context));
+                }
+                assert!(
+                    req.subgraph_request.body().query.is_some(),
+                    "retry should include the full query"
+                );
+                assert!(
+                    req.subgraph_request
+                        .body()
+                        .extensions
+                        .contains_key(PERSISTED_QUERY_KEY),
+                    "retry should keep the persistedQuery hash"
+                );
+                Ok(success_response(req.context))
+            }
+        });
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_persisted_query_not_found_extension_code_retries_with_query() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqnf_extension_code_response(req.context));
+                }
+                assert!(req.subgraph_request.body().query.is_some());
+                Ok(success_response(req.context))
+            }
+        });
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_persisted_query_not_supported_message_disables_apq() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqns_message_response(req.context));
+                }
+                assert!(
+                    req.subgraph_request.body().query.is_some(),
+                    "retry should include the full query"
+                );
+                assert!(
+                    !req.subgraph_request
+                        .body()
+                        .extensions
+                        .contains_key(PERSISTED_QUERY_KEY),
+                    "persistedQuery extension should be removed for PQNS retry"
+                );
+                Ok(success_response(req.context))
+            }
+        });
+
+        let layer = SubgraphApqLayer::new(true);
+        let svc = layer.layer(inner);
+        assert!(svc.apq.load(Relaxed), "APQ should start enabled");
+
+        let resp = svc.clone().oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+        assert!(!svc.apq.load(Relaxed), "APQ should be disabled after PQNS");
+    }
+
+    #[tokio::test]
+    async fn test_persisted_query_not_supported_extension_code_disables_apq() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqns_extension_code_response(req.context));
+                }
+                assert!(req.subgraph_request.body().query.is_some());
+                assert!(
+                    !req.subgraph_request
+                        .body()
+                        .extensions
+                        .contains_key(PERSISTED_QUERY_KEY)
+                );
+                Ok(success_response(req.context))
+            }
+        });
+
+        let layer = SubgraphApqLayer::new(true);
+        let svc = layer.layer(inner);
+        assert!(svc.apq.load(Relaxed));
+
+        let resp = svc.clone().oneshot(make_request()).await.unwrap();
+        assert_eq!(
+            resp.response.body().data,
+            Some(Value::String(ByteString::from("test")))
+        );
+        assert!(!svc.apq.load(Relaxed));
+    }
+
+    const APQ_TEST_QUERY: &str = "query MyOp($id: ID!) { thing(id: $id) { name } }";
+
+    #[tokio::test]
+    async fn test_apq_body_preserves_all_fields() {
+        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+            let body = req.subgraph_request.body();
+            assert!(
+                body.query.is_none(),
+                "APQ body should omit query on first attempt"
+            );
+            assert_eq!(body.operation_name.as_deref(), Some("MyOp"));
+            assert_eq!(
+                body.variables.get("id"),
+                Some(&serde_json_bytes::json!("42"))
+            );
+            assert!(body.extensions.contains_key(PERSISTED_QUERY_KEY));
+            assert!(
+                body.extensions.contains_key("myExt"),
+                "custom extensions should be preserved alongside persistedQuery"
+            );
+            Ok::<_, BoxError>(success_response(req.context))
+        });
+
+        let gql_body = crate::graphql::Request {
+            query: Some(APQ_TEST_QUERY.to_string()),
+            operation_name: Some("MyOp".to_string()),
+            variables: serde_json_bytes::json!({"id": "42"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            extensions: serde_json_bytes::json!({"myExt": "value"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .context(Context::new())
+            .build();
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(request).await.unwrap();
+        assert!(resp.response.body().errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_apq_not_found_retry_preserves_original_body() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                assert!(
+                    req.subgraph_request
+                        .body()
+                        .extensions
+                        .contains_key(PERSISTED_QUERY_KEY),
+                    "both attempts should include the persistedQuery hash"
+                );
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqnf_message_response(req.context));
+                }
+                let body = req.subgraph_request.body();
+                assert_eq!(
+                    body.query.as_deref(),
+                    Some(APQ_TEST_QUERY),
+                    "retry should send the original query string"
+                );
+                assert_eq!(
+                    body.operation_name.as_deref(),
+                    Some("MyOp"),
+                    "operation_name should be preserved on retry"
+                );
+                assert_eq!(
+                    body.variables.get("id"),
+                    Some(&serde_json_bytes::json!("42")),
+                    "variables should be preserved on retry"
+                );
+                Ok(success_response(req.context))
+            }
+        });
+
+        let gql_body = crate::graphql::Request {
+            query: Some(APQ_TEST_QUERY.to_string()),
+            operation_name: Some("MyOp".to_string()),
+            variables: serde_json_bytes::json!({"id": "42"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            extensions: serde_json_bytes::json!({"myExt": "value"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .context(Context::new())
+            .build();
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(request).await.unwrap();
+        assert!(resp.response.body().errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_apq_not_supported_retry_restores_original_body() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let inner = tower::service_fn(move |req: SubgraphRequest| {
+            let n = call_count.fetch_add(1, Relaxed);
+            async move {
+                if n == 0 {
+                    return Ok::<_, BoxError>(pqns_message_response(req.context));
+                }
+                let body = req.subgraph_request.body();
+                assert_eq!(
+                    body.query.as_deref(),
+                    Some(APQ_TEST_QUERY),
+                    "retry should send the original query string"
+                );
+                assert!(
+                    !body.extensions.contains_key(PERSISTED_QUERY_KEY),
+                    "persistedQuery extension should be removed on PQNS retry"
+                );
+                assert!(
+                    body.extensions.contains_key("myExt"),
+                    "other extensions should be preserved on retry"
+                );
+                Ok(success_response(req.context))
+            }
+        });
+
+        let gql_body = crate::graphql::Request {
+            query: Some(APQ_TEST_QUERY.to_string()),
+            operation_name: Some("MyOp".to_string()),
+            variables: serde_json_bytes::json!({"id": "42"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            extensions: serde_json_bytes::json!({"myExt": "value"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+
+        let request = SubgraphRequest::fake_builder()
+            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .context(Context::new())
+            .build();
+
+        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let resp = svc.oneshot(request).await.unwrap();
+        assert!(resp.response.body().errors.is_empty());
+    }
+}

@@ -13,6 +13,7 @@ use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 use tower::service_fn;
 use tracing::Instrument;
@@ -40,11 +41,13 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
+use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
+use crate::services::subgraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -377,7 +380,7 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service.boxed_clone());
+                builder = builder.with_subgraph_service(&name, subgraph_service);
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
@@ -393,15 +396,21 @@ impl YamlRouterFactory {
 pub(crate) async fn create_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     configuration: &Configuration,
-) -> Result<IndexMap<String, SubgraphService>, BoxError> {
+) -> Result<IndexMap<String, subgraph::BoxCloneService>, BoxError> {
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
-        let subgraph_service = SubgraphService::from_config(
+        let enable_apq = configuration
+            .apq
+            .subgraph
+            .subgraphs
+            .get(name)
+            .map(|a| a.enabled)
+            .unwrap_or(configuration.apq.subgraph.all.enabled);
+        let svc = SubgraphApqLayer::new(enable_apq).layer(SubgraphService::new(
             name.clone(),
-            configuration,
             http_service_factory.clone(),
-        )?;
-        subgraph_services.insert(name.clone(), subgraph_service);
+        )?);
+        subgraph_services.insert(name.clone(), svc.boxed_clone());
     }
 
     Ok(subgraph_services)
