@@ -104,13 +104,14 @@ where
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let apq = self.apq.clone();
-        let mut inner = self.inner.clone();
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
             if !apq.load(Relaxed) {
