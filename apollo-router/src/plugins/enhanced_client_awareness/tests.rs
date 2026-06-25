@@ -5,22 +5,22 @@ use super::EnhancedClientAwareness;
 use crate::Context;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugin::test::MockSupergraphService;
 use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_KEY;
 use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_NAME_KEY;
 use crate::plugins::enhanced_client_awareness::CLIENT_LIBRARY_VERSION_KEY;
 use crate::plugins::enhanced_client_awareness::Config;
 use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
 use crate::plugins::telemetry::CLIENT_LIBRARY_VERSION;
+use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::supergraph;
 
 #[tokio::test]
 async fn given_client_library_metadata_adds_values_to_context() {
-    let mut mock_service = MockSupergraphService::new();
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
-    mock_service.expect_call().returning(move |request| {
-        // then
+    tokio::spawn(async move {
+        let (request, responder) = handle.next_request().await.unwrap();
         assert!(
             request.context.contains_key(CLIENT_LIBRARY_NAME),
             "Missing CLIENT_LIBRARY_NAME key/value"
@@ -31,7 +31,6 @@ async fn given_client_library_metadata_adds_values_to_context() {
             .unwrap_or_default()
             .unwrap_or_default();
         assert_eq!(client_library_name, "apollo-general-client-library");
-
         assert!(
             request.context.contains_key(CLIENT_LIBRARY_VERSION),
             "Missing CLIENT_LIBRARY_VERSION key/value"
@@ -42,17 +41,9 @@ async fn given_client_library_metadata_adds_values_to_context() {
             .unwrap_or_default()
             .unwrap_or_default();
         assert_eq!(client_library_version, "0.1.0");
-
-        SupergraphResponse::fake_builder().build()
+        responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
     });
 
-    let service_stack =
-        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
-            .await
-            .unwrap()
-            .supergraph_service(mock_service.boxed_clone());
-
-    // given
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(
         CLIENT_LIBRARY_NAME_KEY,
@@ -62,54 +53,57 @@ async fn given_client_library_metadata_adds_values_to_context() {
     let mut extensions_map = serde_json_bytes::map::Map::new();
     extensions_map.insert(CLIENT_LIBRARY_KEY, clients_map.into());
 
-    // when
-    let request = supergraph::Request::fake_builder()
-        .context(Context::default())
-        .query("{query:{ foo { bar } }}")
-        .extensions(extensions_map)
-        .build()
+    EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+        .await
+        .unwrap()
+        .supergraph_service(mock.boxed_clone())
+        .oneshot(
+            supergraph::Request::fake_builder()
+                .context(Context::default())
+                .query("{query:{ foo { bar } }}")
+                .extensions(extensions_map)
+                .build()
+                .unwrap(),
+        )
+        .await
         .unwrap();
-
-    let _ = service_stack.oneshot(request).await;
 }
 
 #[tokio::test]
 async fn without_client_library_metadata_does_not_add_values_to_context() {
-    let mut mock_service = MockSupergraphService::new();
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
-    mock_service.expect_call().returning(move |request| {
-        // then
+    tokio::spawn(async move {
+        let (request, responder) = handle.next_request().await.unwrap();
         assert!(!request.context.contains_key(CLIENT_LIBRARY_NAME));
         assert!(!request.context.contains_key(CLIENT_LIBRARY_VERSION));
-
-        SupergraphResponse::fake_builder().build()
+        responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
     });
 
-    let service_stack =
-        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
-            .await
-            .unwrap()
-            .supergraph_service(mock_service.boxed_clone());
-
-    // when
-    let request = supergraph::Request::fake_builder()
-        .context(Context::default())
-        .query("{query:{ foo { bar } }}")
-        .build()
+    EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+        .await
+        .unwrap()
+        .supergraph_service(mock.boxed_clone())
+        .oneshot(
+            supergraph::Request::fake_builder()
+                .context(Context::default())
+                .query("{query:{ foo { bar } }}")
+                .build()
+                .unwrap(),
+        )
+        .await
         .unwrap();
-
-    let _ = service_stack.oneshot(request).await;
 }
 
 #[tokio::test]
 async fn invalid_library_name_returns_bad_request() {
-    let mock_service = MockSupergraphService::new();
+    let (mock, _handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone());
+            .supergraph_service(mock.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_NAME_KEY, r#"invalid";||"#.into());
@@ -129,13 +123,13 @@ async fn invalid_library_name_returns_bad_request() {
 
 #[tokio::test]
 async fn invalid_library_version_returns_bad_request() {
-    let mock_service = MockSupergraphService::new();
+    let (mock, _handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed_clone());
+            .supergraph_service(mock.boxed_clone());
 
     let mut clients_map = serde_json_bytes::map::Map::new();
     clients_map.insert(CLIENT_LIBRARY_VERSION_KEY, r#"invalid";||"#.into());
