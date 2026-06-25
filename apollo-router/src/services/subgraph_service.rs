@@ -59,7 +59,6 @@ use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
-use crate::plugins::file_uploads;
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -873,9 +872,6 @@ pub(crate) async fn call_single_http(
     // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
-
-    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
-    let request = file_uploads::http_request_wrapper(request).await;
 
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
