@@ -715,7 +715,6 @@ pub(crate) async fn process_batches(
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
             let SubgraphBatchRequest {
-                operation_name: _,
                 contexts,
                 request,
                 txs,

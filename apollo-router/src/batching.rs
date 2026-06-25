@@ -420,7 +420,6 @@ impl Drop for Batch {
 
 /// A batch of requests that we'll send to a subgraph (...as a single batch request).
 pub(crate) struct SubgraphBatchRequest {
-    pub(crate) operation_name: String,
     pub(crate) contexts: Vec<(Context, SubgraphRequestId)>,
     pub(crate) request: http::Request<RouterBody>,
     pub(crate) txs: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
@@ -446,11 +445,6 @@ pub(crate) async fn assemble_batch(
         .next()
         .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
         .subgraph_request;
-    let operation_name = first_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
     let (parts, first_body) = first_request.into_parts();
 
     let mut gql_requests = Vec::with_capacity(txs.len());
@@ -466,7 +460,6 @@ pub(crate) async fn assemble_batch(
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok(SubgraphBatchRequest {
-        operation_name,
         contexts,
         request,
         txs,
@@ -536,7 +529,6 @@ mod tests {
             .collect::<Vec<String>>();
         // Assemble them
         let SubgraphBatchRequest {
-            operation_name,
             contexts,
             request,
             txs,
@@ -550,9 +542,6 @@ mod tests {
             .collect::<Vec<String>>();
         // Make sure all of our contexts are preserved during assembly
         assert_eq!(input_context_ids, output_context_ids);
-
-        // Make sure that the name of the entire batch is that of the first
-        assert_eq!(operation_name, "batch_test_0");
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
