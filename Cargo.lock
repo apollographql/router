@@ -396,6 +396,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
+ "rhai_codegen",
  "rmp",
  "rstack",
  "rstest",
