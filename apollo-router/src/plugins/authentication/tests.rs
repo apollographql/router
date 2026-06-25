@@ -53,7 +53,6 @@ use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
-use crate::plugin::test;
 use crate::plugins::authentication::Issuers;
 use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::JWTCriteria;
@@ -87,26 +86,17 @@ async fn build_a_test_harness(
     ignore_other_prefixes: bool,
     continue_on_error: bool,
 ) -> router::BoxCloneService {
-    // create a mock service we will use to test our plugin
-    let mut mock_service = test::MockSupergraphService::new();
-
-    // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
-    let expected_mock_response_data = "response created within the mock";
-
-    // Let's set up our mock to make sure it will be called once
-    mock_service.expect_clone().return_once(move || {
-        let mut mock_service = test::MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .once()
-            .returning(move |req: supergraph::Request| {
-                Ok(supergraph::Response::fake_builder()
-                    .data(expected_mock_response_data)
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_service
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
     });
 
     let jwks_url = create_an_url("jwks.json");
@@ -180,13 +170,8 @@ async fn load_plugin() {
 
 #[tokio::test]
 async fn it_rejects_when_there_is_no_auth_header() {
-    let mut mock_service = test::MockSupergraphService::new();
-    mock_service.expect_clone().return_once(move || {
-        println!("cloned to supergraph mock");
-        let mut mock_service = test::MockSupergraphService::new();
-        mock_service.expect_call().never();
-        mock_service
-    });
+    let (mock_service, _handle) =
+        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
     let jwks_url = create_an_url("jwks.json");
 
     let config = serde_json::json!({
@@ -878,21 +863,17 @@ async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whi
 
 #[tokio::test]
 async fn it_extracts_the_token_from_cookies() {
-    let mut mock_service = test::MockSupergraphService::new();
-    mock_service.expect_clone().return_once(move || {
-        println!("cloned to supergraph mock");
-        let mut mock_service = test::MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .once()
-            .returning(move |req: supergraph::Request| {
-                Ok(supergraph::Response::fake_builder()
-                    .data("response created within the mock")
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_service
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
     });
     let jwks_url = create_an_url("jwks.json");
 
@@ -965,21 +946,17 @@ async fn it_extracts_the_token_from_cookies() {
 
 #[tokio::test]
 async fn it_supports_multiple_sources() {
-    let mut mock_service = test::MockSupergraphService::new();
-    mock_service.expect_clone().return_once(move || {
-        println!("cloned to supergraph mock");
-        let mut mock_service = test::MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .once()
-            .returning(move |req: supergraph::Request| {
-                Ok(supergraph::Response::fake_builder()
-                    .data("response created within the mock")
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_service
+    let (mock_service, mut handle) =
+        tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
     });
     let jwks_url = create_an_url("jwks.json");
 
