@@ -21,7 +21,6 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
@@ -964,16 +963,14 @@ async fn no_data() {
         .extra_private_plugin(entity_cache)
         .subgraph_hook(|name, service| {
             if name == "orga" {
-                fn mock_orga_service() -> MockSubgraphService {
-                    let mut subgraph = MockSubgraphService::new();
-                    subgraph.expect_clone().returning(mock_orga_service);
-                    subgraph
-                        .expect_call()
-                        .times(0..=1)
-                        .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                    subgraph
-                }
-                mock_orga_service().boxed_clone()
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                tokio::spawn(async move {
+                    // Drop each responder to simulate an error ("orga not found").
+                    // tower_test sends ClosedError when the responder is dropped.
+                    while let Some((_req, _responder)) = handle.next_request().await {}
+                });
+                mock.boxed_clone()
             } else {
                 service
             }

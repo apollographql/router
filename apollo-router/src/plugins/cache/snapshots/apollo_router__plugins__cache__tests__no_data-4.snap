@@ -23,7 +23,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "HTTP fetch failed: orga not found",
+      "message": "HTTP fetch failed: service closed",
       "path": [
         "currentUser",
         "allOrganizations",
@@ -32,7 +32,7 @@ expression: response
       "extensions": {
         "code": "SUBREQUEST_HTTP_ERROR",
         "service": "orga",
-        "reason": "orga not found"
+        "reason": "service closed"
       }
     }
   ]
