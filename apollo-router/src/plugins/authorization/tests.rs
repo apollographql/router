@@ -10,7 +10,6 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::router;
@@ -1102,36 +1101,32 @@ async fn cache_key_metadata() {
         .unwrap()
         .schema(CACHE_KEY_SCHEMA)
         .subgraph_hook(|_name, _service| {
-            let mut mock_subgraph_service = MockSubgraphService::new();
-            mock_subgraph_service
-                .expect_clone()
-                .return_once(MockSubgraphService::new);
-            mock_subgraph_service.expect_call().times(1).returning(
-                move |req: subgraph::Request| {
-                    assert_eq!(
-                        *req.authorization,
-                        CacheKeyMetadata {
-                            is_authenticated: true,
-                            scopes: vec!["id".to_string()],
-                            policies: vec![]
-                        }
-                    );
-
-                    Ok(subgraph::Response::fake_builder()
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                assert_eq!(
+                    *req.authorization,
+                    CacheKeyMetadata {
+                        is_authenticated: true,
+                        scopes: vec!["id".to_string()],
+                        policies: vec![]
+                    }
+                );
+                responder.send_response(
+                    subgraph::Response::fake_builder()
                         .context(req.context)
                         .data(serde_json::json! {{
-
-                                "currentUser": {
-                                    "id": 1,
-                                    "name": "A", // This will be filtered because we don't have the policy
-                                    "phone": "1234"
-                                }
-
+                            "currentUser": {
+                                "id": 1,
+                                "name": "A",
+                                "phone": "1234"
+                            }
                         }})
-                        .build())
-                },
-            );
-            mock_subgraph_service.boxed_clone()
+                        .build(),
+                );
+            });
+            mock.boxed_clone()
         })
         .build_router()
         .await
