@@ -214,18 +214,15 @@ mod tests {
     use tower::ServiceExt;
 
     use super::QueryDeduplicationService;
-    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
     // Testing strategy:
     //  - We make our subgraph invocations slow (100ms) to increase our chance of a positive dedup
-    //    result
-    //  - We count how many times our inner service is invoked across all service invocations
-    //  - We never know exactly which inner service is going to be invoked (since we are driving
-    //    the service requests concurrently and in parallel), so we set times to 0..2 (== 0 or 1)
-    //    for each expectation.
-    //  - Every time an inner service is invoked we increment our shared counter.
+    //    result.
+    //  - We count how many times our inner service is invoked across all service invocations.
+    //  - With tower_test::mock all clones share the same channel, so the handle driver receives
+    //    every call regardless of which clone the dedup service picked.
     //  - If our shared counter == 1 at the end, then our test passes.
     //
     //  Note: If this test starts to fail it may be because we need to increase the sleep time for
@@ -233,58 +230,30 @@ mod tests {
     //
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dedup_service() {
-        let mut mock = MockSubgraphService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let inner_invocation_count = Arc::new(AtomicU8::new(0));
-        let inner_invocation_count_1 = inner_invocation_count.clone();
-        let inner_invocation_count_2 = inner_invocation_count.clone();
-        let inner_invocation_count_3 = inner_invocation_count.clone();
+        let inner_invocation_count_driver = inner_invocation_count.clone();
 
-        mock.expect_clone().returning(move || {
-            let mut mock = MockSubgraphService::new();
-
-            let inner_invocation_count_1 = inner_invocation_count_1.clone();
-            mock.expect_clone().returning(move || {
-                let mut mock = MockSubgraphService::new();
-                let inner_invocation_count_1 = inner_invocation_count_1.clone();
-                mock.expect_call()
-                    .times(0..2)
-                    .returning(move |req: SubgraphRequest| {
-                        std::thread::sleep(Duration::from_millis(100));
-                        inner_invocation_count_1.fetch_add(1, Ordering::Relaxed);
-                        Ok(SubgraphResponse::fake_builder()
-                            .context(req.context)
-                            .build())
-                    });
-                mock
-            });
-            let inner_invocation_count_2 = inner_invocation_count_2.clone();
-            mock.expect_call()
-                .times(0..2)
-                .returning(move |req: SubgraphRequest| {
-                    std::thread::sleep(Duration::from_millis(100));
-                    inner_invocation_count_2.fetch_add(1, Ordering::Relaxed);
-                    Ok(SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .build())
-                });
-            mock
-        });
-        mock.expect_call()
-            .times(0..2)
-            .returning(move |req: SubgraphRequest| {
-                std::thread::sleep(Duration::from_millis(100));
-                inner_invocation_count_3.fetch_add(1, Ordering::Relaxed);
-                Ok(SubgraphResponse::fake_builder()
+        // With deduplication, exactly one request reaches the inner service regardless of how many
+        // clones the service makes. Sleep 100ms so both concurrent callers are in-flight when dedup
+        // fires.
+        tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            inner_invocation_count_driver.fetch_add(1, Ordering::Relaxed);
+            responder.send_response(
+                SubgraphResponse::fake_builder()
                     .context(req.context)
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
         let mut svc = QueryDeduplicationService::new(mock);
 
         let request = SubgraphRequest::fake_builder().build();
 
-        // Spawn our service invocations so they execute in parallel
+        // Spawn our service invocations so they execute in parallel.
         let fut1 = tokio::spawn(
             svc.ready()
                 .await
@@ -295,7 +264,7 @@ mod tests {
         let (res1, res2) = tokio::join!(fut1, fut2);
 
         // We don't care about our actual request/responses, we just want to make sure that
-        // deduplication occurs...
+        // deduplication occurs.
         res1.expect("fut1 spawned").expect("fut1 joined");
         res2.expect("fut2 spawned").expect("fut2 joined");
 
