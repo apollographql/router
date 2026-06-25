@@ -211,14 +211,13 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
         estimated_size: Default::default(),
     };
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    // This clone happens in `SubgraphServiceFactory::new`
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service.expect_call().times(1).withf(|_| {
-            panic!("this panic should be propagated to the test harness");
-        });
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let _driver = tokio::spawn(async move {
+        let (_req, _responder) = handle.next_request().await.unwrap();
+        panic!("this panic should be propagated to the test harness");
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -254,7 +253,7 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
     let reason: String =
         serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
             .unwrap();
-    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
+    assert_eq!(reason, "service closed".to_string());
 }
 
 #[tokio::test]
@@ -271,23 +270,16 @@ async fn fetch_includes_operation_name() {
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
-                    == Some("topProducts_product_0".into());
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches =
+            req.subgraph_request.body().operation_name == Some("topProducts_product_0".into());
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -320,6 +312,7 @@ async fn fetch_includes_operation_name() {
         )
         .await;
 
+    driver.await.unwrap();
     assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
 }
 
@@ -337,23 +330,15 @@ async fn fetch_makes_post_requests() {
     let succeeded: Arc<AtomicBool> = Default::default();
     let inner_succeeded = Arc::clone(&succeeded);
 
-    let mut mock_products_service = plugin::test::MockSubgraphService::new();
-
-    mock_products_service.expect_clone().return_once(|| {
-        let mut mock_products_service = plugin::test::MockSubgraphService::new();
-        mock_products_service
-            .expect_call()
-            .times(1)
-            .withf(move |request| {
-                let matches = request.subgraph_request.method() == Method::POST;
-                inner_succeeded.store(matches, Ordering::SeqCst);
-                matches
-            })
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_products_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_products_service
+    let (mock_products_service, mut handle) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        let matches = req.subgraph_request.method() == Method::POST;
+        inner_succeeded.store(matches, Ordering::SeqCst);
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -386,6 +371,7 @@ async fn fetch_makes_post_requests() {
         )
         .await;
 
+    driver.await.unwrap();
     assert!(
         succeeded.load(Ordering::SeqCst),
         "subgraph requests must be http post"
@@ -469,47 +455,34 @@ async fn defer() {
             estimated_size: Default::default(),
         };
 
-    let mut mock_x_service = plugin::test::MockSubgraphService::new();
-    mock_x_service.expect_clone().return_once(|| {
-        let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "t": {"id": 1234,
-                        "__typename": "T",
-                         "x": "X"
-                        }
-                    }})
-                    .build())
-            });
-        mock_x_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_x_service
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "t": {"id": 1234, "__typename": "T", "x": "X"}
+                }})
+                .build(),
+        );
     });
 
-    let mut mock_y_service = plugin::test::MockSubgraphService::new();
-    mock_y_service.expect_clone().return_once(|| {
-        let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service
-            .expect_call()
-            .times(1)
-            .withf(move |_request| true)
-            .returning(|_| {
-                Ok(SubgraphResponse::fake_builder()
-                    .data(serde_json::json! {{
-                        "_entities": [{"y": "Y", "__typename": "T"}]
-                    }})
-                    .build())
-            });
-        mock_y_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_y_service
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .data(serde_json::json! {{
+                    "_entities": [{"y": "Y", "__typename": "T"}]
+                }})
+                .build(),
+        );
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
@@ -558,6 +531,8 @@ async fn defer() {
         // unneeded parts are removed in response formatting
         serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
     );
+    driver_x.await.unwrap();
+    driver_y.await.unwrap();
 }
 
 #[tokio::test]
@@ -756,26 +731,25 @@ async fn dependent_mutations() {
         estimated_size: Default::default(),
     };
 
-    let mut mock_a_service = plugin::test::MockSubgraphService::new();
-    mock_a_service.expect_clone().returning(|| {
-        let mut mock_a_service = plugin::test::MockSubgraphService::new();
-        mock_a_service
-            .expect_call()
-            .times(1)
-            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
-        mock_a_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-
-        mock_a_service
+    let (mock_a_service, mut handle_a) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_a = tokio::spawn(async move {
+        let (_req, responder) = handle_a.next_request().await.unwrap();
+        responder.send_response(SubgraphResponse::fake_builder().build());
     });
 
     // the first fetch returned null, so there should never be a call to B
-    let mut mock_b_service = plugin::test::MockSubgraphService::new();
-    mock_b_service
-        .expect_clone()
-        .returning(plugin::test::MockSubgraphService::new);
-    mock_b_service.expect_call().never();
+    let (mock_b_service, mut handle_b) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_b = tokio::spawn(async move {
+        if handle_b.next_request().await.is_some() {
+            panic!("service B should not be called");
+        }
+    });
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let ssf = subgraph_service_factory(vec![
@@ -805,6 +779,9 @@ async fn dependent_mutations() {
             None,
         )
         .await;
+    driver_a.await.unwrap();
+    drop(sf);
+    driver_b.await.unwrap();
 }
 
 #[tokio::test]
@@ -2177,11 +2154,14 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
     };
 
     // Mock X service: returns the root query data for start
-    let mut mock_x_service = plugin::test::MockSubgraphService::new();
-    mock_x_service.expect_clone().return_once(|| {
-        let mut mock_x_service = plugin::test::MockSubgraphService::new();
-        mock_x_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_x_service, mut handle_x) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_x = tokio::spawn(async move {
+        let (_req, responder) = handle_x.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "start": {
                         "__typename": "T",
@@ -2196,47 +2176,41 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         }
                     }
                 }})
-                .build())
-        });
-        mock_x_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_x_service
+                .build(),
+        );
     });
 
     // Mock Y service: entity fetch for Sub, returns data field
-    let mut mock_y_service = plugin::test::MockSubgraphService::new();
-    mock_y_service.expect_clone().return_once(|| {
-        let mut mock_y_service = plugin::test::MockSubgraphService::new();
-        mock_y_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_y_service, mut handle_y) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_y = tokio::spawn(async move {
+        let (_req, responder) = handle_y.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "_entities": [{"data": "d1"}]
                 }})
-                .build())
-        });
-        mock_y_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_y_service
+                .build(),
+        );
     });
 
     // Mock Z service: entity fetch for Inner, returns target
     // If the bug exists, this service will NOT be called (fetch is skipped).
-    let mut mock_z_service = plugin::test::MockSubgraphService::new();
-    mock_z_service.expect_clone().return_once(|| {
-        let mut mock_z_service = plugin::test::MockSubgraphService::new();
-        mock_z_service.expect_call().times(1).returning(|_| {
-            Ok(SubgraphResponse::fake_builder()
+    let (mock_z_service, mut handle_z) = tower_test::mock::pair::<
+        crate::services::SubgraphRequest,
+        crate::services::SubgraphResponse,
+    >();
+    let driver_z = tokio::spawn(async move {
+        let (_req, responder) = handle_z.next_request().await.unwrap();
+        responder.send_response(
+            SubgraphResponse::fake_builder()
                 .data(serde_json::json! {{
                     "_entities": [{"target": {"x": "42"}}]
                 }})
-                .build())
-        });
-        mock_z_service
-            .expect_clone()
-            .returning(plugin::test::MockSubgraphService::new);
-        mock_z_service
+                .build(),
+        );
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
@@ -2313,6 +2287,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         inner_data["target"]["x"], "42",
         "target should have x from Z fetch"
     );
+    driver_x.await.unwrap();
+    driver_y.await.unwrap();
+    driver_z.await.unwrap();
 }
 
 // Documents that the user-visible "errors" array stays SILENT when the
