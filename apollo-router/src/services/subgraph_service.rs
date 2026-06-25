@@ -48,6 +48,7 @@ use crate::Context;
 use crate::Notify;
 use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
+use crate::batching::SubgraphBatchRequest;
 use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -365,7 +366,7 @@ fn http_response_to_graphql_response(
 
 /// Process a single subgraph batch request
 #[instrument(skip(client_factory, contexts, request))]
-pub(crate) async fn process_batch(
+async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
@@ -620,7 +621,7 @@ pub(crate) async fn process_batch(
 }
 
 /// Notify all listeners of a batch query of the results
-pub(crate) async fn notify_batch_query(
+async fn notify_batch_query(
     service: String,
     senders: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     responses: Result<Vec<SubgraphResponse>, FetchError>,
@@ -699,7 +700,6 @@ type BatchInfo = (
         String,
         http::Request<RouterBody>,
         Vec<(Context, SubgraphRequestId)>,
-        usize,
     ),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
@@ -714,9 +714,14 @@ pub(crate) async fn process_batches(
     let mut errors = vec![];
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
-            let (_op_name, contexts, request, txs) = assemble_batch(requests).await?;
+            let SubgraphBatchRequest {
+                operation_name: _,
+                contexts,
+                request,
+                txs,
+            } = assemble_batch(requests).await?;
 
-            Ok(((service, request, contexts, txs.len()), txs))
+            Ok(((service, request, contexts), txs))
         }))
         .await
         .into_iter()
@@ -744,20 +749,22 @@ pub(crate) async fn process_batches(
         )
         .into());
     }
-    let batch_futures = info.into_iter().zip_eq(txs).map(
-        |((service, request, contexts, listener_count), senders)| async move {
-            let batch_result = process_batch(
-                cf.clone(),
-                service.clone(),
-                contexts,
-                request,
-                listener_count,
-            )
-            .await;
+    let batch_futures =
+        info.into_iter()
+            .zip_eq(txs)
+            .map(|((service, request, contexts), senders)| async move {
+                let listener_count = senders.len();
+                let batch_result = process_batch(
+                    cf.clone(),
+                    service.clone(),
+                    contexts,
+                    request,
+                    listener_count,
+                )
+                .await;
 
-            notify_batch_query(service, senders, batch_result).await
-        },
-    );
+                notify_batch_query(service, senders, batch_result).await
+            });
 
     futures::future::try_join_all(batch_futures).await?;
 
@@ -804,7 +811,7 @@ async fn call_http(
 }
 
 /// call_single_http makes http calls with modified graphql::Request (body)
-pub(crate) async fn call_single_http(
+async fn call_single_http(
     request: SubgraphRequest,
     client: crate::services::http::BoxCloneService,
     service_name: &str,
