@@ -193,85 +193,53 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        if matches!(
-            init.config.router.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.router.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
+        for (path, conf) in [
+            (
+                "coprocessor.router.request.context",
+                &init.config.router.request.context,
+            ),
+            (
+                "coprocessor.router.response.context",
+                &init.config.router.response.context,
+            ),
+            (
+                "coprocessor.supergraph.request.context",
+                &init.config.supergraph.request.context,
+            ),
+            (
+                "coprocessor.supergraph.response.context",
+                &init.config.supergraph.response.context,
+            ),
+            (
+                "coprocessor.execution.request.context",
+                &init.config.execution.request.context,
+            ),
+            (
+                "coprocessor.execution.response.context",
+                &init.config.execution.response.context,
+            ),
+            (
+                "coprocessor.subgraph.all.request.context",
+                &init.config.subgraph.all.request.context,
+            ),
+            (
+                "coprocessor.subgraph.all.response.context",
+                &init.config.subgraph.all.response.context,
+            ),
+            (
+                "coprocessor.connector.all.request.context",
+                &init.config.connector.all.request.context,
+            ),
+            (
+                "coprocessor.connector.all.response.context",
+                &init.config.connector.all.response.context,
+            ),
+        ] {
+            if let Some(value) = conf.deprecated_value_str() {
+                tracing::warn!(
+                    "Configuration `{path}: {value}` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+                );
+            }
         }
 
         // Validate all coprocessor URLs
@@ -631,6 +599,15 @@ impl ContextConf {
         match self {
             Self::Deprecated(v) => *v,
             Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
+        }
+    }
+
+    /// Returns the config value string as the user wrote it, if this conf is deprecated.
+    fn deprecated_value_str(&self) -> Option<&'static str> {
+        match self {
+            Self::Deprecated(true) => Some("true"),
+            Self::NewContextConf(NewContextConf::Deprecated) => Some("deprecated"),
+            _ => None,
         }
     }
 }
