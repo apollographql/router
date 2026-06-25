@@ -418,18 +418,18 @@ impl Drop for Batch {
     }
 }
 
+/// A batch of requests that we'll send to a subgraph (...as a single batch request).
+pub(crate) struct SubgraphBatchRequest {
+    pub(crate) operation_name: String,
+    pub(crate) contexts: Vec<(Context, SubgraphRequestId)>,
+    pub(crate) request: http::Request<RouterBody>,
+    pub(crate) txs: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
+}
+
 // Assemble a single batch request to a subgraph
 pub(crate) async fn assemble_batch(
     requests: Vec<BatchQueryInfo>,
-) -> Result<
-    (
-        String,
-        Vec<(Context, SubgraphRequestId)>,
-        http::Request<RouterBody>,
-        Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
-    ),
-    BoxError,
-> {
+) -> Result<SubgraphBatchRequest, BoxError> {
     let (txs, requests): (Vec<_>, Vec<_>) =
         requests.into_iter().map(|r| (r.sender, r.request)).unzip();
 
@@ -465,7 +465,12 @@ pub(crate) async fn assemble_batch(
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
-    Ok((operation_name, contexts, request, txs))
+    Ok(SubgraphBatchRequest {
+        operation_name,
+        contexts,
+        request,
+        txs,
+    })
 }
 
 #[cfg(test)]
@@ -483,6 +488,7 @@ mod tests {
 
     use super::Batch;
     use super::BatchQueryInfo;
+    use super::SubgraphBatchRequest;
     use super::assemble_batch;
     use crate::Configuration;
     use crate::Context;
@@ -529,7 +535,12 @@ mod tests {
             .map(|r| r.request.context.id.clone())
             .collect::<Vec<String>>();
         // Assemble them
-        let (op_name, contexts, request, txs) = assemble_batch(requests)
+        let SubgraphBatchRequest {
+            operation_name,
+            contexts,
+            request,
+            txs,
+        } = assemble_batch(requests)
             .await
             .expect("it can assemble a batch");
 
@@ -541,7 +552,7 @@ mod tests {
         assert_eq!(input_context_ids, output_context_ids);
 
         // Make sure that the name of the entire batch is that of the first
-        assert_eq!(op_name, "batch_test_0");
+        assert_eq!(operation_name, "batch_test_0");
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
