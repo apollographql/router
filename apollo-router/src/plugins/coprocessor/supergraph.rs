@@ -672,10 +672,10 @@ mod tests {
     use super::*;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockInternalHttpClientService;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::router;
     use crate::services::supergraph;
 
@@ -684,32 +684,20 @@ mod tests {
         callback: fn(
             http::Request<RouterBody>,
         ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(
-                    move |req: crate::services::http::HttpRequest| {
-                        let context = req.context.clone();
-                        let fut = callback(req.http_request);
-                        Box::pin(async move {
-                            let response = fut.await?;
-                            Ok(crate::services::http::HttpResponse {
-                                http_response: response,
-                                context,
-                            })
-                        })
-                    },
-                );
-                mock_http_client
-            });
-            mock_http_client
+    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                let context = req.context.clone();
+                if let Ok(response) = callback(req.http_request).await {
+                    responder.send_response(HttpResponse {
+                        http_response: response,
+                        context,
+                    });
+                }
+            }
         });
-
-        mock_http_client
+        mock
     }
 
     #[allow(clippy::type_complexity)]
@@ -717,35 +705,10 @@ mod tests {
         callback: fn(
             http::Request<RouterBody>,
         ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(
-                        move |req: crate::services::http::HttpRequest| {
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(crate::services::http::HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        },
-                    );
-                    mock_http_client
-                });
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
+    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        // Identical to mock_with_callback — the deferred path calls the http client once per
+        // response chunk, so the looping driver handles both single and multi-chunk cases.
+        mock_with_callback(callback)
     }
 
     #[tokio::test]
@@ -763,50 +726,47 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
+        tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.supergraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.supergraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
 
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
+            // The subgraph uri should have changed
+            assert_eq!(
+                Some("MyQuery"),
+                req.supergraph_request.body().operation_name.as_deref()
+            );
 
-                // The subgraph uri should have changed
-                assert_eq!(
-                    Some("MyQuery"),
-                    req.supergraph_request.body().operation_name.as_deref()
-                );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.body().query.as_ref().unwrap()
+            );
 
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.supergraph_request.body().query.as_ref().unwrap()
-                );
-
-                Ok(supergraph::Response::builder()
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -911,11 +871,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
+        let (mock_supergraph_service_1, _handle_1) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -947,7 +904,7 @@ mod tests {
 
         let service = supergraph_stage.clone().as_service(
             mock_http_client,
-            mock_supergraph_service.boxed_clone(),
+            mock_supergraph_service_1.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -978,28 +935,24 @@ mod tests {
             "my error message"
         );
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service_2, mut handle_2) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
+        tokio::spawn(async move {
+            let (req, responder) = handle_2.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         // This should not trigger the supergraph response stage because of the condition
         let request = supergraph::Request::fake_builder().build().unwrap();
-        // let mut mock_http_client = MockInternalHttpClientService::new();
-        // mock_http_client.expect_clone().;
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
@@ -1030,7 +983,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed_clone(),
+            mock_supergraph_service_2.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -1057,23 +1010,21 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
+        tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let mock_http_client =
             mock_with_deferred_callback(move |mut res: http::Request<RouterBody>| {
@@ -1198,16 +1149,13 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::fake_stream_builder()
+        tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_stream_builder()
                     .response(
                         graphql::Response::builder()
                             .data(json!({ "test": 1 }))
@@ -1228,8 +1176,9 @@ mod tests {
                     )
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
@@ -1320,16 +1269,13 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::fake_stream_builder()
+        tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_stream_builder()
                     .response(
                         graphql::Response::builder()
                             .data(json!({ "test": 1 }))
@@ -1350,8 +1296,9 @@ mod tests {
                     )
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
@@ -1445,11 +1392,13 @@ mod tests {
                 },
             };
 
-            let mut mock_supergraph_service = MockSupergraphService::new();
-            mock_supergraph_service
-                .expect_call()
-                .returning(|req: supergraph::Request| {
-                    Ok(supergraph::Response::fake_stream_builder()
+            let (mock_supergraph_service, mut supergraph_handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+            tokio::spawn(async move {
+                let (req, responder) = supergraph_handle.next_request().await.unwrap();
+                responder.send_response(
+                    supergraph::Response::fake_stream_builder()
                         // Chunk 1: no errors — on_graphql_error condition is false → not called
                         .response(
                             graphql::Response::builder()
@@ -1470,8 +1419,9 @@ mod tests {
                         )
                         .context(req.context)
                         .build()
-                        .unwrap())
-                });
+                        .unwrap(),
+                );
+            });
 
             let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
                 Box::pin(async {
@@ -1535,23 +1485,22 @@ mod tests {
     }
 
     // Helper function to create mock supergraph service
-    fn create_mock_supergraph_service() -> MockSupergraphService {
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_supergraph_service
+    fn create_mock_supergraph_service()
+    -> tower_test::mock::Mock<supergraph::Request, supergraph::Response> {
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    supergraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            }
+        });
+        mock
     }
 
     // Helper functions for supergraph request validation tests
@@ -1571,8 +1520,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
-    fn create_mock_http_client_supergraph_request_valid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_valid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1596,8 +1545,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL break response
-    fn create_mock_http_client_supergraph_request_empty_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_empty_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1619,8 +1568,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_supergraph_request_invalid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_invalid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1644,8 +1593,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_supergraph_response_valid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_response_valid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -1666,7 +1615,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_invalid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
@@ -1687,7 +1637,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty response
-    fn create_mock_http_client_empty_response() -> MockInternalHttpClientService {
+    fn create_mock_http_client_empty_response() -> tower_test::mock::Mock<HttpRequest, HttpResponse>
+    {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
