@@ -18,6 +18,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -576,6 +577,7 @@ dependencies = [
  "serde_json_bytes",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -1360,6 +1362,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -1726,6 +1729,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -2626,6 +2630,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
  "tracing",
 ]
 
@@ -2639,6 +2644,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -3988,6 +3994,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -4719,6 +4726,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -5333,6 +5341,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -5905,6 +5914,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
