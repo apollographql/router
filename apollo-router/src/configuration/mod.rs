@@ -460,14 +460,6 @@ impl Configuration {
         }
     }
 
-    fn apollo_plugin_enabled(&self, plugin_name: &str) -> bool {
-        self.apollo_plugins
-            .plugins
-            .get(plugin_name)
-            .and_then(|config| config.as_object().and_then(|c| c.get("enabled")))
-            .and_then(|enabled| enabled.as_bool())
-            .unwrap_or(false)
-    }
 }
 
 impl Default for Configuration {

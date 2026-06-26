@@ -36,7 +36,6 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
