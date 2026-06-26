@@ -1106,28 +1106,29 @@ async fn cache_key_metadata() {
             let (mock, mut handle) =
                 tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
             let driver = tokio::spawn(async move {
-                let (req, responder) = handle.next_request().await.unwrap();
-                assert_eq!(
-                    *req.authorization,
-                    CacheKeyMetadata {
-                        is_authenticated: true,
-                        scopes: vec!["id".to_string()],
-                        policies: vec![]
-                    }
-                );
-                // name will be null in the response: it requires @policy(["name"]) which we don't hold
-                responder.send_response(
-                    subgraph::Response::fake_builder()
-                        .context(req.context)
-                        .data(serde_json::json! {{
-                            "currentUser": {
-                                "id": 1,
-                                "name": "A",
-                                "phone": "1234"
-                            }
-                        }})
-                        .build(),
-                );
+                while let Some((req, responder)) = handle.next_request().await {
+                    assert_eq!(
+                        *req.authorization,
+                        CacheKeyMetadata {
+                            is_authenticated: true,
+                            scopes: vec!["id".to_string()],
+                            policies: vec![]
+                        }
+                    );
+                    // name will be null in the response: it requires @policy(["name"]) which we don't hold
+                    responder.send_response(
+                        subgraph::Response::fake_builder()
+                            .context(req.context)
+                            .data(serde_json::json! {{
+                                "currentUser": {
+                                    "id": 1,
+                                    "name": "A",
+                                    "phone": "1234"
+                                }
+                            }})
+                            .build(),
+                    );
+                }
             });
             drivers_clone.lock().unwrap().push(driver);
             mock.boxed_clone()
