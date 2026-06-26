@@ -1357,19 +1357,10 @@ async fn test_rhai_metric_subgraph_request() {
 #[tokio::test]
 async fn test_rhai_metric_failed_callback() {
     async {
-        // The supergraph_service in test_metrics_fail.rhai throws, so we might never call the mock.
+        // The supergraph_service in test_metrics_fail.rhai throws before calling the inner
+        // service, so the mock is never reached.
         let (mock_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-        let driver = tokio::spawn(async move {
-            while let Some((req, responder)) = handle.next_request().await {
-                responder.send_response(
-                    SupergraphResponse::fake_builder()
-                        .context(req.context)
-                        .build()
-                        .unwrap(),
-                );
-            }
-        });
 
         let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.rhai")
@@ -1385,7 +1376,8 @@ async fn test_rhai_metric_failed_callback() {
         let mut router_service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder().build().unwrap();
         let _ = router_service.ready().await.unwrap().call(req).await;
-        crate::plugin::test::await_mock_driver(driver).await;
+        drop(router_service);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
 
         assert_histogram_count!(
             "apollo.router.operations.rhai.duration",

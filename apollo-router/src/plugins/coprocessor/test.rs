@@ -3893,7 +3893,7 @@ mod tests {
         >();
         tokio::spawn(async move {
             while let Some((_req, responder)) = handle.next_request().await {
-                drop(responder); // sends ClosedError to caller
+                responder.send_error("hard error from mock http client");
             }
         });
         mock
@@ -4644,7 +4644,7 @@ mod tests {
                         http_response: response,
                         context,
                     }),
-                    Err(_) => drop(responder),
+                    Err(err) => responder.send_error(err),
                 }
             }
         });
@@ -4673,7 +4673,7 @@ mod tests {
                         http_response: response,
                         context,
                     }),
-                    Err(_) => drop(responder),
+                    Err(err) => responder.send_error(err),
                 }
             }
         });
@@ -6591,7 +6591,7 @@ mod tests {
                             http_response: response,
                             context,
                         }),
-                        Err(_) => drop(responder),
+                        Err(err) => responder.send_error(err),
                     }
                 }
             });

@@ -214,9 +214,10 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
         crate::services::SubgraphRequest,
         crate::services::SubgraphResponse,
     >();
-    let _driver = tokio::spawn(async move {
+    let driver = tokio::spawn(async move {
         let (_req, _responder) = handle.next_request().await.unwrap();
-        panic!("this panic should be propagated to the test harness");
+        // dropping _responder without sending a response simulates a service failure;
+        // tower_test reports this to the caller as "service closed"
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -248,6 +249,7 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
             None,
         )
         .await;
+    crate::plugin::test::await_mock_driver(driver).await;
     assert_eq!(result.errors.len(), 1);
     let reason: String =
         serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())

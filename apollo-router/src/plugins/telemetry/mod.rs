@@ -2168,6 +2168,7 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
+    use crate::error::FetchError;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2515,7 +2516,8 @@ mod tests {
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let driver = tokio::spawn(async move {
-                while let Some((req, responder)) = handle.next_request().await {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     responder.send_response(
                         RouterResponse::fake_builder()
                             .context(req.context)
@@ -2596,7 +2598,8 @@ mod tests {
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let driver = tokio::spawn(async move {
-                while let Some((req, responder)) = handle.next_request().await {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     responder.send_response(
                         RouterResponse::fake_builder()
                             .context(req.context)
@@ -2688,7 +2691,8 @@ mod tests {
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
             let driver = tokio::spawn(async move {
-                while let Some((req, responder)) = handle.next_request().await {
+                for _ in 0..3 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     responder.send_response(
                         SupergraphResponse::fake_builder()
                             .context(req.context)
@@ -2797,7 +2801,8 @@ mod tests {
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
-                while let Some((req, responder)) = handle.next_request().await {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
@@ -2904,7 +2909,8 @@ mod tests {
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
-                while let Some((req, responder)) = handle.next_request().await {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
@@ -3013,7 +3019,8 @@ mod tests {
         let (mock_request_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let driver = tokio::spawn(async move {
-            while let Some((req, responder)) = handle.next_request().await {
+            for _ in 0..10 {
+                let (req, responder) = handle.next_request().await.unwrap();
                 if req
                     .context
                     .extensions()
@@ -3147,8 +3154,12 @@ mod tests {
             let (mock_subgraph_service_in_error, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
-                let (_req, _responder) = handle.next_request().await.unwrap();
-                // drop responder to simulate service error
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_error(FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: String::from("my_subgraph_name_error"),
+                    reason: String::from("cannot contact the subgraph"),
+                });
             });
 
             let mut subgraph_service = plugin.subgraph_service(
@@ -3181,7 +3192,7 @@ mod tests {
             assert_histogram_count!(
                 "http.client.request.duration",
                 1,
-                "message" = "service closed",
+                "message" = "HTTP fetch failed: cannot contact the subgraph",
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );

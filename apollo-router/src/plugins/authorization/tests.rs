@@ -1115,6 +1115,7 @@ async fn cache_key_metadata() {
                         policies: vec![]
                     }
                 );
+                // name and phone will be filtered because we don't have the required policy
                 responder.send_response(
                     subgraph::Response::fake_builder()
                         .context(req.context)
