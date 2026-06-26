@@ -558,7 +558,6 @@ where
         update_context_from_coprocessor(
             &context,
             returned_context,
-            &response_config.context,
             &keys_sent,
         )?;
     }

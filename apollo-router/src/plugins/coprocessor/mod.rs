@@ -634,7 +634,6 @@ pub(crate) fn validate_coprocessor_url(url: &str, config_path: &str) -> Result<(
 pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
-    context_config: &ContextConf,
     keys_sent: &HashSet<String>,
 ) -> Result<(), BoxError> {
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
@@ -1276,7 +1275,7 @@ where
             parts.status = control.get_http_status()?;
         }
         if let Some(ctx) = co_processor_output.context {
-            update_context_from_coprocessor(&context, ctx, &response_config.context, &keys_sent)?;
+            update_context_from_coprocessor(&context, ctx, &keys_sent)?;
         }
         if let Some(headers) = co_processor_output.headers {
             parts.headers = internalize_header_map(headers)?;
@@ -1381,7 +1380,6 @@ where
                         update_context_from_coprocessor(
                             &generator_map_context,
                             ctx,
-                            &context_conf,
                             &keys_sent,
                         )?;
                     }
@@ -1729,7 +1727,6 @@ where
         update_context_from_coprocessor(
             &response.context,
             context,
-            &response_config.context,
             &keys_sent,
         )?;
     }

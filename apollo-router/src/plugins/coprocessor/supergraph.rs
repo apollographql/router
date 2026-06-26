@@ -503,7 +503,6 @@ where
             update_context_from_coprocessor(
                 &response.context,
                 context,
-                &response_config.context,
                 &keys_sent,
             )?;
         }
@@ -614,7 +613,6 @@ where
                         update_context_from_coprocessor(
                             &generator_map_context,
                             context,
-                            &response_config_context,
                             &keys_sent,
                         )?;
                     }

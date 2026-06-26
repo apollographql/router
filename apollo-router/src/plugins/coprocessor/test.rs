@@ -4807,7 +4807,6 @@ mod tests {
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
@@ -4850,7 +4849,6 @@ mod tests {
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
@@ -4870,7 +4868,6 @@ mod tests {
     #[test]
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
         use std::collections::HashSet;
-        use std::sync::Arc;
 
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -4885,16 +4882,12 @@ mod tests {
         // Coprocessor returns context without k1 (deleted)
         let returned_context = Context::new();
 
-        // Use Selective config to only send "k1", not "key_not_sent"
-        let selective_keys: HashSet<String> = ["k1".to_string()].into();
-        let context_config = ContextConf::Selective(Arc::new(selective_keys));
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &context_config,
             &keys_sent,
         )
         .unwrap();
@@ -4936,7 +4929,6 @@ mod tests {
         update_context_from_coprocessor(
             &target_context,
             returned_context,
-            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
@@ -4989,7 +4981,6 @@ mod tests {
         update_context_from_coprocessor(
             &shared_context,
             returned_context,
-            &ContextConf::All,
             &keys_sent,
         )
         .unwrap();
