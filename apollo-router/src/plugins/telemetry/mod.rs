@@ -170,8 +170,11 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+// 1.x key names — fallback read path preserved until they are explicitly deprecated in 2.x
+const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
 pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
 pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_library_version";
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
@@ -613,8 +616,10 @@ impl PluginPrivate for Telemetry {
                         // that processing is deferred until the future is polled.
                         let get_from_context =
                             |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME);
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
+                        let client_name = get_from_context(&ctx, CLIENT_NAME)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_NAME));
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_VERSION));
 
                         if let Some(key) = client_name_key {
                             span.set_span_dyn_attribute(
