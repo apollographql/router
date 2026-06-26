@@ -107,6 +107,9 @@ async fn build_a_test_harness(
                     .unwrap())
             });
         mock_service
+            .expect_clone()
+            .returning(test::MockSupergraphService::new);
+        mock_service
     });
 
     let jwks_url = create_an_url("jwks.json");
@@ -185,6 +188,9 @@ async fn it_rejects_when_there_is_no_auth_header() {
         println!("cloned to supergraph mock");
         let mut mock_service = test::MockSupergraphService::new();
         mock_service.expect_call().never();
+        mock_service
+            .expect_clone()
+            .returning(test::MockSupergraphService::new);
         mock_service
     });
     let jwks_url = create_an_url("jwks.json");
@@ -893,6 +899,9 @@ async fn it_extracts_the_token_from_cookies() {
                     .unwrap())
             });
         mock_service
+            .expect_clone()
+            .returning(test::MockSupergraphService::new);
+        mock_service
     });
     let jwks_url = create_an_url("jwks.json");
 
@@ -979,6 +988,9 @@ async fn it_supports_multiple_sources() {
                     .build()
                     .unwrap())
             });
+        mock_service
+            .expect_clone()
+            .returning(test::MockSupergraphService::new);
         mock_service
     });
     let jwks_url = create_an_url("jwks.json");

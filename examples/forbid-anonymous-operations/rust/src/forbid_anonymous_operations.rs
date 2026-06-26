@@ -40,7 +40,7 @@ impl Plugin for ForbidAnonymousOperations {
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
         // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .checkpoint(|req: supergraph::Request| {
+            .checkpoint_async(|req: supergraph::Request| async move {
                 // The http_request is stored in a `SupergraphRequest` context.
                 // Its `body()` is an `apollo_router::Request`, that contains:
                 // - Zero or one query

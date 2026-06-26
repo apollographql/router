@@ -302,7 +302,7 @@ impl Plugin for Subscription {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: SubgraphRequest| {
+            .checkpoint_async(move |req: SubgraphRequest| async move {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()
@@ -800,6 +800,9 @@ mod tests {
                     .context(req.context)
                     .build())
             });
+        mock_subgraph_service
+            .expect_clone()
+            .returning(MockSubgraphService::new);
 
         let mut subgraph_service = dyn_plugin.subgraph_service(
             "my_subgraph_name",

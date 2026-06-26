@@ -148,7 +148,7 @@ fn supergraph_service(
         // .map_request()
         // .map_response()
         // .rate_limit()
-        // .checkpoint()
+        // .checkpoint_async()
         // .timeout()
         .service(service)
         .boxed_clone()

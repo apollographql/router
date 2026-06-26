@@ -46,7 +46,7 @@ impl Plugin for DoNotExecute {
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 Ok(ControlFlow::Break(
                     execution::Response::fake_builder()
                         .context(req.context)

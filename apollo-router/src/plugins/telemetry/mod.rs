@@ -446,38 +446,41 @@ impl PluginPrivate for Telemetry {
                     }
                 }
             }))
-            .checkpoint(move |req: router::Request| {
-                let library_name_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_name_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                let library_version_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_version_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                if !library_name_valid || !library_version_valid {
-                    if !library_name_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library name header value"
-                        );
+            .checkpoint_async(move |req: router::Request| {
+                let config_checkpoint = config_checkpoint.clone();
+                async move {
+                    let library_name_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_name_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    let library_version_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_version_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    if !library_name_valid || !library_version_valid {
+                        if !library_name_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library name header value"
+                            );
+                        }
+                        if !library_version_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library version header value"
+                            );
+                        }
+                        Ok(ControlFlow::Break(
+                            router::Response::error_builder()
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build()?,
+                        ))
+                    } else {
+                        Ok(ControlFlow::Continue(req))
                     }
-                    if !library_version_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library version header value"
-                        );
-                    }
-                    Ok(ControlFlow::Break(
-                        router::Response::error_builder()
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build()?,
-                    ))
-                } else {
-                    Ok(ControlFlow::Continue(req))
                 }
             })
             .map_future_with_request_data(
@@ -2240,6 +2243,25 @@ mod tests {
             .expect("unable to create telemetry plugin")
     }
 
+    /// Creates a MockRouterService that returns a BAD_REQUEST response and can be cloned
+    /// arbitrarily. Each clone also returns the same bad-request response. Needed because
+    /// AsyncCheckpointService unconditionally clones its inner service on every call(), so a
+    /// mock that is called N times will be cloned N-1 times and each clone will be called once.
+    fn make_bad_request_router_mock() -> MockRouterService {
+        let mut m = MockRouterService::new();
+        m.expect_call().returning(|req: RouterRequest| {
+            Ok(RouterResponse::fake_builder()
+                .context(req.context)
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap())
+        });
+        m.expect_clone().returning(make_bad_request_router_mock);
+        m
+    }
+
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
         let web_endpoint = plugin
             .web_endpoints()
@@ -2513,21 +2535,8 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
                     .await;
 
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(2)
-                .returning(move |req: RouterRequest| {
-                    Ok(RouterResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                });
             let mut bad_request_router_service =
-                plugin.router_service(BoxCloneService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneService::new(make_bad_request_router_mock()));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2590,21 +2599,8 @@ mod tests {
             ))
             .await;
 
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(2)
-                .returning(move |req: RouterRequest| {
-                    Ok(RouterResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                });
             let mut bad_request_router_service =
-                plugin.router_service(BoxCloneService::new(mock_bad_request_service));
+                plugin.router_service(BoxCloneService::new(make_bad_request_router_mock()));
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")

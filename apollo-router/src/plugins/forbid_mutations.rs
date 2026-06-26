@@ -42,7 +42,7 @@ impl Plugin for ForbidMutations {
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if self.forbid {
             ServiceBuilder::new()
-                .checkpoint(|req: ExecutionRequest| {
+                .checkpoint_async(|req: ExecutionRequest| async move {
                     if req.query_plan.contains_mutations() {
                         let error = Error::builder()
                             .message("Mutations are forbidden".to_string())
@@ -88,6 +88,9 @@ mod forbid_http_get_mutations_tests {
         let mut mock_service = MockExecutionService::new();
 
         mock_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
+        mock_service
             .expect_call()
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
@@ -119,13 +122,17 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
+        let mut mock_service = MockExecutionService::new();
+        mock_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
         ))
         .await
         .expect("couldn't create forbid_mutations plugin")
-        .execution_service(MockExecutionService::new().boxed_clone());
+        .execution_service(mock_service.boxed_clone());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
         let mut response = service_stack.oneshot(request).await.unwrap();

@@ -142,6 +142,26 @@ impl Service<RouterRequest> for RouterService {
     }
 }
 
+/// Creates a MockSupergraphService that can be called and cloned an arbitrary number of times.
+/// Each clone also has the callback and is itself callable and clonable.
+/// This is necessary because AsyncCheckpointService::call() unconditionally clones its inner
+/// service, so clones of the mock must also support being called on subsequent requests.
+#[cfg(test)]
+pub(crate) fn make_supergraph_mock_with_callback(
+    callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
+    + Send
+    + Sync
+    + Clone
+    + 'static,
+) -> MockSupergraphService {
+    let callback_for_clone = callback.clone();
+    let mut m = MockSupergraphService::new();
+    m.expect_call().returning(callback);
+    m.expect_clone()
+        .returning(move || make_supergraph_mock_with_callback(callback_for_clone.clone()));
+    m
+}
+
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
@@ -159,12 +179,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 + Clone {
     let mut supergraph_service = MockSupergraphService::new();
 
-    supergraph_service.expect_clone().returning(move || {
-        let cloned_callback = supergraph_callback.clone();
-        let mut supergraph_service = MockSupergraphService::new();
-        supergraph_service.expect_call().returning(cloned_callback);
-        supergraph_service
-    });
+    supergraph_service
+        .expect_clone()
+        .returning(move || make_supergraph_mock_with_callback(supergraph_callback.clone()));
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())

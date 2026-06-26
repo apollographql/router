@@ -811,6 +811,9 @@ fn it_can_compare_method_strings() {
 async fn test_router_service_adds_timestamp_header() -> Result<(), BoxError> {
     let mut mock_service = MockSupergraphService::new();
     mock_service
+        .expect_clone()
+        .return_once(MockSupergraphService::new);
+    mock_service
         .expect_call()
         .times(1)
         .returning(move |req: SupergraphRequest| {
@@ -982,6 +985,9 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
 async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError> {
     let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_clone()
+        .return_once(MockSupergraphService::new);
     mock_service.expect_call().never();
 
     let dyn_plugin = create_plugin(script_name).await?;
@@ -1031,6 +1037,9 @@ async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError>
 
 async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
     let mut mock_service = MockRouterService::new();
+    mock_service
+        .expect_clone()
+        .return_once(MockRouterService::new);
     mock_service.expect_call().never();
 
     let dyn_plugin = create_plugin(script_name).await?;
@@ -1046,6 +1055,9 @@ async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
 
 async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> {
     let mut mock_service = MockSubgraphService::new();
+    mock_service
+        .expect_clone()
+        .return_once(MockSubgraphService::new);
     mock_service.expect_call().never();
 
     let dyn_plugin = create_plugin(script_name).await?;
@@ -1239,6 +1251,9 @@ async fn test_rhai_metric_router_request() {
     async {
         let mut mock_service = MockRouterService::new();
         mock_service
+            .expect_clone()
+            .return_once(MockRouterService::new);
+        mock_service
             .expect_call()
             .times(1)
             .returning(move |req: router::Request| {
@@ -1278,6 +1293,9 @@ async fn test_rhai_metric_router_request() {
 async fn test_rhai_metric_supergraph_request() {
     async {
         let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .return_once(MockSupergraphService::new);
         mock_service
             .expect_call()
             .times(1)
@@ -1319,6 +1337,9 @@ async fn test_rhai_metric_subgraph_request() {
     async {
         let mut mock_service = crate::plugin::test::MockSubgraphService::new();
         mock_service
+            .expect_clone()
+            .return_once(MockSubgraphService::new);
+        mock_service
             .expect_call()
             .times(1)
             .returning(move |req: SubgraphRequest| {
@@ -1358,6 +1379,9 @@ async fn test_rhai_metric_subgraph_request() {
 async fn test_rhai_metric_failed_callback() {
     async {
         let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .return_once(MockSupergraphService::new);
         // The supergraph_service in test_metrics_fail.rhai throws, so we might never call the mock
         mock_service
             .expect_call()

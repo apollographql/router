@@ -45,6 +45,9 @@ async fn given_client_library_metadata_adds_values_to_context() {
 
         SupergraphResponse::fake_builder().build()
     });
+    mock_service
+        .expect_clone()
+        .returning(MockSupergraphService::new);
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -84,6 +87,9 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
 
         SupergraphResponse::fake_builder().build()
     });
+    mock_service
+        .expect_clone()
+        .returning(MockSupergraphService::new);
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -103,7 +109,10 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
 
 #[tokio::test]
 async fn invalid_library_name_returns_bad_request() {
-    let mock_service = MockSupergraphService::new();
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_clone()
+        .returning(MockSupergraphService::new);
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -129,7 +138,10 @@ async fn invalid_library_name_returns_bad_request() {
 
 #[tokio::test]
 async fn invalid_library_version_returns_bad_request() {
-    let mock_service = MockSupergraphService::new();
+    let mut mock_service = MockSupergraphService::new();
+    mock_service
+        .expect_clone()
+        .returning(MockSupergraphService::new);
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
