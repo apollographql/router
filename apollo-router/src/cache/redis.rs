@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -34,16 +29,6 @@ use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-use fred::types::scan::ScanResult;
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-use futures::Stream;
 use futures::future::join_all;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
@@ -997,7 +982,10 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 ))]
 impl RedisCacheStorage {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use std::pin::Pin;
+
         use fred::prelude::Key;
+        use futures::Stream;
         use futures::StreamExt;
 
         if self.namespace.is_none() {
@@ -1088,8 +1076,15 @@ impl RedisCacheStorage {
         &self,
         pattern: String,
         count: Option<u32>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
-    {
+    ) -> Result<
+        std::pin::Pin<
+            Box<
+                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
+                    + Send,
+            >,
+        >,
+        RedisError,
+    > {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
