@@ -4804,12 +4804,7 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -4846,12 +4841,7 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -4885,12 +4875,7 @@ mod tests {
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -4926,12 +4911,7 @@ mod tests {
         // k2 intentionally removed by coprocessor
         // k3 was never sent, must survive
 
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         assert!(target_context.contains_key("k1"));
         assert!(!target_context.contains_key("k2")); // deleted by coprocessor
@@ -4978,12 +4958,7 @@ mod tests {
             .insert("book_request_end", 5700i64)
             .unwrap();
 
-        update_context_from_coprocessor(
-            &shared_context,
-            returned_context,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&shared_context, returned_context, &keys_sent).unwrap();
 
         // accounts_request_start was never sent to book's coprocessor, so it must survive
         assert!(shared_context.contains_key("accounts_request_start"));

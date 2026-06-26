@@ -1724,11 +1724,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &response.context,
-            context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&response.context, context, &keys_sent)?;
     }
 
     if let Some(headers) = co_processor_output.headers {

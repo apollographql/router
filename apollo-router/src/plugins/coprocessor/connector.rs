@@ -555,11 +555,7 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &context,
-            returned_context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&context, returned_context, &keys_sent)?;
     }
 
     if let Some(body) = co_processor_output.body {
