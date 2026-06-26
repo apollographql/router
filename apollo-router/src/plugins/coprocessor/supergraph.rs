@@ -322,10 +322,7 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (mut key, value) in context.try_into_iter()? {
-                    if request_config.context.is_deprecated() {
-                        key = context_key_from_deprecated(key);
-                    }
+                for (key, value) in context.try_into_iter()? {
                     supergraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -348,10 +345,7 @@ where
     request.supergraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if request_config.context.is_deprecated() {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
