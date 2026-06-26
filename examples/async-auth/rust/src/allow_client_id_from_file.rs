@@ -177,7 +177,6 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
     use apollo_router::services::supergraph;
@@ -217,7 +216,8 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::fake_builder()
@@ -260,7 +260,8 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::fake_builder()
@@ -302,34 +303,29 @@ mod tests {
     async fn test_client_id_allowed() {
         let valid_client_id = "jeremy";
 
-        // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockSupergraphService::new();
-
         // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
-        // Let's set up our mock to make sure it will be called once, with the expected operation_name
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: supergraph::Request| {
-                assert_eq!(
-                    valid_client_id,
-                    // we're ok with unwrap's here because we're running a test
-                    // we would not do this in actual code
-                    req.supergraph_request
-                        .headers()
-                        .get("x-client-id")
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                );
-                // let's return the expected data
-                Ok(supergraph::Response::fake_builder()
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert_eq!(
+                valid_client_id,
+                req.supergraph_request
+                    .headers()
+                    .get("x-client-id")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            );
+            responder.send_response(
+                supergraph::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::fake_builder()
@@ -365,6 +361,7 @@ mod tests {
             // we're allowed to unwrap() here because we know the json is a str()
             graphql_response.data.unwrap().as_str().unwrap(),
             expected_mock_response_data
-        )
+        );
+        driver.await.unwrap();
     }
 }
