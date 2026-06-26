@@ -261,7 +261,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, _handle) =
+        let (mock_router_service, mut handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -307,6 +307,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -326,7 +327,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, _handle) =
+        let (mock_router_service, mut handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -372,6 +373,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -391,7 +393,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, _handle) =
+        let (mock_router_service, mut handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -436,6 +438,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -450,7 +453,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, _handle) =
+        let (mock_subgraph_service, mut handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -497,6 +500,7 @@ mod tests {
                 .message
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -631,7 +635,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -789,7 +793,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -953,7 +957,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1032,7 +1036,7 @@ mod tests {
                 .data
                 .unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1047,7 +1051,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, _handle) =
+        let (mock_subgraph_service, mut handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1101,6 +1105,7 @@ mod tests {
             "my error message",
             response.into_body().errors[0].message.as_str()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -1115,7 +1120,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, _handle) =
+        let (mock_subgraph_service, mut handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1163,6 +1168,7 @@ mod tests {
             }))
             .unwrap()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -1286,7 +1292,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1389,7 +1395,7 @@ mod tests {
             serde_json_bytes::Value::Null,
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1540,7 +1546,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1698,7 +1704,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1817,7 +1823,7 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -1880,7 +1886,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
-        supergraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1987,7 +1993,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
-        supergraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -2089,7 +2095,7 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
-        supergraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -2648,7 +2654,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let (mock_router_service, _handle) =
+        let (mock_router_service, mut handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
@@ -2727,6 +2733,7 @@ mod tests {
             }),
             actual_response
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -2745,7 +2752,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let (mock_router_service, _handle) =
+        let (mock_router_service, mut handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
@@ -2815,6 +2822,7 @@ mod tests {
             }),
             actual_response
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -3229,9 +3237,12 @@ mod tests {
     }
 
     // Helper function to create working router service mock
-    fn create_mock_router_service() -> tower_test::mock::Mock<router::Request, router::Response> {
+    fn create_mock_router_service() -> (
+        tower_test::mock::Mock<router::Request, router::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             while let Some((req, responder)) = handle.next_request().await {
                 responder.send_response(
                     router::Response::builder()
@@ -3244,7 +3255,7 @@ mod tests {
                 );
             }
         });
-        mock
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns valid GraphQL response for RouterRequest
@@ -3648,10 +3659,12 @@ mod tests {
     }
 
     // Helper function to create mock subgraph service
-    fn create_mock_subgraph_service()
-    -> tower_test::mock::Mock<subgraph::Request, subgraph::Response> {
+    fn create_mock_subgraph_service() -> (
+        tower_test::mock::Mock<subgraph::Request, subgraph::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             while let Some((req, responder)) = handle.next_request().await {
                 responder.send_response(
                     subgraph::Response::builder()
@@ -3665,7 +3678,7 @@ mod tests {
                 );
             }
         });
-        mock
+        (mock, driver)
     }
 
     // Helper functions for subgraph request validation tests
@@ -3888,9 +3901,10 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3905,15 +3919,19 @@ mod tests {
             &json!({ "test": 1234_u32 }),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     // ===== SUBGRAPH REQUEST VALIDATION TESTS =====
+    // The loop driver exits when the channel closes, so await_mock_driver works for both
+    // accept (service called) and reject (service not called, channel closes via oneshot drop).
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3928,13 +3946,15 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3951,13 +3971,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3974,13 +3996,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3995,13 +4019,15 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4015,13 +4041,15 @@ mod tests {
         // Empty object deserializes to GraphQL response with no data/errors
         assert_eq!(res.response.body().data, None);
         assert_eq!(res.response.body().errors.len(), 0);
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4034,15 +4062,17 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         // Falls back to original response since permissive deserialization fails too
         assert!(res.response.body().data.is_some() || !res.response.body().errors.is_empty());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     // ===== SUBGRAPH RESPONSE VALIDATION TESTS =====
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4056,13 +4086,15 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4073,13 +4105,15 @@ mod tests {
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4090,13 +4124,15 @@ mod tests {
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4110,13 +4146,15 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
         let service = create_subgraph_stage_for_validation_test().as_service(
             create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4129,6 +4167,7 @@ mod tests {
         // (all fields are optional with defaults), resulting in a response with no data/errors
         assert_eq!(res.response.body().data, None);
         assert_eq!(res.response.body().errors.len(), 0);
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     // ===== SUBGRAPH SELECTIVE BODY FILTERING TESTS =====
@@ -4218,7 +4257,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -4311,7 +4350,7 @@ mod tests {
         );
         // Original errors should be preserved since they weren't sent to coprocessor
         assert_eq!(response.response.body().errors[0].message, "test error");
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -4380,7 +4419,7 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -4470,7 +4509,7 @@ mod tests {
         );
         // Errors should remain empty
         assert!(response.response.body().errors.is_empty());
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[tokio::test]
@@ -4572,7 +4611,7 @@ mod tests {
             response.response.body().extensions.get("processor"),
             Some(&json!("modified"))
         );
-        subgraph_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
     }
 
     #[allow(clippy::type_complexity)]
@@ -5417,20 +5456,19 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5446,20 +5484,19 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5475,23 +5512,21 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_with_false_condition();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5501,23 +5536,21 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_response_with_false_condition();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5527,36 +5560,34 @@ mod tests {
     #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_when_conditions_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5571,20 +5602,19 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5600,20 +5630,19 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5629,36 +5658,34 @@ mod tests {
     #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_for_errored_stages_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..1 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
                 let _service = _stage.as_service(
                     create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5673,25 +5700,22 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                // Mock HTTP client used by coprocessor (RouterRequest stage)
                 let mock_http_client = create_mock_http_client_router_request_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 3, Some(true))]);
@@ -5703,24 +5727,22 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_response_validation_test();
                 let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 2, Some(true))]);
@@ -5732,28 +5754,24 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_with_false_condition();
-                // Mock HTTP client used by coprocessor (RouterRequest stage)
                 let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5763,27 +5781,24 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..1 {
                 let router_stage = create_router_stage_for_response_with_false_condition();
                 let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5793,44 +5808,40 @@ mod tests {
     #[tokio::test]
     async fn both_router_stages_metric_incremented_when_conditions_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_validation_test();
                 let mock_http_client = create_mock_http_client_router_request_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
                 let router_stage = create_router_stage_for_response_validation_test();
                 let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5845,24 +5856,22 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_validation_test();
                 let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 2, Some(false))]);
@@ -5874,24 +5883,22 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
                 let router_stage = create_router_stage_for_response_validation_test();
                 let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -6029,7 +6036,7 @@ mod tests {
             // chunk that contained GraphQL errors. Before the fix, the metric was silently
             // dropped because `executed` was already checked (as false) before the stream ran.
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
-            router_driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(router_driver).await;
         }
         .with_metrics()
         .await;
@@ -6038,44 +6045,40 @@ mod tests {
     #[tokio::test]
     async fn both_router_stages_metric_incremented_for_errored_stages_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let router_stage = create_router_stage_for_request_validation_test();
                 let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_response_validation_test();
                 let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
                         mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -7887,7 +7890,7 @@ mod tests {
                     "API key should be sent unmasked to coprocessor"
                 );
             }
-            subgraph_driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(subgraph_driver).await;
         }
 
         #[tokio::test]

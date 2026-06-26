@@ -676,7 +676,7 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
-        driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -744,7 +744,7 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
-        driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -787,7 +787,7 @@ mod test {
 
             let (mock, mut handle) =
                 tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-            tokio::spawn(async move {
+            let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
                 responder.send_response(super::example_response(req).unwrap());
             });
@@ -798,6 +798,7 @@ mod test {
                 .await?
                 .call(request)
                 .await?;
+            crate::plugin::test::await_mock_driver(driver).await;
 
             Ok(())
         }

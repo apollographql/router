@@ -1087,6 +1087,8 @@ type Organization
 async fn cache_key_metadata() {
     let query = "query { currentUser { id name phone } }";
 
+    let drivers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<tokio::task::JoinHandle<()>>::new()));
+    let drivers_clone = drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
             "include_subgraph_errors": {
@@ -1100,10 +1102,10 @@ async fn cache_key_metadata() {
         }))
         .unwrap()
         .schema(CACHE_KEY_SCHEMA)
-        .subgraph_hook(|_name, _service| {
+        .subgraph_hook(move |_name, _service| {
             let (mock, mut handle) =
                 tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-            tokio::spawn(async move {
+            let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
                 assert_eq!(
                     *req.authorization,
@@ -1126,6 +1128,7 @@ async fn cache_key_metadata() {
                         .build(),
                 );
             });
+            drivers_clone.lock().unwrap().push(driver);
             mock.boxed_clone()
         })
         .build_router()
@@ -1153,6 +1156,10 @@ async fn cache_key_metadata() {
     let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
+
+    for driver in std::sync::Arc::try_unwrap(drivers).unwrap().into_inner().unwrap() {
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
 }
 
 // Verifies that the refactored typed config parsing produces the same values as the

@@ -729,7 +729,7 @@ mod tests {
         let (mock_supergraph_service, mut supergraph_handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let supergraph_driver = tokio::spawn(async move {
             let (req, responder) = supergraph_handle.next_request().await.unwrap();
             // Let's assert that the subgraph request has been transformed as it should have.
             assert_eq!(
@@ -846,6 +846,7 @@ mod tests {
                 .data
                 .unwrap()
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -871,7 +872,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_supergraph_service_1, _handle_1) =
+        let (mock_supergraph_service_1, mut handle_1) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -938,7 +939,7 @@ mod tests {
         let (mock_supergraph_service_2, mut handle_2) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let driver_2 = tokio::spawn(async move {
             let (req, responder) = handle_2.next_request().await.unwrap();
             responder.send_response(
                 supergraph::Response::builder()
@@ -993,6 +994,8 @@ mod tests {
             service.oneshot(request).await.unwrap();
 
         assert!(context.get::<_, bool>("testKey").ok().flatten().is_none());
+        crate::plugin::test::assert_no_mock_calls(handle_1).await;
+        crate::plugin::test::await_mock_driver(driver_2).await;
     }
 
     #[tokio::test]
@@ -1013,7 +1016,7 @@ mod tests {
         let (mock_supergraph_service, mut supergraph_handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let supergraph_driver = tokio::spawn(async move {
             let (req, responder) = supergraph_handle.next_request().await.unwrap();
             responder.send_response(
                 supergraph::Response::builder()
@@ -1132,6 +1135,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1152,7 +1156,7 @@ mod tests {
         let (mock_supergraph_service, mut supergraph_handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let supergraph_driver = tokio::spawn(async move {
             let (req, responder) = supergraph_handle.next_request().await.unwrap();
             responder.send_response(
                 supergraph::Response::fake_stream_builder()
@@ -1247,6 +1251,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1272,7 +1277,7 @@ mod tests {
         let (mock_supergraph_service, mut supergraph_handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let supergraph_driver = tokio::spawn(async move {
             let (req, responder) = supergraph_handle.next_request().await.unwrap();
             responder.send_response(
                 supergraph::Response::fake_stream_builder()
@@ -1367,6 +1372,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3 }, "hasNext": false }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1395,7 +1401,7 @@ mod tests {
             let (mock_supergraph_service, mut supergraph_handle) =
                 tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-            tokio::spawn(async move {
+            let supergraph_driver = tokio::spawn(async move {
                 let (req, responder) = supergraph_handle.next_request().await.unwrap();
                 responder.send_response(
                     supergraph::Response::fake_stream_builder()
@@ -1463,6 +1469,7 @@ mod tests {
                 1,
                 Some(true),
             )]);
+            crate::plugin::test::await_mock_driver(supergraph_driver).await;
         }
         .with_metrics()
         .await;
@@ -1484,12 +1491,18 @@ mod tests {
         }
     }
 
-    // Helper function to create mock supergraph service
-    fn create_mock_supergraph_service()
-    -> tower_test::mock::Mock<supergraph::Request, supergraph::Response> {
+    type SupergraphHandle = tower_test::mock::Handle<supergraph::Request, supergraph::Response>;
+
+    // Helper function to create mock supergraph service.
+    // Returns (Mock, JoinHandle) — the driver is a loop that exits when the service is dropped.
+    // All call sites should await the driver after calling oneshot to propagate panics.
+    fn create_mock_supergraph_service() -> (
+        tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let (mock, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             while let Some((req, responder)) = handle.next_request().await {
                 responder.send_response(
                     supergraph::Response::builder()
@@ -1500,7 +1513,7 @@ mod tests {
                 );
             }
         });
-        mock
+        (mock, driver)
     }
 
     // Helper functions for supergraph request validation tests
@@ -1658,9 +1671,10 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1673,13 +1687,15 @@ mod tests {
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1693,15 +1709,19 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     // ===== SUPERGRAPH REQUEST VALIDATION TESTS =====
+    // The loop driver exits when the channel closes, so await_mock_driver works for both
+    // accept (service called) and reject (service not called, channel closes via oneshot drop).
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1714,13 +1734,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1738,13 +1760,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1762,13 +1786,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1781,13 +1807,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1802,13 +1830,15 @@ mod tests {
         // Empty object deserializes to GraphQL response with no data/errors
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1822,15 +1852,17 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // Falls back to original response since permissive deserialization fails too
         assert!(body.data.is_some() || !body.errors.is_empty());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     // ===== SUPERGRAPH RESPONSE VALIDATION TESTS =====
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1842,13 +1874,15 @@ mod tests {
         // With validation enabled, valid GraphQL response should be processed normally
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1859,13 +1893,15 @@ mod tests {
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1876,13 +1912,15 @@ mod tests {
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed_clone(),
+            supergraph_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1894,5 +1932,6 @@ mod tests {
         // With validation disabled, valid response processed via permissive deserialization
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 }

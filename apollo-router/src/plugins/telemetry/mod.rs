@@ -2286,7 +2286,7 @@ mod tests {
             .next_response()
             .await
             .unwrap();
-        driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2490,7 +2490,7 @@ mod tests {
                 .next_response()
                 .await
                 .unwrap();
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_counter!(
                 "http.request",
@@ -2579,7 +2579,7 @@ mod tests {
                 "acme.my_attribute" = "application/json"
             );
             drop(bad_request_router_service);
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2672,7 +2672,7 @@ mod tests {
                 "network.protocol.version" = "HTTP/1.1"
             );
             drop(bad_request_router_service);
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2780,7 +2780,7 @@ mod tests {
                 "graphql.document" = "Query test { me {name} }"
             );
             drop(bad_request_supergraph_service);
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2887,7 +2887,7 @@ mod tests {
             );
             assert_histogram_not_exists!("http.client.request.duration", f64);
             drop(bad_request_subgraph_service);
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2993,7 +2993,7 @@ mod tests {
                 subgraph.name = "test"
             );
             drop(bad_request_subgraph_service);
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3057,7 +3057,7 @@ mod tests {
         }
         // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
         drop(request_supergraph_service);
-        driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
@@ -3131,7 +3131,7 @@ mod tests {
                 "subgraph" = "my_subgraph_name",
                 "subgraph_error_extended_code" = "FETCH_ERROR"
             );
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3185,7 +3185,7 @@ mod tests {
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );
-            driver.await.unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3503,7 +3503,7 @@ mod tests {
             .next_response()
             .await
             .unwrap();
-        driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

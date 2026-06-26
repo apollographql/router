@@ -238,7 +238,7 @@ mod tests {
         // With deduplication, exactly one request reaches the inner service regardless of how many
         // clones the service makes. Sleep 100ms so both concurrent callers are in-flight when dedup
         // fires.
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
             inner_invocation_count_driver.fetch_add(1, Ordering::Relaxed);
@@ -269,5 +269,6 @@ mod tests {
         res2.expect("fut2 spawned").expect("fut2 joined");
 
         assert_eq!(1, inner_invocation_count.load(Ordering::Relaxed));
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 }

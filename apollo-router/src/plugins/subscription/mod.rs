@@ -791,7 +791,7 @@ mod tests {
             .unwrap();
 
         // The subscription plugin intercepts this request and never calls the inner service.
-        let (mock, _handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let mut subgraph_service =
             dyn_plugin.subgraph_service("my_subgraph_name", BoxCloneService::new(mock));
@@ -833,6 +833,7 @@ mod tests {
                 .extensions(Object::default())
                 .build()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[test]

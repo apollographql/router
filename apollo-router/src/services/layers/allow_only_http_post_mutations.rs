@@ -158,7 +158,7 @@ mod forbid_http_get_mutations_tests {
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
         let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
         });
@@ -170,12 +170,13 @@ mod forbid_http_get_mutations_tests {
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn it_lets_http_post_mutations_pass_through() {
         let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
         });
@@ -187,12 +188,13 @@ mod forbid_http_get_mutations_tests {
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn it_lets_http_get_queries_pass_through() {
         let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
         });
@@ -204,6 +206,7 @@ mod forbid_http_get_mutations_tests {
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -228,7 +231,8 @@ mod forbid_http_get_mutations_tests {
 
         for method in forbidden_methods {
             // Inner service is never reached — the layer rejects the request.
-            let (mock, _handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+            let (mock, mut handle) =
+                tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
             let mut error_response = AllowOnlyHttpPostMutationsLayer::default()
                 .layer(mock)
                 .oneshot(create_request(method, OperationKind::Mutation))
@@ -242,6 +246,7 @@ mod forbid_http_get_mutations_tests {
                 error_response.response.headers().get("Allow").unwrap()
             );
             assert_error_eq_ignoring_id!(expected_error, response.errors[0]);
+            crate::plugin::test::assert_no_mock_calls(handle).await;
         }
     }
 

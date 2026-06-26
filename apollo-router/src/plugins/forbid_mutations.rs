@@ -113,7 +113,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let (mock, _handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),
@@ -130,6 +130,7 @@ mod forbid_http_get_mutations_tests {
 
         assert_eq!(expected_status, response.response.status());
         assert_error_eq_ignoring_id!(actual_error, expected_error);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]

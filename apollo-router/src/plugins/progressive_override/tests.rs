@@ -156,7 +156,7 @@ async fn plugin_router_service_adds_all_arbitrary_labels_to_context() {
         .oneshot(router::Request::fake_builder().build().unwrap())
         .await;
 
-    driver.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 struct LabelAssertions {
@@ -241,7 +241,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
 
     let _ = service_stack.oneshot(request).await;
 
-    driver.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
@@ -394,7 +394,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
 
     let _ = service_stack.oneshot(request).await;
 
-    driver.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]

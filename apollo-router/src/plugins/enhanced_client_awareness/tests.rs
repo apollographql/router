@@ -19,7 +19,7 @@ use crate::services::supergraph;
 async fn given_client_library_metadata_adds_values_to_context() {
     let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
-    tokio::spawn(async move {
+    let driver = tokio::spawn(async move {
         let (request, responder) = handle.next_request().await.unwrap();
         assert!(
             request.context.contains_key(CLIENT_LIBRARY_NAME),
@@ -67,13 +67,14 @@ async fn given_client_library_metadata_adds_values_to_context() {
         )
         .await
         .unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn without_client_library_metadata_does_not_add_values_to_context() {
     let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
-    tokio::spawn(async move {
+    let driver = tokio::spawn(async move {
         let (request, responder) = handle.next_request().await.unwrap();
         assert!(!request.context.contains_key(CLIENT_LIBRARY_NAME));
         assert!(!request.context.contains_key(CLIENT_LIBRARY_VERSION));
@@ -93,11 +94,12 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
         )
         .await
         .unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn invalid_library_name_returns_bad_request() {
-    let (mock, _handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -119,11 +121,12 @@ async fn invalid_library_name_returns_bad_request() {
 
     let response = service_stack.oneshot(request).await.unwrap();
     assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn invalid_library_version_returns_bad_request() {
-    let (mock, _handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -145,4 +148,5 @@ async fn invalid_library_version_returns_bad_request() {
 
     let response = service_stack.oneshot(request).await.unwrap();
     assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }

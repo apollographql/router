@@ -2779,19 +2779,24 @@ async fn no_data() {
         .collect(),
     );
 
+    let drain_drivers = std::sync::Arc::new(std::sync::Mutex::new(
+        Vec::<tokio::task::JoinHandle<()>>::new(),
+    ));
+    let drain_drivers_clone = drain_drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(response_cache)
-        .subgraph_hook(|name, service| {
+        .subgraph_hook(move |name, service| {
             if name == "orga" {
                 let (mock, mut handle) =
                     tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-                tokio::spawn(async move {
+                let driver = tokio::spawn(async move {
                     // Drop each responder to send ClosedError, simulating a subgraph error.
                     while let Some((_req, _responder)) = handle.next_request().await {}
                 });
+                drain_drivers_clone.lock().unwrap().push(driver);
                 mock.boxed_clone()
             } else {
                 service
@@ -2855,6 +2860,13 @@ async fn no_data() {
       ]
     }
     "#);
+    for driver in std::sync::Arc::try_unwrap(drain_drivers)
+        .unwrap()
+        .into_inner()
+        .unwrap()
+    {
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
 }
 
 #[tokio::test]

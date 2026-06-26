@@ -311,7 +311,7 @@ async fn fetch_includes_operation_name() {
         )
         .await;
 
-    driver.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
 }
 
@@ -370,7 +370,7 @@ async fn fetch_makes_post_requests() {
         )
         .await;
 
-    driver.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver).await;
     assert!(
         succeeded.load(Ordering::SeqCst),
         "subgraph requests must be http post"
@@ -530,8 +530,8 @@ async fn defer() {
         // unneeded parts are removed in response formatting
         serde_json::json! {{"data":{"t":{"y":"Y","__typename":"T","id":1234,"x":"X"}},"path":["t"]}}
     );
-    driver_x.await.unwrap();
-    driver_y.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
 }
 
 #[tokio::test]
@@ -778,9 +778,9 @@ async fn dependent_mutations() {
             None,
         )
         .await;
-    driver_a.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver_a).await;
     drop(sf);
-    driver_b.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver_b).await;
 }
 
 #[tokio::test]
@@ -2286,9 +2286,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         inner_data["target"]["x"], "42",
         "target should have x from Z fetch"
     );
-    driver_x.await.unwrap();
-    driver_y.await.unwrap();
-    driver_z.await.unwrap();
+    crate::plugin::test::await_mock_driver(driver_x).await;
+    crate::plugin::test::await_mock_driver(driver_y).await;
+    crate::plugin::test::await_mock_driver(driver_z).await;
 }
 
 // Documents that the user-visible "errors" array stays SILENT when the

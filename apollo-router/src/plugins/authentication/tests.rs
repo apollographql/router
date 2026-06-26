@@ -75,7 +75,9 @@ pub(crate) fn create_an_url(filename: &str) -> String {
     Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
-async fn build_a_default_test_harness() -> router::BoxCloneService {
+type MockHandle = tower_test::mock::Handle<supergraph::Request, supergraph::Response>;
+
+async fn build_a_default_test_harness() -> (router::BoxCloneService, MockHandle) {
     build_a_test_harness(None, None, false, false, false).await
 }
 
@@ -85,19 +87,11 @@ async fn build_a_test_harness(
     multiple_jwks: bool,
     ignore_other_prefixes: bool,
     continue_on_error: bool,
-) -> router::BoxCloneService {
-    let (mock_service, mut handle) =
+) -> (router::BoxCloneService, MockHandle) {
+    let (mock_service, handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    // Caller is responsible for driving `handle`: spawn a driver for tests that
+    // reach the inner service, or call assert_no_mock_calls for rejection tests.
 
     let jwks_url = create_an_url("jwks.json");
 
@@ -151,7 +145,7 @@ async fn build_a_test_harness(
             serde_json::Value::String("Continue".to_string());
     }
 
-    match crate::TestHarness::builder()
+    let test_harness = match crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
         .supergraph_hook(move |_| mock_service.clone().boxed_clone())
@@ -160,17 +154,19 @@ async fn build_a_test_harness(
     {
         Ok(test_harness) => test_harness,
         Err(e) => panic!("Failed to build test harness: {e}"),
-    }
+    };
+    (test_harness, handle)
 }
 
 #[tokio::test]
 async fn load_plugin() {
-    let _test_harness = build_a_default_test_harness().await;
+    let (_test_harness, mut handle) = build_a_default_test_harness().await;
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_there_is_no_auth_header() {
-    let (mock_service, _handle) =
+    let (mock_service, mut handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
     let jwks_url = create_an_url("jwks.json");
 
@@ -226,11 +222,12 @@ async fn it_rejects_when_there_is_no_auth_header() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_is_missing() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -265,11 +262,12 @@ async fn it_rejects_when_auth_prefix_is_missing() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -304,11 +302,12 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -342,11 +341,12 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -381,11 +381,12 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -420,11 +421,22 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
-    let test_harness = build_a_default_test_harness().await;
+    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -458,11 +470,22 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-    let test_harness = build_a_test_harness(None, None, false, true, false).await;
+    let (test_harness, mut handle) = build_a_test_harness(None, None, false, true, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
@@ -492,11 +515,22 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true, false, false).await;
+    let (test_harness, mut handle) = build_a_test_harness(None, None, true, false, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -530,12 +564,23 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-    let test_harness =
+    let (test_harness, mut handle) =
         build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -569,12 +614,23 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-    let test_harness =
+    let (test_harness, mut handle) =
         build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -608,11 +664,23 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, false).await;
+    let (test_harness, mut handle) =
+        build_a_test_harness(None, Some("".to_string()), false, false, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -646,11 +714,22 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_inserts_success_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, false).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -713,11 +792,12 @@ async fn it_inserts_success_jwt_status_into_context() {
             "another claim": "this is another claim"
         })
     );
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false, false).await;
+    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -781,11 +861,22 @@ async fn it_inserts_failure_jwt_status_into_context() {
         jwt_claims.is_none(),
         "because the JWT was invalid, no claims should be set"
     );
+    crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_moves_on_after_jwt_errors_when_configured() {
-    let test_harness = build_a_test_harness(None, None, false, false, true).await;
+    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, true).await;
+    let driver = tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    });
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -845,27 +936,28 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
         jwt_claims.is_none(),
         "because the JWT was invalid, no claims should be set"
     );
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-    let _test_harness =
-        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
+    // The build panics, so the handle is never returned — discard the tuple.
+    let _ = build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-    let _test_harness =
-        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
+    // The build panics, so the handle is never returned — discard the tuple.
+    let _ = build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
 async fn it_extracts_the_token_from_cookies() {
     let (mock_service, mut handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    tokio::spawn(async move {
+    let driver = tokio::spawn(async move {
         let (req, responder) = handle.next_request().await.unwrap();
         responder.send_response(
             supergraph::Response::fake_builder()
@@ -942,13 +1034,14 @@ async fn it_extracts_the_token_from_cookies() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_supports_multiple_sources() {
     let (mock_service, mut handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    tokio::spawn(async move {
+    let driver = tokio::spawn(async move {
         let (req, responder) = handle.next_request().await.unwrap();
         responder.send_response(
             supergraph::Response::fake_builder()
@@ -1031,6 +1124,7 @@ async fn it_supports_multiple_sources() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    crate::plugin::test::await_mock_driver(driver).await;
 }
 
 async fn build_jwks_search_components() -> JwksManager {

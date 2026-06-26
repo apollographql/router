@@ -1272,7 +1272,7 @@ mod test {
 
         // First and third requests pass through; the second is rate-limited by the plugin and
         // never reaches the inner service.
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             for _ in 0..2 {
                 let (_req, responder) = handle.next_request().await.unwrap();
                 responder.send_response(
@@ -1324,6 +1324,7 @@ mod test {
             .await
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

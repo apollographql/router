@@ -821,7 +821,7 @@ mod tests {
                 .unwrap()
         );
 
-        exec_driver.await.unwrap();
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
@@ -840,7 +840,7 @@ mod tests {
         };
 
         // The execution service is never reached — the coprocessor breaks the flow.
-        let (exec_mock, _exec_handle) =
+        let (exec_mock, mut exec_handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -897,6 +897,7 @@ mod tests {
                 .as_str(),
             "my error message"
         );
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
@@ -915,7 +916,7 @@ mod tests {
 
         let (exec_mock, mut exec_handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
-        tokio::spawn(async move {
+        let exec_driver = tokio::spawn(async move {
             let (req, responder) = exec_handle.next_request().await.unwrap();
             responder.send_response(
                 execution::Response::builder()
@@ -1035,6 +1036,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
@@ -1053,7 +1055,7 @@ mod tests {
 
         let (exec_mock, mut exec_handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
-        tokio::spawn(async move {
+        let exec_driver = tokio::spawn(async move {
             let (req, responder) = exec_handle.next_request().await.unwrap();
             responder.send_response(
                 execution::Response::fake_stream_builder()
@@ -1147,6 +1149,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
@@ -1168,7 +1171,7 @@ mod tests {
 
             let (exec_mock, mut exec_handle) =
                 tower_test::mock::pair::<execution::Request, execution::Response>();
-            tokio::spawn(async move {
+            let exec_driver = tokio::spawn(async move {
                 let (req, responder) = exec_handle.next_request().await.unwrap();
                 responder.send_response(
                     execution::Response::fake_stream_builder()
@@ -1227,6 +1230,7 @@ mod tests {
                 2,
                 Some(true),
             )]);
+            crate::plugin::test::await_mock_driver(exec_driver).await;
         }
         .with_metrics()
         .await;
@@ -1247,24 +1251,17 @@ mod tests {
         }
     }
 
-    // Helper function to create mock execution service
-    fn create_mock_execution_service()
-    -> tower_test::mock::Mock<execution::Request, execution::Response> {
-        let (mock, mut handle) =
-            tower_test::mock::pair::<execution::Request, execution::Response>();
-        tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        mock
+    type ExecHandle = tower_test::mock::Handle<execution::Request, execution::Response>;
+
+    // Helper function to create a mock execution service.
+    // Returns (Mock, Handle) — caller drives the handle based on expected behaviour:
+    // - ACCEPT tests: spawn a single-call driver and await it with await_mock_driver
+    // - REJECT tests: call assert_no_mock_calls(handle).await
+    fn create_mock_execution_service() -> (
+        tower_test::mock::Mock<execution::Request, execution::Response>,
+        ExecHandle,
+    ) {
+        tower_test::mock::pair::<execution::Request, execution::Response>()
     }
 
     // Helper functions for execution request validation tests
@@ -1422,9 +1419,22 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_invalid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1437,13 +1447,27 @@ mod tests {
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_empty() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1457,15 +1481,19 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     // ===== EXECUTION REQUEST VALIDATION TESTS =====
+    // All request-stage http clients return "break" control, so the execution service
+    // is never reached in these tests.
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_valid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1478,13 +1506,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_empty() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1502,13 +1532,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_invalid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1526,13 +1558,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_valid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1545,13 +1579,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_empty() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1566,13 +1602,15 @@ mod tests {
         // Empty object deserializes to GraphQL response with no data/errors
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_invalid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1586,15 +1624,30 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // Falls back to original response since permissive deserialization fails too
         assert!(body.data.is_some() || !body.errors.is_empty());
+        crate::plugin::test::assert_no_mock_calls(exec_handle).await;
     }
 
     // ===== EXECUTION RESPONSE VALIDATION TESTS =====
+    // The execution service is always called first in response-stage tests.
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_valid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1606,13 +1659,27 @@ mod tests {
         // With validation enabled, valid GraphQL response should be processed normally
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_empty() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1623,13 +1690,27 @@ mod tests {
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_invalid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true, // Validation enabled
@@ -1640,13 +1721,27 @@ mod tests {
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_valid() {
+        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let exec_driver = tokio::spawn(async move {
+            let (req, responder) = exec_handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service = create_execution_stage_for_response_validation_test().as_service(
             create_mock_http_client_execution_response_valid_response(),
-            create_mock_execution_service().boxed_clone(),
+            exec_mock.boxed_clone(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             false, // Validation disabled
@@ -1658,5 +1753,6 @@ mod tests {
         // With validation disabled, valid response processed via permissive deserialization
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(exec_driver).await;
     }
 }
