@@ -1753,7 +1753,7 @@ async fn test_redis_emits_configuration_error_metric() {
                 "all": {
                     "enabled": true,
                     "redis": {
-                        "urls": ["invalid-redis-schem://127.0.0.1:7000"], // invalid schema!
+                        "urls": ["redis://127.0.0.1:1"], // port 1 is not Redis; connection will be refused
                         "ttl": "10m",
                         "required_to_start": false, // don't fail startup, allow errors during runtime
                     },
@@ -1794,7 +1794,7 @@ async fn test_redis_emits_configuration_error_metric() {
 
     router
         .assert_metric_non_zero(
-            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="response-cache",otel_scope_name="apollo/router"}"#,
+            r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#,
             None,
         )
         .await;
