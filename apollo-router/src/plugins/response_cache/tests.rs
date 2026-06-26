@@ -2779,9 +2779,9 @@ async fn no_data() {
         .collect(),
     );
 
-    let drain_drivers = std::sync::Arc::new(std::sync::Mutex::new(
-        Vec::<tokio::task::JoinHandle<()>>::new(),
-    ));
+    let drain_drivers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<
+        tokio::task::JoinHandle<()>,
+    >::new()));
     let drain_drivers_clone = drain_drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))

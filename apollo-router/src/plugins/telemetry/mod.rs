@@ -2152,6 +2152,7 @@ mod tests {
     use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
+    use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
     use crate::graphql::IntoGraphQLErrors;
@@ -2168,7 +2169,6 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
-    use crate::error::FetchError;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;

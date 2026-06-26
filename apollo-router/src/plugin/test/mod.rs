@@ -26,18 +26,13 @@ pub async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
 ///
 /// Waits up to 10 ms after the test action for a request to arrive; if one does,
 /// the test fails immediately. Pass `mut handle` from `tower_test::mock::pair`.
-pub async fn assert_no_mock_calls<Req, Res>(
-    mut handle: tower_test::mock::Handle<Req, Res>,
-) where
+pub async fn assert_no_mock_calls<Req, Res>(mut handle: tower_test::mock::Handle<Req, Res>)
+where
     Req: Send + 'static,
     Res: Send + 'static,
 {
     if matches!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(10),
-            handle.next_request(),
-        )
-        .await,
+        tokio::time::timeout(std::time::Duration::from_millis(10), handle.next_request(),).await,
         Ok(Some(_))
     ) {
         panic!("mock service was called but should not have been");

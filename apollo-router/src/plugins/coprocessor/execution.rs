@@ -918,79 +918,78 @@ mod tests {
             );
         });
 
-        let mock_http_client =
-            mock_with_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+        let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(res.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::ExecutionResponse.to_string(),
-                        deserialized_response.stage
-                    );
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::ExecutionResponse.to_string(),
+                    deserialized_response.stage
+                );
 
-                    assert_eq!(
-                        json! {{"data":{ "test": 1234_u32 }}},
-                        deserialized_response.body.unwrap()
-                    );
+                assert_eq!(
+                    json! {{"data":{ "test": 1234_u32 }}},
+                    deserialized_response.body.unwrap()
+                );
 
-                    let input = json!(
-                          {
-                      "version": 1,
-                      "stage": "ExecutionResponse",
-                      "control": {
-                          "break": 400
-                      },
-                      "id": "1b19c05fdafc521016df33148ad63c1b",
-                      "headers": {
-                        "cookie": [
-                          "tasty_cookie=strawberry"
-                        ],
-                        "content-type": [
-                          "application/json"
-                        ],
-                        "host": [
-                          "127.0.0.1:4000"
-                        ],
-                        "apollo-federation-include-trace": [
-                          "ftv1"
-                        ],
-                        "apollographql-client-name": [
-                          "manual"
-                        ],
-                        "accept": [
-                          "*/*"
-                        ],
-                        "user-agent": [
-                          "curl/7.79.1"
-                        ],
-                        "content-length": [
-                          "46"
-                        ]
-                      },
-                      "body": {
-                        "data": { "test": 42 }
-                      },
-                      "context": {
-                        "entries": {
-                          "accepts-json": false,
-                          "accepts-wildcard": true,
-                          "accepts-multipart": false,
-                          "this-is-a-test-context": 42
-                        }
-                      },
-                      "sdl": "the sdl shouldn't change"
-                    });
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&input).unwrap(),
-                        ))
-                        .unwrap())
-                })
-            });
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "ExecutionResponse",
+                  "control": {
+                      "break": 400
+                  },
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": {
+                    "data": { "test": 42 }
+                  },
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldn't change"
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = execution_stage.as_service(
             mock_http_client,
@@ -1072,42 +1071,41 @@ mod tests {
             );
         });
 
-        let mock_http_client =
-            mock_with_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::ExecutionResponse.to_string(),
-                        deserialized_response.stage
+        let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
+            Box::pin(async {
+                let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(res.into_body()).await.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::ExecutionResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                // Copy the has_next from the body into the data for checking later
+                deserialized_response
+                    .body
+                    .as_mut()
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .get_mut("data")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "has_next".to_string(),
+                        Value::from(deserialized_response.has_next.unwrap_or_default()),
                     );
 
-                    // Copy the has_next from the body into the data for checking later
-                    deserialized_response
-                        .body
-                        .as_mut()
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .get_mut("data")
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .insert(
-                            "has_next".to_string(),
-                            Value::from(deserialized_response.has_next.unwrap_or_default()),
-                        );
-
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
-                        ))
-                        .unwrap())
-                })
-            });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = execution_stage.as_service(
             mock_http_client,
