@@ -95,7 +95,6 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::plugin::PluginInit;
     use apollo_router::services::subgraph;
@@ -136,13 +135,17 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
-        let mut mock_service = test::MockSubgraphService::new();
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(subgraph::Response::fake_builder()
-                .status_code(StatusCode::FORBIDDEN)
-                .build())
+        tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                subgraph::Response::fake_builder()
+                    .status_code(StatusCode::FORBIDDEN)
+                    .build(),
+            );
         });
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
@@ -172,13 +175,17 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
-        let mut mock_service = test::MockSubgraphService::new();
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(subgraph::Response::fake_builder()
-                .status_code(StatusCode::OK)
-                .build())
+        tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                subgraph::Response::fake_builder()
+                    .status_code(StatusCode::OK)
+                    .build(),
+            );
         });
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
@@ -210,22 +217,23 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = test::MockSupergraphService::new();
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_service.expect_call().times(1).returning(
-            move |router_request: supergraph::Request| {
-                let context = router_request.context;
-                // Insert several status codes which shall override the router response status
-                context
-                    .insert("status_code", json!(500u16))
-                    .expect("couldn't insert status_code");
-
-                Ok(supergraph::Response::fake_builder()
+        tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context;
+            // Insert several status codes which shall override the router response status
+            context
+                .insert("status_code", json!(500u16))
+                .expect("couldn't insert status_code");
+            responder.send_response(
+                supergraph::Response::fake_builder()
                     .context(context)
                     .build()
-                    .unwrap())
-            },
-        );
+                    .unwrap(),
+            );
+        });
 
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
         let init = PluginInit::fake_builder()
@@ -254,18 +262,20 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = test::MockSupergraphService::new();
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_service.expect_call().times(1).returning(
-            move |router_request: supergraph::Request| {
-                let context = router_request.context;
-                // Don't insert any StatusCode
-                Ok(supergraph::Response::fake_builder()
+        tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context;
+            // Don't insert any StatusCode
+            responder.send_response(
+                supergraph::Response::fake_builder()
                     .context(context)
                     .build()
-                    .unwrap())
-            },
-        );
+                    .unwrap(),
+            );
+        });
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
         let init = PluginInit::fake_builder()
