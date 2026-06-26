@@ -94,7 +94,6 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
-    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
