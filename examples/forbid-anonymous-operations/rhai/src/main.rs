@@ -12,19 +12,14 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test;
     use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_router_forbids_anonymous_operation() {
-        let mut mock_service = test::MockSupergraphService::new();
-        // create a mock service we will use to test our plugin
-        // Let's set up our mock to make sure it will be called once
-        mock_service
-            .expect_clone()
-            .return_once(test::MockSupergraphService::new);
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let config = serde_json::json!({
             "rhai": {

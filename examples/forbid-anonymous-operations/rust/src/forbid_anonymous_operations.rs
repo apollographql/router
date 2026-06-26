@@ -97,7 +97,6 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::plugin::Plugin;
     use apollo_router::services::supergraph;
     use http::StatusCode;
@@ -131,7 +130,8 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -166,7 +166,8 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let (mock_service, _handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -201,32 +202,26 @@ mod tests {
         let operation_name = "validOperationName";
 
         // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockSupergraphService::new();
-
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
         let expected_mock_response_data = "response created within the mock";
-
-        // Let's set up our mock to make sure it will be called once, with the expected operation_name
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: supergraph::Request| {
-                assert_eq!(
-                    operation_name,
-                    // we're ok with unwrap's here because we're running a test
-                    // we would not do this in actual code
-                    req.supergraph_request
-                        .body()
-                        .operation_name
-                        .as_ref()
-                        .unwrap()
-                );
-                // let's return the expected data
-                Ok(supergraph::Response::fake_builder()
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert_eq!(
+                operation_name,
+                req.supergraph_request
+                    .body()
+                    .operation_name
+                    .as_ref()
+                    .unwrap()
+            );
+            responder.send_response(
+                supergraph::Response::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -254,6 +249,7 @@ mod tests {
             // we're allowed to unwrap() here because we know the json is a str()
             graphql_response.data.unwrap().as_str().unwrap(),
             expected_mock_response_data
-        )
+        );
+        driver.await.unwrap();
     }
 }
