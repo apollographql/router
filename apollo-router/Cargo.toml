@@ -205,8 +205,7 @@ prost = "0.14.0"
 prost-types = "0.14.0"
 proteus = "0.5.0"
 rand = "0.10.0"
-rhai = { version = "~1.23.6", features = ["sync", "serde", "internals"] }
-rhai_codegen = "=3.1.0" # sync with main rhai dep; remove when that is updated
+rhai = { version = "~1.25.1", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
 reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls",
@@ -341,7 +340,7 @@ reqwest = { version = "0.12.9", default-features = false, features = [
     "multipart",
     "stream",
 ] }
-rhai = { version = "1.23.6", features = [
+rhai = { version = "1.25.1", features = [
     "sync",
     "serde",
     "internals",
