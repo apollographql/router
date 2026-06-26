@@ -35,7 +35,7 @@ jobs:
 
       - name: Checkout PR code
         if: steps.team-check.outputs.is_member == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
 
