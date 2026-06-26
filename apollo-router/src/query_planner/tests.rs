@@ -29,7 +29,6 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;

@@ -7885,6 +7885,7 @@ mod tests {
                 "secret-api-key-67890", // gitleaks:allow
                 "API key should be sent unmasked to coprocessor"
             );
+            drop(headers);
             subgraph_driver.await.unwrap();
         }
 

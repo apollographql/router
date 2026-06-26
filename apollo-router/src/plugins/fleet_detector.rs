@@ -590,7 +590,6 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
-    use crate::services::router::Body;
 
     #[tokio::test]
     async fn test_enabled_router_service() {
