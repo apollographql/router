@@ -5,12 +5,6 @@ layer that translated context keys between their Router 1.x names (e.g. `operati
 current names (e.g. `apollo::supergraph::operation_name`) when sending and receiving context from a
 coprocessor. Deprecation warnings were emitted in Router 2.x.
 
-Additionally, the telemetry plugin no longer falls back to reading `apollo_telemetry::client_name`
-and `apollo_telemetry::client_version` from context. These keys were the 1.x names for
-`apollo::telemetry::client_name` and `apollo::telemetry::client_version`. If you have any
-Rhai scripts or custom plugins that write client name or version using the old key names, update
-them to use the current names; otherwise client attribution in Studio will stop working.
-
 If you have `context: deprecated` in your coprocessor config, update to `context: all` (or a
 selective list of key names) and update your coprocessor to reference current context key names:
 
