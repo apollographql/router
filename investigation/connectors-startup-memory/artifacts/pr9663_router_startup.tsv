@@ -1,0 +1,9 @@
+# Test B — router-startup path (release-dhat router), PR #9663 vs committed baseline.
+# baseline rows copied from artifacts/measurements.tsv (committed, smyrick/6817694b).
+# with_pr rows measured in wkfz-pr (smyrick/6817694b + origin/benjamn/connector-satisfiability-collapse).
+# Router never runs satisfiability => expected unchanged. N64 skipped (160s startup); N16/N32 representative.
+variant	N	ready_sec	rss_max_bytes	dhat_total_bytes	dhat_peak_bytes
+baseline	16	20.89	787021824	918243144	107927943
+baseline	32	49.08	1101152256	5824711340	410597096
+with_pr	16	19.42	794525696	929634726	108287215
+with_pr	32	43.87	1111343104	5846936044	411238200

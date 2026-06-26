@@ -119,7 +119,122 @@ Federation-only test: `apollo-federation` integration test `connectors_startup_p
 5. (Optional) run #9663's branch through `scripts/measure_all.sh` to empirically show whether
    it moves the router-startup curve (expectation: it won't, by construction).
 
-## 9. Caveats
+## 9. Testing Ben's PR #9663 against our local tests (NEXT AGENT: do this)
+
+Goal: run our repro/tests with Ben's changes applied and see what moves.
+
+**Critical gotchas — read before running:**
+- `compose_all.sh` uses **rover**, which downloads its **own bundled** supergraph plugin
+  (v2.12.0) — it does **NOT** use local `apollo-federation`, so it will **not** reflect
+  #9663. Use it only to *generate* the supergraph inputs.
+- The **router startup** path (`measure_all.sh`, `fed_planner_all.sh`) does **not** run
+  satisfiability, so it is expected to be **unchanged** by #9663 (this is the scope gap in
+  §4 — confirming "no change here" is itself a useful result).
+- #9663 lands in `validate_satisfiability_with_connectors`. The way to actually exercise it
+  locally is the **federation-cli `satisfiability` subcommand**, which calls that function.
+  Our generated schemas are a good trigger: the K item-connectors per subgraph are keyless
+  (empty key-signature → all interchangeable) and the E entity-connectors group by shared
+  `@key` — so consolidation should fire strongly.
+
+### Setup: combine the PR with our repro (use two worktrees for clean before/after)
+
+```bash
+# repo root
+git fetch origin benjamn/connector-satisfiability-collapse smyrick/6817694b
+
+# BASELINE worktree (our branch, no PR)
+git worktree add ../wkfz-base smyrick/6817694b
+
+# WITH-PR worktree: our repro + Ben's changes merged (files are disjoint → clean merge)
+git worktree add -b smyrick/6817694b-with-9663 ../wkfz-pr smyrick/6817694b
+cd ../wkfz-pr && git merge --no-edit origin/benjamn/connector-satisfiability-collapse && cd -
+```
+
+### Test A — satisfiability path (this is where #9663 should win)
+
+Run in BOTH worktrees and compare peak RSS + wall time. The supergraph inputs already exist
+under `investigation/connectors-startup-memory/artifacts/` on our branch (committed); copy
+or regenerate them in each worktree first (`bash .../scripts/compose_all.sh`).
+
+```bash
+# in each worktree (../wkfz-base and ../wkfz-pr):
+for n in 16 32 64; do
+  sg=investigation/connectors-startup-memory/artifacts/connectors_N$n/supergraph.graphql
+  echo "== N$n =="
+  /usr/bin/time -l cargo run --release -q -p apollo-federation-cli -- satisfiability "$sg" 2>&1 \
+    | grep -E "maximum resident|SUCCESS|error|real"
+done
+```
+
+Expectation: baseline grows steeply (multi-GB / many seconds by N64); WITH-PR drops sharply
+(consolidation collapses interchangeable synthetic subgraphs) with an **identical pass/fail
+verdict**. Record both into a new `artifacts/pr9663_satisfiability.tsv` and note the ratio.
+(For allocator-accurate numbers instead of RSS, the `apollo-federation` dhat test
+`connectors_validation_profiling` profiles the satisfiability path, but it uses a hardcoded
+fixture — the `satisfiability` subcommand above against our N-sweep is the parametric test.)
+
+### Test B — router-startup path (expected unchanged; confirms the scope gap)
+
+```bash
+# in ../wkfz-pr (PR applied):
+cargo build --profile release-dhat -p apollo-router --features dhat-heap
+bash investigation/connectors-startup-memory/scripts/measure_all.sh
+# diff the result against our committed baseline:
+git -C . diff --no-index ../wkfz-base/investigation/connectors-startup-memory/artifacts/measurements.tsv \
+  investigation/connectors-startup-memory/artifacts/measurements.tsv || true
+```
+
+Expectation: **no meaningful change** vs the committed `measurements.tsv` — the router still
+builds the full O(S²) query graph (`QueryPlanner::new`) from the un-consolidated executed
+schema. If it *does* change, that's a surprise worth digging into.
+
+### Report
+
+Summarize Test A (the win) + Test B (no change) and tie back to §4's open question: A proves
+#9663 fixes the composition/satisfiability cost; B shows the router-startup half is still
+open. Post back to the Slack thread (§7) and/or this doc.
+
+### Results (2026-06-25, this agent) — #9663 tested locally
+
+Setup: baseline = `smyrick/6817694b`; with_pr = same + `origin/benjamn/connector-satisfiability-collapse`
+merged into `smyrick/6817694b-with-9663` (worktree `../wkfz-pr`; one trivial `Cargo.toml`
+conflict — both sides kept). Caveat: Ben's branch carries an unrelated `dev` merge, so the
+with_pr tree differs from baseline by more than just the consolidation (matters only for the
+sub-1% Test-B deltas, not Test A).
+
+**Test A — satisfiability (`apollo-federation-cli satisfiability`, /usr/bin/time -l). PR WINS.**
+Verdict identical (`[SUCCESS]`) for every N. Raw: `artifacts/pr9663_satisfiability.tsv`.
+
+| N  | baseline RSS | PR RSS  | baseline real | PR real | RSS× | time× |
+|----|--------------|---------|---------------|---------|------|-------|
+| 16 | 99 MB        | 40 MB   | 0.70s         | 0.61s   | 2.5  | 1.1   |
+| 32 | 416 MB       | 69 MB   | 4.22s         | 0.13s   | 6.0  | 32    |
+| 64 | 2616 MB      | 127 MB  | 42.69s        | 0.26s   | 20.6 | 164   |
+
+Baseline is steeply super-linear (matches §3); PR is near-flat. Consolidation collapses the
+interchangeable synthetic subgraphs as designed. Confirms #9663 fixes the composition half.
+
+**Test B — router startup (release-dhat router). UNCHANGED, as predicted (§4 scope gap).**
+PR vs committed `measurements.tsv` baseline (N16/N32; N64's 160s startup skipped). Raw:
+`artifacts/pr9663_router_startup.tsv`.
+
+| N  | metric    | baseline   | PR         | Δ      |
+|----|-----------|------------|------------|--------|
+| 16 | dhat_peak | 107.93 MB  | 108.29 MB  | +0.3%  |
+| 16 | rss_max   | 787 MB     | 795 MB     | +1.0%  |
+| 32 | dhat_peak | 410.60 MB  | 411.24 MB  | +0.2%  |
+| 32 | rss_max   | 1101 MB    | 1111 MB    | +0.9%  |
+
+All within run-to-run noise (<1.3%, attributable to the dev-merge drift). The router never
+calls satisfiability, so #9663 cannot move this curve — empirically confirmed.
+
+**Bottom line:** #9663 is a decisive fix for the composition/satisfiability path (~20× RSS,
+~164× wall at N64, same verdict) and does **nothing** for the router-startup O(S²) query-graph
+build. So §4's open question still gates next steps: if the customer's 14 GB OOM is in
+GraphOS/compose → #9663 is the fix; if it's in the router process at startup → still open
+(needs the `query_graph/mod.rs` + `build_query_graph.rs` optimizations from §8.2).
+
+## 10. Caveats
 
 - Profiled on macOS/dhat; customer OOMs on Linux. Allocation **shape** is
   platform-independent (dhat attribution transfers); absolute RSS differs.

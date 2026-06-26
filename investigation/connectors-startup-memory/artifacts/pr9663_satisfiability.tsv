@@ -1,0 +1,10 @@
+# Test A — satisfiability path (apollo-federation-cli `satisfiability`), PR #9663 vs baseline.
+# Inputs: artifacts/connectors_N<n>/supergraph.graphql (committed). /usr/bin/time -l.
+# baseline = smyrick/6817694b ; with_pr = smyrick/6817694b + origin/benjamn/connector-satisfiability-collapse
+variant	N	verdict	real_sec	rss_max_bytes
+baseline	16	SUCCESS	0.70	98861056
+baseline	32	SUCCESS	4.22	415760384
+baseline	64	SUCCESS	42.69	2616066048
+with_pr	16	SUCCESS	0.61	39616512
+with_pr	32	SUCCESS	0.13	69238784
+with_pr	64	SUCCESS	0.26	127057920
