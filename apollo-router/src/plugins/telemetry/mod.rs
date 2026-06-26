@@ -613,18 +613,8 @@ impl PluginPrivate for Telemetry {
                         // that processing is deferred until the future is polled.
                         let get_from_context =
                             |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_NAME,
-                            )
-                        });
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION).or_else(|| {
-                            get_from_context(
-                                &ctx,
-                                crate::context::deprecated::DEPRECATED_CLIENT_VERSION,
-                            )
-                        });
+                        let client_name = get_from_context(&ctx, CLIENT_NAME);
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
 
                         if let Some(key) = client_name_key {
                             span.set_span_dyn_attribute(
