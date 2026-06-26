@@ -967,10 +967,10 @@ async fn no_data() {
             if name == "orga" {
                 let (mock, mut handle) =
                     tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-                // Drain loop: drop each responder to simulate "orga not found".
-                // Ends when the mock channel closes (service dropped after oneshot).
                 let driver = tokio::spawn(async move {
-                    while let Some((_req, _responder)) = handle.next_request().await {}
+                    while let Some((_req, responder)) = handle.next_request().await {
+                        responder.send_error("orga not found");
+                    }
                 });
                 drain_drivers_clone.lock().unwrap().push(driver);
                 mock.boxed_clone()

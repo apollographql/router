@@ -700,17 +700,6 @@ mod tests {
         mock
     }
 
-    #[allow(clippy::type_complexity)]
-    fn mock_with_deferred_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
-        // Identical to mock_with_callback — the deferred path calls the http client once per
-        // response chunk, so the looping driver handles both single and multi-chunk cases.
-        mock_with_callback(callback)
-    }
-
     #[tokio::test]
     async fn external_plugin_supergraph_request() {
         let supergraph_stage = SupergraphStage {
@@ -1030,7 +1019,7 @@ mod tests {
         });
 
         let mock_http_client =
-            mock_with_deferred_callback(move |mut res: http::Request<RouterBody>| {
+            mock_with_callback(move |mut res: http::Request<RouterBody>| {
                 Box::pin(async move {
                     let deserialized_response: Externalizable<Value> =
                         serde_json::from_slice(&router::body::into_bytes(&mut res).await.unwrap())
@@ -1185,7 +1174,7 @@ mod tests {
         });
 
         let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+            mock_with_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
                         &router::body::into_bytes(res.into_body()).await.unwrap(),
@@ -1306,7 +1295,7 @@ mod tests {
         });
 
         let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+            mock_with_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
                     let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
                         &router::body::into_bytes(res.into_body()).await.unwrap(),
@@ -1429,7 +1418,7 @@ mod tests {
                 );
             });
 
-            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+            let mock_http_client = mock_with_callback(|_: http::Request<RouterBody>| {
                 Box::pin(async {
                     let response = serde_json_bytes::json!({
                         "version": 1,
@@ -1608,7 +1597,7 @@ mod tests {
     // Helper function to create mock http client that returns valid GraphQL response
     fn create_mock_http_client_supergraph_response_valid_response()
     -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,
@@ -1630,7 +1619,7 @@ mod tests {
     // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_invalid_response()
     -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,
@@ -1652,7 +1641,7 @@ mod tests {
     // Helper function to create mock http client that returns empty response
     fn create_mock_http_client_empty_response() -> tower_test::mock::Mock<HttpRequest, HttpResponse>
     {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,

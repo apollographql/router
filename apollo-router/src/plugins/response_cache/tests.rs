@@ -2793,8 +2793,9 @@ async fn no_data() {
                 let (mock, mut handle) =
                     tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
                 let driver = tokio::spawn(async move {
-                    // Drop each responder to send ClosedError, simulating a subgraph error.
-                    while let Some((_req, _responder)) = handle.next_request().await {}
+                    while let Some((_req, responder)) = handle.next_request().await {
+                        responder.send_error("orga not found");
+                    }
                 });
                 drain_drivers_clone.lock().unwrap().push(driver);
                 mock.boxed_clone()
@@ -2845,7 +2846,7 @@ async fn no_data() {
       },
       "errors": [
         {
-          "message": "HTTP fetch failed: service closed",
+          "message": "HTTP fetch failed: orga not found",
           "path": [
             "currentUser",
             "allOrganizations",
@@ -2854,7 +2855,7 @@ async fn no_data() {
           "extensions": {
             "code": "SUBREQUEST_HTTP_ERROR",
             "service": "orga",
-            "reason": "service closed"
+            "reason": "orga not found"
           }
         }
       ]
