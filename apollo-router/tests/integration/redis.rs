@@ -24,11 +24,7 @@
 
 use std::collections::HashMap;
 
-use apollo_router::Context;
-use apollo_router::MockedSubgraphs;
-use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
-use apollo_router::services::router::body::from_bytes;
 use apollo_router::services::supergraph;
 use fred::cmd;
 use fred::prelude::Client as RedisClient;
@@ -36,12 +32,8 @@ use fred::prelude::Config as RedisConfig;
 use fred::prelude::Value as RedisValue;
 use fred::prelude::*;
 use fred::types::scan::ScanType;
-use fred::types::scan::Scanner;
 use futures::StreamExt;
-use http::HeaderValue;
 use http::Method;
-use http::header::CACHE_CONTROL;
-use serde_json::Value;
 use serde_json::json;
 use tokio::task::JoinSet;
 use tower::BoxError;
