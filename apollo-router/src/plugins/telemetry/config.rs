@@ -9,6 +9,7 @@ use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
 use opentelemetry_sdk::metrics::Aggregation;
+#[cfg(test)]
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::trace::SpanLimits;
@@ -249,7 +250,7 @@ impl MetricView {
     }
 
     /// Converts this MetricView into a view function for OTel SDK 0.31+
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn into_view_fn(
         self,
     ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
