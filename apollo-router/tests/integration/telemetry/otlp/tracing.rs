@@ -833,6 +833,48 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_deprecated_client_name_context_key_is_not_read() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("../fixtures/otlp_deprecated_client_name.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let reqwest_client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("reqwest client build");
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .reqwest_client(reqwest_client)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // The rhai script sets apollo_telemetry::client_name (the old 1.x key).
+    // In 3.x only apollo::telemetry::client_name is read, so client.name
+    // must be empty rather than the deprecated value.
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "")
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
+        .await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_ipv6() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
