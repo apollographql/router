@@ -36,4 +36,4 @@ selective list of key names) and update your coprocessor to reference current co
 
 Config migration is automatic: `context: deprecated` is migrated to `context: all`.
 
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/ROUTER-1775
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9686
