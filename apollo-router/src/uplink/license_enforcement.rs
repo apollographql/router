@@ -950,7 +950,6 @@ mod test {
                         AllowedFeature::Authorization,
                         AllowedFeature::Batching,
                         AllowedFeature::DemandControl,
-                        AllowedFeature::EntityCaching,
                         AllowedFeature::PersistedQueries,
                         AllowedFeature::ApqCaching,
                     ]),
