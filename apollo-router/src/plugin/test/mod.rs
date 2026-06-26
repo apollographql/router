@@ -32,13 +32,14 @@ pub async fn assert_no_mock_calls<Req, Res>(
     Req: Send + 'static,
     Res: Send + 'static,
 {
-    if tokio::time::timeout(
-        std::time::Duration::from_millis(10),
-        handle.next_request(),
-    )
-    .await
-    .is_ok()
-    {
+    if matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            handle.next_request(),
+        )
+        .await,
+        Ok(Some(_))
+    ) {
         panic!("mock service was called but should not have been");
     }
 }
