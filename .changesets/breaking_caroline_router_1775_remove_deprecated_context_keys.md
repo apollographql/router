@@ -1,4 +1,4 @@
-### Remove deprecated 1.x context key aliases for coprocessors ([Issue #ROUTER-1775](https://apollographql.atlassian.net/browse/ROUTER-1775))
+### Remove deprecated 1.x context key aliases for coprocessors ([PR #9686](https://github.com/apollographql/router/pull/9686))
 
 The `context: deprecated` coprocessor configuration option has been removed. It was a compatibility
 layer that translated context keys between their Router 1.x names (e.g. `operation_name`) and their
