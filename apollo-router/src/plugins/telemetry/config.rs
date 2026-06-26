@@ -249,6 +249,7 @@ impl MetricView {
     }
 
     /// Converts this MetricView into a view function for OTel SDK 0.31+
+    #[allow(dead_code)]
     pub(crate) fn into_view_fn(
         self,
     ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {

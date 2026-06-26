@@ -579,6 +579,7 @@ impl RedisCacheStorage {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
@@ -813,6 +814,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
@@ -904,6 +906,7 @@ impl RedisCacheStorage {
 
     /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
     /// inserts, and otherwise an error and error traces and error-level log
+    #[allow(dead_code)]
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
@@ -936,6 +939,7 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
+    #[allow(dead_code)]
     pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
     where
         I: Iterator<Item = fred::types::Key>,
@@ -978,6 +982,7 @@ impl RedisCacheStorage {
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    #[allow(dead_code)]
     pub(crate) async fn scan_with_namespaced_results(
         &self,
         pattern: String,
