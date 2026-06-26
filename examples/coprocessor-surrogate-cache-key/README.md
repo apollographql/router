@@ -29,14 +29,28 @@ coprocessor:
         context: true
 ```
 
+The response cache can expose cache key details in the request context, at the key `apollo::response_cache::debug_cached_keys`, when debug mode is enabled:
+
+```yaml title=router.yaml
+response_cache:
+  enabled: true
+  debug: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://localhost:6379"]
+        ttl: 24h # Optional, by default no expiration
+```
+
 The coprocessor will then work at two stages:
 
 - Subgraph response:
   - Extract the subgraph request id
   - Extract the list of surrogate keys from the response
 - Supergraph stage:
-  - Extract the map `subgraph request id => cache keys`
-  - Match it with the surrogate cache keys obtained at the subgraph response stage
+  - Read the list of cache entries from `apollo::response_cache::debug_cached_keys` in the context
+  - Match surrogate keys (obtained at the subgraph response stage) to the corresponding cache keys
 
 The coprocessor then has a map of `surrogate keys => cache keys` that it can use to invalidate cached data directly from Redis.
 

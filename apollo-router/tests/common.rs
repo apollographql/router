@@ -2510,14 +2510,12 @@ fn merge_overrides(
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in ["/response_cache/subgraph/subgraphs"] {
-        if let Some(subgraphs) = config
-            .pointer_mut(per_subgraph_path)
-            .and_then(|o| o.as_object_mut())
-        {
-            for subgraph_config in subgraphs.values_mut() {
-                insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
-            }
+    if let Some(subgraphs) = config
+        .pointer_mut("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in subgraphs.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
@@ -2544,16 +2542,16 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = ["/response_cache/subgraph/subgraphs"];
-    for section in per_subgraph_sections {
-        if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
-            for subgraph_config in subgraphs.values() {
-                if let Some(urls) = subgraph_config
-                    .pointer("/redis/urls")
-                    .and_then(|o| o.as_array())
-                {
-                    return Some(convert_urls(urls));
-                }
+    if let Some(subgraphs) = config
+        .pointer("/response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object())
+    {
+        for subgraph_config in subgraphs.values() {
+            if let Some(urls) = subgraph_config
+                .pointer("/redis/urls")
+                .and_then(|o| o.as_array())
+            {
+                return Some(convert_urls(urls));
             }
         }
     }

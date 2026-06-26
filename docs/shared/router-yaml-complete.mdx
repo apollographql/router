@@ -637,7 +637,11 @@ telemetry:
               - false
           level: info
     instruments:
-      cache: {}
+      cache:
+        apollo.router.response.cache:
+          attributes:
+            graphql.type.name:
+              alias: example_alias
       connector:
         http.client.request.body.size:
           attributes:
