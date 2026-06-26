@@ -8,7 +8,6 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::services::subgraph;
     use apollo_router::services::supergraph;
     use http::HeaderMap;
@@ -19,53 +18,36 @@ mod tests {
         header_one: Option<String>,
         header_two: Option<String>,
     ) -> Option<String> {
-        let mut mock_service1 = test::MockSubgraphService::new();
-        let mut mock_service2 = test::MockSubgraphService::new();
-
-        mock_service1.expect_clone().returning(move || {
-            let mut mock_service = test::MockSubgraphService::new();
-            mock_service
-                .expect_clone()
-                .return_once(test::MockSubgraphService::new);
-            let value = header_one.clone();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: subgraph::Request| {
-                    let mut headers = HeaderMap::new();
-                    if let Some(value) = &value {
-                        headers.insert("cache-control", value.parse().unwrap());
-                    }
-
-                    Ok(subgraph::Response::fake_builder()
-                        .headers(headers)
-                        .context(req.context)
-                        .build())
-                });
-            mock_service
+        let (mock_service1, mut handle1) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        tokio::spawn(async move {
+            let (req, responder) = handle1.next_request().await.unwrap();
+            let mut headers = HeaderMap::new();
+            if let Some(value) = &header_one {
+                headers.insert("cache-control", value.parse().unwrap());
+            }
+            responder.send_response(
+                subgraph::Response::fake_builder()
+                    .headers(headers)
+                    .context(req.context)
+                    .build(),
+            );
         });
 
-        mock_service2.expect_clone().returning(move || {
-            let mut mock_service = test::MockSubgraphService::new();
-            mock_service
-                .expect_clone()
-                .return_once(test::MockSubgraphService::new);
-            let value = header_two.clone();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: subgraph::Request| {
-                    let mut headers = HeaderMap::new();
-                    if let Some(value) = &value {
-                        headers.insert("cache-control", value.parse().unwrap());
-                    }
-
-                    Ok(subgraph::Response::fake_builder()
-                        .headers(headers)
-                        .context(req.context)
-                        .build())
-                });
-            mock_service
+        let (mock_service2, mut handle2) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        tokio::spawn(async move {
+            let (req, responder) = handle2.next_request().await.unwrap();
+            let mut headers = HeaderMap::new();
+            if let Some(value) = &header_two {
+                headers.insert("cache-control", value.parse().unwrap());
+            }
+            responder.send_response(
+                subgraph::Response::fake_builder()
+                    .headers(headers)
+                    .context(req.context)
+                    .build(),
+            );
         });
 
         let config = serde_json::json!({

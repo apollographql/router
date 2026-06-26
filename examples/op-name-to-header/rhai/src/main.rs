@@ -13,41 +13,31 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
-        // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockSupergraphService::new();
-
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
-
-        // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockSupergraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: supergraph::Request| {
-                    // Let's make sure our request contains our new header
-                    assert_eq!(
-                        req.supergraph_request
-                            .headers()
-                            .get("X-operation-name")
-                            .expect("X-operation-name is present"),
-                        "TopProducts"
-                    );
-                    Ok(supergraph::Response::fake_builder()
-                        .data(expected_mock_response_data)
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
-            mock_service
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert_eq!(
+                req.supergraph_request
+                    .headers()
+                    .get("X-operation-name")
+                    .expect("X-operation-name is present"),
+                "TopProducts"
+            );
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .data(expected_mock_response_data)
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
         });
 
         let config = serde_json::json!({
