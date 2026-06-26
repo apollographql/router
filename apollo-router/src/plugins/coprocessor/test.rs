@@ -7873,19 +7873,20 @@ mod tests {
             let _response = service.oneshot(request).await.unwrap();
 
             // Verify the coprocessor received unmasked headers
-            let headers = received_headers.lock().unwrap();
-            assert!(headers.is_some());
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some());
 
-            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
-            assert_eq!(
-                headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "secret-api-key-67890", // gitleaks:allow
-                "API key should be sent unmasked to coprocessor"
-            );
-            drop(headers);
+                assert_eq!(
+                    headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "secret-api-key-67890", // gitleaks:allow
+                    "API key should be sent unmasked to coprocessor"
+                );
+            }
             subgraph_driver.await.unwrap();
         }
 
