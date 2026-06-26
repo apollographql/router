@@ -1822,7 +1822,8 @@ mod create_subgraph_services_tests {
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
     where
         Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
-        Fut: std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+        Fut:
+            std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
     {
         use hyper::body::Incoming;
         use hyper_util::rt::TokioExecutor;

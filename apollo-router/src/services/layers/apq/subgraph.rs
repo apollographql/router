@@ -600,9 +600,10 @@ mod tests {
                     let svc = hyper::service::service_fn(|request: http::Request<Incoming>| {
                         handle(request.map(Body::new))
                     });
-                    if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                        .serve_connection_with_upgrades(io, svc)
-                        .await
+                    if let Err(err) =
+                        hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                            .serve_connection_with_upgrades(io, svc)
+                            .await
                     {
                         eprintln!("server error: {err}");
                     }
@@ -755,9 +756,11 @@ mod tests {
                         if n == 0 {
                             assert!(graphql_request.query.is_none());
                             let pqnf_response = Response {
-                                errors: vec![Error::builder()
-                                    .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
-                                    .build()],
+                                errors: vec![
+                                    Error::builder()
+                                        .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
+                                        .build(),
+                                ],
                                 ..Response::default()
                             };
                             return Ok(http::Response::builder()
