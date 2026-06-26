@@ -459,7 +459,6 @@ impl Configuration {
             },
         }
     }
-
 }
 
 impl Default for Configuration {
