@@ -3016,11 +3016,6 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "const": "deprecated",
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
           "description": "Only send the list of context keys to coprocessor",
           "properties": {
