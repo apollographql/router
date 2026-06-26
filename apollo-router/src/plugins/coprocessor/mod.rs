@@ -29,8 +29,6 @@ use tower::util::MapFutureLayer;
 
 use crate::Context;
 use crate::configuration::shared::Client;
-use crate::context::context_key_from_deprecated;
-use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Value;
@@ -553,17 +551,11 @@ pub(super) enum ContextConf {
     None,
     /// Send all context keys to coprocessor
     All,
-    /// Send all context keys using deprecated names (from router 1.x) to coprocessor
-    Deprecated,
     /// Only send the list of context keys to coprocessor
     Selective(Arc<HashSet<String>>),
 }
 
 impl ContextConf {
-    pub(crate) fn is_deprecated(&self) -> bool {
-        matches!(self, Self::Deprecated)
-    }
-
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
             Self::None => None,
@@ -572,18 +564,6 @@ impl ContextConf {
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     keys_sent.insert(elt.key().clone());
                     (elt.key().clone(), elt.value().clone())
-                }));
-                new_ctx.id = ctx.id.clone();
-                Some((new_ctx, keys_sent))
-            }
-            Self::Deprecated => {
-                let mut keys_sent = HashSet::new();
-                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
-                    keys_sent.insert(elt.key().clone());
-                    (
-                        context_key_to_deprecated(elt.key().clone()),
-                        elt.value().clone(),
-                    )
                 }));
                 new_ctx.id = ctx.id.clone();
                 Some((new_ctx, keys_sent))
@@ -659,12 +639,7 @@ pub(crate) fn update_context_from_coprocessor(
 ) -> Result<(), BoxError> {
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
-    for (mut key, value) in context_returned.try_into_iter()? {
-        // Handle deprecated key names - convert back to actual key names
-        if context_config.is_deprecated() {
-            key = context_key_from_deprecated(key);
-        }
-
+    for (key, value) in context_returned.try_into_iter()? {
         keys_returned.insert(key.clone());
         target_context.insert_json_value(key, value);
     }
@@ -1128,10 +1103,7 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            for (mut key, value) in context.try_into_iter()? {
-                if request_config.context.is_deprecated() {
-                    key = context_key_from_deprecated(key);
-                }
+            for (key, value) in context.try_into_iter()? {
                 res.context.upsert_json_value(key, move |_current| value);
             }
         }
@@ -1151,10 +1123,7 @@ where
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if request_config.context.is_deprecated() {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -1585,10 +1554,7 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (mut key, value) in context.try_into_iter()? {
-                    if request_config.context.is_deprecated() {
-                        key = context_key_from_deprecated(key);
-                    }
+                for (key, value) in context.try_into_iter()? {
                     subgraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -1611,10 +1577,7 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if request_config.context.is_deprecated() {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
