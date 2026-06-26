@@ -216,7 +216,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let (mock_service, _handle) =
+        let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
@@ -251,7 +251,8 @@ mod tests {
         assert_eq!(
             "Missing 'x-client-id' header".to_string(),
             graphql_response.errors[0].message
-        )
+        );
+        apollo_router::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -260,7 +261,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let (mock_service, _handle) =
+        let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
@@ -296,7 +297,8 @@ mod tests {
         assert_eq!(
             "client-id is not allowed".to_string(),
             graphql_response.errors[0].message
-        )
+        );
+        apollo_router::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
@@ -362,6 +364,6 @@ mod tests {
             graphql_response.data.unwrap().as_str().unwrap(),
             expected_mock_response_data
         );
-        driver.await.unwrap();
+        apollo_router::plugin::test::await_mock_driver(driver).await;
     }
 }
