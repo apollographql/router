@@ -148,7 +148,6 @@ fn make_redis_url(ports: &[&str]) -> Option<String> {
     Some(url)
 }
 
-// TODO: consider centralizing this fn and the same one in entity_cache.rs?
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
     let mut reviews = vec![];
     let mut top_products = vec![];
@@ -1756,10 +1755,11 @@ async fn test_redis_emits_configuration_error_metric() {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_entity_cache": {
+        "response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
+                    "enabled": true,
                     "redis": {
                         "urls": ["invalid-redis-schem://127.0.0.1:7000"], // invalid schema!
                         "ttl": "10m",
@@ -1802,7 +1802,7 @@ async fn test_redis_emits_configuration_error_metric() {
 
     router
         .assert_metric_non_zero(
-            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="entity",otel_scope_name="apollo/router"}"#,
+            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="response-cache",otel_scope_name="apollo/router"}"#,
             None,
         )
         .await;

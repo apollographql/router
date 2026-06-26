@@ -2509,12 +2509,8 @@ fn merge_overrides(
 
     insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
     insert_redis_namespace(config.pointer_mut("/apq/router/cache/redis"));
-    insert_redis_namespace(config.pointer_mut("/preview_entity_cache/subgraph/all/redis"));
     insert_redis_namespace(config.pointer_mut("/response_cache/subgraph/all/redis"));
-    for per_subgraph_path in [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ] {
+    for per_subgraph_path in ["/response_cache/subgraph/subgraphs"] {
         if let Some(subgraphs) = config
             .pointer_mut(per_subgraph_path)
             .and_then(|o| o.as_object_mut())
@@ -2540,7 +2536,6 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     let top_level_paths = [
         "/supergraph/query_planning/cache/redis/urls",
         "/apq/router/cache/redis/urls",
-        "/preview_entity_cache/subgraph/all/redis/urls",
         "/response_cache/subgraph/all/redis/urls",
     ];
     for path in top_level_paths {
@@ -2549,10 +2544,7 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         }
     }
 
-    let per_subgraph_sections = [
-        "/response_cache/subgraph/subgraphs",
-        "/preview_entity_cache/subgraph/subgraphs",
-    ];
+    let per_subgraph_sections = ["/response_cache/subgraph/subgraphs"];
     for section in per_subgraph_sections {
         if let Some(subgraphs) = config.pointer(section).and_then(|o| o.as_object()) {
             for subgraph_config in subgraphs.values() {
