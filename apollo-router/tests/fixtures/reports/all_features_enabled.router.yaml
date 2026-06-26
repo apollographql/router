@@ -10,15 +10,6 @@ apq:
     all:
       enabled: true
 
-# Enable entity cache
-preview_entity_cache:
-  enabled: true
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: [ "redis://..." ]
-
 # Remaining Configuration
 include_subgraph_errors:
   all: true
