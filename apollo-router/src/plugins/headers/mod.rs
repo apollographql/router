@@ -1217,7 +1217,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1226,7 +1226,7 @@ mod test {
             ("c", "d"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1245,7 +1245,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1254,7 +1254,7 @@ mod test {
             ("c", "d"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1270,7 +1270,7 @@ mod test {
         )]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1279,7 +1279,7 @@ mod test {
             ("header_from_context", "my_value_from_context"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1298,7 +1298,7 @@ mod test {
         )]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1307,7 +1307,7 @@ mod test {
             ("header_from_context", "my_value_from_context"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1324,7 +1324,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1333,7 +1333,7 @@ mod test {
             ("header_from_request", "my_operation_name"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1353,7 +1353,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1362,7 +1362,7 @@ mod test {
             ("header_from_request", "myCoolValue"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1379,7 +1379,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1388,7 +1388,7 @@ mod test {
             ("header_from_request", "my_operation_name"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1409,7 +1409,7 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1418,7 +1418,7 @@ mod test {
             ("header_from_request", "myCoolValue"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1431,11 +1431,11 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1491,11 +1491,11 @@ mod test {
             id: SubgraphRequestId(String::new()),
         };
 
-        let call = service.ready().await?.call(req);
+        let call = tokio::spawn(service.ready().await?.call(req));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1511,11 +1511,11 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1528,11 +1528,11 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![("ac", "vac")]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1548,11 +1548,11 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![("ac", "vac")]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1566,7 +1566,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1577,7 +1577,7 @@ mod test {
             ("db", "vdb2"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1594,7 +1594,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1605,7 +1605,7 @@ mod test {
             ("db", "vdb2"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1621,7 +1621,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1630,7 +1630,7 @@ mod test {
             ("da", "vda"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1649,7 +1649,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1658,7 +1658,7 @@ mod test {
             ("da", "vda"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1674,7 +1674,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1683,7 +1683,7 @@ mod test {
             ("ea", "vda"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1702,7 +1702,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1711,7 +1711,7 @@ mod test {
             ("ea", "vda"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1739,7 +1739,7 @@ mod test {
         ]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1749,7 +1749,7 @@ mod test {
             ("rb", "vda"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1780,7 +1780,7 @@ mod test {
         ]))
         .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1790,7 +1790,7 @@ mod test {
             ("rb", "vda"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1804,7 +1804,7 @@ mod test {
                 default: Some("defaulted".try_into()?),
             })]))
             .layer(mock);
-        let call = service.ready().await?.call(example_request());
+        let call = tokio::spawn(service.ready().await?.call(example_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1813,7 +1813,7 @@ mod test {
             ("ea", "defaulted"),
         ]);
         responder.send_response(example_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
@@ -1832,7 +1832,7 @@ mod test {
             })]))
             .layer(mock);
 
-        let call = service.ready().await?.call(example_connector_request());
+        let call = tokio::spawn(service.ready().await?.call(example_connector_request()));
         let (request, responder) = handle.next_request().await.unwrap();
         request.assert_headers(vec![
             ("aa", "vaa"),
@@ -1841,7 +1841,7 @@ mod test {
             ("ea", "defaulted"),
         ]);
         responder.send_response(example_connector_response(request).unwrap());
-        call.await?;
+        call.await.unwrap()?;
         Ok(())
     }
 
