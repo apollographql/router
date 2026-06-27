@@ -217,7 +217,7 @@ pub(crate) fn build_operation_with_aliasing(
     let ContextualArguments {
         arguments,
         count,
-        inverted_contexts: _,
+        inverted_contexts: _, // not used here (only used for interpreting the response data)
     } = contextual_arguments;
     let parsed_document = subgraph_operation.as_parsed();
 
