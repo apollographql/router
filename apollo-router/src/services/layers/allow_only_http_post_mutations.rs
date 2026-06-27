@@ -231,8 +231,7 @@ mod forbid_http_get_mutations_tests {
 
         for method in forbidden_methods {
             // Inner service is never reached — the layer rejects the request.
-            let (mock, mut handle) =
-                tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+            let (mock, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
             let mut error_response = AllowOnlyHttpPostMutationsLayer::default()
                 .layer(mock)
                 .oneshot(create_request(method, OperationKind::Mutation))

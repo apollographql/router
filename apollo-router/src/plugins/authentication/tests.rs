@@ -160,13 +160,13 @@ async fn build_a_test_harness(
 
 #[tokio::test]
 async fn load_plugin() {
-    let (_test_harness, mut handle) = build_a_default_test_harness().await;
+    let (_test_harness, handle) = build_a_default_test_harness().await;
     crate::plugin::test::assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_rejects_when_there_is_no_auth_header() {
-    let (mock_service, mut handle) =
+    let (mock_service, handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
     let jwks_url = create_an_url("jwks.json");
 
@@ -227,7 +227,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_is_missing() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let (test_harness, handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -267,7 +267,7 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let (test_harness, handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -307,7 +307,7 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let (test_harness, handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -346,7 +346,7 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let (test_harness, handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -386,7 +386,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
+    let (test_harness, handle) = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -797,7 +797,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, false).await;
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()

@@ -829,7 +829,7 @@ mod tests {
         };
 
         // The execution service is never reached — the coprocessor breaks the flow.
-        let (exec_mock, mut exec_handle) =
+        let (exec_mock, exec_handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1477,7 +1477,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_valid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
             exec_mock.boxed_clone(),
@@ -1498,7 +1498,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_empty() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
             exec_mock.boxed_clone(),
@@ -1524,7 +1524,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_invalid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
             exec_mock.boxed_clone(),
@@ -1550,7 +1550,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_valid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_valid_response(),
             exec_mock.boxed_clone(),
@@ -1571,7 +1571,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_empty() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_empty_response(),
             exec_mock.boxed_clone(),
@@ -1594,7 +1594,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_invalid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
+        let (exec_mock, exec_handle) = create_mock_execution_service();
         let service = create_execution_stage_for_request_validation_test().as_service(
             create_mock_http_client_execution_request_invalid_response(),
             exec_mock.boxed_clone(),

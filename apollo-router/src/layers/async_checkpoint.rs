@@ -238,7 +238,7 @@ mod async_checkpoint_tests {
 
     #[tokio::test]
     async fn test_return() {
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -267,7 +267,7 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack =
             AsyncCheckpointLayer::new(
@@ -358,7 +358,7 @@ mod async_checkpoint_tests {
 
     #[tokio::test]
     async fn test_double_ready_doesnt_panic() {
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -382,7 +382,7 @@ mod async_checkpoint_tests {
 
     #[tokio::test]
     async fn test_double_call_doesnt_panic() {
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(

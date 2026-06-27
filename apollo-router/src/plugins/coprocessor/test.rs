@@ -261,7 +261,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, mut handle) =
+        let (mock_router_service, handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -327,7 +327,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, mut handle) =
+        let (mock_router_service, handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -393,7 +393,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_router_service, mut handle) =
+        let (mock_router_service, handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -453,7 +453,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, mut handle) =
+        let (mock_subgraph_service, handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1051,7 +1051,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, mut handle) =
+        let (mock_subgraph_service, handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1120,7 +1120,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_subgraph_service, mut handle) =
+        let (mock_subgraph_service, handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -2654,7 +2654,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let (mock_router_service, mut handle) =
+        let (mock_router_service, handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
@@ -2752,7 +2752,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let (mock_router_service, mut handle) =
+        let (mock_router_service, handle) =
             tower_test::mock::pair::<router::Request, router::Response>();
 
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {

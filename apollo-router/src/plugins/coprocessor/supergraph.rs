@@ -861,7 +861,7 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let (mock_supergraph_service_1, mut handle_1) =
+        let (mock_supergraph_service_1, handle_1) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
@@ -1476,8 +1476,6 @@ mod tests {
             },
         }
     }
-
-    type SupergraphHandle = tower_test::mock::Handle<supergraph::Request, supergraph::Response>;
 
     // Helper function to create mock supergraph service.
     // Returns (Mock, JoinHandle) — the driver is a loop that exits when the service is dropped.

@@ -99,7 +99,7 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
 
 #[tokio::test]
 async fn invalid_library_name_returns_bad_request() {
-    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let (mock, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
@@ -126,7 +126,7 @@ async fn invalid_library_name_returns_bad_request() {
 
 #[tokio::test]
 async fn invalid_library_version_returns_bad_request() {
-    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let (mock, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let service_stack =
         EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))

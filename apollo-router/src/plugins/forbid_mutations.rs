@@ -113,7 +113,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
             ForbidMutationsConfig(true),
             Default::default(),

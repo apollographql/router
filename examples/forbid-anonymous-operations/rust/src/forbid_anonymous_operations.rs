@@ -130,7 +130,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
@@ -167,7 +167,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.

@@ -181,7 +181,7 @@ async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
 async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     async {
         // The execution_service in test.rhai throws an exception, so the inner service is never called.
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
@@ -978,8 +978,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 }
 
 async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError> {
-    let (mock_service, mut handle) =
-        tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+    let (mock_service, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
     let dyn_plugin = create_plugin(script_name).await?;
 
@@ -1007,7 +1006,7 @@ async fn create_plugin(script_name: &str) -> Result<Box<dyn DynPlugin>, BoxError
 }
 
 async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError> {
-    let (mock_service, mut handle) =
+    let (mock_service, handle) =
         tower_test::mock::pair::<execution::Request, execution::Response>();
     let dyn_plugin = create_plugin(script_name).await?;
     let mut service = dyn_plugin.execution_service(mock_service.boxed_clone());
@@ -1025,7 +1024,7 @@ async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError>
 }
 
 async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
-    let (mock_service, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+    let (mock_service, handle) = tower_test::mock::pair::<router::Request, router::Response>();
 
     let dyn_plugin = create_plugin(script_name).await?;
 
@@ -1040,8 +1039,7 @@ async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
 }
 
 async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> {
-    let (mock_service, mut handle) =
-        tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+    let (mock_service, handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
     let dyn_plugin = create_plugin(script_name).await?;
 
@@ -1359,7 +1357,7 @@ async fn test_rhai_metric_failed_callback() {
     async {
         // The supergraph_service in test_metrics_fail.rhai throws before calling the inner
         // service, so the mock is never reached.
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
         let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()
@@ -1393,7 +1391,7 @@ async fn test_rhai_metric_failed_callback() {
 #[tokio::test]
 async fn test_rhai_metric_no_callback_no_emission() {
     async {
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
         let dyn_plugin: Box<dyn crate::plugin::DynPlugin> = crate::plugin::plugins()

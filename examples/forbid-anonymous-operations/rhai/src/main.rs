@@ -18,7 +18,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_router_forbids_anonymous_operation() {
-        let (mock_service, mut handle) =
+        let (mock_service, handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let config = serde_json::json!({

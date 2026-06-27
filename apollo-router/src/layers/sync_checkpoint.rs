@@ -260,7 +260,7 @@ mod checkpoint_tests {
 
     #[tokio::test]
     async fn test_return() {
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack = CheckpointLayer::new(|_req| {
             Ok(ControlFlow::Break(
@@ -289,7 +289,7 @@ mod checkpoint_tests {
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack =
             CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error))).layer(mock);
