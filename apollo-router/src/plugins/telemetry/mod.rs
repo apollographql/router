@@ -209,7 +209,7 @@ fn get_client_attribute_from_context(
         ::tracing::warn!(
             "`{deprecated_key}` context key is deprecated; \
              use `{key}` instead. \
-             The fallback will be removed in a future 3.x release."
+             The fallback will be removed in version 3.0."
         );
     }
     v
