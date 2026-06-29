@@ -25,7 +25,26 @@ pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
 /// Assert that a mock service is never called during the test.
 ///
 /// Waits up to 10 ms after the test action for a request to arrive; if one does,
-/// the test fails immediately. Pass `mut handle` from `tower_test::mock::pair`.
+/// the test fails immediately. As the final action in your test, pass `handle`
+/// from `tower_test::mock::pair`.
+///
+/// # Example
+/// ```rust,ignore
+/// use tower::ServiceBuilder;
+/// use tower::Service as _;
+/// use tower::ServiceExt as _;
+/// let (mock, handle) = tower_test::mock::pair::<(), ()>();
+/// let mut service = ServiceBuilder::new()
+///     .filter(|_req| Err("never call inner"))
+///     .service(mock);
+/// service
+///     .ready()
+///     .await
+///     .unwrap()
+///     .call(())
+///     .await.expect_err("should return error");
+/// crate::plugin::test::assert_no_mock_calls(handle).await;
+/// ```
 #[cfg(test)]
 pub(crate) async fn assert_no_mock_calls<Req, Res>(mut handle: tower_test::mock::Handle<Req, Res>)
 where
