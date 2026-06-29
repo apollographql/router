@@ -3,6 +3,8 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use regex::Regex;
 use serde_json_bytes::json;
+use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
 use crate::Context;
@@ -1087,9 +1089,7 @@ type Organization
 async fn cache_key_metadata() {
     let query = "query { currentUser { id name phone } }";
 
-    let drivers = std::sync::Arc::new(std::sync::Mutex::new(
-        Vec::<tokio::task::JoinHandle<()>>::new(),
-    ));
+    let drivers = Arc::new(Mutex::new(Vec::<JoinHandle<()>>::new()));
     let drivers_clone = drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -1161,11 +1161,7 @@ async fn cache_key_metadata() {
 
     insta::assert_json_snapshot!(response);
 
-    for driver in std::sync::Arc::try_unwrap(drivers)
-        .unwrap()
-        .into_inner()
-        .unwrap()
-    {
+    for driver in Arc::try_unwrap(drivers).unwrap().into_inner().unwrap() {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 }
