@@ -208,8 +208,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
-    use std::time::Duration;
 
+    use tokio::sync::Barrier;
     use tower::Service;
     use tower::ServiceExt;
 
@@ -219,17 +219,14 @@ mod tests {
     use crate::services::SubgraphResponse;
 
     // Testing strategy:
-    //  - We make our subgraph invocations slow (100ms) to increase our chance of a positive dedup
-    //    result
+    //  - We hold the inner service at a Barrier until both futures are provably in flight, then
+    //    release it. This guarantees deduplication occurs before either request completes.
     //  - We count how many times our inner service is invoked across all service invocations
     //  - We never know exactly which inner service is going to be invoked (since we are driving
     //    the service requests concurrently and in parallel), so we set times to 0..2 (== 0 or 1)
     //    for each expectation.
     //  - Every time an inner service is invoked we increment our shared counter.
     //  - If our shared counter == 1 at the end, then our test passes.
-    //
-    //  Note: If this test starts to fail it may be because we need to increase the sleep time for
-    //  each inner service above 100ms.
     //
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dedup_service() {
@@ -240,17 +237,30 @@ mod tests {
         let inner_invocation_count_2 = inner_invocation_count.clone();
         let inner_invocation_count_3 = inner_invocation_count.clone();
 
+        // Barrier with count 2: one participant is the inner service closure, the other is the
+        // test body after both futures are spawned. This ensures the inner service does not
+        // complete until both concurrent requests are guaranteed to be in flight.
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_1 = barrier.clone();
+        let barrier_2 = barrier.clone();
+        let barrier_3 = barrier.clone();
+
         mock.expect_clone().returning(move || {
             let mut mock = MockSubgraphService::new();
 
             let inner_invocation_count_1 = inner_invocation_count_1.clone();
+            let barrier_1 = barrier_1.clone();
             mock.expect_clone().returning(move || {
                 let mut mock = MockSubgraphService::new();
                 let inner_invocation_count_1 = inner_invocation_count_1.clone();
+                let barrier_inner = barrier_1.clone();
                 mock.expect_call()
                     .times(0..2)
                     .returning(move |req: SubgraphRequest| {
-                        std::thread::sleep(Duration::from_millis(100));
+                        let b = barrier_inner.clone();
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(b.wait())
+                        });
                         inner_invocation_count_1.fetch_add(1, Ordering::Relaxed);
                         Ok(SubgraphResponse::fake_builder()
                             .context(req.context)
@@ -259,10 +269,14 @@ mod tests {
                 mock
             });
             let inner_invocation_count_2 = inner_invocation_count_2.clone();
+            let barrier_inner = barrier_2.clone();
             mock.expect_call()
                 .times(0..2)
                 .returning(move |req: SubgraphRequest| {
-                    std::thread::sleep(Duration::from_millis(100));
+                    let b = barrier_inner.clone();
+                    tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(b.wait())
+                    });
                     inner_invocation_count_2.fetch_add(1, Ordering::Relaxed);
                     Ok(SubgraphResponse::fake_builder()
                         .context(req.context)
@@ -270,10 +284,14 @@ mod tests {
                 });
             mock
         });
+        let barrier_inner = barrier_3.clone();
         mock.expect_call()
             .times(0..2)
             .returning(move |req: SubgraphRequest| {
-                std::thread::sleep(Duration::from_millis(100));
+                let b = barrier_inner.clone();
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(b.wait())
+                });
                 inner_invocation_count_3.fetch_add(1, Ordering::Relaxed);
                 Ok(SubgraphResponse::fake_builder()
                     .context(req.context)
@@ -292,6 +310,10 @@ mod tests {
                 .call(request.clone()),
         );
         let fut2 = tokio::spawn(svc.ready().await.expect("it is ready").call(request));
+
+        // Both futures are now in flight. Release the inner service by meeting it at the barrier.
+        barrier.wait().await;
+
         let (res1, res2) = tokio::join!(fut1, fut2);
 
         // We don't care about our actual request/responses, we just want to make sure that
