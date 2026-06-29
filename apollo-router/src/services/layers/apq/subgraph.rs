@@ -10,6 +10,7 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceExt;
 
 use super::calculate_hash_for_query;
 use crate::graphql;
@@ -141,11 +142,11 @@ where
                     let body = request.subgraph_request.body_mut();
                     body.query = original_query;
                     body.extensions.remove(PERSISTED_QUERY_KEY);
-                    inner.call(request).await
+                    inner.ready().await?.call(request).await
                 }
                 ApqError::PersistedQueryNotFound => {
                     request.subgraph_request.body_mut().query = original_query;
-                    inner.call(request).await
+                    inner.ready().await?.call(request).await
                 }
                 ApqError::Other => Ok(response),
             }
