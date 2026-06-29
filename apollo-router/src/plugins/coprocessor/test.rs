@@ -1854,7 +1854,7 @@ mod tests {
             ));
         });
 
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
                     .body(router::body::from_bytes(
@@ -1919,31 +1919,29 @@ mod tests {
             ));
         });
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
-                            .unwrap();
-                    let context = deserialized_response.context.unwrap_or_default();
-                    assert_eq!(
-                        context
-                            .get::<&str, u8>("this-is-a-test-context")
-                            .expect("context key should be there")
-                            .expect("context key should have the right format"),
-                        42
-                    );
-                    assert!(
-                        context
-                            .get::<&str, String>("not_passed")
-                            .ok()
-                            .flatten()
-                            .is_none()
-                    );
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let (_, body) = req.into_parts();
+                let deserialized_response: Externalizable<Value> =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                let context = deserialized_response.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    42
+                );
+                assert!(
+                    context
+                        .get::<&str, String>("not_passed")
+                        .ok()
+                        .flatten()
+                        .is_none()
+                );
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
                                 "version": 1,
                                 "stage": "SupergraphResponse",
                                 "context": {
@@ -1955,10 +1953,10 @@ mod tests {
                                     "data": null
                                 }
                             }"#,
-                        ))
-                        .unwrap())
-                })
-            });
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -2024,24 +2022,22 @@ mod tests {
             ));
         });
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
-                            .unwrap();
-                    let context = deserialized_response.context.unwrap_or_default();
-                    assert_eq!(
-                        context
-                            .get::<&str, String>("operation_name")
-                            .expect("context key should be there")
-                            .expect("context key should have the right format"),
-                        "Test".to_string()
-                    );
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let (_, body) = req.into_parts();
+                let deserialized_response: Externalizable<Value> =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                let context = deserialized_response.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, String>("operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "Test".to_string()
+                );
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
                                 "version": 1,
                                 "stage": "SupergraphResponse",
                                 "context": {
@@ -2053,10 +2049,10 @@ mod tests {
                                     "data": null
                                 }
                             }"#,
-                        ))
-                        .unwrap())
-                })
-            });
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -2849,79 +2845,78 @@ mod tests {
         })
         .await;
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
+        let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(res.into_body()).await.unwrap(),
+                )
+                .unwrap();
 
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::RouterResponse.to_string(),
-                        deserialized_response.stage
-                    );
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::RouterResponse.to_string(),
+                    deserialized_response.stage
+                );
 
-                    assert_eq!(
-                        json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
-                        deserialized_response.body.unwrap()
-                    );
+                assert_eq!(
+                    json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
+                    deserialized_response.body.unwrap()
+                );
 
-                    let input = json!(
-                          {
-                      "version": 1,
-                      "stage": "RouterResponse",
-                      "control": {
-                          "break": 400
-                      },
-                      "id": "1b19c05fdafc521016df33148ad63c1b",
-                      "headers": {
-                        "cookie": [
-                          "tasty_cookie=strawberry"
-                        ],
-                        "content-type": [
-                          "application/json"
-                        ],
-                        "host": [
-                          "127.0.0.1:4000"
-                        ],
-                        "apollo-federation-include-trace": [
-                          "ftv1"
-                        ],
-                        "apollographql-client-name": [
-                          "manual"
-                        ],
-                        "accept": [
-                          "*/*"
-                        ],
-                        "user-agent": [
-                          "curl/7.79.1"
-                        ],
-                        "content-length": [
-                          "46"
-                        ]
-                      },
-                      "body": "{
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterResponse",
+                  "control": {
+                      "break": 400
+                  },
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
                       \"data\": { \"test\": 42 }
                     }",
-                      "context": {
-                        "entries": {
-                          "accepts-json": false,
-                          "accepts-wildcard": true,
-                          "accepts-multipart": false,
-                          "this-is-a-test-context": 42
-                        }
-                      },
-                      "sdl": "the sdl shouldnt change"
-                    });
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&input).unwrap(),
-                        ))
-                        .unwrap())
-                })
-            });
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = router_stage.as_service(
             mock_http_client,
@@ -2983,7 +2978,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 // Return response that modifies the body - this demonstrates router stage processes
                 // coprocessor responses without GraphQL validation (unlike other stages)
@@ -3287,7 +3282,7 @@ mod tests {
         crate::services::http::HttpRequest,
         crate::services::http::HttpResponse,
     > {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
                     "version": 1,
@@ -3310,7 +3305,7 @@ mod tests {
         crate::services::http::HttpRequest,
         crate::services::http::HttpResponse,
     > {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
                     "version": 1,
@@ -3375,7 +3370,7 @@ mod tests {
         crate::services::http::HttpRequest,
         crate::services::http::HttpResponse,
     > {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
                     "version": 1,
@@ -4651,37 +4646,6 @@ mod tests {
         mock
     }
 
-    #[allow(clippy::type_complexity)]
-    fn mock_with_deferred_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> tower_test::mock::Mock<
-        crate::services::http::HttpRequest,
-        crate::services::http::HttpResponse,
-    > {
-        let (mock, mut handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        tokio::spawn(async move {
-            while let Some((req, responder)) = handle.next_request().await {
-                let context = req.context.clone();
-                let fut = callback(req.http_request);
-                match fut.await {
-                    Ok(response) => responder.send_response(crate::services::http::HttpResponse {
-                        http_response: response,
-                        context,
-                    }),
-                    Err(err) => responder.send_error(err),
-                }
-            }
-        });
-        mock
-    }
-
-    // Tests for conditional validation based on incoming payload validity
-
     // Helper functions for readable tests
     fn valid_response() -> crate::graphql::Response {
         crate::graphql::Response::builder()
@@ -5946,7 +5910,7 @@ mod tests {
             };
 
             // HTTP client mock: returns a simple "continue" response for coprocessor calls
-            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+            let mock_http_client = mock_with_callback(|_: http::Request<RouterBody>| {
                 Box::pin(async {
                     let response = json!({
                         "version": 1,
