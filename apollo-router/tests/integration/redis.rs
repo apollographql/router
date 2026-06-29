@@ -31,8 +31,6 @@ use fred::prelude::Client as RedisClient;
 use fred::prelude::Config as RedisConfig;
 use fred::prelude::Value as RedisValue;
 use fred::prelude::*;
-use fred::types::scan::ScanType;
-use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::Method;
 use serde_json::json;
@@ -53,82 +51,6 @@ use crate::integration::response_cache::namespace;
 
 const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
 const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
-
-async fn find_redis_key_matching(
-    client: &RedisClient,
-    namespace: &str,
-    pattern: &str,
-) -> Option<String> {
-    let full_pattern = format!("{namespace}:{pattern}");
-    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
-    let mut all_keys = Vec::new();
-
-    while let Some(result) = scanner.next().await {
-        if let Ok(ref scan_result) = result
-            && let Some(keys) = scan_result.results()
-        {
-            for key in keys {
-                if let Some(s) = key.as_str() {
-                    all_keys.push(s.to_string());
-                }
-            }
-        }
-    }
-    all_keys.sort();
-    all_keys.into_iter().next()
-}
-
-/// Scan for all keys matching the pattern and return them as a sorted Vec.
-async fn find_all_redis_keys_matching(
-    client: &RedisClient,
-    namespace: &str,
-    pattern: &str,
-) -> Vec<String> {
-    let full_pattern = format!("{namespace}:{pattern}");
-    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
-    let mut all_keys = Vec::new();
-
-    while let Some(result) = scanner.next().await {
-        if let Ok(ref scan_result) = result
-            && let Some(keys) = scan_result.results()
-        {
-            for key in keys {
-                if let Some(s) = key.as_str() {
-                    all_keys.push(s.to_string());
-                }
-            }
-        }
-    }
-    all_keys.sort();
-    all_keys
-}
-
-/// Find a key matching the pattern that is NOT in `exclude_keys`.
-/// This is deterministic even when Redis SCAN returns keys in arbitrary order (e.g. Redis 7.4.9+).
-async fn find_redis_key_matching_not_in(
-    client: &RedisClient,
-    namespace: &str,
-    pattern: &str,
-    exclude_keys: &[String],
-) -> Option<String> {
-    let full_pattern = format!("{namespace}:{pattern}");
-    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
-    let mut all_keys = Vec::new();
-
-    while let Some(result) = scanner.next().await {
-        if let Ok(ref scan_result) = result
-            && let Some(keys) = scan_result.results()
-        {
-            for key in keys {
-                if let Some(s) = key.as_str() {
-                    all_keys.push(s.to_string());
-                }
-            }
-        }
-    }
-    all_keys.sort();
-    all_keys.into_iter().find(|k| !exclude_keys.contains(k))
-}
 
 fn make_redis_url(ports: &[&str]) -> Option<String> {
     let port = ports.first()?;
