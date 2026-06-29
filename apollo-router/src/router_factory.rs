@@ -13,7 +13,6 @@ use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceExt;
 use tower::service_fn;
 use tracing::Instrument;
@@ -41,7 +40,6 @@ use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
-use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
@@ -377,7 +375,7 @@ impl YamlRouterFactory {
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&http_service_factory, &configuration).await?;
+                create_subgraph_services(&http_service_factory).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
@@ -395,21 +393,10 @@ impl YamlRouterFactory {
 
 pub(crate) async fn create_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
-    configuration: &Configuration,
 ) -> Result<IndexMap<String, subgraph::BoxCloneService>, BoxError> {
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
-        let enable_apq = configuration
-            .apq
-            .subgraph
-            .subgraphs
-            .get(name)
-            .map(|a| a.enabled)
-            .unwrap_or(configuration.apq.subgraph.all.enabled);
-        let svc = SubgraphApqLayer::new(enable_apq).layer(SubgraphService::new(
-            name.clone(),
-            http_service_factory.clone(),
-        )?);
+        let svc = SubgraphService::new(name.clone(), http_service_factory.clone())?;
         subgraph_services.insert(name.clone(), svc.boxed_clone());
     }
 
@@ -1818,6 +1805,7 @@ mod create_subgraph_services_tests {
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::layers::apq::subgraph::PERSISTED_QUERY_KEY;
     use crate::services::router;
+    use crate::services::subgraph_service::SubgraphServiceFactory;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
     where
@@ -1914,14 +1902,20 @@ mod create_subgraph_services_tests {
         let mut http_service_factory = IndexMap::new();
         http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
 
-        let services = create_subgraph_services(&http_service_factory, &config)
+        let subgraph_services = create_subgraph_services(&http_service_factory)
             .await
             .unwrap();
+        let factory = SubgraphServiceFactory::new(
+            subgraph_services.into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            None,
+            config.apq.subgraph.clone(),
+        );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        let resp = services
-            .get("test")
+        let resp = factory
+            .create("test")
             .unwrap()
-            .clone()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
             .unwrap();
@@ -1964,14 +1958,20 @@ mod create_subgraph_services_tests {
         let mut http_service_factory = IndexMap::new();
         http_service_factory.insert("test".to_string(), make_http_service_factory("test"));
 
-        let services = create_subgraph_services(&http_service_factory, &config)
+        let subgraph_services = create_subgraph_services(&http_service_factory)
             .await
             .unwrap();
+        let factory = SubgraphServiceFactory::new(
+            subgraph_services.into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            None,
+            config.apq.subgraph.clone(),
+        );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
-        services
-            .get("test")
+        factory
+            .create("test")
             .unwrap()
-            .clone()
             .oneshot(subgraph_request(url, "test", "query"))
             .await
             .unwrap();
@@ -2037,9 +2037,16 @@ mod create_subgraph_services_tests {
             make_http_service_factory("disabled_subgraph"),
         );
 
-        let services = create_subgraph_services(&http_service_factory, &config)
+        let subgraph_services = create_subgraph_services(&http_service_factory)
             .await
             .unwrap();
+        let factory = SubgraphServiceFactory::new(
+            subgraph_services.into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            None,
+            config.apq.subgraph.clone(),
+        );
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
 
         let enabled_request = SubgraphRequest::builder()
@@ -2080,17 +2087,15 @@ mod create_subgraph_services_tests {
             .context(Context::new())
             .build();
 
-        services
-            .get("enabled_subgraph")
+        factory
+            .create("enabled_subgraph")
             .unwrap()
-            .clone()
             .oneshot(enabled_request)
             .await
             .unwrap();
-        services
-            .get("disabled_subgraph")
+        factory
+            .create("disabled_subgraph")
             .unwrap()
-            .clone()
             .oneshot(disabled_request)
             .await
             .unwrap();

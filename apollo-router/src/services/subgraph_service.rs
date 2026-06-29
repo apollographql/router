@@ -49,7 +49,10 @@ use crate::batching::BatchQueryInfo;
 use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::configuration::SubgraphApq;
 use crate::configuration::TlsClientAuth;
+use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
@@ -1067,17 +1070,20 @@ impl SubgraphServiceFactory {
         plugins: Arc<Plugins>,
         notify: Notify<String, graphql::Response>,
         subscription_config: Option<Arc<SubscriptionConfig>>,
+        apq_config: SubgraphConfiguration<SubgraphApq>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
         for (name, service) in services.into_iter() {
-            // We have to do a little dance here to insert the subscription layer at the right
-            // place: *after* all user plugins, but *before* the subgraph service proper.
+            // We have to do a little dance here to insert the subscription and APQ layers at the
+            // right place: *after* all user plugins, but *before* the subgraph service proper.
+            let apq_enabled = apq_config.get(&name).enabled;
             let inner_service = ServiceBuilder::new()
                 .layer(SubscriptionSubgraphLayer::new(
                     notify.clone(),
                     subscription_config.clone(),
                     Arc::from(name.clone()),
                 ))
+                .layer(SubgraphApqLayer::new(apq_enabled))
                 .service(service.clone())
                 .boxed_clone();
             // One buffer per named subgraph provides per-subgraph backpressure and is
