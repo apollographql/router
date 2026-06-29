@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::str;
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
 use apollo_compiler::name;
 
 use crate::connectors::spec::CONNECT_VERSIONS;
-use crate::link::Import;
 use crate::link::Link;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
 use crate::link::cache_tag_spec_definition::CACHE_TAG_VERSIONS;
@@ -29,101 +29,115 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 pub(crate) const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 
 impl Identity {
+    pub const AUTHENTICATED_NAME: Name = name!("authenticated");
     pub fn authenticated_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("authenticated"),
+            name: Self::AUTHENTICATED_NAME.into(),
         }
     }
 
+    pub const CACHE_TAG_NAME: Name = name!("cacheTag");
     pub fn cache_tag_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("cacheTag"),
+            name: Self::CACHE_TAG_NAME.into(),
         }
     }
 
+    pub const CONNECT_NAME: Name = name!("connect");
     pub fn connect_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("connect"),
+            name: Self::CONNECT_NAME.into(),
         }
     }
 
+    pub const CONTEXT_NAME: Name = name!("context");
     pub fn context_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("context"),
+            name: Self::CONTEXT_NAME.into(),
         }
     }
 
+    pub const CORE_NAME: Name = name!("core");
     pub fn core_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("core"),
+            name: Self::CORE_NAME.into(),
         }
     }
 
+    pub const COST_NAME: Name = name!("cost");
     pub fn cost_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("cost"),
+            name: Self::COST_NAME.into(),
         }
     }
 
+    pub const FEDERATION_NAME: Name = name!("federation");
     pub fn federation_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("federation"),
+            name: Self::FEDERATION_NAME.into(),
         }
     }
 
+    pub const INACCESSIBLE_NAME: Name = name!("inaccessible");
     pub fn inaccessible_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("inaccessible"),
+            name: Self::INACCESSIBLE_NAME.into(),
         }
     }
 
+    pub const JOIN_NAME: Name = name!("join");
     pub fn join_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("join"),
+            name: Self::JOIN_NAME.into(),
         }
     }
 
+    pub const LINK_NAME: Name = name!("link");
     pub fn link_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("link"),
+            name: Self::LINK_NAME.into(),
         }
     }
 
+    pub const POLICY_NAME: Name = name!("policy");
     pub fn policy_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("policy"),
+            name: Self::POLICY_NAME.into(),
         }
     }
 
+    pub const REQUIRES_SCOPES_NAME: Name = name!("requiresScopes");
     pub fn requires_scopes_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("requiresScopes"),
+            name: Self::REQUIRES_SCOPES_NAME.into(),
         }
     }
 
+    pub const SOURCE_NAME: Name = name!("source");
     pub fn source_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("source"),
+            name: Self::SOURCE_NAME.into(),
         }
     }
 
+    pub const TAG_NAME: Name = name!("tag");
     pub fn tag_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("tag"),
+            name: Self::TAG_NAME.into(),
         }
     }
 }
@@ -183,12 +197,10 @@ impl SpecRegistry {
     pub(crate) fn get_composition_spec(
         &self,
         source: &Link,
-        directive_import: &Import,
+        directive_name_in_spec: &Name,
     ) -> Option<DirectiveCompositionSpecification> {
         let specs = self.get_definition(&source.url)?.directive_specs();
-        let spec = specs
-            .iter()
-            .find(|s| *s.name() == directive_import.element)?;
+        let spec = specs.iter().find(|s| s.name() == directive_name_in_spec)?;
         let directive_spec: DirectiveSpecification = spec.as_any().downcast_ref().cloned()?;
         directive_spec.composition
     }

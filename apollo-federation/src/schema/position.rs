@@ -2179,9 +2179,9 @@ impl SchemaDefinitionPosition {
     fn is_link(schema: &FederationSchema, name: &str) -> Result<bool, FederationError> {
         Ok(match schema.metadata() {
             Some(metadata) => {
-                let link_spec_definition = metadata.link_spec_definition()?;
+                let link_spec_definition = metadata.link_spec_definition();
                 let link_name_in_schema = link_spec_definition
-                    .directive_name_in_schema(schema, &link_spec_definition.identity().name)
+                    .directive_name_in_schema(schema, link_spec_definition.name())
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: "Unexpectedly could not find core/link spec usage".to_owned(),
                     })?;

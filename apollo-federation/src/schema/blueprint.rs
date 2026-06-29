@@ -295,14 +295,26 @@ impl FederationBlueprint {
     pub(crate) fn complete_subgraph_schema(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        if schema.is_fed_2() {
-            // subgraph metadata was already computed which means we have @link with fed spec and its definition
-            Self::complete_fed_2_subgraph_schema(schema)
+        if schema.links_metadata.is_some() {
+            if schema.is_fed_2() {
+                // An @link schema that contains an @link for v2.x of the federation spec.
+                Self::complete_fed_2_subgraph_schema(schema)
+            } else {
+                // An @link schema that contains no @link for the federation spec, or for a non-v2.x
+                // version. In the non-v2.x version case, `expand_known_features()` will emit an
+                // error.
+                Self::complete_fed_1_subgraph_schema(schema)
+            }
         } else if has_federation_spec_link(schema.schema()) {
-            // we have @link with fed spec but we don't have @link directive definition
+            // A non-@link schema that contains an @link for some federation spec version. Add an
+            // @link for the latest link spec along with definitions, which will populate link
+            // metadata.
             LinkSpecDefinition::latest().add_to_schema(schema, None)?;
+            // Again, if the federation spec is unknown, `expand_known_features()` will emit an
+            // error.
             Self::complete_fed_2_subgraph_schema(schema)
         } else {
+            // A non-@link schema with no @link for the federation spec.
             Self::complete_fed_1_subgraph_schema(schema)
         }
     }
@@ -319,7 +331,8 @@ impl FederationBlueprint {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         Self::remove_federation_definitions_broken_in_known_ways(schema)?;
-        // fed 1 schema won't have @link so we cannot use FederationSpecDefinition#add_elements_to_schema
+        // Fed 1 schema won't have @link for the federation spec so we cannot use
+        // FederationSpecDefinition#add_elements_to_schema
         let mut errors = MultipleFederationErrors { errors: vec![] };
         let fed_1_link_spec_definition = LinkSpecDefinition::fed1_latest();
         let fed_1_link = Arc::new(Link {
@@ -423,6 +436,7 @@ impl FederationBlueprint {
         // See: https://github.com/apollographql/federation/blob/8200b154/internals-js/src/federation.ts#L2238
         let skip = [
             Identity::link_identity(),
+            Identity::core_identity(),
             Identity::federation_identity(),
             Identity::join_identity(),
         ];

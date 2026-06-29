@@ -55,10 +55,6 @@ pub(crate) enum RouterSelector {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -66,10 +62,6 @@ pub(crate) enum RouterSelector {
     Env {
         /// The name of the environment variable
         env: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -88,10 +80,6 @@ pub(crate) enum RouterSelector {
     OperationName {
         /// The operation name from the query.
         operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -99,10 +87,8 @@ pub(crate) enum RouterSelector {
     RequestHeader {
         /// The name of the request header.
         request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -110,10 +96,6 @@ pub(crate) enum RouterSelector {
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -153,12 +135,10 @@ pub(crate) enum RouterSelector {
     },
     /// A header from the response
     ResponseHeader {
-        /// The name of the request header.
+        /// The name of the response header.
         response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -166,10 +146,6 @@ pub(crate) enum RouterSelector {
     ResponseContext {
         /// The response context key.
         response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -254,13 +230,27 @@ impl Selector for RouterSelector {
             RouterSelector::RequestHeader {
                 request_header,
                 default,
-                ..
-            } => request
-                .router_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = request
+                    .router_request
+                    .headers()
+                    .get(request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::Env {
                 env,
                 default,
@@ -400,13 +390,27 @@ impl Selector for RouterSelector {
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::ResponseStatus { response_status } => match response_status {
                 ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
@@ -640,6 +644,8 @@ impl Selector for RouterSelector {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use http::StatusCode;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
@@ -751,7 +757,6 @@ mod test {
     fn router_request_context() {
         let selector = RouterSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -793,7 +798,6 @@ mod test {
     fn router_response_context() {
         let selector = RouterSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -880,12 +884,169 @@ mod test {
     }
 
     #[test]
+    fn router_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
+    }
+
+    #[test]
+    fn router_request_header_redact_explicit_mask() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "x-custom".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Mask),
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("x-custom", "some-value")
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_request_header_masked_by_defaults_without_rules() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .build()
+            .unwrap();
+        // Fail-secure: no rules in context → the built-in defaults still mask
+        // `authorization`.
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "session=abc123".into()
+        );
+    }
+
+    #[test]
     fn router_baggage() {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -1038,7 +1199,6 @@ mod test {
     fn router_env() {
         let mut selector = RouterSelector::Env {
             env: "SELECTOR_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -1068,7 +1228,6 @@ mod test {
     fn router_operation_name_string() {
         let selector = RouterSelector::OperationName {
             operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();

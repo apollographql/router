@@ -1,0 +1,73 @@
+name: Claude Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    # Only fire with the trigger command "/claude-review"
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/claude-review')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      actions: read
+
+    steps:
+      # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
+      # NOTE: hardcoded due to an issue with the GitHub PAT; update this list as team membership changes
+      - name: Check team membership
+        id: team-check
+        env:
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          GRAPHOS_TEAM=(morriswchris BoD abernix Jephuff phryneas BobaFetters conwuegb alyssahursh carodewig aaronArinder rohan-b99 tayrrible jasmine-fernandes-apollo)
+          if [[ " ${GRAPHOS_TEAM[*]} " == *" $COMMENTER "* ]]; then
+            echo "is_member=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_member=false" >> $GITHUB_OUTPUT
+            echo "::notice::$COMMENTER is not an active member of the team — skipping review."
+          fi
+
+      - name: Checkout PR code
+        if: steps.team-check.outputs.is_member == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Run Claude review
+        if: steps.team-check.outputs.is_member == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--model claude-opus-4-8 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review."'
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'
+          show_full_output: true
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(gh api *)",
+                  "Bash(cat *)",
+                  "Write(**)"
+                ]
+              }
+            }
+          # The wildcards above look broad but the actual blast radius is
+          # bounded by the GITHUB_TOKEN granted to this job, which only has
+          # pull-requests: write and contents: read. That token cannot push
+          # code, delete branches, create releases, or perform any admin
+          # operation — so even unrestricted gh api calls can only read repo
+          # content and write PR comments/reviews. The tighter per-endpoint
+          # patterns we tried first (gh api -X POST repos/.../comments *) kept
+          # breaking because the code-review plugin generates different command
+          # forms between runs (-X POST vs --method POST, with/without a
+          # leading slash, inline body vs heredoc via cat). The token scope is
+          # the real security boundary here.

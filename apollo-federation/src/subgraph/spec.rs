@@ -192,10 +192,10 @@ macro_rules! applied_specification {
                         if i.alias.is_some() {
                             Value::Object(vec![
                                 (name!("name"), i.element.as_str().into()),
-                                (name!("as"), i.imported_display_name().to_string().into()),
+                                (name!("as"), i.element_name_in_schema().to_string().into()),
                             ])
                         } else {
-                            i.imported_display_name().to_string().into()
+                            i.element_name_in_schema().to_string().into()
                         }.into()
                     })
                     .collect::<Vec<Node<Value>>>();
