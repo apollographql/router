@@ -131,7 +131,10 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .return_once(test::MockSupergraphService::new);
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -166,7 +169,10 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = test::MockSupergraphService::new();
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .return_once(test::MockSupergraphService::new);
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -202,6 +208,9 @@ mod tests {
 
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .return_once(test::MockSupergraphService::new);
 
         // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";

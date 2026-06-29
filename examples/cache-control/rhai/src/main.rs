@@ -26,7 +26,7 @@ mod tests {
             let mut mock_service = test::MockSubgraphService::new();
             mock_service
                 .expect_clone()
-                .return_once(test::MockSubgraphService::new);
+                .returning(test::MockSubgraphService::new);
             let value = header_one.clone();
             mock_service
                 .expect_call()
@@ -49,7 +49,7 @@ mod tests {
             let mut mock_service = test::MockSubgraphService::new();
             mock_service
                 .expect_clone()
-                .return_once(test::MockSubgraphService::new);
+                .returning(test::MockSubgraphService::new);
             let value = header_two.clone();
             mock_service
                 .expect_call()

@@ -52,7 +52,7 @@ mod tests {
             let mut mock_service = test::MockSubgraphService::new();
             mock_service
                 .expect_clone()
-                .return_once(test::MockSubgraphService::new);
+                .returning(test::MockSubgraphService::new);
             mock_service
                 .expect_call()
                 .once()

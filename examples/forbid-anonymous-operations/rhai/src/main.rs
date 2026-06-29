@@ -22,9 +22,11 @@ mod tests {
         let mut mock_service = test::MockSupergraphService::new();
         // create a mock service we will use to test our plugin
         // Let's set up our mock to make sure it will be called once
-        mock_service
-            .expect_clone()
-            .return_once(test::MockSupergraphService::new);
+        mock_service.expect_clone().return_once(|| {
+            let mut m = test::MockSupergraphService::new();
+            m.expect_clone().returning(test::MockSupergraphService::new);
+            m
+        });
 
         let config = serde_json::json!({
             "rhai": {

@@ -48,6 +48,9 @@ mod tests {
                         .unwrap())
                 });
             mock_service
+                .expect_clone()
+                .returning(test::MockSupergraphService::new);
+            mock_service
         });
 
         let config = serde_json::json!({

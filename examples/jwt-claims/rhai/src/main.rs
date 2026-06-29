@@ -61,6 +61,9 @@ mod tests {
                         .unwrap())
                 });
             mock_service
+                .expect_clone()
+                .returning(test::MockSupergraphService::new);
+            mock_service
         });
 
         #[cfg(target_os = "windows")]
