@@ -1,8 +1,7 @@
 //! Representation of spec identities, versions, and URLs.
 use std::fmt;
 use std::str;
-
-use apollo_compiler::Name;
+use std::sync::Arc;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -10,13 +9,13 @@ use crate::error::SingleFederationError;
 /// Represents the identity of a `@link` specification, which uniquely identify a specification.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Identity {
-    /// The "domain" of which the specification this identifies is part of.
-    /// For instance, `"https://specs.apollo.dev"`.
+    /// The "domain" of which the specification this identifies is part of. For instance,
+    /// `"https://specs.apollo.dev"`.
     pub domain: String,
 
-    /// The name of the specification this identifies.
-    /// For instance, "federation".
-    pub name: Name,
+    /// The name of the specification this identifies. For instance, "federation". This isn't
+    /// guaranteed to a valid GraphQL name.
+    pub name: Arc<str>,
 }
 
 impl fmt::Display for Identity {
@@ -25,7 +24,7 @@ impl fmt::Display for Identity {
     ///     # use apollo_federation::link::spec::Identity;
     ///     use apollo_compiler::name;
     ///     assert_eq!(
-    ///         Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation") }.to_string(),
+    ///         Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation").into() }.to_string(),
     ///         "https://specs.apollo.dev/federation"
     ///     )
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -140,7 +139,7 @@ impl fmt::Display for Url {
     ///     use apollo_compiler::name;
     ///     assert_eq!(
     ///         Url {
-    ///           identity: Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation") },
+    ///           identity: Identity { domain: "https://specs.apollo.dev".to_string(), name: name!("federation").into() },
     ///           version: Version { major: 2, minor: 3 }
     ///         }.to_string(),
     ///         "https://specs.apollo.dev/federation/v2.3"
@@ -184,12 +183,7 @@ impl str::FromStr for Url {
                             r#"@link(url:) argument `"{s}"` missing specification name"#
                         ),
                     })
-                    // Note this is SUPER wrong, but the JS federation implementation didn't check
-                    // if the name was valid, and customers are actively using URLs with for example dashes.
-                    // So we pretend that it's fine. You can't reference an imported element by the
-                    // namespaced name because it's not valid GraphQL to do so--but you can
-                    // explicitly import elements from a spec with an invalid name.
-                    .map(Name::new_unchecked)?;
+                    .map(Arc::from)?;
                 if !url.scheme().starts_with("http") {
                     return Err(SingleFederationError::InvalidLinkIdentifier {
                         message: format!(
@@ -294,7 +288,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "https://specs.apollo.dev".to_string(),
-                    name: name!("federation")
+                    name: name!("federation").into(),
                 },
                 version: Version { major: 2, minor: 3 }
             }
@@ -307,7 +301,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "http://something.com/more/path".to_string(),
-                    name: name!("my_spec_name")
+                    name: name!("my_spec_name").into(),
                 },
                 version: Version { major: 0, minor: 1 }
             }
@@ -319,7 +313,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "http://localhost:8080".to_string(),
-                    name: name!("foo")
+                    name: name!("foo").into(),
                 },
                 version: Version { major: 1, minor: 0 }
             }
@@ -333,7 +327,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "http://localhost:8080/extra".to_string(),
-                    name: name!("foo")
+                    name: name!("foo").into(),
                 },
                 version: Version { major: 1, minor: 0 }
             }
@@ -347,7 +341,7 @@ mod tests {
             Url {
                 identity: Identity {
                     domain: "https://specs.apollo.dev".to_string(),
-                    name: name!("federation")
+                    name: name!("federation").into(),
                 },
                 version: Version { major: 2, minor: 3 }
             }

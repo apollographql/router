@@ -270,7 +270,7 @@ impl Subgraph<Initial> {
             .make_mut()
             .directives
             .push(Component::new(Directive {
-                name: Identity::link_identity().name,
+                name: Identity::LINK_NAME,
                 arguments: vec![
                     Node::new(ast::Argument {
                         name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
@@ -768,7 +768,7 @@ pub(crate) fn schema_as_fed2_subgraph(
     use_latest: bool,
 ) -> Result<(), FederationError> {
     let (link_name_in_schema, metadata) = if let Some(metadata) = schema.metadata() {
-        let link_spec = metadata.link_spec_definition()?;
+        let link_spec = metadata.link_spec_definition();
         // We don't accept pre-1.0 @core: this avoid having to care about what the name
         // of the argument below is, and why would be bother?
         ensure!(
@@ -779,10 +779,7 @@ pub(crate) fn schema_as_fed2_subgraph(
             "Fed2 schema must use @link with version >= 1.0, but schema uses {spec_url}",
             spec_url = link_spec.url()
         );
-        let Some(link) = link_spec.link_in_schema(schema) else {
-            bail!("Core schema is missing the link spec link directive");
-        };
-        (link.spec_name_in_schema().clone(), metadata)
+        (metadata.link_itself().spec_name_in_schema(), metadata)
     } else {
         let link_spec = LinkSpecDefinition::latest();
         let link_name_in_schema = add_link_spec_to_schema(schema, link_spec)?;
@@ -986,7 +983,7 @@ fn add_link_spec_to_schema(
     schema: &mut FederationSchema,
     link_spec: &'static LinkSpecDefinition,
 ) -> Result<Name, FederationError> {
-    let link_spec_name = &link_spec.identity().name;
+    let link_spec_name = link_spec.name();
     let alias = find_unused_name_for_directive(schema, link_spec_name)?;
     let link_name_in_schema = alias.clone().unwrap_or_else(|| link_spec_name.clone());
     link_spec.add_to_schema(schema, alias)?;
