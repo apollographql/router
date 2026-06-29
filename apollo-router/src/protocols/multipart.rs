@@ -1229,6 +1229,86 @@ mod tests {
         );
     }
 
+    /// Verify that `SubscriptionsTerminatedCounter` reads `subgraph.name` and `client.name`
+    /// from the `router::Response` context via `collect_attrs` / `on_response`, rather than
+    /// requiring pre-injected attributes via the test-only `with_stashed_attributes` helper.
+    /// If the wrong context key were used, or `on_response` were not wired up, this test fails.
+    #[tokio::test]
+    async fn test_counter_reads_subgraph_and_client_from_context() {
+        async {
+            use std::collections::HashMap;
+
+            use opentelemetry::metrics::MeterProvider;
+
+            use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
+            use crate::plugins::telemetry::CLIENT_NAME;
+            use crate::plugins::telemetry::config_new::extendable::Extendable;
+            use crate::plugins::telemetry::config_new::instruments::Instrumented;
+            use crate::plugins::telemetry::config_new::instruments::SubscriptionsTerminatedAttributes;
+            use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
+
+            let (_guard, _layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+
+            let otel_counter = crate::metrics::meter_provider()
+                .meter("test")
+                .f64_counter("apollo.router.operations.subscriptions.terminated.client")
+                .with_description("Subscription terminated")
+                .build();
+            let attributes: SubscriptionsTerminatedAttributes = serde_json::from_str(
+                r#"{"reason": true, "subgraph.name": true, "client.name": true}"#,
+            )
+            .unwrap();
+            let selectors =
+                Arc::new(Extendable::<SubscriptionsTerminatedAttributes, RouterSelector> {
+                    attributes,
+                    custom: HashMap::new(),
+                });
+            let counter = SubscriptionsTerminatedCounter::new(otel_counter, selectors);
+
+            // Populate a context with the keys that collect_attrs reads
+            let ctx = crate::Context::default();
+            ctx.insert(
+                SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+                "ctx_subgraph".to_string(),
+            )
+            .unwrap();
+            ctx.insert(CLIENT_NAME, "ctx_client".to_string()).unwrap();
+
+            // Drive on_response — the real collect_attrs path — with a context-bearing response
+            let response = crate::services::router::Response {
+                response: http::Response::builder()
+                    .body(crate::services::router::body::from_bytes(""))
+                    .unwrap(),
+                context: ctx,
+            };
+            counter.on_response(&response);
+
+            // Pass the counter without with_stashed_attributes so that only the
+            // context-read path contributes the subgraph/client attributes
+            let responses = vec![graphql::Response::builder().build()]; // empty → ServerClose
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Subscription)
+                .with_terminated_counter(Some(counter));
+
+            while protocol.next().await.is_some() {}
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.client",
+                1,
+                "reason" = "server_close",
+                "subgraph.name" = "ctx_subgraph",
+                "client.name" = "ctx_client"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[tokio::test]
     async fn test_heartbeat_and_boundaries() {
         let responses = vec![
