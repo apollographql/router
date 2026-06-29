@@ -45,7 +45,7 @@ mod tests {
 
         let (mock_service, mut handle) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             // Let's make sure our request contains our new headers
             assert_eq!(
@@ -120,6 +120,10 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.unwrap())
+        assert_eq!(expected_mock_response_data, response.data.unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out")
+            .unwrap();
     }
 }
