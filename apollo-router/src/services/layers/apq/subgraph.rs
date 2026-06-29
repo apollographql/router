@@ -371,7 +371,10 @@ mod tests {
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
         );
-        assert!(!svc.enabled.load(Relaxed), "APQ should be disabled after PQNS");
+        assert!(
+            !svc.enabled.load(Relaxed),
+            "APQ should be disabled after PQNS"
+        );
     }
 
     #[tokio::test]

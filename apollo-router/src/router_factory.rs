@@ -374,8 +374,7 @@ impl YamlRouterFactory {
             builder = builder.with_configuration(configuration.clone());
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;
-            let subgraph_services =
-                create_subgraph_services(&http_service_factory).await?;
+            let subgraph_services = create_subgraph_services(&http_service_factory).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);

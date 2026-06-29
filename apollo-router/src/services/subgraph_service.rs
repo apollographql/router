@@ -52,7 +52,6 @@ use crate::configuration::BatchingMode;
 use crate::configuration::SubgraphApq;
 use crate::configuration::TlsClientAuth;
 use crate::configuration::subgraph::SubgraphConfiguration;
-use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
@@ -73,6 +72,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::http::service::WireByteCount;
+use crate::services::layers::apq::subgraph::SubgraphApqLayer;
 use crate::services::router;
 use crate::services::subgraph;
 
