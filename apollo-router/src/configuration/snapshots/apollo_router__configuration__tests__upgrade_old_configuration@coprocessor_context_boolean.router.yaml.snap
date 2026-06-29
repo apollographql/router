@@ -7,12 +7,12 @@ coprocessor:
   url: "http://example.com"
   router:
     request:
-      context: deprecated
+      context: all
     response:
       context: none
   supergraph:
     request:
-      context: deprecated
+      context: all
   subgraph:
     all:
       request:
@@ -20,4 +20,4 @@ coprocessor:
   connector:
     all:
       request:
-        context: deprecated
+        context: all
