@@ -72,7 +72,7 @@ impl<S> Layer<S> for SubgraphApqLayer {
     fn layer(&self, inner: S) -> Self::Service {
         SubgraphApqService {
             inner,
-            apq: Arc::new(AtomicBool::new(self.enabled)),
+            enabled: Arc::new(AtomicBool::new(self.enabled)),
         }
     }
 }
@@ -80,14 +80,16 @@ impl<S> Layer<S> for SubgraphApqLayer {
 /// Tower service wrapping an inner subgraph service with APQ retry logic.
 pub(crate) struct SubgraphApqService<S> {
     inner: S,
-    pub(crate) apq: Arc<AtomicBool>,
+    /// Whether APQs are enabled for this subgraph. We automatically flip it to disabled for future requests
+    /// if the subgraph reports that PQs are not supported.
+    pub(crate) enabled: Arc<AtomicBool>,
 }
 
 impl<S: Clone> Clone for SubgraphApqService<S> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            apq: self.apq.clone(),
+            enabled: self.enabled.clone(),
         }
     }
 }
@@ -109,12 +111,12 @@ where
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
-        let apq = self.apq.clone();
+        let enabled = self.enabled.clone();
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         Box::pin(async move {
-            if !apq.load(Relaxed) {
+            if !enabled.load(Relaxed) {
                 return inner.call(request).await;
             }
 
@@ -135,7 +137,7 @@ where
 
             match get_apq_error(response.response.body()) {
                 ApqError::PersistedQueryNotSupported => {
-                    apq.store(false, Relaxed);
+                    enabled.store(false, Relaxed);
                     let body = request.subgraph_request.body_mut();
                     body.query = original_query;
                     body.extensions.remove(PERSISTED_QUERY_KEY);
@@ -361,14 +363,14 @@ mod tests {
 
         let layer = SubgraphApqLayer::new(true);
         let svc = layer.layer(inner);
-        assert!(svc.apq.load(Relaxed), "APQ should start enabled");
+        assert!(svc.enabled.load(Relaxed), "APQ should start enabled");
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
         );
-        assert!(!svc.apq.load(Relaxed), "APQ should be disabled after PQNS");
+        assert!(!svc.enabled.load(Relaxed), "APQ should be disabled after PQNS");
     }
 
     #[tokio::test]
@@ -393,14 +395,14 @@ mod tests {
 
         let layer = SubgraphApqLayer::new(true);
         let svc = layer.layer(inner);
-        assert!(svc.apq.load(Relaxed));
+        assert!(svc.enabled.load(Relaxed));
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
         );
-        assert!(!svc.apq.load(Relaxed));
+        assert!(!svc.enabled.load(Relaxed));
     }
 
     const APQ_TEST_QUERY: &str = "query MyOp($id: ID!) { thing(id: $id) { name } }";
