@@ -18,7 +18,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_router_forbids_anonymous_operation() {
-        let (mock_service, handle) =
+        let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let config = serde_json::json!({
@@ -51,6 +51,11 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             service_response.response.status()
         );
-        apollo_router::plugin::test::assert_no_mock_calls(handle).await;
+        if matches!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), handle.next_request()).await,
+            Ok(Some(_))
+        ) {
+            panic!("mock service was called but should not have been");
+        }
     }
 }

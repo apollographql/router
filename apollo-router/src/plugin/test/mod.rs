@@ -3,7 +3,6 @@
 mod broken;
 mod mock;
 mod restricted;
-mod service;
 
 #[cfg(test)]
 pub use mock::connector::MockConnector;
@@ -15,7 +14,8 @@ pub(crate) use self::mock::canned;
 /// takes longer than 5 seconds or if the driver panicked (e.g. from an assertion).
 ///
 /// Use this instead of `driver.await.unwrap()` so tests never hang silently.
-pub async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
+#[cfg(test)]
+pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
     tokio::time::timeout(std::time::Duration::from_secs(5), driver)
         .await
         .expect("mock driver timed out — service was not called within 5 s")
@@ -26,7 +26,8 @@ pub async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
 ///
 /// Waits up to 10 ms after the test action for a request to arrive; if one does,
 /// the test fails immediately. Pass `mut handle` from `tower_test::mock::pair`.
-pub async fn assert_no_mock_calls<Req, Res>(mut handle: tower_test::mock::Handle<Req, Res>)
+#[cfg(test)]
+pub(crate) async fn assert_no_mock_calls<Req, Res>(mut handle: tower_test::mock::Handle<Req, Res>)
 where
     Req: Send + 'static,
     Res: Send + 'static,
