@@ -120,27 +120,3 @@ make_deprecated_key_conversions!(
     PERSISTED_QUERY_CACHE_HIT => DEPRECATED_PERSISTED_QUERY_CACHE_HIT,
     PERSISTED_QUERY_REGISTERED => DEPRECATED_PERSISTED_QUERY_REGISTERED,
 );
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Context;
-
-    // Rhai scripts access context via Context::get / Context::insert directly, with no key
-    // conversion. This means a Rhai script that uses a deprecated 1.x key (e.g.
-    // "operation_name") will silently miss any value stored under the 2.x key
-    // ("apollo::supergraph::operation_name"). There is nothing to deprecate-warn about for
-    // Rhai — the old keys simply do not work.
-    #[test]
-    fn deprecated_keys_are_not_accessible_without_conversion() {
-        let ctx = Context::new();
-        ctx.insert(OPERATION_NAME, "my_op".to_string()).unwrap();
-
-        // Reading with the deprecated key returns nothing — no automatic conversion occurs
-        let value: Option<String> = ctx.get(DEPRECATED_OPERATION_NAME).unwrap();
-        assert!(
-            value.is_none(),
-            "deprecated key should not find value stored under the new key"
-        );
-    }
-}

@@ -193,55 +193,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        for (path, conf) in [
-            (
-                "coprocessor.router.request.context",
-                &init.config.router.request.context,
-            ),
-            (
-                "coprocessor.router.response.context",
-                &init.config.router.response.context,
-            ),
-            (
-                "coprocessor.supergraph.request.context",
-                &init.config.supergraph.request.context,
-            ),
-            (
-                "coprocessor.supergraph.response.context",
-                &init.config.supergraph.response.context,
-            ),
-            (
-                "coprocessor.execution.request.context",
-                &init.config.execution.request.context,
-            ),
-            (
-                "coprocessor.execution.response.context",
-                &init.config.execution.response.context,
-            ),
-            (
-                "coprocessor.subgraph.all.request.context",
-                &init.config.subgraph.all.request.context,
-            ),
-            (
-                "coprocessor.subgraph.all.response.context",
-                &init.config.subgraph.all.response.context,
-            ),
-            (
-                "coprocessor.connector.all.request.context",
-                &init.config.connector.all.request.context,
-            ),
-            (
-                "coprocessor.connector.all.response.context",
-                &init.config.connector.all.response.context,
-            ),
-        ] {
-            if conf.is_deprecated() {
-                tracing::warn!(
-                    "Configuration `{path}: deprecated` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-                );
-            }
-        }
-
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
         if let Some(ref url) = init.config.router.request.url {
