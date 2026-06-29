@@ -1697,8 +1697,10 @@ mod tests {
     }
 
     // ===== SUPERGRAPH REQUEST VALIDATION TESTS =====
-    // The loop driver exits when the channel closes, so await_mock_driver works for both
-    // accept (service called) and reject (service not called, channel closes via oneshot drop).
+    // For validation tests the supergraph mock is a one-shot driver: it handles at most one
+    // request and then exits. await_mock_driver works for both the accept path (request
+    // forwarded to supergraph) and the reject path (request blocked before reaching
+    // supergraph, driver exits when its handle is dropped).
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_valid() {

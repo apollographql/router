@@ -1217,16 +1217,18 @@ mod test {
         ))]))
         .layer(mock);
 
-        let call = tokio::spawn(service.ready().await?.call(example_request()));
-        let (request, responder) = handle.next_request().await.unwrap();
-        request.assert_headers(vec![
-            ("aa", "vaa"),
-            ("ab", "vab"),
-            ("ac", "vac"),
-            ("c", "d"),
-        ]);
-        responder.send_response(example_response(request).unwrap());
-        call.await.unwrap()?;
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            request.assert_headers(vec![
+                ("aa", "vaa"),
+                ("ab", "vab"),
+                ("ac", "vac"),
+                ("c", "d"),
+            ]);
+            responder.send_response(example_response(request).unwrap());
+        });
+        service.ready().await?.call(example_request()).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
