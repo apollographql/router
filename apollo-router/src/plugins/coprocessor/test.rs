@@ -7761,40 +7761,42 @@ mod tests {
             crate::plugin::test::await_mock_driver(http_driver).await;
 
             // Verify the coprocessor received the FULL headers (unmasked)
-            let headers = received_headers.lock().unwrap();
-            assert!(headers.is_some(), "Headers should be sent to coprocessor");
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some(), "Headers should be sent to coprocessor");
 
-            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
-            // Authorization header should be unmasked
-            assert_eq!(
-                headers_obj
-                    .get("authorization")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "Bearer secret-token-12345", // gitleaks:allow
-                "Authorization header should be sent unmasked to coprocessor"
-            );
+                // Authorization header should be unmasked
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer secret-token-12345", // gitleaks:allow
+                    "Authorization header should be sent unmasked to coprocessor"
+                );
 
-            // Cookie header should be unmasked
-            assert_eq!(
-                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "session=my-session-id",
-                "Cookie header should be sent unmasked to coprocessor"
-            );
+                // Cookie header should be unmasked
+                assert_eq!(
+                    headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "session=my-session-id",
+                    "Cookie header should be sent unmasked to coprocessor"
+                );
 
-            // Non-sensitive header should also be present
-            assert_eq!(
-                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "test-agent"
-            );
+                // Non-sensitive header should also be present
+                assert_eq!(
+                    headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "test-agent"
+                );
+            }
             crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
@@ -8007,20 +8009,22 @@ mod tests {
             crate::plugin::test::await_mock_driver(http_driver).await;
 
             // Verify headers are still sent
-            let headers = received_headers.lock().unwrap();
-            assert!(headers.is_some());
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some());
 
-            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
-            assert_eq!(
-                headers_obj
-                    .get("authorization")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "Bearer token"
-            );
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer token"
+                );
+            }
             crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
@@ -8129,41 +8133,43 @@ mod tests {
             crate::plugin::test::await_mock_driver(http_driver).await;
 
             // Verify ALL headers are sent unmasked to coprocessor
-            let headers = received_headers.lock().unwrap();
-            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+            {
+                let headers = received_headers.lock().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
-            assert_eq!(
-                headers_obj
-                    .get("authorization")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "Bearer secret" // gitleaks:allow
-            );
-            assert_eq!(
-                headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "session=secret" // gitleaks:allow
-            );
-            assert_eq!(
-                headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "test-agent"
-            );
-            assert_eq!(
-                headers_obj
-                    .get("x-custom-header")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "custom-value"
-            );
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "session=secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "test-agent"
+                );
+                assert_eq!(
+                    headers_obj
+                        .get("x-custom-header")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "custom-value"
+                );
+            }
             crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
@@ -8275,38 +8281,40 @@ mod tests {
             // Coprocessors always receive raw header values — masking applies to logs/telemetry
             // only, not to the externalized payload. All three headers arrive unmasked regardless
             // of whether they appear in the sensitive list.
-            let headers = received_headers.lock().unwrap();
-            let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+            {
+                let headers = received_headers.lock().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
 
-            assert_eq!(
-                headers_obj
-                    .get("x-internal-token")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "internal-secret" // gitleaks:allow
-            );
-            assert_eq!(
-                headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "secret-key-value" // gitleaks:allow
-            );
-            // `authorization` is in the effective sensitive list (built-in default, since
-            // `replace_defaults: false` merges user headers with the built-ins). It still arrives
-            // unmasked here because coprocessors receive raw headers by design.
-            assert_eq!(
-                headers_obj
-                    .get("authorization")
-                    .unwrap()
-                    .as_array()
-                    .unwrap()[0]
-                    .as_str()
-                    .unwrap(),
-                "Bearer public-token"
-            );
+                assert_eq!(
+                    headers_obj
+                        .get("x-internal-token")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "internal-secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "secret-key-value" // gitleaks:allow
+                );
+                // `authorization` is in the effective sensitive list (built-in default, since
+                // `replace_defaults: false` merges user headers with the built-ins). It still arrives
+                // unmasked here because coprocessors receive raw headers by design.
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer public-token"
+                );
+            }
             crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
