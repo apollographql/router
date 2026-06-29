@@ -247,7 +247,7 @@ mod tests {
         // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
         // for the inner service response. join! then polls fut2, which finds the entry and
         // subscribes to the broadcast. Both are suspended before the driver responds,
-        // guaranteeing deduplication without any sleep or barrier.
+        // guaranteeing deduplication.
         let (res1, res2) = tokio::join!(fut1, fut2);
         res1.expect("fut1 joined");
         res2.expect("fut2 joined");
