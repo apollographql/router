@@ -77,6 +77,41 @@ pub(crate) fn create_an_url(filename: &str) -> String {
 
 type MockHandle = tower_test::mock::Handle<supergraph::Request, supergraph::Response>;
 
+fn spawn_mock_driver(mut handle: MockHandle) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            supergraph::Response::fake_builder()
+                .data("response created within the mock")
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+    })
+}
+
+async fn parse_next_graphql_response(service_response: &mut router::Response) -> graphql::Response {
+    serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap()
+}
+
+fn assert_mock_success(service_response: &router::Response, response: &graphql::Response) {
+    assert_eq!(response.errors, vec![]);
+    assert_eq!(StatusCode::OK, service_response.response.status());
+    assert_eq!(
+        "response created within the mock",
+        response.data.as_ref().unwrap()
+    );
+}
+
 async fn build_a_default_test_harness() -> (router::BoxCloneService, MockHandle) {
     build_a_test_harness(None, None, false, false, false).await
 }
@@ -195,24 +230,13 @@ async fn it_rejects_when_there_is_no_auth_header() {
         .await
         .unwrap();
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder().build().unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message("The request is not authenticated")
@@ -229,27 +253,16 @@ async fn it_rejects_when_there_is_no_auth_header() {
 async fn it_rejects_when_auth_prefix_is_missing() {
     let (test_harness, handle) = build_a_default_test_harness().await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "invalid")
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message(format!(
@@ -269,27 +282,16 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     let (test_harness, handle) = build_a_default_test_harness().await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer")
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message(format!(
@@ -309,27 +311,16 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     let (test_harness, handle) = build_a_default_test_harness().await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message(format!(
@@ -348,7 +339,6 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     let (test_harness, handle) = build_a_default_test_harness().await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
             http::header::AUTHORIZATION,
@@ -357,21 +347,11 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
@@ -388,7 +368,6 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     let (test_harness, handle) = build_a_default_test_harness().await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 http::header::AUTHORIZATION,
@@ -397,21 +376,11 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
@@ -426,19 +395,9 @@ async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
-    let (test_harness, mut handle) = build_a_default_test_harness().await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let (test_harness, handle) = build_a_default_test_harness().await;
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 http::header::AUTHORIZATION,
@@ -447,92 +406,41 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-    let (test_harness, mut handle) = build_a_test_harness(None, None, false, true, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
-    // Let's create a request with our operation name
+    let (test_harness, handle) = build_a_test_harness(None, None, false, true, false).await;
+    let driver = spawn_mock_driver(handle);
+
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let (test_harness, mut handle) = build_a_test_harness(None, None, true, false, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let (test_harness, handle) = build_a_test_harness(None, None, true, false, false).await;
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 http::header::AUTHORIZATION,
@@ -541,48 +449,22 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-    let (test_harness, mut handle) =
+    let (test_harness, handle) =
         build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 "SOMETHING",
@@ -591,48 +473,22 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-    let (test_harness, mut handle) =
+    let (test_harness, handle) =
         build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 http::header::AUTHORIZATION,
@@ -641,48 +497,22 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let (test_harness, mut handle) =
+    let (test_harness, handle) =
         build_a_test_harness(None, Some("".to_string()), false, false, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
                 http::header::AUTHORIZATION,
@@ -691,47 +521,21 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
             .build()
             .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_inserts_success_jwt_status_into_context() {
-    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, false).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, false).await;
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
             http::header::AUTHORIZATION,
@@ -740,7 +544,6 @@ async fn it_inserts_success_jwt_status_into_context() {
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
@@ -760,24 +563,9 @@ async fn it_inserts_success_jwt_status_into_context() {
         JwtStatus::Failure { .. } => panic!("expected a success but got {jwt_context:?}"),
     }
 
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
 
     let jwt_claims = service_response
         .context
@@ -799,7 +587,6 @@ async fn it_inserts_success_jwt_status_into_context() {
 async fn it_inserts_failure_jwt_status_into_context() {
     let (test_harness, handle) = build_a_test_harness(None, None, false, false, false).await;
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
             http::header::AUTHORIZATION,
@@ -808,7 +595,6 @@ async fn it_inserts_failure_jwt_status_into_context() {
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
@@ -832,16 +618,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
         None => panic!("expected an error"),
     }
 
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
     let expected_error = graphql::Error::builder()
         .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
@@ -866,19 +643,9 @@ async fn it_inserts_failure_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_moves_on_after_jwt_errors_when_configured() {
-    let (test_harness, mut handle) = build_a_test_harness(None, None, false, false, true).await;
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, true).await;
+    let driver = spawn_mock_driver(handle);
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
             http::header::AUTHORIZATION,
@@ -887,7 +654,6 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
@@ -911,20 +677,9 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
         None => panic!("expected an error"),
     }
 
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
-
     // JWT decode failure should be ignored
+    let response = parse_next_graphql_response(&mut service_response).await;
     assert_eq!(response.errors, vec![]);
-
     assert_eq!(StatusCode::OK, service_response.response.status());
 
     let jwt_claims = service_response
@@ -955,18 +710,9 @@ async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whi
 
 #[tokio::test]
 async fn it_extracts_the_token_from_cookies() {
-    let (mock_service, mut handle) =
+    let (mock_service, handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let driver = spawn_mock_driver(handle);
     let jwks_url = create_an_url("jwks.json");
 
     let config = serde_json::json!({
@@ -1002,7 +748,6 @@ async fn it_extracts_the_token_from_cookies() {
 
     let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
             http::header::COOKIE,
@@ -1011,46 +756,21 @@ async fn it_extracts_the_token_from_cookies() {
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_supports_multiple_sources() {
-    let (mock_service, mut handle) =
+    let (mock_service, handle) =
         tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-    let driver = tokio::spawn(async move {
-        let (req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(
-            supergraph::Response::fake_builder()
-                .data("response created within the mock")
-                .context(req.context)
-                .build()
-                .unwrap(),
-        );
-    });
+    let driver = spawn_mock_driver(handle);
     let jwks_url = create_an_url("jwks.json");
 
     let config = serde_json::json!({
@@ -1095,35 +815,18 @@ async fn it_supports_multiple_sources() {
 
     let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A";
 
-    // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header("Authz2", format!("Bear {token}"))
         .build()
         .unwrap();
 
-    // ...And call our service stack with it
     let mut service_response = test_harness
         .oneshot(request_with_appropriate_name.try_into().unwrap())
         .await
         .unwrap();
-    let response: graphql::Response = serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap();
+    let response = parse_next_graphql_response(&mut service_response).await;
 
-    assert_eq!(response.errors, vec![]);
-
-    assert_eq!(StatusCode::OK, service_response.response.status());
-
-    let expected_mock_response_data = "response created within the mock";
-    // with the expected message
-    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    assert_mock_success(&service_response, &response);
     crate::plugin::test::await_mock_driver(driver).await;
 }
 
