@@ -13,6 +13,7 @@ use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::ElementName;
 use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::spec::Identity;
@@ -179,6 +180,21 @@ pub(crate) trait SpecDefinition {
             [error] => Err(FederationError::SingleFederationError(error.clone())),
             _ => Err(FederationError::MultipleFederationErrors(errors)),
         }
+    }
+
+    fn all_element_names(&self) -> Box<dyn Iterator<Item = ElementName>> {
+        Box::new(
+            self.type_specs()
+                .into_iter()
+                .map(|spec| ElementName {
+                    name: spec.name().clone(),
+                    is_directive: false,
+                })
+                .chain(self.directive_specs().into_iter().map(|spec| ElementName {
+                    name: spec.name().clone(),
+                    is_directive: true,
+                })),
+        )
     }
 }
 

@@ -112,7 +112,7 @@ pub(super) fn carryover_directives(
         if !referencers.is_empty()
             && to
                 .metadata()
-                .and_then(|m| m.by_identity.get(&Identity::inaccessible_identity()))
+                .and_then(|m| m.for_identity(&Identity::inaccessible_identity()))
                 .is_none()
         {
             SchemaDefinitionPosition
@@ -206,15 +206,23 @@ pub(super) fn carryover_directives(
     // compose directive
 
     metadata
-        .directives_by_imported_name
+        .by_import_element_name_in_schema()
         .iter()
-        .filter(|(_name, (link, _import))| !is_known_link(link))
-        .try_for_each(|(name, (link, import))| {
+        .filter_map(|(name_in_schema, (link, name_in_spec))| {
+            if is_known_link(link) {
+                return None;
+            }
+            if !name_in_schema.is_directive {
+                return None;
+            }
+            Some((&name_in_schema.name, (link, &name_in_spec.name)))
+        })
+        .try_for_each(|(name_in_schema, (link, name_in_spec))| {
             // This is a strange thing — someone is importing @defer, but it's not a type system directive so we don't need to carry it over
-            if name == "defer" {
+            if name_in_schema == "defer" {
                 return Ok(());
             }
-            let directive_name = link.directive_name_in_schema(&import.element);
+            let directive_name = link.directive_name_in_schema(name_in_spec);
             let referencers = from.referencers().get_directive(&directive_name);
             if !referencers.is_empty() {
                 if !SchemaDefinitionPosition
@@ -380,6 +388,10 @@ pub(super) fn carryover_directives(
 }
 
 fn is_known_link(link: &Link) -> bool {
+    let Some(name) = link.url.identity.name.clone().try_into().ok() else {
+        return false;
+    };
+
     link.url.identity.domain == APOLLO_SPEC_DOMAIN
         && [
             name!(link),
@@ -391,7 +403,7 @@ fn is_known_link(link: &Link) -> bool {
             name!(policy),
             name!(context),
         ]
-        .contains(&link.url.identity.name)
+        .contains(&name)
 }
 
 fn copy_directive_definition(

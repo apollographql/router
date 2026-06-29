@@ -229,6 +229,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.supergraph.path
             );
 
+            tracing::warn!(
+                "The `apollo.router.session.count.active` metric is deprecated and may be \
+                 removed in a future release. Switch to the OpenTelemetry-compliant \
+                 `http.server.active_requests` metric instead. See \
+                 https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#session"
+            );
+
             // serve extra routers
 
             let listeners_and_routers =
@@ -502,7 +509,7 @@ async fn handle_graphql<RF: RouterFactory>(
 ) -> impl IntoResponse {
     let _guard = i64_up_down_counter_with_unit!(
         "apollo.router.session.count.active",
-        "Amount of in-flight sessions",
+        "Amount of in-flight sessions (deprecated, use `http.server.active_requests` instead)",
         "{session}",
         1
     );

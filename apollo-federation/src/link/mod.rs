@@ -1,6 +1,5 @@
 use std::fmt;
 use std::ops::Range;
-use std::str;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -12,6 +11,8 @@ use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 
 use crate::error::FederationError;
+use crate::link::link_spec_definition::CORE_VERSIONS;
+use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
@@ -45,7 +46,7 @@ impl fmt::Display for Purpose {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Import {
     /// The name of the element that is being imported.
     ///
@@ -61,37 +62,39 @@ pub struct Import {
 }
 
 impl Import {
-    pub fn imported_name(&self) -> &Name {
+    pub fn name_in_schema(&self) -> &Name {
         self.alias.as_ref().unwrap_or(&self.element)
     }
 
-    pub fn element_display_name(&self) -> impl fmt::Display {
-        DisplayName {
-            name: &self.element,
+    pub fn element_name_in_spec(&self) -> ElementName {
+        ElementName {
+            name: self.element.clone(),
             is_directive: self.is_directive,
         }
     }
 
-    pub fn imported_display_name(&self) -> impl fmt::Display {
-        DisplayName {
-            name: self.imported_name(),
+    pub fn element_name_in_schema(&self) -> ElementName {
+        ElementName {
+            name: self.name_in_schema().clone(),
             is_directive: self.is_directive,
         }
     }
 }
 
-/// A [`fmt::Display`]able wrapper for name strings that adds an `@` in front for directive names.
-struct DisplayName<'s> {
-    name: &'s str,
-    is_directive: bool,
+/// The name of a type or directive, regardless of whether it's a name-in-spec or a name-in-schema.
+/// Note that this is cheap to clone since [Name] is cheap to clone.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ElementName {
+    pub name: Name,
+    pub is_directive: bool,
 }
 
-impl fmt::Display for DisplayName<'_> {
+impl fmt::Display for ElementName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_directive {
             f.write_str("@")?;
         }
-        f.write_str(self.name)
+        f.write_str(&self.name)
     }
 }
 
@@ -101,6 +104,8 @@ impl fmt::Display for Import {
     }
 }
 
+/// Metadata about a single application of @link in a schema.
+// PORT_NOTE: Named `CoreFeature` in the JS codebase, but "core" is outdated terminology.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
@@ -111,17 +116,42 @@ pub struct Link {
 }
 
 impl Link {
-    pub fn from_directive_application(
+    /// Use [super::LinkSpecDefinition::link_from_directive] instead of this method where possible,
+    /// since this method guesses the version of the link/core spec.
+    pub(crate) fn from_directive_application_when_link_spec_unknown(
         directive: &Node<Directive>,
         schema: &Schema,
     ) -> Result<Link, FederationError> {
-        let mut link = Link::try_from(directive.as_ref())?;
-        link.line_column_range = directive.line_column_range(&schema.sources);
-        Ok(link)
+        LINK_VERSIONS
+            .latest()
+            .link_from_directive(directive, schema)
+            .or_else(|error| {
+                // If the directive couldn't be parsed as a @link application, try parsing it as @core
+                // one, though if that also errors then prefer the original @link-parsing errors.
+                CORE_VERSIONS
+                    .latest()
+                    .link_from_directive(directive, schema)
+                    .or(Err(error))
+            })
     }
 
-    pub fn spec_name_in_schema(&self) -> &Name {
-        self.spec_alias.as_ref().unwrap_or(&self.url.identity.name)
+    pub fn spec_name_in_schema(&self) -> Name {
+        if let Some(spec_alias) = &self.spec_alias {
+            return spec_alias.clone();
+        }
+        let name = &self.url.identity.name;
+        name.clone().try_into().unwrap_or_else(|_| {
+            // TODO: While @link does allow for specs with invalid names as long as they have valid
+            // aliases, for backwards compatibility, we need to support @link applications that have
+            // an invalid name and no alias. These have historically been fine because such schemas
+            // do not use the default names for types/directives from the spec being linked. So
+            // ideally, we would return a `Result::Err` in `directive_name_in_schema()` and
+            // `type_name_in_schema()` when someone tries to compute an element name-in-schema that
+            // would be an invalid name. However, that would cause many upstream callers to also
+            // have to return `Result`. For now, we're leaving that step to the future. (We wouldn't
+            // do that in this method because it's used in `LinksMetadata::add_link()`.)
+            Name::new_unchecked(name)
+        })
     }
 
     pub fn directive_name_in_schema(&self, name: &Name) -> Name {
@@ -131,7 +161,7 @@ impl Link {
         // whose name match the one of the spec: those don't get qualified.
         if let Some(import) = self.imports.iter().find(|i| i.element == *name) {
             import.alias.clone().unwrap_or_else(|| name.clone())
-        } else if name == self.url.identity.name.as_str() {
+        } else if name.as_str() == self.url.identity.name.as_ref() {
             self.spec_name_in_schema().clone()
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
@@ -149,8 +179,8 @@ impl Link {
             .iter()
             .find(|i| i.element == *directive_name_in_spec)
         {
-            element_import.imported_name().clone()
-        } else if spec_url.identity.name == *directive_name_in_spec {
+            element_import.name_in_schema().clone()
+        } else if spec_url.identity.name.as_ref() == directive_name_in_spec.as_str() {
             spec_name_in_schema.clone()
         } else {
             Name::new_unchecked(format!("{spec_name_in_schema}__{directive_name_in_spec}").as_str())
@@ -168,7 +198,7 @@ impl Link {
         }
     }
 
-    pub fn for_identity<'schema>(
+    pub(crate) fn for_identity<'schema>(
         schema: &'schema Schema,
         identity: &Identity,
     ) -> Option<(Self, &'schema Component<Directive>)> {
@@ -177,7 +207,9 @@ impl Link {
             .directives
             .iter()
             .find_map(|directive| {
-                let link = Link::from_directive_application(directive, schema).ok()?;
+                let link =
+                    Link::from_directive_application_when_link_spec_unknown(directive, schema)
+                        .ok()?;
                 if link.url.identity == *identity {
                     Some((link, directive))
                 } else {
@@ -185,18 +217,10 @@ impl Link {
                 }
             })
     }
-
-    /// Returns true if this link has an import assigning an alias to the given element.
-    pub(crate) fn renames(&self, element: &Name) -> bool {
-        self.imports
-            .iter()
-            .find(|import| &import.element == element)
-            .is_some_and(|import| *import.imported_name() != *element)
-    }
 }
 
 impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Directive::from(self).fmt(f)
+        LINK_VERSIONS.latest().directive_from_link(self).fmt(f)
     }
 }

@@ -72,6 +72,10 @@ telemetry:
 | `apollo.router.operations.response_cache.invalidation.request.entry` | Number of invalidated entries per invalidation request. | `{entry}` |
 | `apollo.router.operations.response_cache.invalidation.duration` | Duration of the invalidation event execution, in seconds. | `s` |
 
+### Experimental maintenance metrics
+
+- `experimental.apollo.router.operations.response_cache.maintenance.commands`: Counter of Redis `ZREMRANGEBYSCORE` commands per drain cycle, split by a `deduplicated` attribute (`true` = avoided by deduplication, `false` = actually executed). Use the ratio `deduplicated=true / (true + false)` to measure how much Redis pressure the deduplication is relieving. A high ratio at scale indicates many inserts are concentrating on the same cache tags.
+
 ### Internal
 | Name | Description | Unit |
 | --- | --- | --- |
