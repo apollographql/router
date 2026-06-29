@@ -6146,11 +6146,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
-<<<<<<< HEAD
  "windows-sys 0.61.0",
-=======
- "windows-sys 0.59.0",
->>>>>>> origin/dev
 ]
 
 [[package]]
@@ -6899,11 +6895,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
-<<<<<<< HEAD
  "windows-sys 0.61.0",
-=======
- "windows-sys 0.59.0",
->>>>>>> origin/dev
 ]
 
 [[package]]

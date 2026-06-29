@@ -153,33 +153,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deprecated_context_key_mode_bool_warns_at_startup() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        let config = serde_json::json!({
-            "coprocessor": {
-                "url": "http://this-url-is-never-connected-to.invalid/",
-                "router": {
-                    "request": {
-                        "context": true
-                    }
-                }
-            }
-        });
-        let _test_harness = crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .unwrap();
-
-        assert!(
-            tracing_test::logs_contain("coprocessor.router.request.context: true` is deprecated"),
-            "expected deprecation warning for context: true config"
-        );
-    }
-
-    #[tokio::test]
     async fn fails_without_global_url() {
         let config = serde_json::json!({
             "coprocessor": {

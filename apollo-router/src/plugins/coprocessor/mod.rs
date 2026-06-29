@@ -193,8 +193,6 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-<<<<<<< HEAD
-=======
         for (path, conf) in [
             (
                 "coprocessor.router.request.context",
@@ -237,14 +235,13 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 &init.config.connector.all.response.context,
             ),
         ] {
-            if let Some(value) = conf.deprecated_value_str() {
+            if conf.is_deprecated() {
                 tracing::warn!(
-                    "Configuration `{path}: {value}` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+                    "Configuration `{path}: deprecated` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
                 );
             }
         }
 
->>>>>>> origin/dev
         // Validate all coprocessor URLs
         validate_coprocessor_url(&init.config.url, "coprocessor.url")?;
         if let Some(ref url) = init.config.router.request.url {
@@ -597,44 +594,7 @@ pub(super) struct BodyFieldsConf {
 }
 
 /// Configures the context
-<<<<<<< HEAD
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq)]
-=======
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, untagged)]
-pub(super) enum ContextConf {
-    /// Deprecated configuration using a boolean
-    Deprecated(bool),
-    NewContextConf(NewContextConf),
-}
-
-impl ContextConf {
-    fn is_deprecated(&self) -> bool {
-        match self {
-            Self::Deprecated(v) => *v,
-            Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
-        }
-    }
-
-    /// Returns the config value string as the user wrote it, if this conf is deprecated.
-    fn deprecated_value_str(&self) -> Option<&'static str> {
-        match self {
-            Self::Deprecated(true) => Some("true"),
-            Self::NewContextConf(NewContextConf::Deprecated) => Some("deprecated"),
-            _ => None,
-        }
-    }
-}
-
-impl Default for ContextConf {
-    fn default() -> Self {
-        Self::Deprecated(false)
-    }
-}
-
-/// Configures the context
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
->>>>>>> origin/dev
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(super) enum ContextConf {
     /// Do not send context to the coprocessor (the default)
