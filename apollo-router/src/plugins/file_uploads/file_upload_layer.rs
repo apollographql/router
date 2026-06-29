@@ -4,7 +4,6 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::HeaderName;
 use http::HeaderValue;
-use http::header::CONTENT_TYPE;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -59,7 +58,6 @@ where
                 parts
                     .headers
                     .insert(APOLLO_REQUIRE_PREFLIGHT.clone(), TRUE.clone());
-                parts.headers.insert(CONTENT_TYPE, form.content_type());
                 let body = router::body::from_result_stream(form.into_stream(operations).await);
                 req.http_request = http::Request::from_parts(parts, body);
             }
