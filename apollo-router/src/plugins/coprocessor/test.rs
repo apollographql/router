@@ -71,7 +71,6 @@ mod tests {
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
-    use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
@@ -88,7 +87,6 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
-    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -862,179 +860,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_subgraph_request_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: SubgraphRequestConf {
-                condition: Default::default(),
-                body: true,
-                subgraph_request_id: true,
-                context: ContextConf::Deprecated,
-                ..Default::default()
-            },
-            response: Default::default(),
-        };
-
-        let (mock_subgraph_service, mut handle_subgraph) =
-            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        let subgraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_subgraph.next_request().await.unwrap();
-            // Let's assert that the subgraph request has been transformed as it should have.
-            assert_eq!(
-                req.subgraph_request.headers().get("cookie").unwrap(),
-                "tasty_cookie=strawberry"
-            );
-            assert_eq!(
-                req.context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .unwrap()
-                    .unwrap(),
-                42
-            );
-            assert_eq!(
-                req.context
-                    .get::<&str, String>("apollo::supergraph::operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "New".to_string()
-            );
-            // The subgraph uri should have changed
-            assert_eq!(
-                "http://thisurihaschanged/",
-                req.subgraph_request.uri().to_string()
-            );
-            // The query should have changed
-            assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.subgraph_request.into_body().query.unwrap()
-            );
-            // this should be the same as the initial request id
-            assert_eq!(&*req.id, "5678");
-            responder.send_response(
-                subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build(),
-            );
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let req = req.http_request;
-            let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
-                    .unwrap();
-            assert_eq!(
-                deserialized_request.subgraph_request_id.as_deref(),
-                Some("5678")
-            );
-            let req_context = deserialized_request.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                42
-            );
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                            "version": 1,
-                            "stage": "SubgraphRequest",
-                            "control": "continue",
-                            "headers": {
-                                "cookie": [
-                                  "tasty_cookie=strawberry"
-                                ],
-                                "content-type": [
-                                  "application/json"
-                                ],
-                                "host": [
-                                  "127.0.0.1:4000"
-                                ],
-                                "apollo-federation-include-trace": [
-                                  "ftv1"
-                                ],
-                                "apollographql-client-name": [
-                                  "manual"
-                                ],
-                                "accept": [
-                                  "*/*"
-                                ],
-                                "user-agent": [
-                                  "curl/7.79.1"
-                                ],
-                                "content-length": [
-                                  "46"
-                                ]
-                              },
-                              "body": {
-                                "query": "query Long {\n  me {\n  name\n}\n}"
-                              },
-                              "context": {
-                                "entries": {
-                                  "this-is-a-test-context": 42,
-                                  "operation_name": "New"
-                                }
-                              },
-                              "serviceName": "service name shouldn't change",
-                              "uri": "http://thisurihaschanged",
-                              "subgraphRequestId": "9abc"
-                        }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed_clone(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 42)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        assert_eq!("5678", &*response.id);
-        assert_eq!(
-            json!({ "test": 1234_u32 }),
-            response.response.into_body().data.unwrap()
-        );
-        crate::plugin::test::await_mock_driver(subgraph_driver).await;
-        crate::plugin::test::await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
     async fn external_plugin_subgraph_request_with_condition() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
@@ -1649,170 +1474,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_subgraph_response_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: Default::default(),
-            response: SubgraphResponseConf {
-                condition: Default::default(),
-                body: BodyConf::All(true),
-                subgraph_request_id: true,
-                context: ContextConf::Deprecated,
-                ..Default::default()
-            },
-        };
-
-        let (mock_subgraph_service, mut handle_subgraph) =
-            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        let subgraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_subgraph.next_request().await.unwrap();
-            assert_eq!(&*req.id, "5678");
-            responder.send_response(
-                subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build(),
-            );
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let (_, body) = req.http_request.into_parts();
-            let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-            assert_eq!(
-                deserialized_response.subgraph_request_id,
-                Some(SubgraphRequestId("5678".to_string()))
-            );
-            let req_context = deserialized_response.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, u8>("this-is-a-test-context")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                55
-            );
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse",
-                            "headers": {
-                                "cookie": [
-                                  "tasty_cookie=strawberry"
-                                ],
-                                "content-type": [
-                                  "application/json"
-                                ],
-                                "host": [
-                                  "127.0.0.1:4000"
-                                ],
-                                "apollo-federation-include-trace": [
-                                  "ftv1"
-                                ],
-                                "apollographql-client-name": [
-                                  "manual"
-                                ],
-                                "accept": [
-                                  "*/*"
-                                ],
-                                "user-agent": [
-                                  "curl/7.79.1"
-                                ],
-                                "content-length": [
-                                  "46"
-                                ]
-                              },
-                              "body": {
-                                "data": {
-                                    "test": 5678
-                                }
-                              },
-                              "context": {
-                                "entries": {
-                                  "this-is-a-test-context": 42,
-                                  "operation_name": "New"
-                                }
-                              },
-                              "subgraphRequestId": "9abc"
-                        }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed_clone(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 55)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        // Let's assert that the subgraph response has been transformed as it should have.
-        assert_eq!(
-            response.response.headers().get("cookie").unwrap(),
-            "tasty_cookie=strawberry"
-        );
-        assert_eq!(&*response.id, "5678");
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, u8>("this-is-a-test-context")
-                .unwrap()
-                .unwrap(),
-            42
-        );
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
-        );
-
-        assert_eq!(
-            json!({ "test": 5678_u32 }),
-            response.response.into_body().data.unwrap()
-        );
-        crate::plugin::test::await_mock_driver(subgraph_driver).await;
-        crate::plugin::test::await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
     async fn external_plugin_subgraph_response_with_condition() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
@@ -2116,115 +1777,6 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             25
-        );
-
-        let gql_response = response.response.body_mut().next().await.unwrap();
-        // Let's assert that the supergraph response has been transformed as it should have.
-        assert_eq!(gql_response.subscribed, Some(true));
-        assert_eq!(gql_response.data, Some(Value::Null));
-        crate::plugin::test::await_mock_driver(supergraph_driver).await;
-        crate::plugin::test::await_mock_driver(http_driver).await;
-    }
-
-    #[tokio::test]
-    async fn external_plugin_supergraph_response_with_deprecated_context() {
-        let supergraph_stage = SupergraphStage {
-            request: Default::default(),
-            response: SupergraphResponseConf {
-                condition: Default::default(),
-                headers: false,
-                context: ContextConf::Deprecated,
-                body: BodyConf::All(true),
-                status_code: false,
-                sdl: false,
-                url: None,
-            },
-        };
-
-        let (mock_supergraph_service, mut handle_supergraph) =
-            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-        let supergraph_driver = tokio::spawn(async move {
-            let (req, responder) = handle_supergraph.next_request().await.unwrap();
-            responder.send_response(supergraph::Response::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(Value::Null)
-                    .subscribed(true)
-                    .build(),
-                req.context,
-            ));
-        });
-
-        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
-            crate::services::http::HttpRequest,
-            crate::services::http::HttpResponse,
-        >();
-        let http_driver = tokio::spawn(async move {
-            let (req, responder) = http_handle.next_request().await.unwrap();
-            let context = req.context.clone();
-            let (_, body) = req.http_request.into_parts();
-            let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-            let req_context = deserialized_response.context.unwrap_or_default();
-            assert_eq!(
-                req_context
-                    .get::<&str, String>("operation_name")
-                    .expect("context key should be there")
-                    .expect("context key should have the right format"),
-                "Test".to_string()
-            );
-            let response = http::Response::builder()
-                .body(router::body::from_bytes(
-                    r#"{
-                            "version": 1,
-                            "stage": "SupergraphResponse",
-                            "context": {
-                                "entries": {
-                                    "operation_name": "New"
-                                }
-                            },
-                            "body": {
-                                "data": null
-                            }
-                        }"#,
-                ))
-                .unwrap();
-            responder.send_response(crate::services::http::HttpResponse {
-                http_response: response,
-                context,
-            });
-        });
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed_clone(),
-            "http://test".to_string(),
-            Arc::default(),
-            true,
-        );
-
-        let request = supergraph::Request::fake_builder().build().unwrap();
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-
-        let mut response = service.oneshot(request).await.unwrap();
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
-        );
-        assert!(
-            response
-                .context
-                .get::<&str, String>("operation_name")
-                .ok()
-                .flatten()
-                .is_none()
         );
 
         let gql_response = response.response.body_mut().next().await.unwrap();
@@ -5607,13 +5159,7 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::All,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5650,13 +5196,7 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::All,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5673,7 +5213,6 @@ mod tests {
     #[test]
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
         use std::collections::HashSet;
-        use std::sync::Arc;
 
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -5688,19 +5227,10 @@ mod tests {
         // Coprocessor returns context without k1 (deleted)
         let returned_context = Context::new();
 
-        // Use Selective config to only send "k1", not "key_not_sent"
-        let selective_keys: HashSet<String> = ["k1".to_string()].into();
-        let context_config = ContextConf::Selective(Arc::new(selective_keys));
         let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &context_config,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5708,44 +5238,6 @@ mod tests {
         assert_eq!(
             target_context.get_json_value("key_not_sent"),
             Some(serde_json_bytes::json!("preserved_value"))
-        );
-    }
-
-    #[rstest::rstest]
-    fn test_update_context_from_coprocessor_handles_deprecated_key_names(
-        #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
-        #[values(ContextConf::Deprecated)] context_conf: ContextConf,
-    ) {
-        use std::collections::HashSet;
-
-        use crate::Context;
-        use crate::plugins::coprocessor::update_context_from_coprocessor;
-
-        let target_context =
-            Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
-        let returned_context =
-            Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
-        let keys_sent: HashSet<String> = [target_context_key_name]
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &context_conf,
-            &keys_sent,
-        )
-        .unwrap();
-
-        assert_eq!(
-            target_context.get_json_value(CLIENT_NAME),
-            Some(json!("v2")),
-        );
-
-        assert!(
-            !target_context.contains_key(DEPRECATED_CLIENT_NAME),
-            "DEPRECATED_CLIENT_NAME should not be present"
         );
     }
 
@@ -5774,13 +5266,7 @@ mod tests {
         // k2 intentionally removed by coprocessor
         // k3 was never sent, must survive
 
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::All,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         assert!(target_context.contains_key("k1"));
         assert!(!target_context.contains_key("k2")); // deleted by coprocessor
@@ -5827,13 +5313,7 @@ mod tests {
             .insert("book_request_end", 5700i64)
             .unwrap();
 
-        update_context_from_coprocessor(
-            &shared_context,
-            returned_context,
-            &ContextConf::All,
-            &keys_sent,
-        )
-        .unwrap();
+        update_context_from_coprocessor(&shared_context, returned_context, &keys_sent).unwrap();
 
         // accounts_request_start was never sent to book's coprocessor, so it must survive
         assert!(shared_context.contains_key("accounts_request_start"));
