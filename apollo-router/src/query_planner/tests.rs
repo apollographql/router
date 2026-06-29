@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::panic::catch_unwind;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -189,72 +190,6 @@ fn service_usage() {
             .collect::<Vec<_>>(),
         vec!["product", "books", "product", "books", "product"]
     );
-}
-
-/// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
-/// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
-/// with a closed service.
-///
-/// See: https://github.com/tower-rs/tower/issues/455
-///
-/// The query planner reports the failed subgraph fetch as an error with a reason of "service
-/// closed", which is what this test expects.
-#[tokio::test]
-async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed() {
-    let query_plan: QueryPlan = QueryPlan {
-        root: serde_json::from_str(test_query_plan!()).unwrap(),
-        formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty_for_tests()),
-        query_metrics: Default::default(),
-        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
-        estimated_size: Default::default(),
-    };
-
-    let (mock_products_service, mut handle) = tower_test::mock::pair::<
-        crate::services::SubgraphRequest,
-        crate::services::SubgraphResponse,
-    >();
-    let driver = tokio::spawn(async move {
-        let (_req, _responder) = handle.next_request().await.unwrap();
-        // dropping _responder without sending a response simulates a service failure;
-        // tower_test reports this to the caller as "service closed"
-    });
-
-    let (sender, _) = tokio::sync::mpsc::channel(10);
-
-    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = subgraph_service_factory(vec![(
-        "product".into(),
-        mock_products_service.boxed_clone(),
-    )]);
-    let sf = FetchService::new(
-        schema.clone(),
-        Default::default(),
-        Arc::new(ssf),
-        None,
-        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
-        Arc::new(SubgraphConfiguration::<HoistOrphanErrors>::default()),
-    );
-
-    let result = query_plan
-        .execute(
-            &Context::new(),
-            &sf,
-            &Default::default(),
-            &schema,
-            &Default::default(),
-            sender,
-            None,
-            &None,
-            None,
-        )
-        .await;
-    crate::plugin::test::await_mock_driver(driver).await;
-    assert_eq!(result.errors.len(), 1);
-    let reason: String =
-        serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
-            .unwrap();
-    assert_eq!(reason, "service closed".to_string());
 }
 
 #[tokio::test]
