@@ -139,7 +139,7 @@ mod tests {
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 subgraph::Response::fake_builder()
@@ -171,6 +171,10 @@ mod tests {
             .expect("couldn't access status_codes");
 
         assert_eq!(403, received_status_code);
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 
     #[tokio::test]
@@ -179,7 +183,7 @@ mod tests {
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (_req, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 subgraph::Response::fake_builder()
@@ -210,6 +214,10 @@ mod tests {
             .expect("couldn't access context");
 
         assert!(received_status_codes.is_none());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 
     // Now that our status codes mechanism has been tested,
@@ -220,7 +228,7 @@ mod tests {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             let context = req.context;
             // Insert several status codes which shall override the router response status
@@ -258,6 +266,10 @@ mod tests {
         );
 
         let _response = service_response.next_response().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 
     #[tokio::test]
@@ -265,7 +277,7 @@ mod tests {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             let context = req.context;
             // Don't insert any StatusCode
@@ -296,5 +308,9 @@ mod tests {
 
         assert_eq!(StatusCode::OK, service_response.response.status());
         let _response = service_response.next_response().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 }

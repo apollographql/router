@@ -20,7 +20,7 @@ mod tests {
     ) -> Option<String> {
         let (mock_service1, mut handle1) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        tokio::spawn(async move {
+        let driver1 = tokio::spawn(async move {
             let (req, responder) = handle1.next_request().await.unwrap();
             let mut headers = HeaderMap::new();
             if let Some(value) = &header_one {
@@ -36,7 +36,7 @@ mod tests {
 
         let (mock_service2, mut handle2) =
             tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
-        tokio::spawn(async move {
+        let driver2 = tokio::spawn(async move {
             let (req, responder) = handle2.next_request().await.unwrap();
             let mut headers = HeaderMap::new();
             if let Some(value) = &header_two {
@@ -100,11 +100,18 @@ mod tests {
 
         assert_eq!(StatusCode::OK, service_response.response.status());
 
-        service_response
+        let result = service_response
             .response
             .headers()
             .get("cache-control")
-            .map(|v| v.to_str().expect("can parse header value").to_string())
+            .map(|v| v.to_str().expect("can parse header value").to_string());
+        for driver in [driver1, driver2] {
+            tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+                .await
+                .expect("mock driver timed out — service was not called within 5 s")
+                .unwrap();
+        }
+        result
     }
 
     #[tokio::test]

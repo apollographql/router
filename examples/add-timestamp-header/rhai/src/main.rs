@@ -22,7 +22,7 @@ mod tests {
         let expected_mock_response_data = "response created within the mock";
         let (mock_service, mut handle) =
             tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-        tokio::spawn(async move {
+        let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 supergraph::Response::fake_builder()
@@ -83,5 +83,9 @@ mod tests {
 
         // with the expected message
         assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 }
