@@ -1,9 +1,11 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use regex::Regex;
 use serde_json_bytes::json;
-use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
