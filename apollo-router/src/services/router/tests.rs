@@ -17,12 +17,14 @@ use tower_service::Service;
 use crate::Context;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
+use crate::plugin::test::assert_no_mock_calls;
+use crate::plugin::test::await_mock_driver;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::services::router::service::from_supergraph_mock_callback;
+use crate::services::router::service::from_supergraph_mock;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -66,7 +68,7 @@ fn it_leaves_varys_alone_if_there_are_more_than_one() {
 
 #[tokio::test]
 async fn it_extracts_query_and_operation_name() {
-    let query = "query";
+    let query = "query operationName { __typename }";
     let expected_query = query;
     let operation_name = "operationName";
     let expected_operation_name = operation_name;
@@ -75,28 +77,29 @@ async fn it_extracts_query_and_operation_name() {
         .data(json!({"response": "yay"}))
         .build();
 
-    let mut router_service = from_supergraph_mock_callback(move |req| {
-        let example_response = expected_response.clone();
-
-        assert_eq!(
-            req.supergraph_request.body().query.as_deref().unwrap(),
-            expected_query
-        );
-        assert_eq!(
-            req.supergraph_request
-                .body()
-                .operation_name
-                .as_deref()
-                .unwrap(),
-            expected_operation_name
-        );
-
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert_eq!(
+                req.supergraph_request.body().query.as_deref().unwrap(),
+                expected_query
+            );
+            assert_eq!(
+                req.supergraph_request
+                    .body()
+                    .operation_name
+                    .as_deref()
+                    .unwrap(),
+                expected_operation_name
+            );
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                expected_response.clone(),
+                req.context,
+            ));
+        }
+    });
+    let mut router_service = from_supergraph_mock(mock).await;
 
     // get request
     let get_request = supergraph::Request::builder()
@@ -137,13 +140,15 @@ async fn it_extracts_query_and_operation_name() {
         .call(post_request.try_into().unwrap())
         .await
         .unwrap();
+    await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_fails_on_empty_query() {
     let expected_error = "Must provide query string.";
 
-    let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let router_service = from_supergraph_mock(mock).await;
 
     let request = SupergraphRequest::fake_builder()
         .query("".to_string())
@@ -166,13 +171,15 @@ async fn it_fails_on_empty_query() {
 
     assert_eq!(expected_error, actual_error);
     assert!(response.errors[0].extensions.contains_key("code"));
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_fails_on_no_query() {
     let expected_error = "Must provide query string.";
 
-    let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let router_service = from_supergraph_mock(mock).await;
 
     let request = SupergraphRequest::fake_builder()
         .build()
@@ -193,6 +200,7 @@ async fn it_fails_on_no_query() {
     let actual_error = response.errors[0].message.clone();
     assert_eq!(expected_error, actual_error);
     assert!(response.errors[0].extensions.contains_key("code"));
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]

@@ -171,15 +171,19 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            // Return a simple successful response
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -230,6 +234,7 @@ mod tests {
         // This will call the mock_http_client, which verifies the correct URL is used
         service.oneshot(request.try_into().unwrap()).await.unwrap();
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2246,10 +2251,13 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
@@ -2262,18 +2270,26 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes =
+                router::body::into_bytes(req.router_request.into_body())
+                    .await
+                    .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2323,9 +2339,7 @@ mod tests {
                   "46"
                 ]
               },
-              "body": "{
-                  \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                }",
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
               "context": {
                 "entries": {
                   "accepts-json": false,
@@ -2359,6 +2373,7 @@ mod tests {
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2379,10 +2394,13 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
@@ -2395,18 +2413,26 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes =
+                router::body::into_bytes(req.router_request.into_body())
+                    .await
+                    .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2476,9 +2502,7 @@ mod tests {
                   "46"
                 ]
               },
-              "body": "{
-                  \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                }",
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
               "context": {
                 "entries": {
                   "accepts-json": false,
@@ -2528,6 +2552,7 @@ mod tests {
                 .is_some()
         );
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2553,7 +2578,10 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             assert!(
                 req.context
                     .get::<&str, u8>("this-is-a-test-context")
@@ -2561,13 +2589,15 @@ mod tests {
                     .flatten()
                     .is_none()
             );
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2586,6 +2616,7 @@ mod tests {
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
         crate::plugin::test::assert_no_mock_calls(http_handle).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2604,17 +2635,18 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
-            // the method shouldn't have changed
-            assert_eq!(req.supergraph_request.method(), Method::GET);
-            // the uri shouldn't have changed
-            assert_eq!(req.supergraph_request.uri(), "/");
+            // the method shouldn't have changed (coprocessor said POST but we ignore method on continue)
+            assert_eq!(req.router_request.method(), Method::GET);
 
             assert_eq!(
                 req.context
@@ -2625,18 +2657,26 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes =
+                router::body::into_bytes(req.router_request.into_body())
+                    .await
+                    .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -2688,9 +2728,7 @@ mod tests {
                   "46"
                 ]
               },
-              "body": "{
-                  \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                }",
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
               "context": {
                 "entries": {
                   "accepts-json": false,
@@ -2727,6 +2765,7 @@ mod tests {
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2945,14 +2984,19 @@ mod tests {
             request: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!("{ \"test\": 1234_u32 }"))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!("{ \"test\": 1234_u32 }"))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -3070,6 +3114,7 @@ mod tests {
             .unwrap()
         );
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -3084,14 +3129,19 @@ mod tests {
             ..Default::default()
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!({"test": 42}))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
         let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
             crate::services::http::HttpRequest,
@@ -3144,6 +3194,7 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "modified_by_coprocessor");
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     // ===== ROUTER RESPONSE VALIDATION TESTS =====
@@ -3153,10 +3204,21 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_valid() {
         let (http_client, http_driver) = create_mock_http_client_router_response_valid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3174,15 +3236,27 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "valid_response");
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_empty() {
         let (http_client, http_driver) = create_mock_http_client_router_response_empty_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3201,15 +3275,27 @@ mod tests {
         // Empty object passes through unchanged since router response doesn't validate
         assert!(body.as_object().unwrap().is_empty());
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_invalid() {
         let (http_client, http_driver) = create_mock_http_client_router_response_invalid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3228,15 +3314,27 @@ mod tests {
         // Invalid response passes through unchanged since router response doesn't validate
         assert_eq!(body["errors"], "this should be an array not a string");
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_valid() {
         let (http_client, http_driver) = create_mock_http_client_router_response_valid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3254,15 +3352,27 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "valid_response");
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_empty() {
         let (http_client, http_driver) = create_mock_http_client_router_response_empty_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3281,15 +3391,27 @@ mod tests {
         // Empty object passes through unchanged
         assert!(body.as_object().unwrap().is_empty());
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_invalid() {
         let (http_client, http_driver) = create_mock_http_client_router_response_invalid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3308,6 +3430,7 @@ mod tests {
         // Invalid response passes through unchanged
         assert_eq!(body["errors"], "this should be an array not a string");
         crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     // Helper functions for router request validation tests
@@ -3354,16 +3477,11 @@ mod tests {
         }
     }
 
-    async fn create_mock_router_service_for_validation_test() -> router::BoxCloneService {
-        router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!({"test": 42}))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await
-        .boxed_clone()
+    fn create_mock_router_service_for_validation_test() -> (
+        tower_test::mock::Mock<router::Request, router::Response>,
+        tower_test::mock::Handle<router::Request, router::Response>,
+    ) {
+        tower_test::mock::pair::<router::Request, router::Response>()
     }
 
     // Helper function to create working router service mock
@@ -3584,10 +3702,11 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request_validation_disabled_empty() {
         let (http_client, http_driver) = create_mock_http_client_empty_router_response();
+        let (router_service, router_handle) = create_mock_router_service_for_validation_test();
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
@@ -3612,15 +3731,18 @@ mod tests {
                 || body.get("errors").is_some()
         );
         crate::plugin::test::await_mock_driver(http_driver).await;
+        // Coprocessor breaks — inner service is never called
+        crate::plugin::test::assert_no_mock_calls(router_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_request_validation_enabled_empty() {
         let (http_client, http_driver) = create_mock_http_client_empty_router_response();
+        let (router_service, router_handle) = create_mock_router_service_for_validation_test();
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
                 http_client,
-                create_mock_router_service_for_validation_test().await,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
@@ -3649,6 +3771,8 @@ mod tests {
                 .contains("couldn't deserialize coprocessor output body")
         );
         crate::plugin::test::await_mock_driver(http_driver).await;
+        // Coprocessor breaks — inner service is never called
+        crate::plugin::test::assert_no_mock_calls(router_handle).await;
     }
 
     #[test]
@@ -8072,14 +8196,19 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            })
-            .await;
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
 
             // Mock coprocessor that captures the headers it receives
             let received_headers = Arc::new(std::sync::Mutex::new(None));
@@ -8189,6 +8318,7 @@ mod tests {
                     .unwrap(),
                 "test-agent"
             );
+            crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
         #[tokio::test]
@@ -8334,14 +8464,19 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            })
-            .await;
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
 
             let received_headers = Arc::new(std::sync::Mutex::new(None));
             let received_headers_clone = received_headers.clone();
@@ -8409,6 +8544,7 @@ mod tests {
                     .unwrap(),
                 "Bearer token"
             );
+            crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
         #[tokio::test]
@@ -8429,14 +8565,19 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            })
-            .await;
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
 
             let received_headers = Arc::new(std::sync::Mutex::new(None));
             let received_headers_clone = received_headers.clone();
@@ -8546,6 +8687,7 @@ mod tests {
                     .unwrap(),
                 "custom-value"
             );
+            crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
         #[tokio::test]
@@ -8565,14 +8707,19 @@ mod tests {
                 response: Default::default(),
             };
 
-            let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            })
-            .await;
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
 
             let received_headers = Arc::new(std::sync::Mutex::new(None));
             let received_headers_clone = received_headers.clone();
@@ -8683,6 +8830,7 @@ mod tests {
                     .unwrap(),
                 "Bearer public-token"
             );
+            crate::plugin::test::await_mock_driver(router_driver).await;
         }
 
         // Real end-to-end coverage for the coprocessor + masking flow lives in

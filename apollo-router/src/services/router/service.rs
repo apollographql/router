@@ -141,12 +141,8 @@ impl Service<RouterRequest> for RouterService {
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback_and_configuration(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock_with_configuration(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -155,19 +151,6 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let (mock, mut handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
-
-    // Drive the handle in a background task so each request is fulfilled by the callback.
-    let mut cb = supergraph_callback;
-    tokio::spawn(async move {
-        while let Some((req, responder)) = handle.next_request().await {
-            if let Ok(response) = cb(req) {
-                responder.send_response(response);
-            }
-        }
-    });
-
-    // Capture `mock` (Send + Sync) rather than a BoxCloneService (Send only).
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
         .supergraph_hook(move |_| mock.clone().boxed_clone())
@@ -187,12 +170,8 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -200,11 +179,7 @@ pub(crate) async fn from_supergraph_mock_callback(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    from_supergraph_mock_callback_and_configuration(
-        supergraph_callback,
-        Arc::new(Configuration::default()),
-    )
-    .await
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
 
 #[cfg(test)]
