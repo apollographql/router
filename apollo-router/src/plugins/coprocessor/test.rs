@@ -2271,10 +2271,9 @@ mod tests {
 
             // The query should have changed
             let context = req.context.clone();
-            let body_bytes =
-                router::body::into_bytes(req.router_request.into_body())
-                    .await
-                    .unwrap();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
             let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
                 body["query"].as_str().unwrap(),
@@ -2414,10 +2413,9 @@ mod tests {
 
             // The query should have changed
             let context = req.context.clone();
-            let body_bytes =
-                router::body::into_bytes(req.router_request.into_body())
-                    .await
-                    .unwrap();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
             let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
                 body["query"].as_str().unwrap(),
@@ -2658,10 +2656,9 @@ mod tests {
 
             // The query should have changed
             let context = req.context.clone();
-            let body_bytes =
-                router::body::into_bytes(req.router_request.into_body())
-                    .await
-                    .unwrap();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
             let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
                 body["query"].as_str().unwrap(),
