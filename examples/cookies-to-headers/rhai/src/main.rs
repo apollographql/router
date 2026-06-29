@@ -51,6 +51,9 @@ mod tests {
         mock_service.expect_clone().returning(move || {
             let mut mock_service = test::MockSubgraphService::new();
             mock_service
+                .expect_clone()
+                .return_once(test::MockSubgraphService::new);
+            mock_service
                 .expect_call()
                 .once()
                 .returning(move |req: subgraph::Request| {
