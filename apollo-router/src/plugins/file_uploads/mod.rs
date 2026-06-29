@@ -422,11 +422,9 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
                 }
             }
 
-            let form = MultipartFormData::new(subgraph_map, multipart);
             req.subgraph_request
-                .headers_mut()
-                .insert(CONTENT_TYPE, form.content_type());
-            req.subgraph_request.extensions_mut().insert(form);
+                .extensions_mut()
+                .insert(MultipartFormData::new(subgraph_map, multipart));
         }
     }
     req
