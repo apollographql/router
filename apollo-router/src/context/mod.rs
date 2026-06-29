@@ -20,7 +20,6 @@ use tower::BoxError;
 use crate::json_ext::Value;
 use crate::services::layers::query_analysis::ParsedDocument;
 
-pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
 /// Context key for the operation name.
@@ -49,9 +48,6 @@ pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
 /// plugins without having to deserialize the router response. This is subject to change and is NOT
 /// supported for user access.
 pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
-
-pub(crate) use deprecated::context_key_from_deprecated;
-pub(crate) use deprecated::context_key_to_deprecated;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
