@@ -32,6 +32,7 @@ use fred::prelude::Config as RedisConfig;
 use fred::prelude::Value as RedisValue;
 use fred::prelude::*;
 use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::Method;
 use serde_json::json;
