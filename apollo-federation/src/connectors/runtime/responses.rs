@@ -124,9 +124,62 @@ pub fn handle_raw_response(
         warnings,
     );
     if success {
-        map_response(data, key, inputs, warnings)
+        let response = map_response(data, key, inputs, warnings);
+        check_list_mismatch(connector, response)
     } else {
         map_error(connector, data, parts, key, inputs, warnings)
+    }
+}
+
+/// Returns an error when the mapped response value doesn't match the expected
+/// arrayness of the schema field. When the schema declares `[T]` but the
+/// connector returns a non-array value (or vice versa), the GraphQL runtime
+/// silently nullifies the field, so this provides an actionable error instead.
+fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> MappedResponse {
+    let MappedResponse::Data {
+        data,
+        key,
+        problems,
+    } = response
+    else {
+        return response;
+    };
+
+    let is_array = matches!(data, Value::Array(_));
+    let is_null = matches!(data, Value::Null);
+
+    let message = if connector.output_is_list && !is_array && !is_null {
+        Some(
+            "Response was not a list. The schema expects a list for this field, \
+             but the connector returned a single object. \
+             Check that the API returns an array."
+                .to_string(),
+        )
+    } else if !connector.output_is_list && is_array {
+        Some(
+            "Response was a list. The schema expects a single object for this field, \
+             but the connector returned an array."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    if let Some(message) = message {
+        let mut error = RuntimeError::new(message, &key);
+        error.subgraph_name = Some(connector.id.subgraph_name.clone());
+        error.coordinate = Some(connector.id.coordinate());
+        MappedResponse::Error {
+            error,
+            key,
+            problems,
+        }
+    } else {
+        MappedResponse::Data {
+            data,
+            key,
+            problems,
+        }
     }
 }
 
@@ -917,5 +970,148 @@ mod tests {
             items[0].get("viewUri").is_none(),
             "original field name should not appear in output when aliased"
         );
+    }
+
+    fn make_connector(output_is_list: bool) -> crate::connectors::models::Connector {
+        use apollo_compiler::name;
+
+        use crate::connectors::ConnectId;
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::models::Connector;
+        use crate::connectors::models::ConnectorErrorsSettings;
+
+        Connector {
+            id: ConnectId::new(
+                "subgraph".into(),
+                None,
+                name!("Query"),
+                name!("posts"),
+                None,
+                0,
+            ),
+            transport: None,
+            selection: JSONSelection::parse("$").unwrap(),
+            config: None,
+            max_requests: None,
+            entity_resolver: None,
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            batch_settings: None,
+            error_settings: ConnectorErrorsSettings::default(),
+            output_is_list,
+            label: "test".into(),
+        }
+    }
+
+    // CNN-564: when schema declares a list field but API returns a single object,
+    // check_list_mismatch must return an error instead of silently passing through
+    // the wrong-shaped data (which the router would null without explanation).
+    #[test]
+    fn list_field_with_object_response_produces_error() {
+        let connector = make_connector(true);
+        let key = ResponseKey::RootField {
+            name: "posts".to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let response = MappedResponse::Data {
+            data: json!({"id": 1, "title": "First"}),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("not a list"),
+            "error message should explain the mismatch, got: {:?}",
+            error.message
+        );
+    }
+
+    // CNN-564: when schema declares a single-object field but API returns an array,
+    // check_list_mismatch must return an error.
+    #[test]
+    fn non_list_field_with_array_response_produces_error() {
+        let connector = make_connector(false);
+        let key = ResponseKey::RootField {
+            name: "post".to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let response = MappedResponse::Data {
+            data: json!([{"id": 1}, {"id": 2}]),
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant, got Data");
+        };
+        assert!(
+            error.message.contains("a list"),
+            "error message should explain the mismatch, got: {:?}",
+            error.message
+        );
+    }
+
+    // CNN-564: when schema declares a list field and API returns null,
+    // do NOT emit a list-mismatch error (null is a valid/separate failure mode).
+    #[test]
+    fn list_field_with_null_response_passes_through() {
+        let connector = make_connector(true);
+        let key = ResponseKey::RootField {
+            name: "posts".to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let response = MappedResponse::Data {
+            data: Value::Null,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        assert!(
+            matches!(result, MappedResponse::Data { .. }),
+            "null data should pass through without a list-mismatch error"
+        );
+    }
+
+    // CNN-564: when the response is already an Error, check_list_mismatch must
+    // leave it untouched (don't double-error).
+    #[test]
+    fn error_response_is_unchanged_by_list_check() {
+        use crate::connectors::runtime::errors::RuntimeError;
+
+        let connector = make_connector(true);
+        let key = ResponseKey::RootField {
+            name: "posts".to_string(),
+            inputs: RequestInputs::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let error = RuntimeError::new("original error", &key);
+        let response = MappedResponse::Error {
+            error,
+            key,
+            problems: vec![],
+        };
+
+        let result = super::check_list_mismatch(&connector, response);
+
+        let MappedResponse::Error { error, .. } = result else {
+            panic!("expected Error variant");
+        };
+        assert_eq!(error.message, "original error");
     }
 }

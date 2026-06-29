@@ -7110,6 +7110,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                output_is_list: false,
                 label: "label".into(),
             })
         }

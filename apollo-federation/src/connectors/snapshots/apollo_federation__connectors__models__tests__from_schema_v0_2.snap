@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/models.rs
-assertion_line: 938
 expression: "&connectors"
 ---
 [
@@ -203,6 +202,7 @@ expression: "&connectors"
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_is_list: true,
         label: Label(
             "connectors.json http: GET /posts",
         ),
@@ -485,6 +485,7 @@ expression: "&connectors"
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_is_list: false,
         label: Label(
             "[BATCH] connectors.json http: POST /posts",
         ),

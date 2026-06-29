@@ -2058,6 +2058,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_is_list: false,
             label: "test label".into(),
         };
         let key = ResponseKey::RootField {
