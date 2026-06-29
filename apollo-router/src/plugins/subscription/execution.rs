@@ -108,37 +108,10 @@ where
                 let execution_service_cloned = inner.clone();
                 let supergraph_http_request = req.supergraph_request.clone();
 
-                // Race fix (subscribe-before-publish, A3 candidate #2): subscribe to
-                // the schema/configuration broadcast channels *here*, synchronously
-                // in `call()`, *before* spawning the side-channel task and before
-                // returning the inner future that drives the subgraph request.
-                //
-                // `subscribe_schema()` / `subscribe_configuration()` wrap a fresh
-                // `tokio::broadcast::Receiver`. The broadcast is non-replaying:
-                // messages sent before `subscribe` returns are not delivered to
-                // the new receiver. Previously these calls lived inside
-                // `subscription_task` *after* two `.await` points
-                // (`rx.recv().await` for subscription params and
-                // `receiver.next().await` for the subgraph stream), so by the
-                // time the task subscribed the subgraph plugin had already
-                // incremented `apollo.router.operations.subscriptions` (where
-                // the test deadline-polls before triggering the reload). On
-                // slow runners (CircleCI `m4pro.large`, 6 vCPU under
-                // hypervisor jitter) the test's `replace_schema_string` could
-                // fire `broadcast_schema` *before* the spawned task reached
-                // the subscribe call, dropping the schema-reload message on
-                // the floor. Sub-1 then sees `receiver.next() == None`
-                // (factory drop) without the schema broadcast ever arriving
-                // on its receiver, the 1s grace window in the None arm
-                // times out, and the client receives 3 events instead of 4
-                // ("Received 3 events but expected 4. Stream may have
-                // terminated early." at `tests/integration/subscriptions/mod.rs:266`).
-                //
-                // Subscribing here guarantees both receivers are attached to
-                // the broadcast channels before the subgraph subscription
-                // request is even dispatched, so any subsequent
-                // `broadcast_schema` / `broadcast_configuration` call (from
-                // the test or the state machine) is delivered.
+                // Subscribe to config and schema changes immediately, so we don't
+                // miss out on any events happening in-between here and when we
+                // actually start responding to changes (which happens asynchronously
+                // inside the subscription task).
                 let configuration_updated_rx = Box::pin(notify.subscribe_configuration());
                 let schema_updated_rx = Box::pin(notify.subscribe_schema());
 
