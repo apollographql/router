@@ -206,10 +206,8 @@ where
 mod tests {
 
     use std::sync::Arc;
-    use std::sync::atomic::AtomicU8;
-    use std::sync::atomic::Ordering;
-    use std::time::Duration;
 
+    use tokio::sync::Barrier;
     use tower::Service;
     use tower::ServiceExt;
 
@@ -218,30 +216,23 @@ mod tests {
     use crate::services::SubgraphResponse;
 
     // Testing strategy:
-    //  - We make our subgraph invocations slow (100ms) to increase our chance of a positive dedup
-    //    result.
-    //  - We count how many times our inner service is invoked across all service invocations.
-    //  - With tower_test::mock all clones share the same channel, so the handle driver receives
-    //    every call regardless of which clone the dedup service picked.
-    //  - If our shared counter == 1 at the end, then our test passes.
-    //
-    //  Note: If this test starts to fail it may be because we need to increase the sleep time for
-    //  each inner service above 100ms.
-    //
+    //  - The driver holds at a Barrier until both futures are provably in flight, then
+    //    responds once. This guarantees deduplication occurs before either request completes.
+    //  - If dedup fails and two requests reach the inner service, the driver only handles
+    //    one; the mock closes after the driver exits, causing the second inner call to fail,
+    //    which surfaces as a test assertion failure.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dedup_service() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
-        let inner_invocation_count = Arc::new(AtomicU8::new(0));
-        let inner_invocation_count_driver = inner_invocation_count.clone();
+        // Barrier with count 2: driver waits here after receiving the request; test body
+        // waits here after spawning both futures. They meet when both are in flight.
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
 
-        // With deduplication, exactly one request reaches the inner service regardless of how many
-        // clones the service makes. Sleep 100ms so both concurrent callers are in-flight when dedup
-        // fires.
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            inner_invocation_count_driver.fetch_add(1, Ordering::Relaxed);
+            barrier_clone.wait().await;
             responder.send_response(
                 SubgraphResponse::fake_builder()
                     .context(req.context)
@@ -253,7 +244,6 @@ mod tests {
 
         let request = SubgraphRequest::fake_builder().build();
 
-        // Spawn our service invocations so they execute in parallel.
         let fut1 = tokio::spawn(
             svc.ready()
                 .await
@@ -261,14 +251,14 @@ mod tests {
                 .call(request.clone()),
         );
         let fut2 = tokio::spawn(svc.ready().await.expect("it is ready").call(request));
-        let (res1, res2) = tokio::join!(fut1, fut2);
 
-        // We don't care about our actual request/responses, we just want to make sure that
-        // deduplication occurs.
+        // Both futures are now in flight. Release the inner service.
+        barrier.wait().await;
+
+        let (res1, res2) = tokio::join!(fut1, fut2);
         res1.expect("fut1 spawned").expect("fut1 joined");
         res2.expect("fut2 spawned").expect("fut2 joined");
 
-        assert_eq!(1, inner_invocation_count.load(Ordering::Relaxed));
         crate::plugin::test::await_mock_driver(driver).await;
     }
 }

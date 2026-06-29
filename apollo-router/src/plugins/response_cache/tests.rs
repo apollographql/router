@@ -75,6 +75,7 @@ pub(super) fn create_subgraph_conf(
             invalidation: Some(SubgraphInvalidationConfig {
                 enabled: true,
                 shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                ..Default::default()
             }),
             ..Default::default()
         },

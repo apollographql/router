@@ -653,7 +653,7 @@ mod supergraph_spec_imports {
             &result,
             &[(
                 "INVALID_LINK_DIRECTIVE_USAGE",
-                r#"[products] Invalid use of @link in schema: import for '@inaccessible' of https://specs.apollo.dev/federation/v2.5 conflicts with spec https://specs.apollo.dev/inaccessible/v0.2"#,
+                r#"[products] Please import "@inaccessible" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/inaccessible" to avoid potential unexpected behavior in the future."#,
             )],
         );
     }
@@ -683,7 +683,7 @@ mod supergraph_spec_imports {
             &result,
             &[(
                 "INVALID_LINK_DIRECTIVE_USAGE",
-                r#"[accounts] Invalid use of @link in schema: import for '@policy' of https://specs.apollo.dev/federation/v2.6 conflicts with spec https://specs.apollo.dev/policy/v0.1"#,
+                r#"[accounts] Cannot import "@requiresScopes" from feature "https://specs.apollo.dev/federation" since it can be confused with a namespaced name from another linked feature "https://specs.apollo.dev/requiresScopes". Please rename the import or feature to avoid conflicts via "as"."#,
             )],
         );
     }
@@ -751,7 +751,7 @@ mod supergraph_spec_imports {
             &result,
             &[(
                 "INVALID_LINK_DIRECTIVE_USAGE",
-                r#"[products] Invalid use of @link in schema: import for '@inaccessible' of https://specs.apollo.dev/federation/v2.4 conflicts with spec https://specs.apollo.dev/inaccessible/v0.2"#,
+                r#"[products] Please import "@inaccessible" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/inaccessible" to avoid potential unexpected behavior in the future."#,
             )],
         );
     }
