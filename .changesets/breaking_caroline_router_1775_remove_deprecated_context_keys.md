@@ -36,4 +36,10 @@ selective list of key names) and update your coprocessor to reference current co
 
 Config migration is automatic: `context: deprecated` is migrated to `context: all`.
 
+Additionally, the telemetry plugin no longer reads `apollo_telemetry::client_name` or
+`apollo_telemetry::client_version` as fallback context keys. If any Rhai scripts or custom plugins
+set client name or version using the old 1.x key names, update them to use
+`apollo::telemetry::client_name` and `apollo::telemetry::client_version` respectively, or client
+attribution in Studio will stop working.
+
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9686
