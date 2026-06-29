@@ -903,20 +903,9 @@ mod tests {
             request: Default::default(),
         };
 
-        let (exec_mock, mut exec_handle) =
+        let (exec_mock, exec_handle) =
             tower_test::mock::pair::<execution::Request, execution::Response>();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
+        let exec_driver = spawn_exec_driver(exec_handle);
 
         let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
             Box::pin(async {
@@ -1251,6 +1240,51 @@ mod tests {
         tower_test::mock::pair::<execution::Request, execution::Response>()
     }
 
+    // Spawns the standard single-request mock driver used by accept-path tests.
+    // Responds with data: {"test": 1234}, empty errors, empty extensions.
+    fn spawn_exec_driver(mut handle: ExecHandle) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                execution::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        })
+    }
+
+    fn build_request_validation_service(
+        http_client: tower_test::mock::Mock<HttpRequest, HttpResponse>,
+        exec_mock: tower_test::mock::Mock<execution::Request, execution::Response>,
+        validation: bool,
+    ) -> execution::BoxCloneService {
+        create_execution_stage_for_request_validation_test().as_service(
+            http_client,
+            exec_mock.boxed_clone(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            validation,
+        )
+    }
+
+    fn build_response_validation_service(
+        http_client: tower_test::mock::Mock<HttpRequest, HttpResponse>,
+        exec_mock: tower_test::mock::Mock<execution::Request, execution::Response>,
+        validation: bool,
+    ) -> execution::BoxCloneService {
+        create_execution_stage_for_response_validation_test().as_service(
+            http_client,
+            exec_mock.boxed_clone(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+            validation,
+        )
+    }
+
     // Helper functions for execution request validation tests
     fn create_execution_stage_for_request_validation_test() -> ExecutionStage {
         ExecutionStage {
@@ -1406,25 +1440,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_invalid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_invalid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1439,25 +1460,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_empty() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_empty_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1478,12 +1486,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_valid() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_valid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1499,12 +1505,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_empty() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_empty_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1525,12 +1529,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_enabled_invalid() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_invalid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1551,12 +1553,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_valid() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_valid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1572,12 +1572,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_empty() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_empty_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1595,12 +1593,10 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_execution_request_validation_disabled_invalid() {
         let (exec_mock, exec_handle) = create_mock_execution_service();
-        let service = create_execution_stage_for_request_validation_test().as_service(
+        let service = build_request_validation_service(
             create_mock_http_client_execution_request_invalid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1619,25 +1615,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_valid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_execution_response_valid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1651,25 +1634,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_empty() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_empty_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1682,25 +1652,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_enabled_invalid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_invalid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            true, // Validation enabled
+            exec_mock,
+            true,
         );
 
         let request = execution::Request::fake_builder().build();
@@ -1713,25 +1670,12 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_execution_response_validation_disabled_valid() {
-        let (exec_mock, mut exec_handle) = create_mock_execution_service();
-        let exec_driver = tokio::spawn(async move {
-            let (req, responder) = exec_handle.next_request().await.unwrap();
-            responder.send_response(
-                execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap(),
-            );
-        });
-        let service = create_execution_stage_for_response_validation_test().as_service(
+        let (exec_mock, exec_handle) = create_mock_execution_service();
+        let exec_driver = spawn_exec_driver(exec_handle);
+        let service = build_response_validation_service(
             create_mock_http_client_execution_response_valid_response(),
-            exec_mock.boxed_clone(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-            false, // Validation disabled
+            exec_mock,
+            false,
         );
 
         let request = execution::Request::fake_builder().build();
