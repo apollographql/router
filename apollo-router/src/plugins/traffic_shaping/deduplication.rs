@@ -205,9 +205,6 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
-
-    use tokio::sync::Barrier;
     use tower::Service;
     use tower::ServiceExt;
 
@@ -216,23 +213,20 @@ mod tests {
     use crate::services::SubgraphResponse;
 
     // Testing strategy:
-    //  - The driver holds at a Barrier until both futures are provably in flight, then
-    //    responds once. This guarantees deduplication occurs before either request completes.
-    //  - If dedup fails and two requests reach the inner service, the driver only handles
-    //    one; the mock closes after the driver exits, causing the second inner call to fail,
-    //    which surfaces as a test assertion failure.
+    //  - Two calls with the same cache key are joined in the same task via tokio::join!.
+    //    join! polls fut1 first: it locks the wait_map, inserts an entry, calls the inner
+    //    service, and yields (pending on the mock response). join! then polls fut2: it finds
+    //    the entry and subscribes to the broadcast. Both are suspended before the driver ever
+    //    responds. This ordering is structural — cooperative scheduling in a single task —
+    //    not a timing assumption.
+    //  - The driver handles exactly one request. If dedup fails and fut2 reaches the inner
+    //    service a second time, the closed handle returns an error and res2 fails.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_dedup_service() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
-        // Barrier with count 2: driver waits here after receiving the request; test body
-        // waits here after spawning both futures. They meet when both are in flight.
-        let barrier = Arc::new(Barrier::new(2));
-        let barrier_clone = barrier.clone();
-
         let driver = tokio::spawn(async move {
             let (req, responder) = handle.next_request().await.unwrap();
-            barrier_clone.wait().await;
             responder.send_response(
                 SubgraphResponse::fake_builder()
                     .context(req.context)
@@ -241,23 +235,22 @@ mod tests {
         });
 
         let mut svc = QueryDeduplicationService::new(mock);
-
         let request = SubgraphRequest::fake_builder().build();
 
-        let fut1 = tokio::spawn(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(request.clone()),
-        );
-        let fut2 = tokio::spawn(svc.ready().await.expect("it is ready").call(request));
+        // call() returns a lazy BoxFuture — no work happens yet. Both calls share the same
+        // wait_map Arc, so they will see each other's entries when polled.
+        svc.ready().await.expect("it is ready");
+        let fut1 = svc.call(request.clone());
+        svc.ready().await.expect("it is ready");
+        let fut2 = svc.call(request);
 
-        // Both futures are now in flight. Release the inner service.
-        barrier.wait().await;
-
+        // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
+        // for the inner service response. join! then polls fut2, which finds the entry and
+        // subscribes to the broadcast. Both are suspended before the driver responds,
+        // guaranteeing deduplication without any sleep or barrier.
         let (res1, res2) = tokio::join!(fut1, fut2);
-        res1.expect("fut1 spawned").expect("fut1 joined");
-        res2.expect("fut2 spawned").expect("fut2 joined");
+        res1.expect("fut1 joined");
+        res2.expect("fut2 joined");
 
         crate::plugin::test::await_mock_driver(driver).await;
     }
