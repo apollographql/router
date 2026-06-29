@@ -44,6 +44,7 @@ pub(super) struct ValidationTraversal {
     satisfiability_errors_by_mutation_field_and_subgraph:
         IndexMap<FieldDefinitionPosition, IndexMap<Arc<str>, Vec<CompositionError>>>,
     context: ValidationContext,
+    condition_resolver_cache: ConditionResolverCache,
     total_validation_subgraph_paths: usize,
     max_validation_subgraph_paths: usize,
 }
@@ -51,8 +52,6 @@ pub(super) struct ValidationTraversal {
 struct TopLevelConditionResolver {
     /// The federated query graph for the supergraph schema.
     query_graph: Arc<QueryGraph>,
-    /// The cache for top-level condition resolution.
-    condition_resolver_cache: ConditionResolverCache,
 }
 
 /// When we visit a node in the API schema query graph, we keep track of any information about the
@@ -100,7 +99,6 @@ impl ValidationTraversal {
         let mut validation_traversal = Self {
             top_level_condition_resolver: TopLevelConditionResolver {
                 query_graph: federated_query_graph.clone(),
-                condition_resolver_cache: ConditionResolverCache::new(),
             },
             stack: vec![],
             previous_visits: Default::default(),
@@ -108,6 +106,7 @@ impl ValidationTraversal {
             validation_hints: vec![],
             satisfiability_errors_by_mutation_field_and_subgraph: Default::default(),
             context: ValidationContext::new(supergraph_schema)?,
+            condition_resolver_cache: ConditionResolverCache::new(),
             total_validation_subgraph_paths: 0,
             max_validation_subgraph_paths: composition_options
                 .max_validation_subgraph_paths
@@ -293,6 +292,7 @@ impl ValidationTraversal {
                 &mut self.validation_errors,
                 &mut self.validation_hints,
                 &mut self.satisfiability_errors_by_mutation_field_and_subgraph,
+                &mut self.condition_resolver_cache,
             )?;
             if num_errors != self.validation_errors.len() {
                 drop(guard);
@@ -329,10 +329,6 @@ impl CachingConditionResolver for TopLevelConditionResolver {
         &self.query_graph
     }
 
-    fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
-        &mut self.condition_resolver_cache
-    }
-
     fn resolve_without_cache(
         &self,
         edge: EdgeIndex,
@@ -340,6 +336,7 @@ impl CachingConditionResolver for TopLevelConditionResolver {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        _cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         crate::composition::satisfiability::conditions_validation::resolve_condition_plan(
             self.query_graph.clone(),

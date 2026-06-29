@@ -26,6 +26,7 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::UnadvanceableClosures;
 use crate::query_graph::graph_path::Unadvanceables;
 use crate::query_graph::graph_path::transition::TransitionGraphPath;
@@ -190,6 +191,7 @@ impl ValidationState {
     /// Returns either:
     /// - `ValidationResult::Success` with new subgraph paths (may be empty if type condition has no matching results)
     /// - `ValidationResult::Error` with dead ends if validation failed
+    #[allow(clippy::too_many_arguments)]
     fn validate_transition_for_subgraph_paths(
         supergraph_schema: &ValidFederationSchema,
         subgraph_path_infos: &mut [SubgraphPathInfo],
@@ -198,6 +200,7 @@ impl ValidationState {
         target_type: &crate::schema::position::OutputTypeDefinitionPosition,
         matching_contexts: &IndexSet<String>,
         condition_resolver: &mut impl ConditionResolver,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ValidationResult, FederationError> {
         let mut new_subgraph_paths: Vec<SubgraphPathInfo> = Default::default();
         let mut dead_ends: Vec<UnadvanceableClosures> = Default::default();
@@ -209,6 +212,7 @@ impl ValidationState {
                 supergraph_schema,
                 condition_resolver,
                 new_override_conditions,
+                cache,
             )?;
             let options = match options {
                 Either::Left(options) => options,
@@ -383,6 +387,7 @@ impl ValidationState {
             FieldDefinitionPosition,
             IndexMap<Arc<str>, Vec<CompositionError>>,
         >,
+        cache: &mut ConditionResolverCache,
     ) -> Result<Option<ValidationState>, FederationError> {
         let edge_weight = self.supergraph_path.graph().edge_weight(supergraph_edge)?;
         ensure!(
@@ -429,6 +434,7 @@ impl ValidationState {
                     target_type,
                     matching_contexts,
                     condition_resolver,
+                    cache,
                 )?;
 
                 match result {
@@ -534,6 +540,7 @@ impl ValidationState {
                         target_type,
                         matching_contexts,
                         condition_resolver,
+                        cache,
                     )?;
 
                     match result {

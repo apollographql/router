@@ -39,6 +39,7 @@ pub(crate) trait ConditionResolver {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError>;
 }
 
@@ -108,17 +109,24 @@ pub(crate) enum ConditionResolutionCacheResult {
     NotApplicable,
 }
 
+struct CachedConditionEntry {
+    resolution: ConditionResolution,
+    excluded_destinations: ExcludedDestinations,
+    excluded_conditions: ExcludedConditions,
+}
+
 pub(crate) struct ConditionResolverCache {
-    // For every edge having a condition, we cache the resolution its conditions when possible.
-    // We save resolution with the set of excluded edges that were used to compute it: the reason we do this is
-    // that excluded edges impact the resolution, so we should only used a cached value if we know the excluded
-    // edges are the same as when caching, and while we could decide to cache only when we have no excluded edges
-    // at all, this would sub-optimal for types that have multiple keys, as the algorithm will always at least
-    // include the previous key edges to the excluded edges of other keys. In other words, if we only cached
-    // when we have no excluded edges, we'd only ever use the cache for the first key of every type. However,
-    // as the algorithm always try keys in the same order (the order of the edges in the query graph), including
-    // the excluded edges we see on the first ever call is actually the proper thing to do.
-    edge_states: IndexMap<EdgeIndex, (ConditionResolution, ExcludedDestinations)>,
+    // For every edge having a condition, we cache the resolution of its conditions when possible.
+    // Each edge may have multiple cached entries, one per distinct combination of excluded
+    // destinations and excluded conditions seen during resolution. Both of these exclusion sets
+    // affect the resolution: excluded destinations prevent key-jump cycles (e.g. A→B→A), and
+    // excluded conditions prevent infinite recursion on nested @requires. Since the algorithm
+    // always tries keys in the same order (the order of edges in the query graph), we can
+    // store and look up entries by exact match on these exclusion sets.
+    //
+    // The cache is shared across recursion depths via &mut threading so that results
+    // discovered at any depth are visible to all other depths within the same query plan.
+    edge_states: IndexMap<EdgeIndex, Vec<CachedConditionEntry>>,
 }
 
 impl ConditionResolverCache {
@@ -129,39 +137,37 @@ impl ConditionResolverCache {
     }
 
     pub(crate) fn contains(
-        &mut self,
+        &self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
-        if extra_conditions.is_some() {
-            return ConditionResolutionCacheResult::NotApplicable;
-        }
-        // We don't cache if there is a context or excluded conditions because those would impact the resolution and
-        // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though
-        // instead we cache a value only for the first-see excluded edges; see above why that work in practice).
-        // TODO: we could actually have a better handling of the context: it doesn't really change how we'd resolve the condition, it's only
-        // that the context, if not empty, would have to be added to the trigger of key edges in the resolution path tree when appropriate
-        // and we currently don't handle that. But we could cache with an empty context, and then apply the proper transformation on the
-        // cached value `pathTree` when the context is not empty. That said, the context is about active @include/@skip and it's not use
-        // that commonly, so this is probably not an urgent improvement.
-        if !context.is_empty() || !excluded_conditions.is_empty() {
+        // We don't cache when there are extra conditions or a non-empty context. Extra conditions
+        // come from edges whose conditions are supplied externally rather than from the edge weight,
+        // and the context carries @include/@skip state that would need to be threaded into the
+        // resolution's path tree. Caching per-context is possible but not yet implemented.
+        // TODO: we could cache with an empty context and then apply the proper transformation on
+        // the cached value's `pathTree` when the context is not empty. The context would need to be
+        // added to the trigger of key edges in the resolution path tree when appropriate. The
+        // context is about active @include/@skip and it's not used that commonly, so this is
+        // probably not an urgent improvement.
+        if extra_conditions.is_some() || !context.is_empty() {
             return ConditionResolutionCacheResult::NotApplicable;
         }
 
-        if let Some((cached_resolution, cached_excluded_destinations)) = self.edge_states.get(&edge)
-        {
-            // Cache hit.
-            // Ensure we have the same excluded destinations as when we cached the value.
-            if cached_excluded_destinations == excluded_destinations {
-                return ConditionResolutionCacheResult::Hit(cached_resolution.clone());
+        if let Some(entries) = self.edge_states.get(&edge) {
+            for cached in entries {
+                if &cached.excluded_destinations == excluded_destinations
+                    && &cached.excluded_conditions == excluded_conditions
+                {
+                    return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
+                }
             }
-            // Otherwise, fall back to non-cached computation
+            // Edge has cached entries but none matched
             ConditionResolutionCacheResult::NotApplicable
         } else {
-            // Cache miss
             ConditionResolutionCacheResult::Miss
         }
     }
@@ -171,9 +177,20 @@ impl ConditionResolverCache {
         edge: EdgeIndex,
         resolution: ConditionResolution,
         excluded_destinations: ExcludedDestinations,
+        excluded_conditions: ExcludedConditions,
     ) {
-        self.edge_states
-            .insert(edge, (resolution, excluded_destinations));
+        let entries = self.edge_states.entry(edge).or_default();
+        let already_exists = entries.iter().any(|e| {
+            e.excluded_destinations == excluded_destinations
+                && e.excluded_conditions == excluded_conditions
+        });
+        if !already_exists {
+            entries.push(CachedConditionEntry {
+                resolution,
+                excluded_destinations,
+                excluded_conditions,
+            });
+        }
     }
 }
 
@@ -194,19 +211,19 @@ pub(crate) trait CachingConditionResolver {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError>;
 
-    fn resolver_cache(&mut self) -> &mut ConditionResolverCache;
-
     fn resolve_with_cache(
-        &mut self,
+        &self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
-        let cache_result = self.resolver_cache().contains(
+        let cache_result = cache.contains(
             edge,
             context,
             excluded_destinations,
@@ -224,12 +241,17 @@ pub(crate) trait CachingConditionResolver {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            cache,
         )?;
-        // See if this resolution is eligible to be inserted into the cache.
-        if cache_result.is_miss() {
-            self.resolver_cache()
-                .insert(edge, resolution.clone(), excluded_destinations.clone());
-        }
+        // Insert the result into the cache. Because the cache is shared across recursion
+        // depths, the recursive call above may have already inserted an entry for this same
+        // edge and exclusion set. The `insert` method deduplicates, so this is safe.
+        cache.insert(
+            edge,
+            resolution.clone(),
+            excluded_destinations.clone(),
+            excluded_conditions.clone(),
+        );
         Ok(resolution)
     }
 }
@@ -244,6 +266,7 @@ impl<T: CachingConditionResolver> ConditionResolver for T {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         // Invariant check: The edge must have conditions.
         let graph = &self.query_graph();
@@ -259,6 +282,7 @@ impl<T: CachingConditionResolver> ConditionResolver for T {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            cache,
         )
     }
 }
@@ -267,59 +291,117 @@ impl<T: CachingConditionResolver> ConditionResolver for T {
 mod tests {
     use super::*;
     use crate::query_graph::graph_path::operation::OpGraphPathContext;
-    //use crate::link::graphql_definition::{OperationConditional, OperationConditionalKind, BooleanOrVariable};
+
+    fn dest(names: &[&str]) -> ExcludedDestinations {
+        ExcludedDestinations::from_names(names)
+    }
+
+    fn cond(ids: &[usize]) -> ExcludedConditions {
+        let schema = crate::schema::ValidFederationSchema::new(
+            apollo_compiler::Schema::parse_and_validate("type Query { _: ID }", "test.graphql")
+                .unwrap(),
+        )
+        .unwrap();
+        let mut result = ExcludedConditions::default();
+        for id in ids {
+            let type_name = Name::new_unchecked(&format!("C{id}"));
+            let ss = SelectionSet::empty(
+                schema.clone(),
+                crate::schema::position::CompositeTypeDefinitionPosition::Object(
+                    crate::schema::position::ObjectTypeDefinitionPosition { type_name },
+                ),
+            );
+            result = result.add_item(&ss);
+        }
+        result
+    }
+
+    fn ctx() -> OpGraphPathContext {
+        OpGraphPathContext::default()
+    }
 
     #[test]
-    fn test_condition_resolver_cache() {
+    fn exact_match_returns_hit() {
         let mut cache = ConditionResolverCache::new();
+        let edge = EdgeIndex::new(1);
+        let d = dest(&["subA"]);
+        let c = cond(&[]);
 
-        let edge1 = EdgeIndex::new(1);
-        let empty_context = OpGraphPathContext::default();
-        let empty_destinations = ExcludedDestinations::default();
-        let empty_conditions = ExcludedConditions::default();
-
-        assert!(
-            cache
-                .contains(
-                    edge1,
-                    &empty_context,
-                    &empty_destinations,
-                    &empty_conditions,
-                    None
-                )
-                .is_miss()
-        );
-
+        assert!(cache.contains(edge, &ctx(), &d, &c, None).is_miss());
         cache.insert(
-            edge1,
+            edge,
             ConditionResolution::unsatisfied_conditions(),
-            empty_destinations.clone(),
+            d.clone(),
+            c.clone(),
         );
+        assert!(cache.contains(edge, &ctx(), &d, &c, None).is_hit());
+    }
 
+    #[test]
+    fn miss_on_unknown_edge() {
+        let mut cache = ConditionResolverCache::new();
+        let c = cond(&[]);
+        let d = dest(&[]);
+        cache.insert(
+            EdgeIndex::new(1),
+            ConditionResolution::unsatisfied_conditions(),
+            d.clone(),
+            c.clone(),
+        );
         assert!(
             cache
-                .contains(
-                    edge1,
-                    &empty_context,
-                    &empty_destinations,
-                    &empty_conditions,
-                    None
-                )
-                .is_hit(),
-        );
-
-        let edge2 = EdgeIndex::new(2);
-
-        assert!(
-            cache
-                .contains(
-                    edge2,
-                    &empty_context,
-                    &empty_destinations,
-                    &empty_conditions,
-                    None
-                )
+                .contains(EdgeIndex::new(2), &ctx(), &d, &c, None)
                 .is_miss()
         );
+    }
+
+    #[test]
+    fn multi_entry_per_edge() {
+        let mut cache = ConditionResolverCache::new();
+        let edge = EdgeIndex::new(1);
+        let c = cond(&[]);
+        cache.insert(
+            edge,
+            ConditionResolution::unsatisfied_conditions(),
+            dest(&["subA"]),
+            c.clone(),
+        );
+        cache.insert(
+            edge,
+            ConditionResolution::no_conditions(),
+            dest(&["subB"]),
+            c.clone(),
+        );
+        assert!(
+            cache
+                .contains(edge, &ctx(), &dest(&["subA"]), &c, None)
+                .is_hit()
+        );
+        assert!(
+            cache
+                .contains(edge, &ctx(), &dest(&["subB"]), &c, None)
+                .is_hit()
+        );
+    }
+
+    #[test]
+    fn dedup_prevents_duplicate_entries() {
+        let mut cache = ConditionResolverCache::new();
+        let edge = EdgeIndex::new(1);
+        let d = dest(&["subA"]);
+        let c = cond(&[]);
+        cache.insert(
+            edge,
+            ConditionResolution::unsatisfied_conditions(),
+            d.clone(),
+            c.clone(),
+        );
+        cache.insert(
+            edge,
+            ConditionResolution::unsatisfied_conditions(),
+            d.clone(),
+            c.clone(),
+        );
+        assert_eq!(cache.edge_states.get(&edge).unwrap().len(), 1);
     }
 }

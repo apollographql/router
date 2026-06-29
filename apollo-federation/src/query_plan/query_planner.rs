@@ -31,6 +31,7 @@ use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -784,6 +785,7 @@ fn compute_root_parallel_best_plan(
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<BestQueryPlanInfo, FederationError> {
+    let mut cache = ConditionResolverCache::new();
     let planning_traversal = QueryPlanningTraversal::new(
         parameters,
         selection,
@@ -792,12 +794,13 @@ fn compute_root_parallel_best_plan(
         FetchDependencyGraphToCostProcessor,
         non_local_selection_state.as_mut(),
         None,
+        &mut cache,
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
     // so we just return an empty plan.
     Ok(planning_traversal
-        .find_best_plan()?
+        .find_best_plan(&mut cache)?
         .unwrap_or_else(|| BestQueryPlanInfo::empty(parameters)))
 }
 
@@ -807,6 +810,7 @@ fn compute_root_parallel_best_plan_for_mutation(
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<BestQueryPlanInfo, FederationError> {
+    let mut cache = ConditionResolverCache::new();
     parameters.federated_query_graph.out_edges(parameters.head).into_iter().map(|edge_ref| {
         let mutation_subgraph = parameters.federated_query_graph.node_weight(edge_ref.target())?.source.clone();
         let planning_traversal = QueryPlanningTraversal::new(
@@ -817,8 +821,9 @@ fn compute_root_parallel_best_plan_for_mutation(
             FetchDependencyGraphToCostProcessor,
             non_local_selection_state.as_mut(),
             Some(mutation_subgraph),
+            &mut cache,
         )?;
-        planning_traversal.find_best_plan()
+        planning_traversal.find_best_plan(&mut cache)
     }).process_results(|iter| iter
         .flatten()
         .min_by(|a, b| a.cost.total_cmp(&b.cost))

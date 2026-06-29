@@ -56,19 +56,18 @@ pub(super) fn resolve_condition_plan(
         excluded_destinations.clone(),
         excluded_conditions,
     );
+    let mut cache = ConditionResolverCache::new();
     let mut traversal = ConditionValidationTraversal::new(
         query_graph.clone(),
         initial_option,
         conditions.iter().cloned(),
     );
-    traversal.find_resolution()
+    traversal.find_resolution(&mut cache)
 }
 
 struct ConditionValidationTraversal {
     /// The federated query graph for the supergraph schema.
     query_graph: Arc<QueryGraph>,
-    /// The cache for condition resolution.
-    condition_resolver_cache: ConditionResolverCache,
     /// The stack of open branches left to plan, along with state indicating the next selection to
     /// plan for them.
     // PORT_NOTE: This implementation closely follows the way `QueryPlanningTraversal` was ported.
@@ -83,7 +82,6 @@ impl ConditionValidationTraversal {
     ) -> Self {
         Self {
             query_graph,
-            condition_resolver_cache: ConditionResolverCache::new(),
             open_branches: vec![OpenBranchAndSelections {
                 selections: selections.into_iter().collect(),
                 open_branch: OpenBranch(vec![initial_option]),
@@ -92,13 +90,19 @@ impl ConditionValidationTraversal {
     }
 
     // Analogous to `find_best_plan_inner` of QueryPlanningTraversal.
-    fn find_resolution(&mut self) -> Result<ConditionResolution, FederationError> {
+    fn find_resolution(
+        &mut self,
+        cache: &mut ConditionResolverCache,
+    ) -> Result<ConditionResolution, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
                 bail!("Sub-stack unexpectedly empty during validation traversal",);
             };
-            let (terminate_planning, new_branch) =
-                self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
+            let (terminate_planning, new_branch) = self.handle_open_branch(
+                &current_selection,
+                &mut current_branch.open_branch.0,
+                cache,
+            )?;
             if terminate_planning {
                 return Ok(ConditionResolution::unsatisfied_conditions());
             }
@@ -124,6 +128,7 @@ impl ConditionValidationTraversal {
         &mut self,
         selection: &Selection,
         options: &mut [SimultaneousPathsWithLazyIndirectPaths],
+        cache: &mut ConditionResolverCache,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
         let mut new_options = Vec::new();
         for paths in options.iter_mut() {
@@ -138,6 +143,7 @@ impl ConditionValidationTraversal {
                 &Default::default(),
                 &never_cancel,
                 &Default::default(),
+                cache,
             )?;
             let Some(options) = options else {
                 continue;
@@ -174,10 +180,6 @@ impl CachingConditionResolver for ConditionValidationTraversal {
         &self.query_graph
     }
 
-    fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
-        &mut self.condition_resolver_cache
-    }
-
     fn resolve_without_cache(
         &self,
         edge: EdgeIndex,
@@ -185,6 +187,7 @@ impl CachingConditionResolver for ConditionValidationTraversal {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        _cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         resolve_condition_plan(
             self.query_graph.clone(),

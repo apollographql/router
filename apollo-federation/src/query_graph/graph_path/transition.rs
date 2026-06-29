@@ -23,6 +23,7 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::graph_path::GraphPath;
 use crate::query_graph::graph_path::GraphPathTriggerVariant;
@@ -263,6 +264,7 @@ impl TransitionGraphPath {
         transition: &QueryGraphEdgeTransition,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &Arc<OverrideConditions>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<Either<Vec<Arc<TransitionGraphPath>>, UnadvanceableClosures>, FederationError> {
         ensure!(
             transition.collect_operation_elements(),
@@ -294,6 +296,7 @@ impl TransitionGraphPath {
                     },
                     condition_resolver,
                     override_conditions,
+                    cache,
                 )?;
                 // The case we described above should be the only case we capture here, and so
                 // the current subgraph must have the implementation type (it may not have the
@@ -389,6 +392,7 @@ impl TransitionGraphPath {
                 &Default::default(),
                 &Default::default(),
                 &Default::default(),
+                cache,
             )?;
             match condition_resolution {
                 ConditionResolution::Satisfied { .. } => {
@@ -642,12 +646,13 @@ impl TransitionPathWithLazyIndirectPaths {
         &mut self,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &OverrideConditions,
+        cache: &mut ConditionResolverCache,
     ) -> Result<TransitionIndirectPaths, FederationError> {
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths {
             Ok(indirect_paths.clone())
         } else {
             let new_indirect_paths =
-                self.compute_indirect_paths(condition_resolver, override_conditions)?;
+                self.compute_indirect_paths(condition_resolver, override_conditions, cache)?;
             self.lazily_computed_indirect_paths = Some(new_indirect_paths.clone());
             Ok(new_indirect_paths)
         }
@@ -657,6 +662,7 @@ impl TransitionPathWithLazyIndirectPaths {
         &self,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &OverrideConditions,
+        cache: &mut ConditionResolverCache,
     ) -> Result<TransitionIndirectPaths, FederationError> {
         self.path
             .advance_with_non_collecting_and_type_preserving_transitions(
@@ -665,6 +671,7 @@ impl TransitionPathWithLazyIndirectPaths {
                 &Default::default(),
                 &Default::default(),
                 override_conditions,
+                cache,
                 // The transitions taken by this method are non-collecting transitions, in which case
                 // the trigger is the context (which is really a hack to provide context information for
                 // keys during fetch dependency graph updating).
@@ -690,6 +697,7 @@ impl TransitionPathWithLazyIndirectPaths {
         api_schema: &ValidFederationSchema,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &Arc<OverrideConditions>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<
         Either<Vec<TransitionPathWithLazyIndirectPaths>, UnadvanceableClosures>,
         FederationError,
@@ -798,6 +806,7 @@ impl TransitionPathWithLazyIndirectPaths {
             transition,
             condition_resolver,
             override_conditions,
+            cache,
         )?;
         let mut options: Vec<Arc<TransitionGraphPath>> = vec![];
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
@@ -834,7 +843,7 @@ impl TransitionPathWithLazyIndirectPaths {
         let span = debug_span!(" |");
         let indirect_options_guard = span.enter();
         let paths_with_non_collecting_edges =
-            self.indirect_options(condition_resolver, override_conditions)?;
+            self.indirect_options(condition_resolver, override_conditions, cache)?;
         if !paths_with_non_collecting_edges.paths.is_empty() {
             drop(indirect_options_guard);
             debug!(
@@ -853,6 +862,7 @@ impl TransitionPathWithLazyIndirectPaths {
                     transition,
                     condition_resolver,
                     override_conditions,
+                    cache,
                 )?;
                 match paths_with_transition {
                     Either::Left(mut paths_with_transition) => {

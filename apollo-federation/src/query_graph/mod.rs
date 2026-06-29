@@ -50,6 +50,7 @@ use graph_path::operation::OpPathElement;
 
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_plan::QueryPlanCost;
@@ -758,6 +759,7 @@ impl QueryGraph {
         to_subgraph: &str,
         condition_resolver: &mut impl ConditionResolver,
         max_cost: QueryPlanCost,
+        cache: &mut ConditionResolverCache,
     ) -> Result<bool, FederationError> {
         for edge_ref in self.out_edges(from_node) {
             let edge_weight = edge_ref.weight();
@@ -780,6 +782,7 @@ impl QueryGraph {
                 &ExcludedDestinations::default(),
                 &ExcludedConditions::default(),
                 None,
+                cache,
             )?;
             let ConditionResolution::Satisfied { cost, .. } = condition_resolution else {
                 continue;

@@ -140,9 +140,6 @@ pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     // TODO(@goto-bus-stop): FED-164: can we remove this? `find_best_plan` consumes `self` and returns the
     // best plan, so it should not be necessary to store it.
     best_plan: Option<BestQueryPlanInfo>,
-    /// The cache for condition resolution.
-    // PORT_NOTE: This is different from JS version. See `ConditionResolver` trait implementation below.
-    resolver_cache: ConditionResolverCache,
 }
 
 struct PlanInfo {
@@ -210,6 +207,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         feature = "snapshot_tracing",
         tracing::instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")
     )]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -222,6 +220,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         cost_processor: FetchDependencyGraphToCostProcessor,
         non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
         initial_subgraph_constraint: Option<Arc<str>>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<Self, FederationError> {
         Self::new_inner(
             parameters,
@@ -235,6 +234,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             Default::default(),
             Default::default(),
             Default::default(),
+            cache,
         )
     }
 
@@ -256,6 +256,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         initial_context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
+        cache: &mut ConditionResolverCache,
     ) -> Result<Self, FederationError> {
         let is_top_level = parameters.head_must_be_root;
 
@@ -295,7 +296,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             open_branches: Default::default(),
             closed_branches: Default::default(),
             best_plan: None,
-            resolver_cache: ConditionResolverCache::new(),
         };
 
         let initial_options = create_initial_options(
@@ -308,6 +308,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             &parameters.override_conditions,
             initial_subgraph_constraint.clone(),
             &parameters.disabled_subgraphs,
+            cache,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
@@ -340,8 +341,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             name = "QueryPlanningTraversal::find_best_plan"
         )
     )]
-    pub(crate) fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
-        self.find_best_plan_inner()?;
+    pub(crate) fn find_best_plan(
+        mut self,
+        cache: &mut ConditionResolverCache,
+    ) -> Result<Option<BestQueryPlanInfo>, FederationError> {
+        self.find_best_plan_inner(cache)?;
         Ok(self.best_plan)
     }
 
@@ -353,7 +357,10 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             name = "QueryPlanningTraversal::find_best_plan_inner"
         )
     )]
-    fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
+    fn find_best_plan_inner(
+        &mut self,
+        cache: &mut ConditionResolverCache,
+    ) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while !self.open_branches.is_empty() {
             self.parameters.check_cancellation()?;
             snapshot!(
@@ -371,8 +378,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     "Sub-stack unexpectedly empty during query plan traversal",
                 ));
             };
-            let (terminate_planning, new_branch) =
-                self.handle_open_branch(&current_selection, &mut current_branch.open_branch.0)?;
+            let (terminate_planning, new_branch) = self.handle_open_branch(
+                &current_selection,
+                &mut current_branch.open_branch.0,
+                cache,
+            )?;
             if terminate_planning {
                 trace!("Planning terminated!");
                 // We clear both open branches and closed ones as a means to terminate the plan
@@ -406,6 +416,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         &mut self,
         selection: &Selection,
         options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
         let operation_element = selection.element();
         let mut new_options = vec![];
@@ -426,6 +437,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 &self.parameters.override_conditions,
                 &|| self.parameters.check_cancellation(),
                 &self.parameters.disabled_subgraphs,
+                cache,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -1131,6 +1143,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         let graph = &self.parameters.federated_query_graph;
         let head = graph.edge_endpoints(edge)?.0;
@@ -1171,8 +1184,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
+            cache,
         )?
-        .find_best_plan()?;
+        .find_best_plan(cache)?;
         match best_plan_opt {
             Some(best_plan) => Ok(ConditionResolution::Satisfied {
                 cost: best_plan.cost,
@@ -1241,10 +1255,6 @@ impl CachingConditionResolver for QueryPlanningTraversal<'_, '_> {
         &self.parameters.federated_query_graph
     }
 
-    fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
-        &mut self.resolver_cache
-    }
-
     fn resolve_without_cache(
         &self,
         edge: EdgeIndex,
@@ -1252,6 +1262,7 @@ impl CachingConditionResolver for QueryPlanningTraversal<'_, '_> {
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         self.resolve_condition_plan(
             edge,
@@ -1259,6 +1270,7 @@ impl CachingConditionResolver for QueryPlanningTraversal<'_, '_> {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            cache,
         )
     }
 }

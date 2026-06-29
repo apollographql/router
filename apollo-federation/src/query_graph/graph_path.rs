@@ -42,6 +42,7 @@ use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::FetchDataPathElement;
@@ -268,14 +269,17 @@ impl Default for ExcludedDestinations {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[cfg(test)]
+impl ExcludedDestinations {
+    pub(crate) fn from_names(names: &[&str]) -> Self {
+        ExcludedDestinations(Arc::new(names.iter().map(|n| Arc::from(*n)).collect()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub(crate) struct ExcludedConditions(Arc<Vec<Arc<SelectionSet>>>);
 
 impl ExcludedConditions {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     fn is_excluded(&self, condition: Option<&Arc<SelectionSet>>) -> bool {
         let Some(condition) = condition else {
             return false;
@@ -1132,6 +1136,7 @@ where
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
+        cache: &mut ConditionResolverCache,
     ) -> Result<ConditionResolution, FederationError> {
         let edge_weight = self.graph.edge_weight(edge)?;
         if edge_weight.conditions.is_none() && edge_weight.required_contexts.is_empty() {
@@ -1264,6 +1269,7 @@ where
                         excluded_destinations,
                         excluded_conditions,
                         Some(&selection_set),
+                        cache,
                     )?;
                     let context_id = self.graph.context_id_by_source_and_argument(
                         &ctx.subgraph_name,
@@ -1335,6 +1341,7 @@ where
             excluded_destinations,
             excluded_conditions,
             None,
+            cache,
         )?;
         if matches!(resolution, ConditionResolution::Unsatisfied { .. }) {
             return Ok(ConditionResolution::Unsatisfied { reason: None });
@@ -1420,6 +1427,7 @@ where
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
         override_conditions: &OverrideConditions,
+        cache: &mut ConditionResolverCache,
         transition_and_context_to_trigger: impl Fn(
             &QueryGraphEdgeTransition,
             &OpGraphPathContext,
@@ -1617,6 +1625,7 @@ where
                     context,
                     &excluded_destinations.add_excluded(&edge_tail_weight.source),
                     excluded_conditions,
+                    cache,
                 )?;
 
                 let ConditionResolution::Satisfied {
@@ -1815,6 +1824,7 @@ where
                                     &edge_tail_weight.source,
                                     condition_resolver,
                                     direct_key_edge_max_cost,
+                                    cache,
                                 )?
                             {
                                 debug!(
