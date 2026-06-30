@@ -25,4 +25,4 @@ driver.await.unwrap();
 
 Use `crate::plugin::test::await_mock_driver(driver).await` (internal) or a timeout-guarded `driver.await` to catch assertion failures inside the spawned task and prevent silent test hangs.
 
-By [@BrynCooke](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9523
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/9716
