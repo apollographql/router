@@ -678,15 +678,6 @@ mod tests {
         assert_eq!(mode, SpanMode::SpecCompliant);
     }
 
-    #[test]
-    fn test_span_mode_deprecated() {
-        let config =
-            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
-                .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
-    }
-
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
     // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an

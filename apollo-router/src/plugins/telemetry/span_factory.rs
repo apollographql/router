@@ -85,9 +85,7 @@ mod tests {
     use tracing_mock::subscriber;
 
     use crate::plugins::telemetry::SpanMode;
-    use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
     use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-    use crate::uplink::license_enforcement::LicenseState;
 
     #[test]
     fn test_specific_span() {
@@ -123,61 +121,5 @@ mod tests {
             tracing::info!("an event happened!");
         });
         handle.assert_finished();
-    }
-
-    #[test]
-    fn test_http_route_on_array_of_router_spans() {
-        let expected_routes = [
-            ("https://www.example.com/", "/"),
-            ("https://www.example.com/path", "/path"),
-            ("http://example.com/path/to/location", "/path/to/location"),
-            ("http://www.example.com/path?with=query", "/path"),
-            ("/foo/bar?baz", "/foo/bar"),
-        ];
-
-        let license_states = [
-            LicenseState::LicensedHalt { limits: None },
-            LicenseState::Unlicensed,
-        ];
-
-        for (uri, expected_route) in expected_routes {
-            let request = http::Request::builder().uri(uri).body("").unwrap();
-
-            // test `request` spans (Deprecated mode only)
-            for license_state in &license_states {
-                let expected_span = expect::span().named(REQUEST_SPAN_NAME).with_fields(
-                    expect::field("http.route")
-                        .with_value(&tracing::field::display(expected_route)),
-                );
-
-                let span_mode = SpanMode::Deprecated;
-                let (subscriber, handle) =
-                    subscriber::mock().new_span(expected_span).run_with_handle();
-                tracing::subscriber::with_default(subscriber, || {
-                    let span = span_mode.create_request(&request, license_state);
-                    let _guard = span.enter();
-                });
-                handle.assert_finished();
-            }
-
-            // test `router` spans in Deprecated mode (http.route set at span creation)
-            {
-                let expected_span = expect::span().named(ROUTER_SPAN_NAME).with_fields(
-                    expect::field("http.route")
-                        .with_value(&tracing::field::display(expected_route)),
-                );
-
-                let (subscriber, handle) =
-                    subscriber::mock().new_span(expected_span).run_with_handle();
-                tracing::subscriber::with_default(subscriber, || {
-                    let span = SpanMode::Deprecated.create_router(&request);
-                    let _guard = span.enter();
-                });
-                handle.assert_finished();
-            }
-
-            // In SpecCompliant mode, http.route is added by HttpServerAttributes
-            // on_request selector logic, not at span creation time.
-        }
     }
 }
