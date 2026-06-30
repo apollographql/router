@@ -40,7 +40,16 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
 
 <Note>
 
-The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them. You must explicitly configure an instrument for different behavior. 
+The [`default_requirement_level` setting](#default_requirement_level) configures whether or not these instruments are enabled by default. Out of the box, its default value of `required` enables them.
+<br />
+<br />
+| Value of `default_requirement_level` | Value of standard instruments |
+|-------------------------------------|--------------------------------|
+| `none`                              | `false`                        |
+| `required`                          | `true`                         |
+| `recommended`                       | `true`                         |
+
+You must explicitly configure an individual instrument for different behavior.
 
 </Note>
 
@@ -50,19 +59,20 @@ These instruments are configurable in `router.yaml`:
 telemetry:
   instrumentation:
     instruments:
+      default_requirement_level: required # (default is required)
       router:
-        http.server.active_requests: true # (default false)
-        http.server.request.body.size: true # (default false)
-        http.server.request.duration: true # (default false)
-        http.server.response.body.size: true # (default false)
+        http.server.active_requests: false # (default is true)
+        http.server.request.body.size: false # (default is true)
+        http.server.request.duration: false # (default is true)
+        http.server.response.body.size: false # (default is true)
       subgraph:
-        http.client.request.body.size: true # (default false)
-        http.client.request.duration: true # (default false)
-        http.client.response.body.size: true # (default false)
+        http.client.request.body.size: false # (default is true)
+        http.client.request.duration: false # (default is true)
+        http.client.response.body.size: false # (default is true)
       connector:
-        http.client.request.body.size: true # (default false)
-        http.client.request.duration: true # (default false)
-        http.client.response.body.size: true # (default false)
+        http.client.request.body.size: false # (default is true)
+        http.client.request.duration: false # (default is true)
+        http.client.response.body.size: false # (default is true)
 ```
 
 They can be customized by attaching or removing attributes. See [attributes](#attributes) to learn more about configuring attributes.
@@ -192,6 +202,7 @@ Valid values:
 
 * `required` (default, Apollo recommended) - required attributes will be attached to standard instruments by default.
 * `recommended` - experimental attributes from OpenTelemetry's development-status conventions will be attached to standard instruments by default.
+* `none` - standard instruments will be disabled by default; no attributes will be set unless configured individually.
 
 <Note>
 
@@ -557,7 +568,7 @@ telemetry:
 | `<instrument-name>`         |                                                                                |            | The name of the custom instrument.            |
 | `attributes`                | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes) or [selectors](/router/configuration/telemetry/instrumentation/selectors)       |            | The attributes of the custom instrument.      |
 | `condition`                 | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                     |            | The condition for mutating the instrument.    |
-| `default_requirement_level` | `required` \| `recommended`                                                      | `required` | The default attribute requirement level.      |
+| `default_requirement_level` | `required` \| `recommended` \| `none`                                          | `required` | The default attribute requirement level.      |
 | `type`                      | `counter` \| `histogram`                                                         |            | The name of the custom instrument.            |
 | `unit`                      |                                                                                |            | A unit name, for example `By` or `{request}`. |
 | `description`               |                                                                                |            | The description of the custom instrument.     |

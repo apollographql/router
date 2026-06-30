@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          my.static.attribute: deprecated static string value

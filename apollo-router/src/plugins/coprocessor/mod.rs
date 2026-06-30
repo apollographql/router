@@ -49,6 +49,7 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
@@ -66,6 +67,122 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
+/// Clone `payload` and mask its sensitive headers via `rule_for_direction`.
+/// Shared by the lazy debug wrappers below.
+///
+/// NOTE: only the `headers` field is masked. The `body`, `context`, and `sdl`
+/// fields are cloned and logged verbatim — header masking does not scan them.
+/// A coprocessor config that copies a sensitive header value into the request
+/// body or context will still have that value appear in these debug logs.
+fn mask_payload_clone<T, F>(
+    payload: &Externalizable<T>,
+    masking_rules: Option<&MaskingRulesMap>,
+    rule_for_direction: &F,
+) -> Externalizable<T>
+where
+    T: Clone,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    let mut clone = payload.clone();
+    if let Some(headers) = clone.headers.as_mut() {
+        *headers = match masking_rules {
+            Some(rules) => rule_for_direction(rules).mask_externalized_headers(headers),
+            None => crate::services::header_masking::default_masking_rules()
+                .mask_externalized_headers(headers),
+        };
+    }
+    clone
+}
+
+/// Lazily produce a Debug view of `payload` with sensitive headers masked, for
+/// use in debug logs. The clone + mask happens only when the value is actually
+/// formatted — i.e. when the `tracing::debug!` level is enabled — so a disabled
+/// `debug!` pays nothing (previously the masked clone was built on every
+/// request regardless of log level).
+///
+/// Without this scrub, the `tracing::debug!(?payload, ...)` lines in each
+/// coprocessor stage would print the full Debug of `Externalizable`, including
+/// the raw `headers` field — defeating the surrounding "(masked)" log.
+///
+/// Masking is limited to the `headers` field (see [`mask_payload_clone`]); the
+/// `body`/`context`/`sdl` fields are logged in full.
+pub(super) fn scrub_payload_for_log<'a, T, F>(
+    payload: &'a Externalizable<T>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+) -> ScrubbedForLog<'a, T, F>
+where
+    T: Clone + std::fmt::Debug + 'a,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>
+        + 'a,
+{
+    ScrubbedForLog {
+        payload,
+        masking_rules,
+        rule_for_direction,
+    }
+}
+
+/// Lazily produce a Debug view of the `Ok` arm of a coprocessor reply with
+/// sensitive headers masked (the symmetric `tracing::debug!(?co_processor_result,
+/// ...)` line). Masks only when formatted, like [`scrub_payload_for_log`].
+pub(super) fn scrub_result_for_log<'a, T, F>(
+    result: &'a Result<Externalizable<T>, BoxError>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+) -> ScrubbedResultForLog<'a, T, F>
+where
+    T: Clone + std::fmt::Debug + 'a,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>
+        + 'a,
+{
+    ScrubbedResultForLog {
+        result,
+        masking_rules,
+        rule_for_direction,
+    }
+}
+
+pub(super) struct ScrubbedForLog<'a, T, F> {
+    payload: &'a Externalizable<T>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+}
+
+impl<T, F> std::fmt::Debug for ScrubbedForLog<'_, T, F>
+where
+    T: Clone + std::fmt::Debug,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let masked = mask_payload_clone(self.payload, self.masking_rules, &self.rule_for_direction);
+        std::fmt::Debug::fmt(&masked, f)
+    }
+}
+
+pub(super) struct ScrubbedResultForLog<'a, T, F> {
+    result: &'a Result<Externalizable<T>, BoxError>,
+    masking_rules: Option<&'a MaskingRulesMap>,
+    rule_for_direction: F,
+}
+
+impl<T, F> std::fmt::Debug for ScrubbedResultForLog<'_, T, F>
+where
+    T: Clone + std::fmt::Debug,
+    F: Fn(&MaskingRulesMap) -> &std::sync::Arc<crate::services::header_masking::HeaderMaskingRules>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.result {
+            Ok(payload) => {
+                let masked =
+                    mask_payload_clone(payload, self.masking_rules, &self.rule_for_direction);
+                f.debug_tuple("Ok").field(&masked).finish()
+            }
+            Err(e) => f.debug_tuple("Err").field(e).finish(),
+        }
+    }
+}
+
 // Type alias for coprocessor HTTP client - uses HttpClientService with timeout
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
@@ -76,85 +193,53 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
 
-        if matches!(
-            init.config.router.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.router.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.router.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.supergraph.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.supergraph.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.execution.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.execution.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.subgraph.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.subgraph.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.request.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.request.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
-        }
-        if matches!(
-            init.config.connector.all.response.context,
-            ContextConf::Deprecated(true)
-        ) {
-            tracing::warn!(
-                "Configuration `coprocessor.connector.all.response.context: true` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
-            );
+        for (path, conf) in [
+            (
+                "coprocessor.router.request.context",
+                &init.config.router.request.context,
+            ),
+            (
+                "coprocessor.router.response.context",
+                &init.config.router.response.context,
+            ),
+            (
+                "coprocessor.supergraph.request.context",
+                &init.config.supergraph.request.context,
+            ),
+            (
+                "coprocessor.supergraph.response.context",
+                &init.config.supergraph.response.context,
+            ),
+            (
+                "coprocessor.execution.request.context",
+                &init.config.execution.request.context,
+            ),
+            (
+                "coprocessor.execution.response.context",
+                &init.config.execution.response.context,
+            ),
+            (
+                "coprocessor.subgraph.all.request.context",
+                &init.config.subgraph.all.request.context,
+            ),
+            (
+                "coprocessor.subgraph.all.response.context",
+                &init.config.subgraph.all.response.context,
+            ),
+            (
+                "coprocessor.connector.all.request.context",
+                &init.config.connector.all.request.context,
+            ),
+            (
+                "coprocessor.connector.all.response.context",
+                &init.config.connector.all.response.context,
+            ),
+        ] {
+            if let Some(value) = conf.deprecated_value_str() {
+                tracing::warn!(
+                    "Configuration `{path}: {value}` is deprecated. See https://go.apollo.dev/o/coprocessor-context"
+                );
+            }
         }
 
         // Validate all coprocessor URLs
@@ -195,6 +280,10 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
 
         let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
 
+        // Masking rules are published by the headers plugin into request
+        // context at router-service time; each coprocessor stage reads them
+        // from context per-request rather than from plugin init, since
+        // `init.full_config` is only populated for `apollo.telemetry`.
         CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
@@ -512,6 +601,15 @@ impl ContextConf {
             Self::NewContextConf(c) => *c == NewContextConf::Deprecated,
         }
     }
+
+    /// Returns the config value string as the user wrote it, if this conf is deprecated.
+    fn deprecated_value_str(&self) -> Option<&'static str> {
+        match self {
+            Self::Deprecated(true) => Some("true"),
+            Self::NewContextConf(NewContextConf::Deprecated) => Some("deprecated"),
+            _ => None,
+        }
+    }
 }
 
 impl Default for ContextConf {
@@ -533,31 +631,41 @@ pub(super) enum NewContextConf {
 }
 
 impl ContextConf {
-    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Option<(Context, HashSet<String>)> {
         match self {
-            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
-            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+            Self::NewContextConf(NewContextConf::All) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
+                    (elt.key().clone(), elt.value().clone())
+                }));
+                new_ctx.id = ctx.id.clone();
+                Some((new_ctx, keys_sent))
+            }
+            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+                let mut keys_sent = HashSet::new();
+                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    keys_sent.insert(elt.key().clone());
                     (
                         context_key_to_deprecated(elt.key().clone()),
                         elt.value().clone(),
                     )
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+                let mut keys_sent = HashSet::new();
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
+                        keys_sent.insert(elt.key().clone());
                         Some((elt.key().clone(), elt.value().clone()))
                     } else {
                         None
                     }
                 }));
                 new_ctx.id = ctx.id.clone();
-
-                Some(new_ctx)
+                Some((new_ctx, keys_sent))
             }
             Self::Deprecated(false) => None,
         }
@@ -614,12 +722,11 @@ pub(crate) fn update_context_from_coprocessor(
     target_context: &Context,
     context_returned: Context,
     context_config: &ContextConf,
+    keys_sent: &HashSet<String>,
 ) -> Result<(), BoxError> {
-    // Collect keys that are in the returned context
     let mut keys_returned = HashSet::with_capacity(context_returned.len());
 
     for (mut key, value) in context_returned.try_into_iter()? {
-        // Handle deprecated key names - convert back to actual key names
         if context_config.is_deprecated() {
             key = context_key_from_deprecated(key);
         }
@@ -628,21 +735,9 @@ pub(crate) fn update_context_from_coprocessor(
         target_context.insert_json_value(key, value);
     }
 
-    // Delete keys that were sent but are missing from the returned context
-    // If the context config is selective, only delete keys that are in the selective list
-    match context_config {
-        ContextConf::NewContextConf(NewContextConf::Selective(context_keys)) => {
-            target_context.retain(|key, _v| {
-                if keys_returned.contains(key) {
-                    return true;
-                } else if context_keys.contains(key) {
-                    return false;
-                }
-                true
-            });
-        }
-        _ => target_context.retain(|key, _v| keys_returned.contains(key)),
-    }
+    // Only delete keys that were SENT to the coprocessor but NOT returned.
+    // Keys never sent (e.g. added concurrently by parallel subgraph stages) are preserved.
+    target_context.retain(|key, _v| keys_returned.contains(key) || !keys_sent.contains(key));
 
     Ok(())
 }
@@ -704,6 +799,10 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_router_request_stage(
@@ -714,6 +813,7 @@ impl RouterStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -740,6 +840,10 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_router_response_stage(
@@ -750,6 +854,7 @@ impl RouterStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -834,6 +939,10 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_subgraph_request_stage(
@@ -844,6 +953,7 @@ impl SubgraphStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -871,6 +981,10 @@ impl SubgraphStage {
 
                 async move {
                     let response: subgraph::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;
@@ -882,6 +996,7 @@ impl SubgraphStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -925,6 +1040,7 @@ impl SubgraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_router_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -933,6 +1049,7 @@ async fn process_router_request_stage<C>(
     mut request_config: RouterRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -960,6 +1077,16 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
+            "Router request headers (masked)"
+        );
+    }
+
     // HTTP GET requests don't have a body
     let body_to_send = request_config
         .body
@@ -969,7 +1096,10 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -984,7 +1114,10 @@ where
         .method(parts.method.to_string())
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_request(None)
+    });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions intended for subgraph requests, not for the
     // coprocessor endpoint
@@ -1003,7 +1136,16 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    // Scoped so the cloned `Externalizable` (which Arc-shares the reply's
+    // Context) drops before `co_processor_result?` hands the reply to
+    // downstream code that needs to `Arc::try_unwrap` the Context.
+    {
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_request(None)
+            });
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
@@ -1104,6 +1246,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_router_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1112,6 +1255,7 @@ async fn process_router_response_stage<C>(
     response_config: RouterResponseConf,
     _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1161,12 +1305,26 @@ where
         let headers_to_send = response_config
             .headers
             .then(|| externalize_header_map(&parts.headers));
+
+        // Log headers with masking for security
+        if response_config.headers
+            && let Some(rules) = header_masking_rules.as_deref()
+        {
+            tracing::debug!(
+                headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
+                "Router response headers (masked)"
+            );
+        }
+
         let body_to_send = response_config
             .body
             .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
             .transpose()?;
         let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-        let context_to_send = response_config.context.get_context(&context);
+        let (context_to_send, keys_sent) = match response_config.context.get_context(&context) {
+            Some((ctx, keys)) => (Some(ctx), keys),
+            None => (None, HashSet::new()),
+        };
 
         let payload = Externalizable::router_builder()
             .stage(PipelineStep::RouterResponse)
@@ -1178,7 +1336,12 @@ where
             .and_sdl(sdl_to_send.clone())
             .build();
 
-        tracing::debug!(?payload, "externalized output");
+        // Second, call our co-processor and get a reply.
+        let payload_for_log =
+            scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+                r.get_response(None)
+            });
+        tracing::debug!(payload = ?payload_for_log, "externalized output");
         // Use a fresh context for the coprocessor HTTP call. The pipeline's request
         // context may carry extensions (eg, AWS SigV4 SigningParamsConfig used in the
         // HttpClientService) intended for subgraph requests, not for the coprocessor
@@ -1194,7 +1357,15 @@ where
         };
         *executed = true;
 
-        tracing::debug!(?co_processor_result, "co-processor returned");
+        // Scoped so the cloned `Externalizable` drops before `?` (see notes at
+        // the RouterRequest site).
+        {
+            let co_processor_result_for_log =
+                scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                    r.get_response(None)
+                });
+            tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+        }
         let co_processor_output = co_processor_result?;
         validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
@@ -1207,7 +1378,7 @@ where
             parts.status = control.get_http_status()?;
         }
         if let Some(ctx) = co_processor_output.context {
-            update_context_from_coprocessor(&context, ctx, &response_config.context)?;
+            update_context_from_coprocessor(&context, ctx, &response_config.context, &keys_sent)?;
         }
         if let Some(headers) = co_processor_output.headers {
             parts.headers = internalize_header_map(headers)?;
@@ -1233,6 +1404,7 @@ where
             let generator_id = map_context.id.clone();
             let context_conf = stream_context_conf.clone();
             let deferred_condition = stream_condition.clone();
+            let header_masking_rules = header_masking_rules.clone();
 
             async move {
                 // Evaluate condition per-chunk. CHUNK_CONTAINS_GRAPHQL_ERROR has been set in
@@ -1249,7 +1421,11 @@ where
                 let body_to_send = stream_body
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
-                let context_to_send = context_conf.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match context_conf.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -1262,7 +1438,15 @@ where
                     .and_sdl(generator_sdl_to_send)
                     .build();
 
-                tracing::debug!(?payload, "externalized output");
+                // Second, call our co-processor and get a reply.
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 // Use a fresh context for the coprocessor HTTP call. The pipeline's request
                 // context may carry extensions intended for subgraph requests, not for the
                 // coprocessor endpoint
@@ -1275,7 +1459,14 @@ where
                         .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                {
+                    let co_processor_result_for_log = scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
+                    );
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+                }
                 let result: Result<Bytes, BoxError> = async {
                     let co_processor_output = co_processor_result?;
                     validate_coprocessor_output(
@@ -1293,6 +1484,7 @@ where
                             &generator_map_context,
                             ctx,
                             &context_conf,
+                            &keys_sent,
                         )?;
                     }
 
@@ -1325,6 +1517,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_subgraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1333,6 +1526,7 @@ async fn process_subgraph_request_stage<C>(
     mut request_config: SubgraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1354,11 +1548,25 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_request(Some(&service_name)).mask_headers_debug(&parts.headers),
+            subgraph = %service_name,
+            "Subgraph request headers (masked)"
+        );
+    }
+
     let body_to_send = request_config
         .body
         .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1379,7 +1587,10 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_request(Some(subgraph_name.as_str()))
+    });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions intended for subgraph requests, not for the
     // coprocessor endpoint
@@ -1398,7 +1609,13 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_request(Some(subgraph_name.as_str()))
+            });
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -1496,6 +1713,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_subgraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -1504,6 +1722,7 @@ async fn process_subgraph_response_stage<C>(
     response_config: SubgraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -1526,10 +1745,26 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if response_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_response(Some(&service_name)).mask_headers_debug(&parts.headers),
+            subgraph = %service_name,
+            "Subgraph response headers (masked)"
+        );
+    }
+
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = filter_graphql_response_body(&body, &response_config.body);
-    let context_to_send = response_config.context.get_context(&response.context);
+    let (context_to_send, keys_sent) = match response_config.context.get_context(&response.context)
+    {
+        Some((ctx, keys)) => (Some(ctx), keys),
+        None => (None, HashSet::new()),
+    };
+    let subgraph_name = service_name.clone();
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1546,7 +1781,10 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log = scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+        r.get_response(Some(subgraph_name.as_str()))
+    });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
     // Use a fresh context for the coprocessor HTTP call. The pipeline's request
     // context may carry extensions intended for subgraph requests, not for the
     // coprocessor endpoint
@@ -1565,7 +1803,13 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log =
+            scrub_result_for_log(&co_processor_result, header_masking_rules.as_deref(), |r| {
+                r.get_response(Some(subgraph_name.as_str()))
+            });
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
@@ -1593,7 +1837,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+        update_context_from_coprocessor(
+            &response.context,
+            context,
+            &response_config.context,
+            &keys_sent,
+        )?;
     }
 
     if let Some(headers) = co_processor_output.headers {

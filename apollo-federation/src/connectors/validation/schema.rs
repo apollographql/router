@@ -125,7 +125,11 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
         .and_then(|arg| arg.as_list())
         .into_iter()
         .flatten()
-        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
+        .filter_map(|value| {
+            Import::try_from(value.as_ref())
+                .ok()
+                .map(|import| (value, import))
+        })
         .collect_vec();
 
     let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];

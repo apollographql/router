@@ -17,6 +17,7 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -98,6 +99,10 @@ impl SupergraphStage {
                 let sdl = sdl.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_supergraph_request_stage(
@@ -108,6 +113,7 @@ impl SupergraphStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -135,6 +141,10 @@ impl SupergraphStage {
 
                 async move {
                     let response: supergraph::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;
@@ -146,6 +156,7 @@ impl SupergraphStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -188,6 +199,7 @@ impl SupergraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -196,6 +208,7 @@ async fn process_supergraph_request_stage<C>(
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -218,11 +231,24 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
+            "Supergraph request headers (masked)"
+        );
+    }
+
     let body_to_send = request_config
         .body
         .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
 
@@ -237,7 +263,11 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(None)
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -254,7 +284,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -343,6 +380,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -351,6 +389,7 @@ async fn process_supergraph_response_stage<C>(
     response_config: SupergraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -390,9 +429,24 @@ where
         let headers_to_send = response_config
             .headers
             .then(|| externalize_header_map(&parts.headers));
+
+        // Log headers with masking for security
+        if response_config.headers
+            && let Some(rules) = header_masking_rules.as_deref()
+        {
+            tracing::debug!(
+                headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
+                "Supergraph response headers (masked)"
+            );
+        }
+
         let body_to_send = filter_graphql_response_body(&first, &response_config.body);
         let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-        let context_to_send = response_config.context.get_context(&response.context);
+        let (context_to_send, keys_sent) =
+            match response_config.context.get_context(&response.context) {
+                Some((ctx, keys)) => (Some(ctx), keys),
+                None => (None, HashSet::new()),
+            };
 
         let payload = Externalizable::supergraph_builder()
             .stage(PipelineStep::SupergraphResponse)
@@ -406,7 +460,11 @@ where
             .build();
 
         // Second, call our co-processor and get a reply.
-        tracing::debug!(?payload, "externalized output");
+        let payload_for_log =
+            super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+                r.get_response(None)
+            });
+        tracing::debug!(payload = ?payload_for_log, "externalized output");
         // We use a new context here to avoid any risk of carrying extensions to coprocessor calls
         // that we don't intend for coprocessor calls; if in the future we change it, make sure to
         // understand what could be sent to coprocessors and how that might affect their behavior
@@ -419,7 +477,14 @@ where
         // Indicate the stage was executed to raise execution metric on parent
         *executed = true;
 
-        tracing::debug!(?co_processor_result, "co-processor returned");
+        {
+            let co_processor_result_for_log = super::scrub_result_for_log(
+                &co_processor_result,
+                header_masking_rules.as_deref(),
+                |r| r.get_response(None),
+            );
+            tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+        }
         let co_processor_output = co_processor_result?;
 
         validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
@@ -445,7 +510,12 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+            update_context_from_coprocessor(
+                &response.context,
+                context,
+                &response_config.context,
+                &keys_sent,
+            )?;
         }
 
         if let Some(headers) = co_processor_output.headers {
@@ -473,13 +543,18 @@ where
                 .condition
                 .evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
             async move {
                 if !should_be_executed {
                     return Ok(deferred_response);
                 }
                 let body_to_send =
                     filter_graphql_response_body(&deferred_response, &response_config.body);
-                let context_to_send = response_config_context.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match response_config_context.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -494,7 +569,14 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = super::scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 // Use a new context to avoid carrying request extensions into the coprocessor
                 // HTTP call, consistent with how the initial chunk is handled.
                 let co_processor_result = {
@@ -503,7 +585,14 @@ where
                         .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                {
+                    let co_processor_result_for_log = super::scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
+                    );
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+                }
                 let result: Result<graphql::Response, BoxError> = async {
                     let co_processor_output = co_processor_result?;
 
@@ -536,6 +625,7 @@ where
                             &generator_map_context,
                             context,
                             &response_config_context,
+                            &keys_sent,
                         )?;
                     }
 

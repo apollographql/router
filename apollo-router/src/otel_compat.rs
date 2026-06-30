@@ -1,9 +1,14 @@
 //! Facilities for using our old version of opentelemetry with our new version of http/hyper.
+#![allow(deprecated)]
 
 /// A header extractor that works on http 1.x types.
 ///
 /// The implementation is a straight copy from [opentelemetry_http::HeaderExtractor].
 /// This can be removed after we update otel.
+#[deprecated(
+    since = "2.16.0",
+    note = "Will be removed in 3.0. Use opentelemetry_http::HeaderExtractor directly."
+)]
 pub struct HeaderExtractor<'a>(pub &'a http::HeaderMap);
 impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
     /// Get a value for a key from the HeaderMap.  If the value is not valid ASCII, returns None.
@@ -24,6 +29,10 @@ impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
 ///
 /// The implementation is a straight copy from [opentelemetry_http::HeaderInjector].
 /// This can be removed after we update otel.
+#[deprecated(
+    since = "2.16.0",
+    note = "Will be removed in 3.0. Use opentelemetry_http::HeaderInjector directly."
+)]
 pub struct HeaderInjector<'a>(pub &'a mut http::HeaderMap);
 
 impl opentelemetry::propagation::Injector for HeaderInjector<'_> {

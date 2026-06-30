@@ -4,7 +4,20 @@
             "type": "Start",
             "schema_path": "./supergraph.graphql",
             "configuration_path": "./configuration.yaml",
-            "subgraphs": {}
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"{ me { name } }"}
+                            },
+                            "response": {
+                                "body": {"data": { "me": { "name": "Ada Lovelace" } } }
+                            }
+                        }
+                    ]
+                }
+            }
         },
         {
             "type": "Request",
