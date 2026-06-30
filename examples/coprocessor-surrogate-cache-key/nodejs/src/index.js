@@ -4,28 +4,25 @@ const port = 3000;
 
 app.use(express.json());
 
-// This is for demo purpose and will keep growing over the time
-// It saves the value of surrogate cache keys returned by a subgraph request
-let surrogateKeys = new Map();
+// Maps subgraph name -> list of surrogate keys seen in that subgraph's most recent response.
+// In a production system you would want a more precise key (e.g. a hash of the subgraph
+// request body) so that multiple concurrent requests to the same subgraph don't collide.
+let surrogateKeysBySubgraph = new Map();
 // Example:
 // {
-//   "​​0e67db40-e98d-4ad7-bb60-2012fb5db504": [
-//     "elections",
-//     "sp500"
-//   ],
-//   "​​0d77db40-e98d-4ad7-bb60-2012fb5db555": [
-//     "homepage"
-//   ]
+//   "products": ["homepage", "feed"],
+//   "reviews": ["homepage"]
 // }
 // --------------
 // For every surrogate cache key we know the related cache keys
 // Example:
 // {
-//   "elections": [
-//     "version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+//   "homepage": [
+//     "version:1.2:subgraph:products:type:Query:hash:af9febfa...:data:d9d84a3c...",
+//     "version:1.2:subgraph:reviews:type:Query:hash:1de543db...:data:d9d84a3c..."
 //   ],
-//   "sp500": [
-//     "version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+//   "feed": [
+//     "version:1.2:subgraph:products:type:Query:hash:af9febfa...:data:d9d84a3c..."
 //   ]
 // }
 
@@ -36,61 +33,67 @@ app.post("/", (req, res) => {
   switch (request.stage) {
     case "SubgraphResponse":
       request.headers["surrogate-keys"] = ["homepage, feed"]; // To simulate
-      // Fetch the surrogate keys returned by the subgraph to create a mapping between subgraph request id and surrogate keys, to create the final mapping later
+      // Capture the surrogate keys returned by the subgraph, keyed by subgraph name.
       // Example:
-      // {
-      //   "​​0e67db40-e98d-4ad7-bb60-2012fb5db504": [
-      //     "elections",
-      //     "sp500"
-      //   ]
+      // surrogateKeysBySubgraph = {
+      //   "products": ["homepage", "feed"]
       // }
-      if (request.headers["surrogate-keys"] && request.subgraphRequestId) {
+      if (request.headers["surrogate-keys"] && request.subgraphName) {
         let keys = request.headers["surrogate-keys"]
           .join(",")
           .split(",")
           .map((k) => k.trim());
 
-        surrogateKeys.set(request.subgraphRequestId, keys);
-        console.log("surrogateKeys", surrogateKeys);
+        surrogateKeysBySubgraph.set(request.subgraphName, keys);
+        console.log("surrogateKeysBySubgraph", surrogateKeysBySubgraph);
       }
       break;
     case "SupergraphResponse":
       if (
         request.context &&
         request.context.entries &&
-        request.context.entries["apollo::entity_cache::cached_keys_status"]
+        request.context.entries["apollo::response_cache::debug_cached_keys"]
       ) {
-        let contextEntry =
-          request.context.entries["apollo::entity_cache::cached_keys_status"];
+        // debug_cached_keys is an array of cache entry objects. Each object has:
+        //   key         - the Redis cache key string
+        //   subgraphName - which subgraph produced this entry
+        //   subgraphRequest - the GraphQL request sent to the subgraph
+        //   source      - "subgraph" (freshly fetched) or "cache" (served from cache)
+        //   shouldStore - whether the entry will be written to Redis
+        //   ... (see response_cache debug documentation for the full schema)
+        let cacheEntries =
+          request.context.entries["apollo::response_cache::debug_cached_keys"];
         let mapping = {};
-        Object.keys(contextEntry).forEach((request_id) => {
-          let cache_keys = contextEntry[`${request_id}`];
-          let surrogateCachekeys = surrogateKeys.get(request_id);
-          if (surrogateCachekeys) {
+
+        for (const entry of cacheEntries) {
+          const surrogateCacheKeys = surrogateKeysBySubgraph.get(
+            entry.subgraphName
+          );
+          if (surrogateCacheKeys) {
             // Create the mapping between surrogate cache keys and effective cache keys
             // Example:
             // {
-            //   "elections": [
-            //     "version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+            //   "homepage": [
+            //     "version:1.2:subgraph:products:type:Query:hash:af9febfa...:data:d9d84a3c..."
             //   ],
-            //   "sp500": [
-            //     "version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:hash:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"
+            //   "feed": [
+            //     "version:1.2:subgraph:products:type:Query:hash:af9febfa...:data:d9d84a3c..."
             //   ]
             // }
-
-            surrogateCachekeys.reduce((acc, current) => {
-              if (acc[`${current}`]) {
-                acc[`${current}`] = acc[`${current}`].concat(cache_keys);
+            for (const surrogateKey of surrogateCacheKeys) {
+              if (mapping[surrogateKey]) {
+                mapping[surrogateKey].push(entry.key);
               } else {
-                acc[`${current}`] = cache_keys;
+                mapping[surrogateKey] = [entry.key];
               }
-
-              return acc;
-            }, mapping);
+            }
           }
-        });
+        }
 
-        console.log(mapping);
+        console.log(
+          "Surrogate key -> cache key mapping:",
+          JSON.stringify(mapping, null, 2)
+        );
       }
       break;
     default:

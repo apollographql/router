@@ -6,7 +6,17 @@ sandbox:
 homepage:
   enabled: false
 include_subgraph_errors:
-  all: true # Propagate errors from all subraphs
+  all: true # Propagate errors from all subgraphs
+
+response_cache:
+  enabled: true
+  debug: true # exposes cache key details in the request context
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://localhost:6379"]
+        ttl: 24h # Optional, by default no expiration
 
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
@@ -16,5 +26,4 @@ coprocessor:
   subgraph:
     all:
       response:
-        subgraph_request_id: true
         context: all
