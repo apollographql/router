@@ -10,8 +10,8 @@ use tower_service::Service;
 use tracing::Span;
 
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
-use crate::plugins::telemetry::span_factory;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::span_factory;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 

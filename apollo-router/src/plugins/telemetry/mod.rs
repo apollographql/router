@@ -966,7 +966,9 @@ impl PluginPrivate for Telemetry {
             .cache_custom_instruments
             .clone();
         ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| span_factory::create_subgraph(name.as_str(), req))
+            .instrument(move |req: &SubgraphRequest| {
+                span_factory::create_subgraph(name.as_str(), req)
+            })
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(

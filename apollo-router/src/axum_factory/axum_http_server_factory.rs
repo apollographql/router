@@ -325,7 +325,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
