@@ -19,7 +19,7 @@ pub(crate) async fn await_mock_driver(driver: tokio::task::JoinHandle<()>) {
     tokio::time::timeout(std::time::Duration::from_secs(5), driver)
         .await
         .expect("mock driver timed out — service was not called within 5 s")
-        .unwrap();
+        .expect("mock driver panicked");
 }
 
 /// Assert that a mock service is never called during the test.
