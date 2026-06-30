@@ -5,10 +5,13 @@
 //! - At the router service, a batch query is split apart into multiple requests.
 //! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
 //! - Each individual request gets a [BatchQuery] extension.
-//! - After query planning of each individual request, that request's [BatchQuery::set_query_hashes]
-//!   is called to set the expected number of subgraph requests. This includes only the subgraph
-//!   requests that are unconditionally executed, not subsequent entity fetches for example that can
-//!   only be executed based on data obtained during query plan execution.
+//! - After query planning of each individual request, we collect the hashes of the plan nodes that
+//!   will be executed unconditionally as part of the query plan. Those query nodes are candidates
+//!   for being batched up into a single request at the subgraph side, as they do not depend on
+//!   other data being fetched first.
+//! - [BatchQuery::set_query_hashes] is called with those hashes, to set the expected number of
+//!   subgraph requests. The hashes are also used to track successful and unsuccessful responses to
+//!   each individual subgraph request.
 //! - Once each subgraph request that is part of the batch reaches the subgraph service, instead of
 //!   submitting the request to the HTTP client, it calls into [BatchQuery::signal_progress]. This
 //!   is how subgraph requests are eventually batched up. When a [BatchQuery] has received all
