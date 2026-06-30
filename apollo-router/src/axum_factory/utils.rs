@@ -29,7 +29,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
-        let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
@@ -38,18 +37,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            if use_legacy_request_span {
-                self.span_mode.create_request(request, &self.license)
-            } else {
-                self.span_mode.create_router(request)
-            }
+            self.span_mode.create_router(request)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            if use_legacy_request_span {
-                self.span_mode.create_request(request, &self.license)
-            } else {
-                self.span_mode.create_router(request)
-            }
+            self.span_mode.create_router(request)
         };
         if matches!(
             &*self.license,

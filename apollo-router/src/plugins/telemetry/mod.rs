@@ -110,7 +110,6 @@ use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
-use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
@@ -331,12 +330,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        if config.instrumentation.spans.mode == SpanMode::Deprecated {
-            ::tracing::warn!(
-                "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
-            );
-        }
-
         // Set up feature usage list
         let full_config = init
             .full_config
@@ -366,8 +359,6 @@ impl PluginPrivate for Telemetry {
         let config_request = self.config.clone();
         let config_checkpoint = self.config.clone();
         let span_mode = config.instrumentation.spans.mode;
-        let use_legacy_request_span =
-            matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
@@ -396,8 +387,7 @@ impl PluginPrivate for Telemetry {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
                 if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
-                    && ((use_legacy_request_span && span_name == REQUEST_SPAN_NAME)
-                        || (!use_legacy_request_span && span_name == ROUTER_SPAN_NAME))
+                    && span_name == ROUTER_SPAN_NAME
                 {
                     //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
                     let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
@@ -425,23 +415,19 @@ impl PluginPrivate for Telemetry {
                 response
             })
             .layer(InstrumentLayer::new(move |request: &router::Request| {
-                if use_legacy_request_span {
-                    span_mode.create_router(&request.router_request)
+                // When running through axum, the TraceLayer holds a "router" span guard
+                // across the entire synchronous call chain, so Span::current() already
+                // returns it here — reuse it rather than creating a duplicate SERVER span.
+                // In tests that bypass axum, there is no active span, so we create one to
+                // match the behavior users actually see.
+                let current = Span::current();
+                if current
+                    .metadata()
+                    .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                {
+                    current
                 } else {
-                    // When running through axum, the TraceLayer holds a "router" span guard
-                    // across the entire synchronous call chain, so Span::current() already
-                    // returns it here — reuse it rather than creating a duplicate SERVER span.
-                    // In tests that bypass axum, there is no active span, so we create one to
-                    // match the behavior users actually see.
-                    let current = Span::current();
-                    if current
-                        .metadata()
-                        .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
-                    {
-                        current
-                    } else {
-                        span_mode.create_router(&request.router_request)
-                    }
+                    span_mode.create_router(&request.router_request)
                 }
             }))
             .checkpoint(move |req: router::Request| {

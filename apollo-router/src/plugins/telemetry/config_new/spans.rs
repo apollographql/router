@@ -14,7 +14,7 @@ use crate::plugins::telemetry::span_factory::SpanMode;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Spans {
-    /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future.
+    /// Span mode for telemetry instrumentation. Only `spec_compliant` is supported.
     pub(crate) mode: SpanMode,
 
     /// The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation.
