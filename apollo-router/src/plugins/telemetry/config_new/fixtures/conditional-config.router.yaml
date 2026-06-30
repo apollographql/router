@@ -3,7 +3,7 @@
 telemetry:
   instrumentation:
     spans:
-      mode: deprecated
+      mode: spec_compliant
       router:
         attributes:
           "http.request.header.x-my-header-condition":
