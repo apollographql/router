@@ -1,6 +1,5 @@
 telemetry:
   instrumentation:
-    spans:
     events:
       router:
         # Standard events

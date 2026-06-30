@@ -1,6 +1,4 @@
 telemetry:
-  instrumentation:
-    spans:
   exporters:
     tracing:
       experimental_response_trace_id:
