@@ -22,7 +22,7 @@ spec:
       targetPort: health
       protocol: TCP
       name: health
-    {{- if .Values.router.configuration.response_cache.invalidation }}
+    {{- if (.Values.router.configuration.response_cache).invalidation }}
     - port: {{ (splitList ":" .Values.router.configuration.response_cache.invalidation.listen | last) }}
       targetPort: invalidation
       protocol: TCP
