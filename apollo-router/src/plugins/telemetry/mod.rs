@@ -5,9 +5,7 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -86,8 +84,6 @@ use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
-use crate::context::deprecated::DEPRECATED_CLIENT_VERSION;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
@@ -184,36 +180,8 @@ const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
     HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
-static CLIENT_NAME_DEPRECATED_WARNED: AtomicBool = AtomicBool::new(false);
-static CLIENT_VERSION_DEPRECATED_WARNED: AtomicBool = AtomicBool::new(false);
 static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
 static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
-
-/// Look up `key` from context, falling back to `deprecated_key` if absent. Emits a
-/// `tracing::warn!` the first time the fallback is used (guarded by `warned`).
-fn get_client_attribute_from_context(
-    ctx: &Context,
-    key: &'static str,
-    deprecated_key: &'static str,
-    warned: &'static AtomicBool,
-) -> Option<String> {
-    if let Some(v) = ctx.get::<&str, String>(key).ok().flatten() {
-        return Some(v);
-    }
-    let v = ctx.get::<&str, String>(deprecated_key).ok().flatten();
-    if v.is_some()
-        && warned
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-    {
-        ::tracing::warn!(
-            "`{deprecated_key}` context key is deprecated; \
-             use `{key}` instead. \
-             The fallback will be removed in version 3.0."
-        );
-    }
-    v
-}
 
 pub(crate) const APOLLO_PRIVATE_QUERY_ALIASES: Key =
     Key::from_static_str("apollo_private.query.aliases");
