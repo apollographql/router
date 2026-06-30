@@ -99,28 +99,15 @@ mod tests {
     use serde_json::Value;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxService;
 
     use crate::Context;
     use crate::plugin::DynPlugin;
-    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
     #[tokio::test]
     async fn plugin_registered() {
-        let mut mock_service = MockSubgraphService::new();
-        mock_service
-            .expect_call()
-            .withf(|req| {
-                req.subgraph_request.uri() == &Uri::from_str("http://localhost:8001").unwrap()
-            })
-            .times(1)
-            .returning(move |req: SubgraphRequest| {
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            });
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.override_subgraph_url")
@@ -136,19 +123,27 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
+
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = SubgraphRequest::fake_builder().context(context);
 
-        let _subgraph_resp = subgraph_service
+        let mut subgraph_service = dyn_plugin.subgraph_service("test_one", mock.boxed());
+        let call = subgraph_service
             .ready()
             .await
             .unwrap()
-            .call(subgraph_req.build())
-            .await
-            .unwrap();
+            .call(SubgraphRequest::fake_builder().context(context).build());
+        let (req, responder) = handle.next_request().await.unwrap();
+        assert_eq!(
+            req.subgraph_request.uri(),
+            &Uri::from_str("http://localhost:8001").unwrap()
+        );
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .context(req.context)
+                .build(),
+        );
+        call.await.unwrap();
     }
 
     #[cfg(unix)]
@@ -166,20 +161,7 @@ mod tests {
         #[case] expected_path: &str,
     ) {
         let expected_uri: Uri = hyperlocal::Uri::new(expected_socket, expected_path).into();
-
-        let mut mock_service = MockSubgraphService::new();
-        let expected_clone = expected_uri.clone();
-        mock_service
-            .expect_call()
-            // NOTE: this is the heart of the test; our core assertion that the request's URI is
-            // being overridden with the target URI, be it with or without a path
-            .withf(move |req| req.subgraph_request.uri() == &expected_clone)
-            .times(1)
-            .returning(move |req: SubgraphRequest| {
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            });
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
         let config = format!(r#"{{ "test_one": "{config_url}" }}"#);
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
@@ -189,16 +171,21 @@ mod tests {
             .await
             .unwrap();
 
-        let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
-        let subgraph_req = SubgraphRequest::fake_builder().context(Context::new());
-
-        let _subgraph_resp = subgraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(subgraph_req.build())
-            .await
-            .unwrap();
+        let mut subgraph_service = dyn_plugin.subgraph_service("test_one", mock.boxed());
+        let call = subgraph_service.ready().await.unwrap().call(
+            SubgraphRequest::fake_builder()
+                .context(Context::new())
+                .build(),
+        );
+        let (req, responder) = handle.next_request().await.unwrap();
+        // NOTE: this is the heart of the test; our core assertion that the request's URI is
+        // being overridden with the target URI, be it with or without a path
+        assert_eq!(req.subgraph_request.uri(), &expected_uri);
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .context(req.context)
+                .build(),
+        );
+        call.await.unwrap();
     }
 }

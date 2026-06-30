@@ -56,7 +56,7 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.26.0"
+addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.15.1" }
@@ -299,9 +299,9 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
-tikv-jemallocator = { version = "0.6.0", features = ["profiling"], optional = true }
-tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], optional = true }
-tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
+tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
+tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
+tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
