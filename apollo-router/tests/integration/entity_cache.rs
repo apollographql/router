@@ -262,21 +262,32 @@ async fn invalidate_with_endpoint() {
         reviews: 1
     "###);
 
-    let request = http::Request::builder()
-        .method("POST")
-        .uri(INVALIDATION_PATH)
-        .header("Authorization", INVALIDATION_SHARED_KEY)
-        .body(json!([{
-            "kind": "entity",
-            "subgraph": "reviews",
-            "type": "Product",
-            "key": {
-                "upc": "1",
-            },
-        }]))
-        .unwrap();
-    let (_headers, body) = make_json_request(&mut router, request).await;
-    insta::assert_yaml_snapshot!(body, @"count: 1");
+    // The cache write is async (fire-and-forget spawn), so the key may not be in Redis
+    // yet. Retry until invalidation reports at least one deleted key.
+    let mut count = 0u64;
+    for _ in 0..100 {
+        let request = http::Request::builder()
+            .method("POST")
+            .uri(INVALIDATION_PATH)
+            .header("Authorization", INVALIDATION_SHARED_KEY)
+            .body(json!([{
+                "kind": "entity",
+                "subgraph": "reviews",
+                "type": "Product",
+                "key": {
+                    "upc": "1",
+                },
+            }]))
+            .unwrap();
+        let (_headers, body): (_, serde_json::Value) =
+            make_json_request(&mut router, request).await;
+        count = body["count"].as_u64().unwrap_or(0);
+        if count > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(count, 1u64);
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
