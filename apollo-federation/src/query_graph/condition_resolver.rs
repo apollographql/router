@@ -117,15 +117,14 @@ struct CachedConditionEntry {
 
 pub(crate) struct ConditionResolverCache {
     // For every edge having a condition, we cache the resolution of its conditions when possible.
-    // Each edge may have multiple cached entries, one per distinct combination of excluded
-    // destinations and excluded conditions seen during resolution. Both of these exclusion sets
-    // affect the resolution: excluded destinations prevent key-jump cycles (e.g. A→B→A), and
-    // excluded conditions prevent infinite recursion on nested @requires. Since the algorithm
-    // always tries keys in the same order (the order of edges in the query graph), we can
-    // store and look up entries by exact match on these exclusion sets.
+    // Each edge may have multiple cached entries, one per distinct set of excluded destinations
+    // seen during resolution. Excluded destinations affect the resolution by preventing key-jump
+    // cycles (e.g. A→B→A). Since the algorithm always tries keys in the same order (the order
+    // of edges in the query graph), we can store and look up entries by exact match on the
+    // excluded destinations.
     //
-    // The cache is shared across recursion depths via &mut threading so that results
-    // discovered at any depth are visible to all other depths within the same query plan.
+    // The cache is shared across recursion depths so that results discovered at any depth are
+    // visible to all other depths within the same query plan.
     edge_states: IndexMap<EdgeIndex, Vec<CachedConditionEntry>>,
 }
 
@@ -243,9 +242,7 @@ pub(crate) trait CachingConditionResolver {
             extra_conditions,
             cache,
         )?;
-        // Insert the result into the cache. Because the cache is shared across recursion
-        // depths, the recursive call above may have already inserted an entry for this same
-        // edge and exclusion set. The `insert` method deduplicates, so this is safe.
+        // See if this resolution is eligible to be inserted into the cache.
         cache.insert(
             edge,
             resolution.clone(),

@@ -1,4 +1,4 @@
-### Share condition resolver cache across recursion depths ([PR #XXXX](https://github.com/apollographql/router/pull/XXXX))
+### Share condition resolver cache across recursion depths ([PR #9721](https://github.com/apollographql/router/pull/9721))
 
 Reduces query planning time for operations on schemas with many
 `@key`/`@requires` conditions by sharing the condition resolver cache
@@ -66,4 +66,4 @@ The win scales with the number of root fields and entity types — every
 additional field that touches the same entity type reuses all the
 condition resolutions that were already computed.
 
-By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/XXXX
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9721>
