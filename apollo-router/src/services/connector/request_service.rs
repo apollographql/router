@@ -55,7 +55,7 @@ assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
 #[derive(Debug)]
-pub struct Request {
+pub(crate) struct Request {
     /// The request context
     pub(crate) context: Context,
 
@@ -85,7 +85,7 @@ pub struct Request {
 
 /// Response type for a connector
 #[derive(Debug)]
-pub struct Response {
+pub(crate) struct Response {
     /// The request context
     pub(crate) context: Context,
 
