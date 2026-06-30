@@ -22,8 +22,6 @@ demand_control:
       max: 1500
       list_size: 10
 telemetry:
-  instrumentation:
-    spans:
   exporters:
     tracing:
       experimental_response_trace_id:
