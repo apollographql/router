@@ -74,14 +74,26 @@ impl JSONSelection {
                 )),
                 spec: self.spec,
             },
-            TopLevelSelection::Path(path) => Self {
-                inner: TopLevelSelection::Path(path.apply_selection_set(
-                    abstract_types,
-                    document,
-                    &selection_set,
-                )),
-                spec: self.spec,
-            },
+            TopLevelSelection::Value(lit) => {
+                // For a top-level PathSelection we can still refine its trailing
+                // SubSelection via the GraphQL selection set. For any other
+                // `LitExpr` shape (primitives, arrays, object literals,
+                // `LitPath` chains, operator chains), the expression may have
+                // computed structure that is not safe to prune against a
+                // GraphQL selection set, so we leave those values untouched.
+                let new_lit = match lit.as_ref() {
+                    LitExpr::Path(path) => {
+                        let refined =
+                            path.apply_selection_set(abstract_types, document, &selection_set);
+                        WithRange::new(LitExpr::Path(refined), lit.range())
+                    }
+                    _ => lit.clone(),
+                };
+                Self {
+                    inner: TopLevelSelection::Value(new_lit),
+                    spec: self.spec,
+                }
+            }
         }
     }
 }
@@ -114,16 +126,43 @@ impl SubSelection {
 
             new_selections.push(NamedSelection {
                 prefix: NamingPrefix::Alias(Alias::new("__typename")),
-                path: PathSelection {
-                    path: WithRange::new(
-                        PathList::Expr(
-                            WithRange::new(LitExpr::String(selection_set.ty.to_string()), None),
-                            WithRange::new(PathList::Empty, None),
+                // Wrap the literal in `PathList::Expr` so the pretty-printed
+                // output is `__typename: $("User")`. The `$(...)` is harmless
+                // under v0.4 but required for the value to parse back as a
+                // `NamedSelection` under v0.3 and earlier, where bare string
+                // literals are not legal as named-selection values.
+                path: WithRange::new(
+                    LitExpr::Path(PathSelection {
+                        path: WithRange::new(
+                            PathList::Expr(
+                                WithRange::new(LitExpr::String(selection_set.ty.to_string()), None),
+                                WithRange::new(PathList::Empty, None),
+                            ),
+                            None,
                         ),
-                        None,
-                    ),
-                },
+                    }),
+                    None,
+                ),
             });
+        }
+
+        // Thin helper: apply a GraphQL selection set to a `NamedSelection`'s
+        // value, refining its inner `PathSelection` when present and leaving
+        // non-path `LitExpr` values untouched (a GraphQL selection set
+        // cannot meaningfully prune a literal or computed expression).
+        fn apply_to_named_value(
+            value: &WithRange<LitExpr>,
+            abstract_types: &IndexSet<String>,
+            document: &ExecutableDocument,
+            selection_set: &SelectionSet,
+        ) -> WithRange<LitExpr> {
+            match value.as_ref() {
+                LitExpr::Path(path) => {
+                    let refined = path.apply_selection_set(abstract_types, document, selection_set);
+                    WithRange::new(LitExpr::Path(refined), value.range())
+                }
+                _ => value.clone(),
+            }
         }
 
         for selection in &self.selections {
@@ -132,7 +171,8 @@ impl SubSelection {
                 // whose single key does not match anything in the field_map.
                 if let Some(fields) = field_map.get_vec(single_key_for_selection.as_str()) {
                     for field in fields {
-                        let applied_path = selection.path.apply_selection_set(
+                        let applied_path = apply_to_named_value(
+                            &selection.path,
                             abstract_types,
                             document,
                             &field.selection_set,
@@ -154,7 +194,8 @@ impl SubSelection {
                 // conservatively preserve it, using a transformed path.
                 new_selections.push(NamedSelection {
                     prefix: selection.prefix.clone(),
-                    path: selection.path.apply_selection_set(
+                    path: apply_to_named_value(
+                        &selection.path,
                         abstract_types,
                         document,
                         selection_set,

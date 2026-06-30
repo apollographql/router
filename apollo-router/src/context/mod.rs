@@ -20,7 +20,6 @@ use tower::BoxError;
 use crate::json_ext::Value;
 use crate::services::layers::query_analysis::ParsedDocument;
 
-pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
 /// Context key for the operation name.
@@ -29,8 +28,19 @@ pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
 pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// Context key for the persisted query ID.
 pub(crate) const PERSISTED_QUERY_ID: &str = "apollo::supergraph::persisted_query_id";
-/// The key to know if the response body contains at least 1 GraphQL error
+/// The key to know if the response body contains at least 1 GraphQL error. This value is sticky:
+/// once set to true for any chunk in a deferred response stream, it remains true for the lifetime
+/// of the request.
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
+/// The key to know if the *current* stream chunk contains GraphQL errors. Updated per-chunk (not
+/// sticky) by the supergraph `check_for_errors` stream map so that the router layer can evaluate
+/// per-chunk conditions without parsing raw bytes. This is safe despite streaming because Rust
+/// async streams are lazy and pull-based: when the router layer pulls a bytes chunk, it drives the
+/// entire upstream chain synchronously — `check_for_errors` sets this key on the graphql::Response
+/// before it is serialized to bytes and returned to the router layer, so the key is always current
+/// for the chunk being processed.
+pub(crate) const CHUNK_CONTAINS_GRAPHQL_ERROR: &str =
+    "apollo::telemetry::chunk_contains_graphql_error";
 /// The key to a map of errors that were already counted in a previous layer. This is subject to
 /// change and is NOT supported for user access.
 pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
@@ -38,9 +48,6 @@ pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
 /// plugins without having to deserialize the router response. This is subject to change and is NOT
 /// supported for user access.
 pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
-
-pub(crate) use deprecated::context_key_from_deprecated;
-pub(crate) use deprecated::context_key_to_deprecated;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;

@@ -303,7 +303,7 @@ async fn cache_control_merging_single_fetch() {
     // Router responds with `max-age` even if a single subgraph used `s-maxage`
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
+    insta::assert_snapshot!(&headers["cache-control"], @"s-maxage=120,public");
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -332,7 +332,7 @@ async fn cache_control_merging_multi_fetch() {
     // The smaller value is used.
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
+    insta::assert_snapshot!(&headers["cache-control"], @"max-age=600,s-maxage=60,public");
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -345,11 +345,19 @@ async fn cache_control_merging_multi_fetch() {
 }
 
 fn parse_max_age(cache_control: &str) -> u32 {
-    cache_control
-        .strip_prefix("max-age=")
-        .and_then(|s| s.strip_suffix(",public"))
+    let directives: Vec<&str> = cache_control.split(',').collect();
+    // Prefer s-maxage (authoritative for shared caches) over max-age
+    let directive = directives
+        .iter()
+        .find(|d| d.trim().starts_with("s-maxage="))
+        .or_else(|| directives.iter().find(|d| d.trim().starts_with("max-age=")))
+        .unwrap_or_else(|| panic!("expected max-age or s-maxage directive, got '{cache_control}'"));
+    directive
+        .trim()
+        .split('=')
+        .nth(1)
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
+        .unwrap_or_else(|| panic!("expected numeric value, got '{cache_control}'"))
 }
 
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {

@@ -1,4 +1,4 @@
-pub(crate) use crate::plugins::response_cache::cache_control;
+use crate::plugins::response_cache::cache_control::CacheControl;
 pub(crate) mod entity;
 pub(crate) mod invalidation;
 pub(crate) mod invalidation_endpoint;

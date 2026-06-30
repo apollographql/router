@@ -1,0 +1,36 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+# Three requestless `@connect` directives, each reading data that only exists
+# when a transport is configured. Every field below should trigger
+# `RequestlessSelectionUsesRequestData`:
+#
+# - `Query.greeting`   — implicit `$root` (the response body).
+# - `Query.code`       — bare `$status` (Details collapses to `$status`).
+# - `Query.trace`      — nested `$response.headers.trace` (Details lists the
+#                        full subtree; three source ranges are recorded).
+type Query {
+  greeting: String
+    @connect(
+      selection: """
+        message
+      """
+    )
+
+  code: Int
+    @connect(
+      selection: """
+        $status
+      """
+    )
+
+  trace: String
+    @connect(
+      selection: """
+        trace: $response.headers.trace
+      """
+    )
+}

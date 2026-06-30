@@ -59,7 +59,9 @@ telemetry:
           unit: request
           description: "supergraph requests"
           attributes:
-            static: hello
+            static:
+              static: hello
+
             graphql_operation_kind:
               operation_kind: string
       subgraph:

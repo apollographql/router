@@ -363,7 +363,6 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugins::subscription::callback::create_verifier;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -788,20 +787,11 @@ mod tests {
             .await
             .unwrap();
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_call()
-            .times(0)
-            .returning(move |req: SubgraphRequest| {
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            });
+        // The subscription plugin intercepts this request and never calls the inner service.
+        let (mock, handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
-        let mut subgraph_service = dyn_plugin.subgraph_service(
-            "my_subgraph_name",
-            BoxCloneService::new(mock_subgraph_service),
-        );
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxCloneService::new(mock));
         let subgraph_req = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http_ext::Request::fake_builder()
@@ -840,6 +830,7 @@ mod tests {
                 .extensions(Object::default())
                 .build()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[test]

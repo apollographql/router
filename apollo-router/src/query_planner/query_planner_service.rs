@@ -774,7 +774,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
 
         assert_eq!(
-            "spec error: parsing error: syntax error: Unexpected <EOF>.",
+            "spec error: parsing error: [1:1] syntax error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }

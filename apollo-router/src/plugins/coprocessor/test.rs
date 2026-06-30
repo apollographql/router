@@ -57,7 +57,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use futures::future::BoxFuture;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::Method;
@@ -66,23 +65,16 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
-    use router::body::RouterBody;
     use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
-    use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
-    use crate::context::deprecated::DEPRECATED_CLIENT_NAME;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockInternalHttpClientService;
-    use crate::plugin::test::MockRouterService;
-    use crate::plugin::test::MockSubgraphService;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::BodyConf;
     use crate::plugins::coprocessor::BodyFieldsConf;
     use crate::plugins::coprocessor::RouterRequestConf;
@@ -95,7 +87,6 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
-    use crate::plugins::telemetry::CLIENT_NAME;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -178,42 +169,54 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            // Return a simple successful response
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async move {
-                // Verify the request was sent to the stage-specific URL (8082), not the global URL (8081)
-                let uri = req.uri().to_string();
-                assert!(
-                    uri.contains("127.0.0.1:8082"),
-                    "Expected request to be sent to stage-specific URL port 8082, but got: {}",
-                    uri
-                );
-
-                // Return a valid coprocessor response
-                let input = json!({
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": "continue",
-                    "body": "{\"query\": \"{ __typename }\"}",
-                    "context": {
-                        "entries": {}
-                    }
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            // Verify the request was sent to the stage-specific URL (8082), not the global URL (8081)
+            let uri = req.uri().to_string();
+            assert!(
+                uri.contains("127.0.0.1:8082"),
+                "Expected request to be sent to stage-specific URL port 8082, but got: {}",
+                uri
+            );
+            // Return a valid coprocessor response
+            let input = json!({
+                "version": 1,
+                "stage": "RouterRequest",
+                "control": "continue",
+                "body": "{\"query\": \"{ __typename }\"}",
+                "context": {
+                    "entries": {}
+                }
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -228,6 +231,8 @@ mod tests {
 
         // This will call the mock_http_client, which verifies the correct URL is used
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -265,35 +270,40 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
+        let (mock_router_service, handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                // Wrong version!
-                let input = json!(
-                      {
-                  "version": 2,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                      "entries": {}
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            // Wrong version!
+            let input = json!(
+                  {
+              "version": 2,
+              "stage": "RouterRequest",
+              "control": "continue",
+              "id": "1b19c05fdafc521016df33148ad63c1b",
+              "body": "{
+                  \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                }",
+              "context": {
+                  "entries": {}
+              },
+              "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -314,6 +324,8 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -333,35 +345,40 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
+        let (mock_router_service, handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                // Wrong stage!
-                let input = json!(
-                {
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": "continue",
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": "{
-                            \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                            }",
-                    "context": {
-                        "entries": {}
-                    },
-                    "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            // Wrong stage!
+            let input = json!(
+            {
+                "version": 1,
+                "stage": "RouterResponse",
+                "control": "continue",
+                "id": "1b19c05fdafc521016df33148ad63c1b",
+                "body": "{
+                        \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                        }",
+                "context": {
+                    "entries": {}
+                },
+                "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -382,6 +399,8 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -401,34 +420,39 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_router_service = MockRouterService::new();
+        let (mock_router_service, handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                // Wrong stage!
-                let input = json!(
-                {
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": "{
-                    \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                    "context": {
-                        "entries": {}
-                    },
-                    "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            // Missing control field!
+            let input = json!(
+            {
+                "version": 1,
+                "stage": "RouterRequest",
+                "id": "1b19c05fdafc521016df33148ad63c1b",
+                "body": "{
+                \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                }",
+                "context": {
+                    "entries": {}
+                },
+                "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -449,6 +473,8 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -463,32 +489,37 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
+        let (mock_subgraph_service, handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": {
-                                    "break": 200
-                                },
-                                "id": "3a67e2dd75e8777804e4a8f42b971df7",
-                                "body": {
-                                    "errors": [{
-                                        "body": "Errors need a message, this will fail to deserialize"
-                                    }]
-                                }
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": {
+                                "break": 200
+                            },
+                            "id": "3a67e2dd75e8777804e4a8f42b971df7",
+                            "body": {
+                                "errors": [{
+                                    "body": "Errors need a message, this will fail to deserialize"
+                                }]
+                            }
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -513,6 +544,8 @@ mod tests {
                 .message
                 .to_string()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -527,115 +560,114 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.subgraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            // The subgraph uri should have changed
+            assert_eq!(
+                "http://thisurihaschanged/",
+                req.subgraph_request.uri().to_string()
+            );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.subgraph_request.into_body().query.unwrap()
+            );
+            // this should be the same as the initial request id
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(
+                deserialized_request.subgraph_request_id.as_deref(),
+                Some("5678")
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": "continue",
+                            "headers": {
+                                "cookie": [
+                                  "tasty_cookie=strawberry"
+                                ],
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "query": "query Long {\n  me {\n  name\n}\n}"
+                              },
+                              "context": {
+                                "entries": {
+                                  "accepts-json": false,
+                                  "accepts-wildcard": true,
+                                  "accepts-multipart": false,
+                                  "this-is-a-test-context": 42
+                                }
+                              },
+                              "serviceName": "service name shouldn't change",
+                              "uri": "http://thisurihaschanged",
+                              "subgraphRequestId": "9abc"
+                        }"#,
+                ))
                 .unwrap();
-                assert_eq!(
-                    deserialized_request.subgraph_request_id.as_deref(),
-                    Some("5678")
-                );
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": "continue",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "query": "query Long {\n  me {\n  name\n}\n}"
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "accepts-json": false,
-                                      "accepts-wildcard": true,
-                                      "accepts-multipart": false,
-                                      "this-is-a-test-context": 42
-                                    }
-                                  },
-                                  "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged",
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -656,6 +688,8 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -673,126 +707,126 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.subgraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            // The subgraph uri should have changed
+            assert_eq!(
+                "http://thisurihaschanged/",
+                req.subgraph_request.uri().to_string()
+            );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.subgraph_request.into_body().query.unwrap()
+            );
+            // this should be the same as the initial request id
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(
+                deserialized_request.subgraph_request_id.as_deref(),
+                Some("5678")
+            );
+            let req_context = deserialized_request.context.unwrap_or_default();
+            assert_eq!(
+                req_context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .expect("context key should be there")
+                    .expect("context key should have the right format"),
+                42
+            );
+            assert!(
+                req_context
+                    .get::<&str, String>("not_passed")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": "continue",
+                            "headers": {
+                                "cookie": [
+                                  "tasty_cookie=strawberry"
+                                ],
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "query": "query Long {\n  me {\n  name\n}\n}"
+                              },
+                              "context": {
+                                "entries": {
+                                  "this-is-a-test-context": 42
+                                }
+                              },
+                              "serviceName": "service name shouldn't change",
+                              "uri": "http://thisurihaschanged",
+                              "subgraphRequestId": "9abc"
+                        }"#,
+                ))
                 .unwrap();
-                assert_eq!(
-                    deserialized_request.subgraph_request_id.as_deref(),
-                    Some("5678")
-                );
-                let context = deserialized_request.context.unwrap_or_default();
-                assert_eq!(
-                    context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    42
-                );
-                assert!(
-                    context
-                        .get::<&str, String>("not_passed")
-                        .ok()
-                        .flatten()
-                        .is_none()
-                );
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": "continue",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "query": "query Long {\n  me {\n  name\n}\n}"
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "this-is-a-test-context": 42
-                                    }
-                                  },
-                                  "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged",
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -821,177 +855,8 @@ mod tests {
             json!({ "test": 1234_u32 }),
             response.response.into_body().data.unwrap()
         );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_subgraph_request_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: SubgraphRequestConf {
-                condition: Default::default(),
-                body: true,
-                subgraph_request_id: true,
-                context: ContextConf::Deprecated,
-                ..Default::default()
-            },
-            response: Default::default(),
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.subgraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-                assert_eq!(
-                    req.context
-                        .get::<&str, String>("apollo::supergraph::operation_name")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    "New".to_string()
-                );
-
-                // The subgraph uri should have changed
-                assert_eq!(
-                    "http://thisurihaschanged/",
-                    req.subgraph_request.uri().to_string()
-                );
-
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
-                );
-
-                // this should be the same as the initial request id
-                assert_eq!(&*req.id, "5678");
-
-                Ok(subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build())
-            });
-
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
-                .unwrap();
-                assert_eq!(
-                    deserialized_request.subgraph_request_id.as_deref(),
-                    Some("5678")
-                );
-                let context = deserialized_request.context.unwrap_or_default();
-                assert_eq!(
-                    context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    42
-                );
-                assert_eq!(
-                    context
-                        .get::<&str, String>("operation_name")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    "Test".to_string()
-                );
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": "continue",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "query": "query Long {\n  me {\n  name\n}\n}"
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "this-is-a-test-context": 42,
-                                      "operation_name": "New"
-                                    }
-                                  },
-                                  "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged",
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed_clone(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 42)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        assert_eq!("5678", &*response.id);
-        assert_eq!(
-            json!({ "test": 1234_u32 }),
-            response.response.into_body().data.unwrap()
-        );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1012,47 +877,26 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!("/", req.subgraph_request.uri().to_string());
-
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!("/", req.subgraph_request.uri().to_string());
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
-                    .build())
-            });
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": "continue",
-                                  "body": {
-                                    "query": "query Long {\n  me {\n  name\n}\n}"
-                                  },
-                                  "context": {
-                                  },
-                                  "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+                    .build(),
+            );
         });
+
+        let (mock_http_client, http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
 
         let service = subgraph_stage.as_service(
             mock_http_client,
@@ -1075,6 +919,8 @@ mod tests {
                 .data
                 .unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::assert_no_mock_calls(http_handle).await;
     }
 
     #[tokio::test]
@@ -1089,37 +935,42 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
+        let (mock_subgraph_service, handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": {
-                                    "break": 200
-                                },
-                                "body": {
-                                    "errors": [{ "message": "my error message" }]
-                                },
-                                "context": {
-                                    "entries": {
-                                        "testKey": true
-                                    }
-                                },
-                                "headers": {
-                                    "aheader": ["a value"]
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": {
+                                "break": 200
+                            },
+                            "body": {
+                                "errors": [{ "message": "my error message" }]
+                            },
+                            "context": {
+                                "entries": {
+                                    "testKey": true
                                 }
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+                            },
+                            "headers": {
+                                "aheader": ["a value"]
+                            }
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -1146,6 +997,8 @@ mod tests {
             "my error message",
             response.into_body().errors[0].message.as_str()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1160,27 +1013,32 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
+        let (mock_subgraph_service, handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
 
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphRequest",
-                                "control": {
-                                    "break": 200
-                                },
-                                "body": "my error message"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": {
+                                "break": 200
+                            },
+                            "body": "my error message"
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -1211,6 +1069,8 @@ mod tests {
             }))
             .unwrap()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1225,84 +1085,87 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+            let subgraph_id = body.get("subgraphRequestId").unwrap();
+            assert_eq!(subgraph_id.as_str(), Some("5678"));
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "headers": {
+                                "cookie": [
+                                  "tasty_cookie=strawberry"
+                                ],
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "data": {
+                                    "test": 5678
+                                }
+                              },
+                              "context": {
+                                "entries": {
+                                  "accepts-json": false,
+                                  "accepts-wildcard": true,
+                                  "accepts-multipart": false,
+                                  "this-is-a-test-context": 42
+                                }
+                              },
+                              "subgraphRequestId": "9abc"
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-                let subgraph_id = body.get("subgraphRequestId").unwrap();
-                assert_eq!(subgraph_id.as_str(), Some("5678"));
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphResponse",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "data": {
-                                        "test": 5678
-                                    }
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "accepts-json": false,
-                                      "accepts-wildcard": true,
-                                      "accepts-multipart": false,
-                                      "this-is-a-test-context": 42
-                                    }
-                                  },
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -1338,6 +1201,8 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1352,77 +1217,80 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(serde_json_bytes::Value::Null)
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+            let subgraph_id = body.get("subgraphRequestId").unwrap();
+            assert_eq!(subgraph_id.as_str(), Some("5678"));
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "headers": {
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "data": null
+                              },
+                              "context": {
+                                "entries": {
+                                  "accepts-json": false,
+                                  "accepts-wildcard": true,
+                                  "accepts-multipart": false
+                                }
+                              },
+                              "subgraphRequestId": "9abc"
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-                let subgraph_id = body.get("subgraphRequestId").unwrap();
-                assert_eq!(subgraph_id.as_str(), Some("5678"));
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphResponse",
-                                "headers": {
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "data": null
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "accepts-json": false,
-                                      "accepts-wildcard": true,
-                                      "accepts-multipart": false
-                                    }
-                                  },
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -1444,6 +1312,8 @@ mod tests {
             serde_json_bytes::Value::Null,
             response.response.into_body().data.unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1461,100 +1331,101 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            assert_eq!(&*req.id, "5678");
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let deserialized_response: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+            assert_eq!(
+                deserialized_response.subgraph_request_id,
+                Some(SubgraphRequestId("5678".to_string()))
+            );
+            let req_context = deserialized_response.context.unwrap_or_default();
+            assert_eq!(
+                req_context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .expect("context key should be there")
+                    .expect("context key should have the right format"),
+                55
+            );
+            assert!(
+                req_context
+                    .get::<&str, String>("not_passed")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "headers": {
+                                "cookie": [
+                                  "tasty_cookie=strawberry"
+                                ],
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "data": {
+                                    "test": 5678
+                                }
+                              },
+                              "context": {
+                                "entries": {
+                                  "this-is-a-test-context": 42
+                                }
+                              },
+                              "subgraphRequestId": "9abc"
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let deserialized_response: Externalizable<Value> =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                assert_eq!(
-                    deserialized_response.subgraph_request_id,
-                    Some(SubgraphRequestId("5678".to_string()))
-                );
-
-                let context = deserialized_response.context.unwrap_or_default();
-                assert_eq!(
-                    context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    55
-                );
-                assert!(
-                    context
-                        .get::<&str, String>("not_passed")
-                        .ok()
-                        .flatten()
-                        .is_none()
-                );
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphResponse",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "data": {
-                                        "test": 5678
-                                    }
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "this-is-a-test-context": 42
-                                    }
-                                  },
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -1598,167 +1469,8 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_subgraph_response_with_deprecated_context() {
-        let subgraph_stage = SubgraphStage {
-            request: Default::default(),
-            response: SubgraphResponseConf {
-                condition: Default::default(),
-                body: BodyConf::All(true),
-                subgraph_request_id: true,
-                context: ContextConf::Deprecated,
-                ..Default::default()
-            },
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                assert_eq!(&*req.id, "5678");
-                Ok(subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .id(req.id)
-                    .subgraph_name(String::default())
-                    .build())
-            });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let deserialized_response: Externalizable<Value> =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                assert_eq!(
-                    deserialized_response.subgraph_request_id,
-                    Some(SubgraphRequestId("5678".to_string()))
-                );
-
-                let context = deserialized_response.context.unwrap_or_default();
-                assert_eq!(
-                    context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    55
-                );
-                assert_eq!(
-                    context
-                        .get::<&str, String>("operation_name")
-                        .expect("context key should be there")
-                        .expect("context key should have the right format"),
-                    "Test".to_string()
-                );
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphResponse",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "data": {
-                                        "test": 5678
-                                    }
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "this-is-a-test-context": 42,
-                                      "operation_name": "New"
-                                    }
-                                  },
-                                  "subgraphRequestId": "9abc"
-                            }"#,
-                    ))
-                    .unwrap())
-            })
-        });
-
-        let service = subgraph_stage.as_service(
-            mock_http_client,
-            mock_subgraph_service.boxed_clone(),
-            "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
-            true,
-        );
-
-        let mut request = subgraph::Request::fake_builder().build();
-        request.id = SubgraphRequestId("5678".to_string());
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-        request
-            .context
-            .insert("this-is-a-test-context", 55)
-            .unwrap();
-
-        let response = service.oneshot(request).await.unwrap();
-
-        // Let's assert that the subgraph response has been transformed as it should have.
-        assert_eq!(
-            response.response.headers().get("cookie").unwrap(),
-            "tasty_cookie=strawberry"
-        );
-        assert_eq!(&*response.id, "5678");
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, u8>("this-is-a-test-context")
-                .unwrap()
-                .unwrap(),
-            42
-        );
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
-        );
-
-        assert_eq!(
-            json!({ "test": 5678_u32 }),
-            response.response.into_body().data.unwrap()
-        );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1769,7 +1481,6 @@ mod tests {
                 // Will be satisfied
                 condition: Condition::Exists(SubgraphSelector::ResponseContext {
                     response_context: String::from("context_value"),
-                    redact: None,
                     default: None,
                 }),
                 body: BodyConf::All(true),
@@ -1777,78 +1488,82 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                req.context
-                    .insert("context_value", "content".to_string())
-                    .unwrap();
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            req.context
+                .insert("context_value", "content".to_string())
+                .unwrap();
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .subgraph_name(String::default())
-                    .build())
-            });
+                    .build(),
+            );
+        });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SubgraphResponse",
-                                "headers": {
-                                    "cookie": [
-                                      "tasty_cookie=strawberry"
-                                    ],
-                                    "content-type": [
-                                      "application/json"
-                                    ],
-                                    "host": [
-                                      "127.0.0.1:4000"
-                                    ],
-                                    "apollo-federation-include-trace": [
-                                      "ftv1"
-                                    ],
-                                    "apollographql-client-name": [
-                                      "manual"
-                                    ],
-                                    "accept": [
-                                      "*/*"
-                                    ],
-                                    "user-agent": [
-                                      "curl/7.79.1"
-                                    ],
-                                    "content-length": [
-                                      "46"
-                                    ]
-                                  },
-                                  "body": {
-                                    "data": {
-                                        "test": 5678
-                                    }
-                                  },
-                                  "context": {
-                                    "entries": {
-                                      "accepts-json": false,
-                                      "accepts-wildcard": true,
-                                      "accepts-multipart": false,
-                                      "this-is-a-test-context": 42
-                                    }
-                                  }
-                            }"#,
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SubgraphResponse",
+                            "headers": {
+                                "cookie": [
+                                  "tasty_cookie=strawberry"
+                                ],
+                                "content-type": [
+                                  "application/json"
+                                ],
+                                "host": [
+                                  "127.0.0.1:4000"
+                                ],
+                                "apollo-federation-include-trace": [
+                                  "ftv1"
+                                ],
+                                "apollographql-client-name": [
+                                  "manual"
+                                ],
+                                "accept": [
+                                  "*/*"
+                                ],
+                                "user-agent": [
+                                  "curl/7.79.1"
+                                ],
+                                "content-length": [
+                                  "46"
+                                ]
+                              },
+                              "body": {
+                                "data": {
+                                    "test": 5678
+                                }
+                              },
+                              "context": {
+                                "entries": {
+                                  "accepts-json": false,
+                                  "accepts-wildcard": true,
+                                  "accepts-multipart": false,
+                                  "this-is-a-test-context": 42
+                                }
+                              }
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = subgraph_stage.as_service(
@@ -1882,6 +1597,8 @@ mod tests {
             json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1899,39 +1616,41 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut handle_supergraph) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_supergraph.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(Value::Null)
+                    .subscribed(true)
+                    .build(),
+                req.context,
+            ));
+        });
 
-        mock_supergraph_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SupergraphResponse",
+                              "body": {
+                                "data": null
+                              }
+                        }"#,
                 ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                                "version": 1,
-                                "stage": "SupergraphResponse",
-                                  "body": {
-                                    "data": null
-                                  }
-                            }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = supergraph_stage.as_service(
@@ -1950,6 +1669,8 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -1969,61 +1690,65 @@ mod tests {
             },
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut handle_supergraph) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_supergraph.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(Value::Null)
+                    .subscribed(true)
+                    .build(),
+                req.context,
+            ));
+        });
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
-                ))
-            });
-
-        let mock_http_client =
-            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
-                            .unwrap();
-                    let context = deserialized_response.context.unwrap_or_default();
-                    assert_eq!(
-                        context
-                            .get::<&str, u8>("this-is-a-test-context")
-                            .expect("context key should be there")
-                            .expect("context key should have the right format"),
-                        42
-                    );
-                    assert!(
-                        context
-                            .get::<&str, String>("not_passed")
-                            .ok()
-                            .flatten()
-                            .is_none()
-                    );
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                                "version": 1,
-                                "stage": "SupergraphResponse",
-                                "context": {
-                                    "entries": {
-                                        "this-is-a-test-context": 25
-                                    }
-                                },
-                                "body": {
-                                    "data": null
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let deserialized_response: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+            let req_context = deserialized_response.context.unwrap_or_default();
+            assert_eq!(
+                req_context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .expect("context key should be there")
+                    .expect("context key should have the right format"),
+                42
+            );
+            assert!(
+                req_context
+                    .get::<&str, String>("not_passed")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                            "version": 1,
+                            "stage": "SupergraphResponse",
+                            "context": {
+                                "entries": {
+                                    "this-is-a-test-context": 25
                                 }
-                            }"#,
-                        ))
-                        .unwrap())
-                })
+                            },
+                            "body": {
+                                "data": null
+                            }
+                        }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -2058,109 +1783,8 @@ mod tests {
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
         assert_eq!(gql_response.data, Some(Value::Null));
-    }
-
-    #[tokio::test]
-    async fn external_plugin_supergraph_response_with_deprecated_context() {
-        let supergraph_stage = SupergraphStage {
-            request: Default::default(),
-            response: SupergraphResponseConf {
-                condition: Default::default(),
-                headers: false,
-                context: ContextConf::Deprecated,
-                body: BodyConf::All(true),
-                status_code: false,
-                sdl: false,
-                url: None,
-            },
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(Value::Null)
-                        .subscribed(true)
-                        .build(),
-                    req.context,
-                ))
-            });
-
-        let mock_http_client =
-            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let (_, body) = req.into_parts();
-                    let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
-                            .unwrap();
-                    let context = deserialized_response.context.unwrap_or_default();
-                    assert_eq!(
-                        context
-                            .get::<&str, String>("operation_name")
-                            .expect("context key should be there")
-                            .expect("context key should have the right format"),
-                        "Test".to_string()
-                    );
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                                "version": 1,
-                                "stage": "SupergraphResponse",
-                                "context": {
-                                    "entries": {
-                                        "operation_name": "New"
-                                    }
-                                },
-                                "body": {
-                                    "data": null
-                                }
-                            }"#,
-                        ))
-                        .unwrap())
-                })
-            });
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed_clone(),
-            "http://test".to_string(),
-            Arc::default(),
-            true,
-        );
-
-        let request = supergraph::Request::fake_builder().build().unwrap();
-        request
-            .context
-            .insert("apollo::supergraph::operation_name", "Test".to_string())
-            .unwrap();
-
-        let mut response = service.oneshot(request).await.unwrap();
-
-        assert_eq!(
-            response
-                .context
-                .get::<&str, String>("apollo::supergraph::operation_name")
-                .unwrap()
-                .unwrap(),
-            "New".to_string()
-        );
-        assert!(
-            response
-                .context
-                .get::<&str, String>("operation_name")
-                .ok()
-                .flatten()
-                .is_none()
-        );
-
-        let gql_response = response.response.body_mut().next().await.unwrap();
-        // Let's assert that the supergraph response has been transformed as it should have.
-        assert_eq!(gql_response.subscribed, Some(true));
-        assert_eq!(gql_response.data, Some(Value::Null));
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -2179,10 +1803,13 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
@@ -2195,83 +1822,94 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+            assert_eq!(
+                PipelineStep::RouterRequest.to_string(),
+                deserialized_request.stage
+            );
+            let input = json!(
+                  {
+              "version": 1,
+              "stage": "RouterRequest",
+              "control": "continue",
+              "id": "1b19c05fdafc521016df33148ad63c1b",
+              "headers": {
+                "cookie": [
+                  "tasty_cookie=strawberry"
+                ],
+                "content-type": [
+                  "application/json"
+                ],
+                "host": [
+                  "127.0.0.1:4000"
+                ],
+                "apollo-federation-include-trace": [
+                  "ftv1"
+                ],
+                "apollographql-client-name": [
+                  "manual"
+                ],
+                "accept": [
+                  "*/*"
+                ],
+                "user-agent": [
+                  "curl/7.79.1"
+                ],
+                "content-length": [
+                  "46"
+                ]
+              },
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
+              "context": {
+                "entries": {
+                  "accepts-json": false,
+                  "accepts-wildcard": true,
+                  "accepts-multipart": false,
+                  "this-is-a-test-context": 42
+                }
+              },
+              "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
                 .unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -2285,6 +1923,8 @@ mod tests {
         let request = supergraph::Request::canned_builder().build().unwrap();
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2305,10 +1945,13 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
@@ -2321,105 +1964,114 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(
+                deserialized_request
+                    .context
+                    .as_ref()
+                    .unwrap()
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+            assert!(
+                deserialized_request
+                    .context
+                    .as_ref()
+                    .unwrap()
+                    .get::<&str, String>("not_passed")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+            assert_eq!(
+                PipelineStep::RouterRequest.to_string(),
+                deserialized_request.stage
+            );
+            let input = json!(
+                  {
+              "version": 1,
+              "stage": "RouterRequest",
+              "control": "continue",
+              "id": "1b19c05fdafc521016df33148ad63c1b",
+              "headers": {
+                "cookie": [
+                  "tasty_cookie=strawberry"
+                ],
+                "content-type": [
+                  "application/json"
+                ],
+                "host": [
+                  "127.0.0.1:4000"
+                ],
+                "apollo-federation-include-trace": [
+                  "ftv1"
+                ],
+                "apollographql-client-name": [
+                  "manual"
+                ],
+                "accept": [
+                  "*/*"
+                ],
+                "user-agent": [
+                  "curl/7.79.1"
+                ],
+                "content-length": [
+                  "46"
+                ]
+              },
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
+              "context": {
+                "entries": {
+                  "accepts-json": false,
+                  "accepts-wildcard": true,
+                  "accepts-multipart": false,
+                  "this-is-a-test-context": 42
+                }
+              },
+              "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
                 .unwrap();
-
-                assert_eq!(
-                    deserialized_request
-                        .context
-                        .as_ref()
-                        .unwrap()
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
-
-                assert!(
-                    deserialized_request
-                        .context
-                        .as_ref()
-                        .unwrap()
-                        .get::<&str, String>("not_passed")
-                        .ok()
-                        .flatten()
-                        .is_none()
-                );
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -2449,6 +2101,8 @@ mod tests {
                 .flatten()
                 .is_some()
         );
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2474,7 +2128,10 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             assert!(
                 req.context
                     .get::<&str, u8>("this-is-a-test-context")
@@ -2482,79 +2139,20 @@ mod tests {
                     .flatten()
                     .is_none()
             );
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
-
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
-                .unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
         });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
+
+        let (mock_http_client, http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
 
         let service = router_stage.as_service(
             mock_http_client,
@@ -2567,6 +2165,8 @@ mod tests {
         let request = supergraph::Request::canned_builder().build().unwrap();
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+        crate::plugin::test::assert_no_mock_calls(http_handle).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2585,17 +2185,18 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
-                req.supergraph_request.headers().get("cookie").unwrap(),
+                req.router_request.headers().get("cookie").unwrap(),
                 "tasty_cookie=strawberry"
             );
 
-            // the method shouldn't have changed
-            assert_eq!(req.supergraph_request.method(), Method::GET);
-            // the uri shouldn't have changed
-            assert_eq!(req.supergraph_request.uri(), "/");
+            // the method shouldn't have changed (coprocessor said POST but we ignore method on continue)
+            assert_eq!(req.router_request.method(), Method::GET);
 
             assert_eq!(
                 req.context
@@ -2606,85 +2207,96 @@ mod tests {
             );
 
             // The query should have changed
+            let context = req.context.clone();
+            let body_bytes = router::body::into_bytes(req.router_request.into_body())
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(
-                "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                body["query"].as_str().unwrap(),
+                "query Long {\n  me {\n  name\n}\n}"
             );
 
-            Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+            assert_eq!(
+                PipelineStep::RouterRequest.to_string(),
+                deserialized_request.stage
+            );
+            let input = json!(
+                  {
+              "version": 1,
+              "stage": "RouterRequest",
+              "control": "continue",
+              "id": "1b19c05fdafc521016df33148ad63c1b",
+              "uri": "/this/is/a/new/uri",
+              "method": "POST",
+              "headers": {
+                "cookie": [
+                  "tasty_cookie=strawberry"
+                ],
+                "content-type": [
+                  "application/json"
+                ],
+                "host": [
+                  "127.0.0.1:4000"
+                ],
+                "apollo-federation-include-trace": [
+                  "ftv1"
+                ],
+                "apollographql-client-name": [
+                  "manual"
+                ],
+                "accept": [
+                  "*/*"
+                ],
+                "user-agent": [
+                  "curl/7.79.1"
+                ],
+                "content-length": [
+                  "46"
+                ]
+              },
+              "body": "{\"query\":\"query Long {\\n  me {\\n  name\\n}\\n}\"}",
+              "context": {
+                "entries": {
+                  "accepts-json": false,
+                  "accepts-wildcard": true,
+                  "accepts-multipart": false,
+                  "this-is-a-test-context": 42
+                }
+              },
+              "sdl": "the sdl shouldnt change"
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
                 .unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                      {
-                  "version": 1,
-                  "stage": "RouterRequest",
-                  "control": "continue",
-                  "id": "1b19c05fdafc521016df33148ad63c1b",
-                  "uri": "/this/is/a/new/uri",
-                  "method": "POST",
-                  "headers": {
-                    "cookie": [
-                      "tasty_cookie=strawberry"
-                    ],
-                    "content-type": [
-                      "application/json"
-                    ],
-                    "host": [
-                      "127.0.0.1:4000"
-                    ],
-                    "apollo-federation-include-trace": [
-                      "ftv1"
-                    ],
-                    "apollographql-client-name": [
-                      "manual"
-                    ],
-                    "accept": [
-                      "*/*"
-                    ],
-                    "user-agent": [
-                      "curl/7.79.1"
-                    ],
-                    "content-length": [
-                      "46"
-                    ]
-                  },
-                  "body": "{
-                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
-                    }",
-                  "context": {
-                    "entries": {
-                      "accepts-json": false,
-                      "accepts-wildcard": true,
-                      "accepts-multipart": false,
-                      "this-is-a-test-context": 42
-                    }
-                  },
-                  "sdl": "the sdl shouldnt change"
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -2701,6 +2313,8 @@ mod tests {
             .unwrap();
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -2719,52 +2333,55 @@ mod tests {
             response: Default::default(),
         };
 
-        let mut mock_router_service = MockRouterService::new();
+        let (mock_router_service, handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
-                .unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                    {
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": {
-                        "break": 200
-                    },
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": "{
-                    \"errors\": [{ \"message\": \"my error message\" }]
-                    }",
-                    "context": {
-                        "entries": {
-                            "testKey": true
-                        }
-                    },
-                    "headers": {
-                        "aheader": ["a value"]
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+            assert_eq!(
+                PipelineStep::RouterRequest.to_string(),
+                deserialized_request.stage
+            );
+            let input = json!(
+                {
+                "version": 1,
+                "stage": "RouterRequest",
+                "control": {
+                    "break": 200
+                },
+                "id": "1b19c05fdafc521016df33148ad63c1b",
+                "body": "{
+                \"errors\": [{ \"message\": \"my error message\" }]
+                }",
+                "context": {
+                    "entries": {
+                        "testKey": true
                     }
+                },
+                "headers": {
+                    "aheader": ["a value"]
                 }
-                );
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            }
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -2801,6 +2418,8 @@ mod tests {
             }),
             actual_response
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -2819,42 +2438,45 @@ mod tests {
             response: Default::default(),
         };
 
-        let mut mock_router_service = MockRouterService::new();
+        let (mock_router_service, handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
 
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-            Box::pin(async {
-                let deserialized_request: Externalizable<Value> = serde_json::from_slice(
-                    &router::body::into_bytes(req.into_body()).await.unwrap(),
-                )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let req = req.http_request;
+            let deserialized_request: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                    .unwrap();
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+            assert_eq!(
+                PipelineStep::RouterRequest.to_string(),
+                deserialized_request.stage
+            );
+            let input = json!(
+                {
+                "version": 1,
+                "stage": "RouterRequest",
+                "control": {
+                    "break": 401
+                },
+                "id": "1b19c05fdafc521016df33148ad63c1b",
+                "body": "this is a test error",
+            }
+            );
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
                 .unwrap();
-
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
-                assert_eq!(
-                    PipelineStep::RouterRequest.to_string(),
-                    deserialized_request.stage
-                );
-
-                let input = json!(
-                    {
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": {
-                        "break": 401
-                    },
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": "this is a test error",
-                }
-                );
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service = router_stage.as_service(
@@ -2892,6 +2514,8 @@ mod tests {
             }),
             actual_response
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -2909,88 +2533,97 @@ mod tests {
             request: Default::default(),
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!("{ \"test\": 1234_u32 }"))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
+                    .data(json!("{ \"test\": 1234_u32 }"))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router::service::from_supergraph_mock(router_mock).await;
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let res = req.http_request;
+            let deserialized_response: Externalizable<Value> =
+                serde_json::from_slice(&router::body::into_bytes(res.into_body()).await.unwrap())
                     .unwrap();
-
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::RouterResponse.to_string(),
-                        deserialized_response.stage
-                    );
-
-                    assert_eq!(
-                        json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
-                        deserialized_response.body.unwrap()
-                    );
-
-                    let input = json!(
-                          {
-                      "version": 1,
-                      "stage": "RouterResponse",
-                      "control": {
-                          "break": 400
-                      },
-                      "id": "1b19c05fdafc521016df33148ad63c1b",
-                      "headers": {
-                        "cookie": [
-                          "tasty_cookie=strawberry"
-                        ],
-                        "content-type": [
-                          "application/json"
-                        ],
-                        "host": [
-                          "127.0.0.1:4000"
-                        ],
-                        "apollo-federation-include-trace": [
-                          "ftv1"
-                        ],
-                        "apollographql-client-name": [
-                          "manual"
-                        ],
-                        "accept": [
-                          "*/*"
-                        ],
-                        "user-agent": [
-                          "curl/7.79.1"
-                        ],
-                        "content-length": [
-                          "46"
-                        ]
-                      },
-                      "body": "{
-                      \"data\": { \"test\": 42 }
-                    }",
-                      "context": {
-                        "entries": {
-                          "accepts-json": false,
-                          "accepts-wildcard": true,
-                          "accepts-multipart": false,
-                          "this-is-a-test-context": 42
-                        }
-                      },
-                      "sdl": "the sdl shouldnt change"
-                    });
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&input).unwrap(),
-                        ))
-                        .unwrap())
-                })
+            assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+            assert_eq!(
+                PipelineStep::RouterResponse.to_string(),
+                deserialized_response.stage
+            );
+            assert_eq!(
+                json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
+                deserialized_response.body.unwrap()
+            );
+            let input = json!(
+                  {
+              "version": 1,
+              "stage": "RouterResponse",
+              "control": {
+                  "break": 400
+              },
+              "id": "1b19c05fdafc521016df33148ad63c1b",
+              "headers": {
+                "cookie": [
+                  "tasty_cookie=strawberry"
+                ],
+                "content-type": [
+                  "application/json"
+                ],
+                "host": [
+                  "127.0.0.1:4000"
+                ],
+                "apollo-federation-include-trace": [
+                  "ftv1"
+                ],
+                "apollographql-client-name": [
+                  "manual"
+                ],
+                "accept": [
+                  "*/*"
+                ],
+                "user-agent": [
+                  "curl/7.79.1"
+                ],
+                "content-length": [
+                  "46"
+                ]
+              },
+              "body": "{
+                  \"data\": { \"test\": 42 }
+                }",
+              "context": {
+                "entries": {
+                  "accepts-json": false,
+                  "accepts-wildcard": true,
+                  "accepts-multipart": false,
+                  "this-is-a-test-context": 42
+                }
+              },
+              "sdl": "the sdl shouldnt change"
             });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&input).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
 
         let service = router_stage.as_service(
             mock_http_client,
@@ -3029,6 +2662,8 @@ mod tests {
             )
             .unwrap()
         );
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
@@ -3043,33 +2678,45 @@ mod tests {
             ..Default::default()
         };
 
-        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!({"test": 42}))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await;
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
+        let mock_router_service = router_mock;
 
-        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                // Return response that modifies the body - this demonstrates router stage processes
-                // coprocessor responses without GraphQL validation (unlike other stages)
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": "continue",
-                    "body": "{\"data\": {\"test\": \"modified_by_coprocessor\"}}"
-                });
-
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            // Return response that modifies the body - this demonstrates router stage processes
+            // coprocessor responses without GraphQL validation (unlike other stages)
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterResponse",
+                "control": "continue",
+                "body": "{\"data\": {\"test\": \"modified_by_coprocessor\"}}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
         });
 
         let service_stack = router_stage
@@ -3095,6 +2742,8 @@ mod tests {
             .unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "modified_by_coprocessor");
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     // ===== ROUTER RESPONSE VALIDATION TESTS =====
@@ -3103,10 +2752,22 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_valid() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_valid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_valid_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3123,14 +2784,28 @@ mod tests {
             .unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_empty() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_empty_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_empty_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3148,14 +2823,28 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // Empty object passes through unchanged since router response doesn't validate
         assert!(body.as_object().unwrap().is_empty());
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_enabled_invalid() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_invalid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_invalid_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled - but router response ignores this
@@ -3173,14 +2862,28 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // Invalid response passes through unchanged since router response doesn't validate
         assert_eq!(body["errors"], "this should be an array not a string");
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_valid() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_valid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_valid_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3197,14 +2900,28 @@ mod tests {
             .unwrap();
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["data"]["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_empty() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_empty_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_empty_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3222,14 +2939,28 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // Empty object passes through unchanged
         assert!(body.as_object().unwrap().is_empty());
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_response_validation_disabled_invalid() {
+        let (http_client, http_driver) = create_mock_http_client_router_response_invalid_response();
+        let (router_service, mut router_handle) = create_mock_router_service_for_validation_test();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(
+                router::Response::builder()
+                    .data(json!({"test": 42}))
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
+        });
         let service_stack = create_router_stage_for_response_validation_test()
             .as_service(
-                create_mock_http_client_router_response_invalid_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled - same behavior as enabled for router response
@@ -3247,6 +2978,8 @@ mod tests {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap();
         // Invalid response passes through unchanged
         assert_eq!(body["errors"], "this should be an array not a string");
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        crate::plugin::test::await_mock_driver(router_driver).await;
     }
 
     // Helper functions for router request validation tests
@@ -3293,122 +3026,175 @@ mod tests {
         }
     }
 
-    async fn create_mock_router_service_for_validation_test() -> router::BoxCloneService {
-        router::service::from_supergraph_mock_callback(move |req| {
-            Ok(supergraph::Response::builder()
-                .data(json!({"test": 42}))
-                .context(req.context)
-                .build()
-                .unwrap())
-        })
-        .await
-        .boxed_clone()
+    fn create_mock_router_service_for_validation_test() -> (
+        tower_test::mock::Mock<router::Request, router::Response>,
+        tower_test::mock::Handle<router::Request, router::Response>,
+    ) {
+        tower_test::mock::pair::<router::Request, router::Response>()
     }
 
     // Helper function to create working router service mock
-    fn create_mock_router_service() -> MockRouterService {
-        let mut mock_router_service = MockRouterService::new();
-
-        mock_router_service
-            .expect_clone()
-            .returning(MockRouterService::new);
-
-        mock_router_service
-            .expect_call()
-            .returning(|req: router::Request| {
-                Ok(router::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_router_service
+    fn create_mock_router_service() -> (
+        tower_test::mock::Mock<router::Request, router::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<router::Request, router::Response>();
+        let driver = tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            }
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns valid GraphQL response for RouterRequest
-    fn create_mock_http_client_router_request_valid_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": "continue",
-                    "body": "{\"data\": {\"test\": \"valid_response\"}}"
-                });
-
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_router_request_valid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterRequest",
+                "control": "continue",
+                "body": "{\"data\": {\"test\": \"valid_response\"}}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_router_response_valid_response() -> MockInternalHttpClientService {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": "continue",
-                    "body": "{\"data\": {\"test\": \"valid_response\"}}"
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_router_response_valid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterResponse",
+                "control": "continue",
+                "body": "{\"data\": {\"test\": \"valid_response\"}}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_router_response_invalid_response() -> MockInternalHttpClientService {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": "continue",
-                    "body": "{\"errors\": \"this should be an array not a string\"}"
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_router_response_invalid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterResponse",
+                "control": "continue",
+                "body": "{\"errors\": \"this should be an array not a string\"}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
-    fn create_mock_http_client_empty_router_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                // Return empty GraphQL break response - passes serde but fails GraphQL validation
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": {
-                        "break": 400
-                    },
-                    "body": "{}"
-                });
-
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_empty_router_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            // Return empty GraphQL break response - passes serde but fails GraphQL validation
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterRequest",
+                "control": {
+                    "break": 400
+                },
+                "body": "{}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper functions for router response validation tests
@@ -3428,31 +3214,48 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL response
-    fn create_mock_http_client_router_response_empty_response() -> MockInternalHttpClientService {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": "continue",
-                    "body": "{}"
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_router_response_empty_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "RouterResponse",
+                "control": "continue",
+                "body": "{}"
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     #[tokio::test]
     async fn external_plugin_router_request_validation_disabled_empty() {
+        let (http_client, http_driver) = create_mock_http_client_empty_router_response();
+        let (router_service, router_handle) = create_mock_router_service_for_validation_test();
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
-                create_mock_http_client_empty_router_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 false, // response_validation disabled
@@ -3476,14 +3279,19 @@ mod tests {
                 || body.get("data").is_some()
                 || body.get("errors").is_some()
         );
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        // Coprocessor breaks — inner service is never called
+        crate::plugin::test::assert_no_mock_calls(router_handle).await;
     }
 
     #[tokio::test]
     async fn external_plugin_router_request_validation_enabled_empty() {
+        let (http_client, http_driver) = create_mock_http_client_empty_router_response();
+        let (router_service, router_handle) = create_mock_router_service_for_validation_test();
         let service_stack = create_router_stage_for_request_validation_test()
             .as_service(
-                create_mock_http_client_empty_router_response(),
-                create_mock_router_service_for_validation_test().await,
+                http_client,
+                router_service.boxed_clone(),
                 "http://test".to_string(),
                 Arc::new("".to_string()),
                 true, // response_validation enabled
@@ -3511,6 +3319,9 @@ mod tests {
                 .unwrap()
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(http_driver).await;
+        // Coprocessor breaks — inner service is never called
+        crate::plugin::test::assert_no_mock_calls(router_handle).await;
     }
 
     #[test]
@@ -3713,26 +3524,26 @@ mod tests {
     }
 
     // Helper function to create mock subgraph service
-    fn create_mock_subgraph_service() -> MockSubgraphService {
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                Ok(subgraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(Object::new())
-                    .subgraph_name("coprocessorMockSubgraph")
-                    .context(req.context)
-                    .id(req.id)
-                    .build())
-            });
-        mock_subgraph_service
+    fn create_mock_subgraph_service() -> (
+        tower_test::mock::Mock<subgraph::Request, subgraph::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .subgraph_name("coprocessorMockSubgraph")
+                        .context(req.context)
+                        .id(req.id)
+                        .build(),
+                );
+            }
+        });
+        (mock, driver)
     }
 
     // Helper functions for subgraph request validation tests
@@ -3789,155 +3600,252 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
-    fn create_mock_http_client_subgraph_request_valid_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "SubgraphRequest",
-                    "control": {
-                        "break": 400
-                    },
-                    "body": {
-                        "data": {"test": "valid_response"}
-                    }
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_subgraph_request_valid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphRequest",
+                "control": {
+                    "break": 400
+                },
+                "body": {
+                    "data": {"test": "valid_response"}
+                }
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns empty GraphQL break response
-    fn create_mock_http_client_subgraph_request_empty_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "SubgraphRequest",
-                    "control": {
-                        "break": 400
-                    },
-                    "body": {}
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_subgraph_request_empty_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphRequest",
+                "control": {
+                    "break": 400
+                },
+                "body": {}
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_subgraph_request_invalid_response() -> MockInternalHttpClientService
-    {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let response = json!({
-                    "version": 1,
-                    "stage": "SubgraphRequest",
-                    "control": {
-                        "break": 400
-                    },
-                    "body": {
-                        "errors": "this should be an array not a string"
-                    }
-                });
-                Ok(http::Response::builder()
-                    .status(200)
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&response).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_subgraph_request_invalid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphRequest",
+                "control": {
+                    "break": 400
+                },
+                "body": {
+                    "errors": "this should be an array not a string"
+                }
+            });
+            let response = http::Response::builder()
+                .status(200)
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_subgraph_response_valid_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let input = json!({
-                    "version": 1,
-                    "stage": "SubgraphResponse",
-                    "control": "continue",
-                    "body": {
-                        "data": {"test": "valid_response"}
-                    }
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_subgraph_response_valid_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphResponse",
+                "control": "continue",
+                "body": {
+                    "data": {"test": "valid_response"}
+                }
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns empty GraphQL response
-    fn create_mock_http_client_subgraph_response_empty_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let input = json!({
-                    "version": 1,
-                    "stage": "SubgraphResponse",
-                    "control": "continue",
-                    "body": {}
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_subgraph_response_empty_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphResponse",
+                "control": "continue",
+                "body": {}
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_invalid_subgraph_response() -> MockInternalHttpClientService {
-        mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
-                let input = json!({
-                    "version": 1,
-                    "stage": "SubgraphResponse",
-                    "control": "continue",
-                    "body": {
-                        "errors": "this should be an array not a string"
-                    }
-                });
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        serde_json::to_string(&input).unwrap(),
-                    ))
-                    .unwrap())
-            })
-        })
+    fn create_mock_http_client_invalid_subgraph_response() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let response_body = json!({
+                "version": 1,
+                "stage": "SubgraphResponse",
+                "control": "continue",
+                "body": {
+                    "errors": "this should be an array not a string"
+                }
+            });
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    serde_json::to_string(&response_body).unwrap(),
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
+            });
+        });
+        (mock, driver)
     }
 
-    fn create_mock_http_client_hard_error() -> MockInternalHttpClientService {
-        let mut mock = MockInternalHttpClientService::new();
-
-        // Make clone() always return another mock with the same behavior:
-        mock.expect_clone()
-            .returning(create_mock_http_client_hard_error);
-
-        mock.expect_call()
-            .returning(|_| Box::pin(async move { Err("hard error from mock http client".into()) }));
-
-        mock
+    fn create_mock_http_client_hard_error() -> (
+        tower_test::mock::Mock<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let driver = tokio::spawn(async move {
+            while let Some((_req, responder)) = handle.next_request().await {
+                responder.send_error("hard error from mock http client");
+            }
+        });
+        (mock, driver)
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_invalid_subgraph_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -3952,15 +3860,21 @@ mod tests {
             &json!({ "test": 1234_u32 }),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     // ===== SUBGRAPH REQUEST VALIDATION TESTS =====
+    // The loop driver exits when the channel closes, so await_mock_driver works for both
+    // accept (service called) and reject (service not called, channel closes via oneshot drop).
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_request_valid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3975,13 +3889,17 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_request_empty_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -3998,13 +3916,18 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_enabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) =
+            create_mock_http_client_subgraph_request_invalid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4021,13 +3944,17 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_request_valid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4042,13 +3969,17 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_request_empty_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4062,13 +3993,18 @@ mod tests {
         // Empty object deserializes to GraphQL response with no data/errors
         assert_eq!(res.response.body().data, None);
         assert_eq!(res.response.body().errors.len(), 0);
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_request_validation_disabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) =
+            create_mock_http_client_subgraph_request_invalid_response();
         let service = create_subgraph_stage_for_request_validation_test().as_service(
-            create_mock_http_client_subgraph_request_invalid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4081,15 +4017,19 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         // Falls back to original response since permissive deserialization fails too
         assert!(res.response.body().data.is_some() || !res.response.body().errors.is_empty());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     // ===== SUBGRAPH RESPONSE VALIDATION TESTS =====
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_response_valid_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4103,13 +4043,17 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_response_empty_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4120,13 +4064,17 @@ mod tests {
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_enabled_invalid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_invalid_subgraph_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_invalid_subgraph_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             true, // Validation enabled
@@ -4137,13 +4085,17 @@ mod tests {
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_valid() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_response_valid_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_subgraph_response_valid_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4157,13 +4109,17 @@ mod tests {
             &json!({"test": "valid_response"}),
             res.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_subgraph_response_validation_disabled_empty() {
+        let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+        let (http_client, http_driver) = create_mock_http_client_subgraph_response_empty_response();
         let service = create_subgraph_stage_for_validation_test().as_service(
-            create_mock_http_client_subgraph_response_empty_response(),
-            create_mock_subgraph_service().boxed_clone(),
+            http_client,
+            subgraph_mock.boxed_clone(),
             "http://test".to_string(),
             "my_subgraph_service_name".to_string(),
             false, // Validation disabled
@@ -4176,6 +4132,8 @@ mod tests {
         // (all fields are optional with defaults), resulting in a response with no data/errors
         assert_eq!(res.response.body().data, None);
         assert_eq!(res.response.body().errors.len(), 0);
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     // ===== SUBGRAPH SELECTIVE BODY FILTERING TESTS =====
@@ -4195,17 +4153,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                use crate::graphql::Error;
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            use crate::graphql::Error;
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
                         Error::builder()
@@ -4220,34 +4174,43 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+            // Verify only errors are sent, not data or extensions
+            assert!(body.get("body").is_some());
+            let response_body = body.get("body").unwrap();
+            assert!(response_body.get("errors").is_some());
+            assert!(response_body.get("data").is_none());
+            assert!(response_body.get("extensions").is_none());
+
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                        "version": 1,
+                        "stage": "SubgraphResponse",
+                        "body": {
+                            "errors": [{ "message": "modified error" }]
+                        }
+                    }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                // Verify only errors are sent, not data or extensions
-                assert!(body.get("body").is_some());
-                let response_body = body.get("body").unwrap();
-                assert!(response_body.get("errors").is_some());
-                assert!(response_body.get("data").is_none());
-                assert!(response_body.get("extensions").is_none());
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse",
-                            "body": {
-                                "errors": [{ "message": "modified error" }]
-                            }
-                        }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -4268,6 +4231,8 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -4285,17 +4250,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                use crate::graphql::Error;
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            use crate::graphql::Error;
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .error(
                         Error::builder()
@@ -4310,35 +4271,44 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+            // Verify data and extensions are sent, but not errors
+            assert!(body.get("body").is_some());
+            let response_body = body.get("body").unwrap();
+            assert!(response_body.get("data").is_some());
+            assert!(response_body.get("extensions").is_some());
+            assert!(response_body.get("errors").is_none());
+
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                        "version": 1,
+                        "stage": "SubgraphResponse",
+                        "body": {
+                            "data": { "test": 5678 },
+                            "extensions": { "ext_key": "modified_value" }
+                        }
+                    }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                // Verify data and extensions are sent, but not errors
-                assert!(body.get("body").is_some());
-                let response_body = body.get("body").unwrap();
-                assert!(response_body.get("data").is_some());
-                assert!(response_body.get("extensions").is_some());
-                assert!(response_body.get("errors").is_none());
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse",
-                            "body": {
-                                "data": { "test": 5678 },
-                                "extensions": { "ext_key": "modified_value" }
-                            }
-                        }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -4363,6 +4333,8 @@ mod tests {
         );
         // Original errors should be preserved since they weren't sent to coprocessor
         assert_eq!(response.response.body().errors[0].message, "test error");
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -4380,41 +4352,47 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+            // Verify no body is sent
+            assert!(body.get("body").is_none());
+
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                        "version": 1,
+                        "stage": "SubgraphResponse"
+                    }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                // Verify no body is sent
-                assert!(body.get("body").is_none());
-
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse"
-                        }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -4433,6 +4411,8 @@ mod tests {
             json!({ "test": 1234_u32 }),
             *response.response.body().data.as_ref().unwrap()
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -4451,59 +4431,65 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Response with data but NO errors
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Response with data but NO errors
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+            // Verify errors field is sent even though it's empty
+            assert!(body.get("body").is_some());
+            let response_body = body.get("body").unwrap();
+            assert!(
+                response_body.get("errors").is_some(),
+                "errors field should be present"
+            );
+            let errors = response_body.get("errors").unwrap();
+            assert!(errors.is_array(), "errors should be an array");
+            assert_eq!(
+                errors.as_array().unwrap().len(),
+                0,
+                "errors array should be empty"
+            );
+            // data and extensions should not be sent since not configured
+            assert!(response_body.get("data").is_none());
+            assert!(response_body.get("extensions").is_none());
+
+            // Don't modify the response - just return it as-is
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                        "version": 1,
+                        "stage": "SubgraphResponse"
+                    }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                // Verify errors field is sent even though it's empty
-                assert!(body.get("body").is_some());
-                let response_body = body.get("body").unwrap();
-                assert!(
-                    response_body.get("errors").is_some(),
-                    "errors field should be present"
-                );
-                let errors = response_body.get("errors").unwrap();
-                assert!(errors.is_array(), "errors should be an array");
-                assert_eq!(
-                    errors.as_array().unwrap().len(),
-                    0,
-                    "errors array should be empty"
-                );
-                // data and extensions should not be sent since not configured
-                assert!(response_body.get("data").is_none());
-                assert!(response_body.get("extensions").is_none());
-
-                // Don't modify the response - just return it as-is
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse"
-                        }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -4524,6 +4510,8 @@ mod tests {
         );
         // Errors should remain empty
         assert!(response.response.body().errors.is_empty());
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
 
     #[tokio::test]
@@ -4543,17 +4531,13 @@ mod tests {
             },
         };
 
-        let mut mock_subgraph_service = MockSubgraphService::new();
-
-        mock_subgraph_service
-            .expect_clone()
-            .returning(MockSubgraphService::new);
-
-        mock_subgraph_service
-            .expect_call()
-            .returning(|req: subgraph::Request| {
-                // Response with data and extensions
-                Ok(subgraph::Response::builder()
+        let (mock_subgraph_service, mut handle_subgraph) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let subgraph_driver = tokio::spawn(async move {
+            let (req, responder) = handle_subgraph.next_request().await.unwrap();
+            // Response with data and extensions
+            responder.send_response(
+                subgraph::Response::builder()
                     .data(json!({ "test": 5678_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::from_iter(vec![(
@@ -4563,44 +4547,53 @@ mod tests {
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
-                    .build())
+                    .build(),
+            );
+        });
+
+        let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        let http_driver = tokio::spawn(async move {
+            let (req, responder) = http_handle.next_request().await.unwrap();
+            let context = req.context.clone();
+            let (_, body) = req.http_request.into_parts();
+            let body: Value =
+                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+            // Verify only extensions are sent, not data or errors
+            assert!(body.get("body").is_some());
+            let response_body = body.get("body").unwrap();
+            assert!(
+                response_body.get("extensions").is_some(),
+                "extensions should be present"
+            );
+            assert!(
+                response_body.get("data").is_none(),
+                "data should not be sent"
+            );
+            assert!(
+                response_body.get("errors").is_none(),
+                "errors should not be sent"
+            );
+
+            // Coprocessor modifies extensions only
+            let response = http::Response::builder()
+                .body(router::body::from_bytes(
+                    r#"{
+                        "version": 1,
+                        "stage": "SubgraphResponse",
+                        "body": {
+                            "extensions": { "trace_id": "abc123", "processor": "modified" }
+                        }
+                    }"#,
+                ))
+                .unwrap();
+            responder.send_response(crate::services::http::HttpResponse {
+                http_response: response,
+                context,
             });
-
-        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
-            Box::pin(async move {
-                let (_, body) = r.into_parts();
-                let body: Value =
-                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
-
-                // Verify only extensions are sent, not data or errors
-                assert!(body.get("body").is_some());
-                let response_body = body.get("body").unwrap();
-                assert!(
-                    response_body.get("extensions").is_some(),
-                    "extensions should be present"
-                );
-                assert!(
-                    response_body.get("data").is_none(),
-                    "data should not be sent"
-                );
-                assert!(
-                    response_body.get("errors").is_none(),
-                    "errors should not be sent"
-                );
-
-                // Coprocessor modifies extensions only
-                Ok(http::Response::builder()
-                    .body(router::body::from_bytes(
-                        r#"{
-                            "version": 1,
-                            "stage": "SubgraphResponse",
-                            "body": {
-                                "extensions": { "trace_id": "abc123", "processor": "modified" }
-                            }
-                        }"#,
-                    ))
-                    .unwrap())
-            })
         });
 
         let service = subgraph_stage.as_service(
@@ -4628,77 +4621,9 @@ mod tests {
             response.response.body().extensions.get("processor"),
             Some(&json!("modified"))
         );
+        crate::plugin::test::await_mock_driver(subgraph_driver).await;
+        crate::plugin::test::await_mock_driver(http_driver).await;
     }
-
-    #[allow(clippy::type_complexity)]
-    fn mock_with_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(
-                    move |req: crate::services::http::HttpRequest| {
-                        let context = req.context.clone();
-                        let fut = callback(req.http_request);
-                        Box::pin(async move {
-                            let response = fut.await?;
-                            Ok(crate::services::http::HttpResponse {
-                                http_response: response,
-                                context,
-                            })
-                        })
-                    },
-                );
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn mock_with_deferred_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(
-                        move |req: crate::services::http::HttpRequest| {
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(crate::services::http::HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        },
-                    );
-                    mock_http_client
-                });
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
-    }
-
-    // Tests for conditional validation based on incoming payload validity
 
     // Helper functions for readable tests
     fn valid_response() -> crate::graphql::Response {
@@ -5212,6 +5137,8 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_deletes_missing_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
@@ -5220,6 +5147,8 @@ mod tests {
         target_context.insert("k1", "v1".to_string()).unwrap();
         target_context.insert("k2", "v2".to_string()).unwrap();
         target_context.insert("k3", "v3".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1", "k2", "k3"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context without k2 (deleted)
         let returned_context = Context::new();
@@ -5230,8 +5159,7 @@ mod tests {
         returned_context.insert("k3", "v3".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
-            .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5249,12 +5177,16 @@ mod tests {
 
     #[test]
     fn test_update_context_from_coprocessor_adds_new_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
         // Create a context with some keys
         let target_context = Context::new();
         target_context.insert("k1", "v1".to_string()).unwrap();
+
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Coprocessor returns context with a new key
         let returned_context = Context::new();
@@ -5264,8 +5196,7 @@ mod tests {
         returned_context.insert("k2", "v2_new".to_string()).unwrap();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &ContextConf::All)
-            .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be updated
         assert_eq!(
@@ -5282,7 +5213,6 @@ mod tests {
     #[test]
     fn test_update_context_from_coprocessor_preserves_keys_not_sent() {
         use std::collections::HashSet;
-        use std::sync::Arc;
 
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
@@ -5297,13 +5227,10 @@ mod tests {
         // Coprocessor returns context without k1 (deleted)
         let returned_context = Context::new();
 
-        // Use Selective config to only send "k1", not "key_not_sent"
-        let selective_keys: HashSet<String> = ["k1".to_string()].into();
-        let context_config = ContextConf::Selective(Arc::new(selective_keys));
+        let keys_sent: HashSet<String> = ["k1"].into_iter().map(String::from).collect();
 
         // Update context
-        update_context_from_coprocessor(&target_context, returned_context, &context_config)
-            .unwrap();
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
         // k1 should be deleted (was sent but missing from returned context)
         assert!(!target_context.contains_key("k1"));
@@ -5314,54 +5241,108 @@ mod tests {
         );
     }
 
-    #[rstest::rstest]
-    fn test_update_context_from_coprocessor_handles_deprecated_key_names(
-        #[values(DEPRECATED_CLIENT_NAME, CLIENT_NAME)] target_context_key_name: &str,
-    ) {
+    #[test]
+    fn test_update_context_from_coprocessor_preserves_concurrently_added_keys() {
+        use std::collections::HashSet;
+
         use crate::Context;
         use crate::plugins::coprocessor::update_context_from_coprocessor;
 
-        let target_context =
-            Context::from_iter([(target_context_key_name.to_string(), "v1".into())]);
-        let returned_context =
-            Context::from_iter([(DEPRECATED_CLIENT_NAME.to_string(), "v2".into())]);
+        // Simulate: keys_sent = {k1, k2} (snapshot at time T1), then k3 is added
+        // to target concurrently (at time T2), coprocessor returns {k1} (deleted k2).
+        // Result: k1 kept, k2 deleted, k3 preserved (was never sent).
+        let target_context = Context::new();
+        target_context.insert("k1", "v1".to_string()).unwrap();
+        target_context.insert("k2", "v2".to_string()).unwrap();
+        // k3 simulates a key added by a concurrent parallel subgraph stage after the
+        // snapshot was taken but before the retain runs
+        target_context
+            .insert("k3", "concurrent_value".to_string())
+            .unwrap();
 
-        update_context_from_coprocessor(
-            &target_context,
-            returned_context,
-            &ContextConf::Deprecated,
-        )
-        .unwrap();
+        let keys_sent: HashSet<String> = ["k1", "k2"].into_iter().map(String::from).collect();
+        let returned_context = Context::new();
+        returned_context.insert("k1", "v1".to_string()).unwrap();
+        // k2 intentionally removed by coprocessor
+        // k3 was never sent, must survive
 
-        assert_eq!(
-            target_context.get_json_value(CLIENT_NAME),
-            Some(json!("v2")),
-        );
+        update_context_from_coprocessor(&target_context, returned_context, &keys_sent).unwrap();
 
-        assert!(
-            !target_context.contains_key(DEPRECATED_CLIENT_NAME),
-            "DEPRECATED_CLIENT_NAME should not be present"
-        );
+        assert!(target_context.contains_key("k1"));
+        assert!(!target_context.contains_key("k2")); // deleted by coprocessor
+        assert!(target_context.contains_key("k3")); // preserved (never sent)
+    }
+
+    #[test]
+    fn test_sibling_subgraph_response_does_not_delete_other_subgraphs_keys() {
+        use std::collections::HashSet;
+
+        use crate::Context;
+        use crate::plugins::coprocessor::update_context_from_coprocessor;
+
+        // Simulate the parallel fanout scenario:
+        // - accounts SubgraphRequest added accounts_request_start to shared context
+        // - book SubgraphResponse fires, its snapshot didn't include accounts_request_start
+        // - book's coprocessor returns without accounts_request_start
+        // - accounts_request_start must survive in the shared context
+        let shared_context = Context::new();
+        shared_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        shared_context
+            .insert("accounts_request_start", 1234i64)
+            .unwrap();
+        shared_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+
+        // book's snapshot only had base_key and book_request_start at the time
+        let keys_sent: HashSet<String> = ["base_key", "book_request_start"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let returned_context = Context::new();
+        returned_context
+            .insert("base_key", "base".to_string())
+            .unwrap();
+        returned_context
+            .insert("book_request_start", 5678i64)
+            .unwrap();
+        returned_context
+            .insert("book_request_end", 5700i64)
+            .unwrap();
+
+        update_context_from_coprocessor(&shared_context, returned_context, &keys_sent).unwrap();
+
+        // accounts_request_start was never sent to book's coprocessor, so it must survive
+        assert!(shared_context.contains_key("accounts_request_start"));
+        assert!(shared_context.contains_key("book_request_start"));
+        // new key added by coprocessor
+        assert!(shared_context.contains_key("book_request_end"));
+        assert!(shared_context.contains_key("base_key"));
     }
 
     // Subgraph stage metrics test
     #[tokio::test]
     async fn subgraph_request_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) =
+                    create_mock_http_client_subgraph_request_valid_response();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5377,20 +5358,22 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) =
+                    create_mock_http_client_subgraph_response_valid_response();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5406,23 +5389,26 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_with_false_condition();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_mock, http_handle) = tower_test::mock::pair::<
+                    crate::services::http::HttpRequest,
+                    crate::services::http::HttpResponse,
+                >();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_mock,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::assert_no_mock_calls(http_handle).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5432,23 +5418,26 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_response_with_false_condition();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_mock, http_handle) = tower_test::mock::pair::<
+                    crate::services::http::HttpRequest,
+                    crate::services::http::HttpResponse,
+                >();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_mock,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::assert_no_mock_calls(http_handle).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5458,36 +5447,40 @@ mod tests {
     #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_when_conditions_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) =
+                    create_mock_http_client_subgraph_request_valid_response();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_request_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) =
+                    create_mock_http_client_subgraph_response_valid_response();
                 let _service = _stage.as_service(
-                    create_mock_http_client_subgraph_response_valid_response(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    false, // Validation disabled
+                    false,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5502,20 +5495,21 @@ mod tests {
     #[tokio::test]
     async fn subgraph_request_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
-                    create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5531,20 +5525,21 @@ mod tests {
     #[tokio::test]
     async fn subgraph_response_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
-                    create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5560,36 +5555,38 @@ mod tests {
     #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_for_errored_stages_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..1 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
-                    create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_validation_test();
-
+                let (subgraph_mock, subgraph_driver) = create_mock_subgraph_service();
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
                 let _service = _stage.as_service(
-                    create_mock_http_client_hard_error(),
-                    create_mock_subgraph_service().boxed_clone(),
+                    http_client,
+                    subgraph_mock.boxed_clone(),
                     "http://test".to_string(),
                     "my_service".to_string(),
-                    true, // Validation enabled
+                    true,
                 );
-
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
+                crate::plugin::test::await_mock_driver(subgraph_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5604,25 +5601,24 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                // Mock HTTP client used by coprocessor (RouterRequest stage)
-                let mock_http_client = create_mock_http_client_router_request_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) =
+                    create_mock_http_client_router_request_valid_response();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 3, Some(true))]);
@@ -5634,24 +5630,24 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_incremented_when_condition_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) =
+                    create_mock_http_client_router_response_valid_response();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 2, Some(true))]);
@@ -5663,28 +5659,28 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_with_false_condition();
-                // Mock HTTP client used by coprocessor (RouterRequest stage)
-                let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_mock, http_handle) = tower_test::mock::pair::<
+                    crate::services::http::HttpRequest,
+                    crate::services::http::HttpResponse,
+                >();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_mock,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::assert_no_mock_calls(http_handle).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5694,27 +5690,28 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_not_incremented_when_condition_false() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..1 {
                 let router_stage = create_router_stage_for_response_with_false_condition();
-                let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_mock, http_handle) = tower_test::mock::pair::<
+                    crate::services::http::HttpRequest,
+                    crate::services::http::HttpResponse,
+                >();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_mock,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::assert_no_mock_calls(http_handle).await;
             }
 
-            // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
         }
         .with_metrics()
@@ -5724,44 +5721,44 @@ mod tests {
     #[tokio::test]
     async fn both_router_stages_metric_incremented_when_conditions_true() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                let mock_http_client = create_mock_http_client_router_request_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) =
+                    create_mock_http_client_router_request_valid_response();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_router_response_valid_response();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) =
+                    create_mock_http_client_router_response_valid_response();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -5776,24 +5773,23 @@ mod tests {
     #[tokio::test]
     async fn router_request_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
                         false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 2, Some(false))]);
@@ -5805,24 +5801,23 @@ mod tests {
     #[tokio::test]
     async fn router_response_metric_incremented_for_errored_stage_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[(
@@ -5836,46 +5831,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn router_response_deferred_chunk_metric_incremented_when_on_graphql_error_matches() {
+        // Tests that apollo.router.operations.coprocessor is recorded when a deferred chunk
+        // matches the on_graphql_error condition, even when the first chunk did not match.
+        //
+        // Bug: `executed` was only set based on first-chunk processing.  If the first chunk
+        // had no errors (condition false) but a later deferred chunk did (condition true), the
+        // metric was never recorded because the lazy mapped_stream runs after `executed` is
+        // checked by the caller.
+        //
+        // The mock uses supergraph::Response::new_from_response (which calls check_for_errors
+        // internally) to drive CHUNK_CONTAINS_GRAPHQL_ERROR from the actual response content —
+        // the same mechanism used in the real pipeline.
+        async {
+            use futures::StreamExt as _;
+
+            use crate::graphql::Error as GraphQLError;
+            use crate::plugins::telemetry::config::AttributeValue;
+
+            // RouterStage with condition: on_graphql_error: true
+            let router_stage = RouterStage {
+                request: Default::default(),
+                response: RouterResponseConf {
+                    condition: Condition::Eq([
+                        SelectorOrValue::Selector(RouterSelector::OnGraphQLError {
+                            on_graphql_error: true,
+                        }),
+                        SelectorOrValue::Value(AttributeValue::Bool(true)),
+                    ]),
+                    body: true,
+                    ..Default::default()
+                },
+            };
+
+            // HTTP client mock: returns a simple "continue" response for coprocessor calls
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response_body = json!({
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                });
+                let response = http::Response::builder()
+                    .status(200)
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&response_body).unwrap(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // Mock router service returning a 2-chunk response. The response is built using
+            // supergraph::Response::new_from_response, which calls check_for_errors internally.
+            // check_for_errors wraps the graphql::Response stream so that CHUNK_CONTAINS_GRAPHQL_ERROR
+            // is set in context as each chunk is polled — identical to how the real pipeline works.
+            //
+            //   Chunk 1: no errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = false
+            //   Chunk 2: has errors → check_for_errors sets CHUNK_CONTAINS_GRAPHQL_ERROR = true
+            let (mock_router_service, mut handle_router) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = handle_router.next_request().await.unwrap();
+                let ctx = req.context.clone();
+
+                let graphql_chunks = vec![
+                    // Chunk 1: successful response — condition will not fire
+                    Response::builder()
+                        .data(serde_json_bytes::json!({"hello": "world"}))
+                        .build(),
+                    // Chunk 2: response with errors — condition will fire
+                    Response::builder()
+                        .errors(vec![
+                            GraphQLError::builder().message("deferred error").build(),
+                        ])
+                        .build(),
+                ];
+
+                // new_from_response applies check_for_errors, which lazily sets
+                // CHUNK_CONTAINS_GRAPHQL_ERROR in context as each graphql chunk is polled.
+                let sg_response = supergraph::Response::new_from_response(
+                    http::Response::new(futures::stream::iter(graphql_chunks).boxed()),
+                    ctx.clone(),
+                );
+
+                // Serialize the graphql stream to bytes. CHUNK_CONTAINS_GRAPHQL_ERROR is
+                // set by check_for_errors before each chunk is yielded, so downstream
+                // condition evaluation in process_router_response_stage reads accurate values.
+                let bytes_stream = sg_response.response.into_body().map(|graphql_resp| {
+                    Ok::<bytes::Bytes, tower::BoxError>(
+                        serde_json::to_vec(&graphql_resp)
+                            .expect("graphql::Response serializes without error")
+                            .into(),
+                    )
+                });
+
+                let body = router::body::from_result_stream(bytes_stream);
+                responder.send_response(
+                    router::Response::http_response_builder()
+                        .response(http::Response::new(body))
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                );
+            });
+
+            let service_stack = router_stage
+                .as_service(
+                    mock_http_client,
+                    mock_router_service.boxed_clone(),
+                    "http://test".to_string(),
+                    Arc::new("".to_string()),
+                    false,
+                )
+                .boxed();
+
+            let request = router::Request::fake_builder().build().unwrap();
+            let response = service_stack.oneshot(request).await.unwrap();
+            // Drain the response body — this forces the lazy mapped_stream to run,
+            // which calls the coprocessor for the deferred error chunk.
+            let _ = router::body::into_bytes(response.response.into_body()).await;
+
+            // The coprocessor should have been called exactly once — for the deferred
+            // chunk that contained GraphQL errors. Before the fix, the metric was silently
+            // dropped because `executed` was already checked (as false) before the stream ran.
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 1, Some(true))]);
+            crate::plugin::test::await_mock_driver(router_driver).await;
+            crate::plugin::test::await_mock_driver(http_driver).await;
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn both_router_stages_metric_incremented_for_errored_stages_processing() {
         async {
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let router_stage = create_router_stage_for_request_validation_test();
-                let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
-            // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let router_stage = create_router_stage_for_response_validation_test();
-                let mock_http_client = create_mock_http_client_hard_error();
-                let mock_router_service = create_mock_router_service();
-
+                let (http_client, http_driver) = create_mock_http_client_hard_error();
+                let (router_mock, router_driver) = create_mock_router_service();
                 let service_stack = router_stage
                     .as_service(
-                        mock_http_client,
-                        mock_router_service.boxed_clone(),
+                        http_client,
+                        router_mock.boxed_clone(),
                         "http://test".to_string(),
                         Arc::new("".to_string()),
-                        false, // response_validation - doesn't matter for router stage
+                        false,
                     )
                     .boxed();
-
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await;
+                crate::plugin::test::await_mock_driver(router_driver).await;
+                crate::plugin::test::await_mock_driver(http_driver).await;
             }
 
             assert_coprocessor_operations_metrics(&[
@@ -6347,13 +6480,10 @@ mod tests {
         use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
         use apollo_federation::connectors::runtime::key::ResponseKey;
         use apollo_federation::connectors::runtime::responses::MappedResponse;
-        use futures::future::BoxFuture;
-        use router::body::RouterBody;
         use tower::BoxError;
         use tower::ServiceExt;
 
         use crate::metrics::FutureMetricsExt;
-        use crate::plugin::test::MockInternalHttpClientService;
         use crate::plugins::coprocessor::ContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
         use crate::plugins::coprocessor::connector::ConnectorResponseConf;
@@ -6365,39 +6495,6 @@ mod tests {
         use crate::services::http::HttpRequest;
         use crate::services::http::HttpResponse;
         use crate::services::router;
-
-        #[allow(clippy::type_complexity)]
-        fn mock_with_callback(
-            callback: fn(
-                http::Request<RouterBody>,
-            )
-                -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-        ) -> MockInternalHttpClientService {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client
-                        .expect_call()
-                        .returning(move |req: HttpRequest| {
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        });
-                    mock_http_client
-                });
-                mock_http_client
-            });
-
-            mock_http_client
-        }
 
         fn create_test_connector() -> Arc<Connector> {
             Arc::new(Connector {
@@ -6483,19 +6580,25 @@ mod tests {
                 )
                 .build();
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": "continue",
-                            "body": "{\"modified\":\"body\"}"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": "continue",
+                        "body": "{\"modified\":\"body\"}"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6509,6 +6612,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
 
             assert!(response.transport_result.is_ok());
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6525,28 +6629,36 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
-                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-                    // The body should be a JSON object, not a JSON string
-                    assert!(
-                        payload["body"].is_object(),
-                        "expected body to be a JSON object, got: {}",
-                        payload["body"]
-                    );
+                // The body should be a JSON object, not a JSON string
+                assert!(
+                    payload["body"].is_object(),
+                    "expected body to be a JSON object, got: {}",
+                    payload["body"]
+                );
 
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": "continue"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": "continue"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6560,6 +6672,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
 
             assert!(response.transport_result.is_ok());
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6576,28 +6689,36 @@ mod tests {
                 [("plain text body".to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
-                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-                    // The body should be a JSON string since the request body is not valid JSON
-                    assert!(
-                        payload["body"].is_string(),
-                        "expected body to be a JSON string, got: {}",
-                        payload["body"]
-                    );
+                // The body should be a JSON string since the request body is not valid JSON
+                assert!(
+                    payload["body"].is_string(),
+                    "expected body to be a JSON string, got: {}",
+                    payload["body"]
+                );
 
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": "continue"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": "continue"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6633,6 +6754,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
 
             assert!(response.transport_result.is_ok());
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6649,19 +6771,25 @@ mod tests {
             let mock_connector_service =
                 crate::plugin::test::MockConnector::new(Default::default());
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": { "break": 400 },
-                            "body": "Request blocked by coprocessor"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": { "break": 400 },
+                        "body": "Request blocked by coprocessor"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6675,6 +6803,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
 
             assert!(response.transport_result.is_err());
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6720,23 +6849,29 @@ mod tests {
                 }
             });
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": "continue",
-                            "headers": {
-                                "content-type": ["application/json"],
-                                "x-new-header": ["new-value"]
-                            },
-                            "uri": "http://new-connector-uri/api"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": "continue",
+                        "headers": {
+                            "content-type": ["application/json"],
+                            "x-new-header": ["new-value"]
+                        },
+                        "uri": "http://new-connector-uri/api"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6759,6 +6894,7 @@ mod tests {
                     .unwrap()
                     .contains(&("x-new-header".to_string(), "new-value".to_string()))
             );
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6776,23 +6912,29 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": "continue",
-                            "context": {
-                                "entries": {
-                                    "test-key": "test-value"
-                                }
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": "continue",
+                        "context": {
+                            "entries": {
+                                "test-key": "test-value"
                             }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6810,6 +6952,7 @@ mod tests {
                 context.get_json_value("test-key"),
                 Some(serde_json_bytes::Value::String("test-value".into()))
             );
+            crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
         #[tokio::test]
@@ -6828,23 +6971,28 @@ mod tests {
                         [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
                     );
 
-                    let mock_http_client =
-                        mock_with_callback(move |_req: http::Request<RouterBody>| {
-                            Box::pin(async {
-                                Ok(http::Response::builder()
-                                    .body(router::body::from_bytes(
-                                        r#"{
-                                        "version": 1,
-                                        "stage": "ConnectorRequest",
-                                        "control": "continue"
-                                    }"#,
-                                    ))
-                                    .unwrap())
-                            })
+                    let (http_client, mut http_handle) =
+                        tower_test::mock::pair::<HttpRequest, HttpResponse>();
+                    let http_driver = tokio::spawn(async move {
+                        let (req, responder) = http_handle.next_request().await.unwrap();
+                        let context = req.context.clone();
+                        let response = http::Response::builder()
+                            .body(router::body::from_bytes(
+                                r#"{
+                                "version": 1,
+                                "stage": "ConnectorRequest",
+                                "control": "continue"
+                            }"#,
+                            ))
+                            .unwrap();
+                        responder.send_response(HttpResponse {
+                            http_response: response,
+                            context,
                         });
+                    });
 
                     let service = connector_stage.as_service(
-                        mock_http_client,
+                        http_client,
                         mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
@@ -6852,6 +7000,7 @@ mod tests {
 
                     let request = create_test_connector_request();
                     let _response = service.oneshot(request).await;
+                    crate::plugin::test::await_mock_driver(http_driver).await;
                 }
 
                 assert_coprocessor_operations_metrics(&[(
@@ -6881,23 +7030,11 @@ mod tests {
                         [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
                     );
 
-                    let mock_http_client =
-                        mock_with_callback(move |_req: http::Request<RouterBody>| {
-                            Box::pin(async {
-                                Ok(http::Response::builder()
-                                    .body(router::body::from_bytes(
-                                        r#"{
-                                        "version": 1,
-                                        "stage": "ConnectorRequest",
-                                        "control": "continue"
-                                    }"#,
-                                    ))
-                                    .unwrap())
-                            })
-                        });
+                    let (http_mock, http_handle) =
+                        tower_test::mock::pair::<HttpRequest, HttpResponse>();
 
                     let service = connector_stage.as_service(
-                        mock_http_client,
+                        http_mock,
                         mock_connector_service.boxed_clone(),
                         "http://test".to_string(),
                         "my_connector_source".to_string(),
@@ -6905,6 +7042,7 @@ mod tests {
 
                     let request = create_test_connector_request();
                     let _response = service.oneshot(request).await;
+                    crate::plugin::test::assert_no_mock_calls(http_handle).await;
                 }
 
                 // This call will validate there are no metrics for all stages
@@ -6930,17 +7068,23 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -6952,6 +7096,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert!(response.transport_result.is_ok());
         }
@@ -6972,19 +7117,24 @@ mod tests {
                         [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
                     );
 
-                    let mock_http_client =
-                        mock_with_callback(move |_req: http::Request<RouterBody>| {
-                            Box::pin(async {
-                                Ok(http::Response::builder()
-                                    .body(router::body::from_bytes(
-                                        r#"{
-                                        "version": 1,
-                                        "stage": "ConnectorResponse"
-                                    }"#,
-                                    ))
-                                    .unwrap())
-                            })
+                    let (mock_http_client, mut http_handle) =
+                        tower_test::mock::pair::<HttpRequest, HttpResponse>();
+                    let http_driver = tokio::spawn(async move {
+                        let (req, responder) = http_handle.next_request().await.unwrap();
+                        let context = req.context.clone();
+                        let response = http::Response::builder()
+                            .body(router::body::from_bytes(
+                                r#"{
+                                "version": 1,
+                                "stage": "ConnectorResponse"
+                            }"#,
+                            ))
+                            .unwrap();
+                        responder.send_response(HttpResponse {
+                            http_response: response,
+                            context,
                         });
+                    });
 
                     let service = connector_stage.as_service(
                         mock_http_client,
@@ -6995,6 +7145,7 @@ mod tests {
 
                     let request = create_test_connector_request();
                     let _response = service.oneshot(request).await;
+                    crate::plugin::test::await_mock_driver(http_driver).await;
                 }
 
                 assert_coprocessor_operations_metrics(&[(
@@ -7020,28 +7171,34 @@ mod tests {
             let mock_connector_service =
                 crate::plugin::test::MockConnector::new(Default::default());
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": { "break": 401 },
-                            "body": {
-                                "errors": [
-                                    {
-                                        "message": "Not authenticated.",
-                                        "extensions": {
-                                            "code": "ERR_UNAUTHENTICATED"
-                                        }
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": { "break": 401 },
+                        "body": {
+                            "errors": [
+                                {
+                                    "message": "Not authenticated.",
+                                    "extensions": {
+                                        "code": "ERR_UNAUTHENTICATED"
                                     }
-                                ]
-                            }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                                }
+                            ]
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7053,6 +7210,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert!(response.transport_result.is_err());
             match &response.mapped_response {
@@ -7077,19 +7235,25 @@ mod tests {
             let mock_connector_service =
                 crate::plugin::test::MockConnector::new(Default::default());
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": { "break": 400 },
-                            "body": "Request blocked"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": { "break": 400 },
+                        "body": "Request blocked"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7101,6 +7265,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert!(response.transport_result.is_err());
             match &response.mapped_response {
@@ -7125,29 +7290,35 @@ mod tests {
             let mock_connector_service =
                 crate::plugin::test::MockConnector::new(Default::default());
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorRequest",
-                            "control": { "break": 429 },
-                            "body": {
-                                "errors": [
-                                    {
-                                        "message": "Rate limited",
-                                        "extensions": {
-                                            "code": "RATE_LIMITED",
-                                            "retryAfter": 30
-                                        }
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorRequest",
+                        "control": { "break": 429 },
+                        "body": {
+                            "errors": [
+                                {
+                                    "message": "Rate limited",
+                                    "extensions": {
+                                        "code": "RATE_LIMITED",
+                                        "retryAfter": 30
                                     }
-                                ]
-                            }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                                }
+                            ]
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7159,6 +7330,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert!(response.transport_result.is_err());
             match &response.mapped_response {
@@ -7189,26 +7361,34 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let body = router::body::into_bytes(req.into_body()).await.unwrap();
-                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-                    // Verify the coprocessor receives a non-empty id
-                    assert!(
-                        !payload["id"].as_str().unwrap_or("").is_empty(),
-                        "id should not be empty in response stage"
-                    );
+                // Verify the coprocessor receives a non-empty id
+                assert!(
+                    !payload["id"].as_str().unwrap_or("").is_empty(),
+                    "id should not be empty in response stage"
+                );
 
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse"
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse"
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7220,6 +7400,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert!(response.transport_result.is_ok());
         }
@@ -7239,22 +7420,28 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse",
-                            "context": {
-                                "entries": {
-                                    "response-key": "response-value"
-                                }
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse",
+                        "context": {
+                            "entries": {
+                                "response-key": "response-value"
                             }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7267,6 +7454,7 @@ mod tests {
             let request = create_test_connector_request();
             let context = request.context.clone();
             service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             assert_eq!(
                 context.get_json_value("response-key"),
@@ -7288,18 +7476,24 @@ mod tests {
                 [(r#"{"query":"test"}"#.to_string(), "ok".to_string())].into(),
             );
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse",
-                            "body": {"modified": "data"}
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse",
+                        "body": {"modified": "data"}
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7311,6 +7505,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             match &response.mapped_response {
                 MappedResponse::Data { data, .. } => {
@@ -7325,9 +7520,11 @@ mod tests {
             request_service::Response,
             BoxError,
         > {
-            tower::service_fn(|req: request_service::Request| async {
+            tower::service_fn(|req: request_service::Request| async move {
+                let subgraph_name = req.connector.id.subgraph_name.to_string();
                 Ok(request_service::Response {
                     context: req.context,
+                    subgraph_name,
                     transport_result: Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),
@@ -7356,20 +7553,26 @@ mod tests {
                 },
             };
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse",
-                            "body": {
-                                "errors": [{"message": "Modified error message"}]
-                            }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse",
+                        "body": {
+                            "errors": [{"message": "Modified error message"}]
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7381,6 +7584,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
@@ -7400,25 +7604,31 @@ mod tests {
                 },
             };
 
-            let mock_http_client = mock_with_callback(move |_req: http::Request<RouterBody>| {
-                Box::pin(async {
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            r#"{
-                            "version": 1,
-                            "stage": "ConnectorResponse",
-                            "body": {
-                                "errors": [{
-                                    "message": "Not authorized",
-                                    "extensions": {
-                                        "code": "ERR_UNAUTHORIZED"
-                                    }
-                                }]
-                            }
-                        }"#,
-                        ))
-                        .unwrap())
-                })
+            let (mock_http_client, mut http_handle) =
+                tower_test::mock::pair::<HttpRequest, HttpResponse>();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                        "version": 1,
+                        "stage": "ConnectorResponse",
+                        "body": {
+                            "errors": [{
+                                "message": "Not authorized",
+                                "extensions": {
+                                    "code": "ERR_UNAUTHORIZED"
+                                }
+                            }]
+                        }
+                    }"#,
+                    ))
+                    .unwrap();
+                responder.send_response(HttpResponse {
+                    http_response: response,
+                    context,
+                });
             });
 
             let service = connector_stage.as_service(
@@ -7430,6 +7640,7 @@ mod tests {
 
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
 
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
@@ -7438,5 +7649,681 @@ mod tests {
                 _ => panic!("Expected MappedResponse::Error"),
             }
         }
+    }
+
+    // Header masking integration tests
+    mod header_masking_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn router_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that sensitive headers (like Authorization) are sent unmasked to the coprocessor
+            // for functionality, even when header masking is enabled
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::All,
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
+
+            // Mock coprocessor that captures the headers it receives
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body_bytes = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+                if let Some(headers) = body.get("headers") {
+                    *received_headers_clone.lock().unwrap() = Some(headers.clone());
+                }
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": "continue",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // Create masking rules for sensitive headers
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed_clone(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            // Send a request with sensitive headers
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret-token-12345") // gitleaks:allow
+                .header("cookie", "session=my-session-id")
+                .header("user-agent", "test-agent")
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
+
+            // Verify the coprocessor received the FULL headers (unmasked)
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some(), "Headers should be sent to coprocessor");
+
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+                // Authorization header should be unmasked
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer secret-token-12345", // gitleaks:allow
+                    "Authorization header should be sent unmasked to coprocessor"
+                );
+
+                // Cookie header should be unmasked
+                assert_eq!(
+                    headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "session=my-session-id",
+                    "Cookie header should be sent unmasked to coprocessor"
+                );
+
+                // Non-sensitive header should also be present
+                assert_eq!(
+                    headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "test-agent"
+                );
+            }
+            crate::plugin::test::await_mock_driver(router_driver).await;
+        }
+
+        #[tokio::test]
+        async fn subgraph_request_headers_sent_unmasked_to_coprocessor() {
+            // Test that subgraph request headers are sent unmasked to coprocessor
+            let subgraph_stage = SubgraphStage {
+                request: SubgraphRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::All,
+                    body: false,
+                    uri: false,
+                    method: false,
+                    service_name: false,
+                    subgraph_request_id: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let (mock_subgraph_service, mut handle_subgraph) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let subgraph_driver = tokio::spawn(async move {
+                let (req, responder) = handle_subgraph.next_request().await.unwrap();
+                responder.send_response(
+                    subgraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .errors(Vec::new())
+                        .extensions(Object::new())
+                        .context(req.context)
+                        .subgraph_name("test_subgraph".to_string())
+                        .build(),
+                );
+            });
+
+            // Mock coprocessor that captures headers
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body_bytes = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+                if let Some(headers) = body.get("headers") {
+                    *received_headers_clone.lock().unwrap() = Some(headers.clone());
+                }
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "version": 1,
+                            "stage": "SubgraphRequest",
+                            "control": "continue",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // Create masking rules
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["x-api-key".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = subgraph_stage.as_service(
+                mock_http_client,
+                mock_subgraph_service.boxed_clone(),
+                "http://test".to_string(),
+                "test_subgraph".to_string(),
+                false,
+            );
+
+            let request = subgraph::Request::fake_builder()
+                .subgraph_request(
+                    http::Request::builder()
+                        .header("x-api-key", "secret-api-key-67890") // gitleaks:allow
+                        .header("content-type", "application/json")
+                        .body(graphql::Request::fake_builder().query("{ test }").build())
+                        .unwrap(),
+                )
+                .build();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
+            crate::plugin::test::await_mock_driver(subgraph_driver).await;
+
+            // Verify the coprocessor received unmasked headers
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some());
+
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+                assert_eq!(
+                    headers_obj.get("x-api-key").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "secret-api-key-67890", // gitleaks:allow
+                    "API key should be sent unmasked to coprocessor"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn headers_sent_when_masking_disabled() {
+            // Test that when masking is disabled, headers are still sent normally
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::All,
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body_bytes = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+                if let Some(headers) = body.get("headers") {
+                    *received_headers_clone.lock().unwrap() = Some(headers.clone());
+                }
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": "continue",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // No masking rules (disabled): leave context empty.
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed_clone(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer token") // gitleaks:allow
+                .build()
+                .unwrap();
+
+            let _response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
+
+            // Verify headers are still sent
+            {
+                let headers = received_headers.lock().unwrap();
+                assert!(headers.is_some());
+
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer token"
+                );
+            }
+            crate::plugin::test::await_mock_driver(router_driver).await;
+        }
+
+        #[tokio::test]
+        async fn multiple_headers_selective_masking() {
+            // Test that with multiple headers, only configured ones would be masked in logs
+            // (but all are sent unmasked to coprocessor)
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::All,
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body_bytes = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+                if let Some(headers) = body.get("headers") {
+                    *received_headers_clone.lock().unwrap() = Some(headers.clone());
+                }
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": "continue",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // Configure to mask only authorization and cookie
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec!["authorization".to_string(), "cookie".to_string()],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed_clone(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("authorization", "Bearer secret") // gitleaks:allow
+                .header("cookie", "session=secret") // gitleaks:allow
+                .header("user-agent", "test-agent")
+                .header("x-custom-header", "custom-value")
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
+
+            // Verify ALL headers are sent unmasked to coprocessor
+            {
+                let headers = received_headers.lock().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("cookie").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "session=secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("user-agent").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "test-agent"
+                );
+                assert_eq!(
+                    headers_obj
+                        .get("x-custom-header")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "custom-value"
+                );
+            }
+            crate::plugin::test::await_mock_driver(router_driver).await;
+        }
+
+        #[tokio::test]
+        async fn custom_sensitive_headers_list() {
+            // Test using a custom list of sensitive headers
+            let router_stage = RouterStage {
+                request: RouterRequestConf {
+                    condition: Default::default(),
+                    headers: true,
+                    context: ContextConf::All,
+                    body: false,
+                    sdl: false,
+                    path: false,
+                    method: false,
+                    url: None,
+                },
+                response: Default::default(),
+            };
+
+            let (router_mock, mut router_handle) =
+                tower_test::mock::pair::<router::Request, router::Response>();
+            let router_driver = tokio::spawn(async move {
+                let (req, responder) = router_handle.next_request().await.unwrap();
+                responder.send_response(
+                    router::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            });
+            let mock_router_service = router_mock;
+
+            let received_headers = Arc::new(std::sync::Mutex::new(None));
+            let received_headers_clone = received_headers.clone();
+
+            let (mock_http_client, mut http_handle) = tower_test::mock::pair::<
+                crate::services::http::HttpRequest,
+                crate::services::http::HttpResponse,
+            >();
+            let http_driver = tokio::spawn(async move {
+                let (req, responder) = http_handle.next_request().await.unwrap();
+                let context = req.context.clone();
+                let body_bytes = router::body::into_bytes(req.http_request.into_body())
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+                if let Some(headers) = body.get("headers") {
+                    *received_headers_clone.lock().unwrap() = Some(headers.clone());
+                }
+                let response = http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::json!({
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": "continue",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap();
+                responder.send_response(crate::services::http::HttpResponse {
+                    http_response: response,
+                    context,
+                });
+            });
+
+            // Custom sensitive headers list
+            let inner = Arc::new(
+                crate::services::header_masking::HeaderMaskingRules::from_config(
+                    &crate::configuration::header_masking_config::HeaderMaskingConfig {
+                        enabled: true,
+                        sensitive_headers: vec![
+                            "x-internal-token".to_string(),
+                            "x-secret-key".to_string(),
+                        ],
+                        replace_defaults: false,
+                    },
+                ),
+            );
+            let masking_rules =
+                Arc::new(crate::services::header_masking::MaskingRulesMap::new_test(
+                    inner,
+                    Default::default(),
+                ));
+
+            let service = router_stage.as_service(
+                mock_http_client,
+                mock_router_service.boxed_clone(),
+                "http://test".to_string(),
+                Arc::new("schema".to_string()),
+                false,
+            );
+
+            let request = router::Request::fake_builder()
+                .header("x-internal-token", "internal-secret") // gitleaks:allow
+                .header("x-secret-key", "secret-key-value") // gitleaks:allow
+                .header("authorization", "Bearer public-token") // in built-in defaults (replace_defaults: false)
+                .build()
+                .unwrap();
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(masking_rules));
+
+            let _response = service.oneshot(request).await.unwrap();
+            crate::plugin::test::await_mock_driver(http_driver).await;
+
+            // Coprocessors always receive raw header values — masking applies to logs/telemetry
+            // only, not to the externalized payload. All three headers arrive unmasked regardless
+            // of whether they appear in the sensitive list.
+            {
+                let headers = received_headers.lock().unwrap();
+                let headers_obj = headers.as_ref().unwrap().as_object().unwrap();
+
+                assert_eq!(
+                    headers_obj
+                        .get("x-internal-token")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "internal-secret" // gitleaks:allow
+                );
+                assert_eq!(
+                    headers_obj.get("x-secret-key").unwrap().as_array().unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "secret-key-value" // gitleaks:allow
+                );
+                // `authorization` is in the effective sensitive list (built-in default, since
+                // `replace_defaults: false` merges user headers with the built-ins). It still arrives
+                // unmasked here because coprocessors receive raw headers by design.
+                assert_eq!(
+                    headers_obj
+                        .get("authorization")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                        .as_str()
+                        .unwrap(),
+                    "Bearer public-token"
+                );
+            }
+            crate::plugin::test::await_mock_driver(router_driver).await;
+        }
+
+        // Real end-to-end coverage for the coprocessor + masking flow lives in
+        // the sibling integration tests above (e.g.
+        // `router_request_headers_sent_unmasked_to_coprocessor`,
+        // `multiple_headers_selective_masking`), which drive
+        // `RouterStage::as_service` with a mocked HTTP client and assert on
+        // what the coprocessor actually receives. Config-shape contracts are
+        // pinned by `HeaderMaskingConfig::tests` and the schema snapshot.
     }
 }

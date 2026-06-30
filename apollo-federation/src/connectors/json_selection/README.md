@@ -45,7 +45,20 @@ improvements, we should adhere to the following principles:
    JSON-processing task. For example, `->` method syntax is better for inline
    transformations that reusing/abusing GraphQL field argument syntax.
 
-2. It must be possible to statically determine the output shape (object
+2. Since `JSONSelection` also borrows heavily from JSON — object and array
+   literals, primitive values (strings, numbers, booleans, `null`), and
+   dotted key access — whenever an element of `JSONSelection` syntax looks
+   the same as JSON, its behavior and semantics should be the same as (or
+   at least analogous to) JSON. This close resemblance enables a powerful
+   promise: **copy-and-paste any JSON value and it is already a valid
+   `JSONSelection`**. Where we go beyond JSON we prefer extensions already
+   familiar from modern ECMAScript — single-quoted strings, trailing commas,
+   object-property shorthand (`{ a }` for `{ a: a }`), `...` spread — so
+   the dialect reads as a superset rather than an alternative. As with the
+   GraphQL principle, non-JSON behaviors belong in non-JSON syntax, not in
+   quietly-repurposed JSON punctuation.
+
+3. It must be possible to statically determine the output shape (object
    properties, array types, and nested value shapes) produced by a
    `JSONSelection` string. JSON data encountered at runtime may be inherently
    dynamic and unpredictable, but we must be able to validate the output shape
@@ -55,7 +68,7 @@ improvements, we should adhere to the following principles:
    avoided because it limits the developer's ability to subselect fields of the
    opaque `JSON` value in GraphQL operations.
 
-3. `JSONSelection` syntax may be _subsetted_ arbitrarily, either by generating a
+4. `JSONSelection` syntax may be _subsetted_ arbitrarily, either by generating a
    reduced `JSONSelection` that serves the needs of a particular GraphQL
    operation, or by skipping unneeded selections during `ApplyTo` execution.
    When this subsetting happens, it would be highly undesirable for the behavior
@@ -64,7 +77,7 @@ improvements, we should adhere to the following principles:
    sense that two `NamedSelection` items should continue to work as before when
    used together in the same `SubSelection`.
 
-4. Backwards compatibility should be maintained as we release new versions of
+5. Backwards compatibility should be maintained as we release new versions of
    the `JSONSelection` syntax along with new versions of the (forthcoming)
    `@link(url: "https://specs.apollo.dev/connect/vX.Y")` specification. Wherever
    possible, we should only add new functionality, not remove or change existing
@@ -81,11 +94,14 @@ worry if it doesn't seem helpful yet, as every rule will be explained in detail
 below.
 
 ```ebnf
-JSONSelection        ::= NamedSelection*
-SubSelection         ::= "{" NamedSelection* "}"
-NamedSelection       ::= (Alias | "...")? PathSelection | Alias SubSelection
+JSONSelection        ::= LitExpr | NamedSelectionList
+NamedSelectionList   ::= NamedSelection ("," NamedSelection)* ","? | NamedSelection*
+SubSelection         ::= "{" NamedSelectionList "}"
+NamedSelection       ::= "..." LitExpr
+                       | Alias LitExpr
+                       | PathSelection
 Alias                ::= Key ":"
-PathSelection        ::= Path SubSelection?
+PathSelection        ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?
 VarPath              ::= "$" (NO_SPACE Identifier)? PathTail
 KeyPath              ::= Key PathTail
 AtPath               ::= "@" PathTail
@@ -103,14 +119,60 @@ LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
-LitObject            ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
-LitProperty          ::= Key (":" LitExpr)?
+LitObject            ::= SubSelection
 LitArray             ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
 Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
+
+The grammar above describes `connect/v0.4` and later. Earlier spec versions
+used a stricter grammar in which `LitObject` was a distinct rule from
+`SubSelection`, commas were required in `LitObject` and `LitArray` bodies,
+spread (`...`) could only appear at the head of a `NamedSelection`, and
+the only legal top-level form was a bare `NamedSelection` sequence. The
+four structural changes that the v0.4 grammar introduces, relative to
+that earlier shape, are:
+
+1. **`LitObject` is now just a `SubSelection`.** The two rules describe
+   the same syntax, so the old `LitProperty` rule is gone — everything
+   it could express is already expressible as a `NamedSelection`. The
+   old shorthand `{ a }` is a single-`Key` `PathSelection`, and the
+   old `{ a: value }` is `Alias LitExpr`. This collapses the two
+   object-body parsing contexts into one.
+
+2. **`NamedSelection` accepts any `LitExpr` after an alias or spread.**
+   `Alias LitExpr` covers the old `Alias PathSelection` and
+   `Alias SubSelection` forms but also lets you alias literal values
+   (`__typename: "Book"`) and operator chains
+   (`fallback: input ?? "default"`). Spread (`...`) likewise accepts
+   any `LitExpr`, so `...{ a: 1 }` and `...$args` both parse, in
+   addition to the pre-existing `...path` form.
+
+3. **Commas are an all-or-nothing choice per construct.** In
+   `SubSelection` (and therefore in a top-level `NamedSelectionList`)
+   and `LitArray`, the body is either comma-separated (with an optional
+   trailing comma) or whitespace-separated — mixing is a parse error:
+   `{ a, b c }` is invalid. `MethodArgs` still requires commas, because
+   positional arguments have ambiguity that whitespace-only separation
+   does not resolve.
+
+4. **The top-level `JSONSelection` may be any `LitExpr`.** Previously
+   the only legal top-level form was a bare `NamedSelection` sequence;
+   now a `JSONSelection` is either a `LitExpr` (the full expression
+   vocabulary — `SubSelection` bodies, `LitArray`, `LitPrimitive`,
+   `LitPath`, `LitOpChain`, and `PathSelection` — including any `->`
+   method chain the grammar allows on them) or a `NamedSelectionList`.
+   `{ id name }` at the top level is equivalent to bare `id name`
+   (the braces are cosmetic and the AST collapses to a bare
+   subselection), and top-level forms such as `[1, 2, 3]`, `"hello"`,
+   `$args.id`, or `{ userid: $args.id }->get("userid")` are all valid.
+   A single bare `Key` like `author` remains a `NamedSelection`
+   (producing `{ author: $.author }`); use `$.author` or `$(author)`
+   when you want the flat, anonymous value instead.
+   The body of a `SubSelection` is factored as the `NamedSelectionList`
+   rule so the wrapping doesn't recurse into an infinite tower of braces.
 
 ### How to read this grammar
 
@@ -127,9 +189,9 @@ regular expression character classes).
 Ambiguities can be resolved by applying the alternatives left to right,
 accepting the first set of expansions that fully matches the input tokens. An
 example where this kind of ordering matters is the `NamedSelection` rule, which
-specifies parsing `NamedPathSelection` before `NamedFieldSelection` and
-`NamedQuotedSelection`, so the entire path will be consumed, rather than
-mistakenly consuming only the first key in the path as a field name.
+tries the `"..." LitExpr` and `Alias LitExpr` alternatives before falling back
+to a bare `PathSelection`, so a leading spread or alias is not mistakenly
+consumed as the first key of a path.
 
 As in many regular expression syntaxes, the `*` and `+` operators denote
 repetition (_zero or more_ and _one or more_, respectively), `?` denotes
@@ -213,40 +275,82 @@ exhaust all possible alternatives without reaching the end.
 I like to think every stop along the railroad has a gift shop and restrooms, so
 feel free to take your time and enjoy the journey.
 
-### `JSONSelection ::= NamedSelection*`
+### `JSONSelection ::= LitExpr | NamedSelectionList`
 
 ![JSONSelection](./grammar/JSONSelection.svg)
 
-The `JSONSelection` non-terminal is the top-level entry point for the grammar,
-and consists of zero or more `NamedSelection` items. Each `NamedSelection` can
-include an optional `Alias` or `...` followed by a `PathSelection`, or a
-(mandatory) `Alias` followed by a `SubSelection`.
+The `JSONSelection` non-terminal is the top-level entry point for the
+grammar, and is either a single `LitExpr` (any expression the
+`LitExpr` rule admits, see below) or a `NamedSelectionList` of zero
+or more `NamedSelection` items.
 
-### `SubSelection ::= "{" NamedSelection* "}"`
+The `LitExpr` alternative is tried first so that top-level inputs that
+look like a literal expression — `{ a: 1 }`, `[1, 2, 3]`, `"hello"`,
+`$args.id`, `1234->add(1111)` — parse as that expression rather than
+as a single-element `NamedSelectionList`. The one exception is a bare
+single-`Key` `PathSelection` like `author` (or `author { name }`): that
+remains a `NamedSelectionList` so `author` continues to mean
+`{ author: $.author }`. Write `$.author` or `$(author)` if you want the
+flat, anonymous value instead. See
+[Single-`Key` path selections](#single-key-path-selections) for the
+full treatment of that ambiguity.
+
+### `NamedSelectionList ::= NamedSelection ("," NamedSelection)* ","? | NamedSelection*`
+
+![NamedSelectionList](./grammar/NamedSelectionList.svg)
+
+A `NamedSelectionList` is a sequence of `NamedSelection` items. The two
+alternatives of this rule encode an all-or-nothing choice between
+comma-separated items (with an optional trailing comma) and
+whitespace-only separation — the two styles cannot be mixed within a
+single list. This rule is shared by the top-level `JSONSelection` and
+by `SubSelection` bodies, so braced and unbraced selection lists accept
+exactly the same separator conventions.
+
+### `SubSelection ::= "{" NamedSelectionList "}"`
 
 ![SubSelection](./grammar/SubSelection.svg)
 
-A `SubSelection` is a sequence of zero or more `NamedSelection` items surrounded
-by `{` and `}`, and is used to select specific properties from the preceding
-object, much like a nested selection set in a GraphQL operation.
+A `SubSelection` is a `NamedSelectionList` wrapped in `{` and `}`, used
+to select specific properties from the preceding object much like a
+nested selection set in a GraphQL operation. Because the body is a
+`NamedSelectionList`, the same comma/whitespace separator choice
+applies inside the braces.
 
 Note that `SubSelection` may appear recursively within itself, as part of one of
 the various `NamedSelection` rules. This recursion allows for arbitrarily deep
 nesting of selections, which is necessary to handle complex JSON structures.
 
-### `NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection`
+### `NamedSelection ::= "..." LitExpr | Alias LitExpr | PathSelection`
 
 ![NamedSelection](./grammar/NamedSelection.svg)
 
-Every production of the `NamedSelection` non-terminal adds named properties to
-the output object, though they obtain their properties/values from the input
-object in different ways.
+Every production of the `NamedSelection` non-terminal contributes named
+properties to the enclosing output object, though they obtain their
+properties/values from the input in different ways.
 
-Since `PathSelection` returns an anonymous value extracted from the given path,
-if you want to use a `PathSelection` alongside other `NamedSelection` items, you
-can either prefix it with an `Alias` or with a `...` spread operator, or ensure
-the path has a trailing `SubSelection` guaranteeing an output object with fields
-that can be merged into the larger selection set.
+The three alternatives correspond to: spreading a literal expression's
+properties into the enclosing object (`"..." LitExpr`), assigning a literal
+expression's value to a given output key (`Alias LitExpr`), and selecting a
+value from a path (`PathSelection`) — which, when its head is a single `Key`,
+uses that key as the output name. See [Single-`Key` path
+selections](#single-key-path-selections) below for the details of that last
+case.
+
+The `LitExpr` right-hand side of the first two alternatives makes alias and
+spread accept anything a literal expression accepts, including sub-selections
+(`names: { first: firstName last: lastName }`), paths (`name: $.author.name`),
+primitives (`__typename: "Book"`), arrays (`tags: ["a", "b"]`), and operator
+chains (`fallback: input ?? "default"`). Spread (`...`) accepts the same set,
+including spreading a path's object value (`...$args`) or a literal object
+(`...{ a: 1 }`) into the enclosing output.
+
+Since `PathSelection` on its own returns an anonymous value extracted from the
+given path, if you want to use a `PathSelection` alongside other
+`NamedSelection` items, you can either prefix it with an `Alias` or with a
+`...` spread operator, or ensure the path has a trailing `SubSelection`
+guaranteeing an output object with fields that can be merged into the larger
+selection set.
 
 For example, the `abc:` alias in this example causes the `{ a b c }` object
 selected from `some.nested.path` to be nested under an `abc` output key:
@@ -297,18 +401,19 @@ author { name }
 some.nested.path { a b c }
 ```
 
-Since `some.nested.path` is a `Path` with a trailing `SubSelection` (concretely,
-the `{ a b c }` part), we've said the `a`, `b`, and `c` fields of that
-`SubSelection` get merged into the top-level output object.
+Since `some.nested.path` is a `PathSelection` with a trailing `SubSelection`
+(concretely, the `{ a b c }` part), we've said the `a`, `b`, and `c` fields
+of that `SubSelection` get merged into the top-level output object.
 
-But isn't `author` also a (single-`Key`) `Path` with a trailing `SubSelection`
-(the `{ name }` part)? Why do we preserve the `author` key, rather than merging
-the `name` field into the top-level output object, as with `a`, `b`, and `c`
-from `some.nested.path { a b c }`?
+But isn't `author` also a (single-`Key`) `PathSelection` with a trailing
+`SubSelection` (the `{ name }` part)? Why do we preserve the `author` key,
+rather than merging the `name` field into the top-level output object, as
+with `a`, `b`, and `c` from `some.nested.path { a b c }`?
 
-**The answer is that `author` has a special status as a single-`Key` `Path` used
-in a `SubSelection` context.** By contrast, `some.nested.path` is not a `Path`
-that has an obvious (single) output `Key`, so it remains anonymous unless you
+**The answer is that `author` has a special status as a single-`Key`
+`PathSelection` used in a `SubSelection` context.** By contrast,
+`some.nested.path` is not a `PathSelection` that has an obvious (single)
+output `Key`, so it remains anonymous unless you
 explicitly provide an alias: `abc: some.nested.path { a b c }`. Referring back
 to the [Guiding principles](#guiding-principles), the `author { name }` syntax
 resembles GraphQL operation syntax, so it must behave like GraphQL query syntax.
@@ -332,11 +437,14 @@ the original `author` key. Note also that `$.author.name` is equivalent to
 `author.name`, but the `$.` is typically unnecessary because `author.name` is
 already unambiguously a more-than-single-`Key` path.
 
-Note that the special status of single-`Key` path selections is restricted to
-the `SubSelection` parsing context. When you use the `$(...)` syntax or pass
-`->` method arguments, parsing switches into the `LitExpr` literal expression
-parsing context, where there is no special status for single-`Key` paths, and
-everything is parsed as a JSON literal or a `PathSelection`:
+Note that the special status of single-`Key` path selections only applies
+when the path is a direct member of a `SubSelection`. In any other position
+where a `PathSelection` appears as a value — as a `LitArray` element, as a
+`MethodArgs` argument, as the target of an `Alias` or spread, or as the root
+of an `ExprPath` — the path simply produces its value, with no enclosing key.
+This is a consequence of the `NamedSelection` rule: only the third alternative
+(a bare `PathSelection`) triggers key preservation; the `Alias LitExpr` and
+`"..." LitExpr` alternatives treat the right-hand side as a value.
 
 ```graphql
 # These two expressions are equivalent:
@@ -347,23 +455,24 @@ $.author->echo([@.name, $.author.name, $.author { name }])
 # Expected output: ["Ben", "Ben", { name: "Ben" }]
 ```
 
-While the `author` in `author { name }` no longer produces an `author` output
-key (because we are passing an argument to `->echo`, which is always a `LitExpr`
-element), the `name` in `author { name }` has returned to `SubSelection` parsing
-context because of the `{...}` braces, so `name` still counts as a single-`Key`
-GraphQL-style field selection.
+The `author` in `author { name }` doesn't produce an `author` output key here
+because the surrounding `LitArray` is not a `SubSelection`, so single-`Key`
+preservation does not apply. The `name` inside the trailing `{ name }` *is*
+inside a `SubSelection`, so its single-`Key` preservation does apply, which
+is why each array element in the expected output is a `{ name: "Ben" }`
+object rather than a bare `"Ben"` string.
 
 #### Named group selections
 
 Sometimes you will need to take a group of named properties and nest them under
-a new name in the output object. The `NamedSelection ::= Alias SubSelection`
-syntax uses the `Alias` to name the nested `SubSelection` object containing the
-named properties to be grouped. The `Alias` is mandatory because the grouped
-object would otherwise be anonymous.
+a new name in the output object. The `Alias LitExpr` form of `NamedSelection`,
+with a `SubSelection` on the right-hand side, uses the `Alias` to name the
+nested object containing the grouped properties. The `Alias` is mandatory
+because the grouped object would otherwise be anonymous.
 
 For example, if the input JSON has `firstName` and `lastName` fields, but you
 want to represent them under a single `names` field in the output object, you
-could use the following `NamedGroupSelection`:
+could use the following alias-with-`SubSelection` form:
 
 ```graphql
 names: {
@@ -375,8 +484,8 @@ firstName
 lastName
 ```
 
-A common use case for `NamedGroupSelection` is to create nested objects from
-scalar ID fields:
+A common use case for this pattern is creating nested objects from scalar ID
+fields:
 
 ```graphql
 postID
@@ -391,33 +500,25 @@ This convention is useful when the `Author` type is an entity with `@key(fields:
 "id")`, and you want to select fields from `post` and `post.author` in the same
 query, without directly handling the `post.authorID` field in GraphQL.
 
-### `Alias ::= Identifier ":"`
+### `Alias ::= Key ":"`
 
 ![Alias](./grammar/Alias.svg)
 
 Analogous to a GraphQL alias, the `Alias` syntax allows for renaming properties
-from the input JSON to match the desired output shape.
+from the input JSON to match the desired output shape. Because `Key` is an
+`Identifier | LitString`, aliases may also use quoted names such as
+`"kebab-case-key":`.
 
 In addition to renaming, `Alias` can provide names to otherwise anonymous
-structures, such as those selected by `PathSelection` or `NamedGroupSelection`.
+structures, such as those selected by a `PathSelection`, a literal value, or a
+grouped `SubSelection`.
 
-### `Path ::= VarPath | KeyPath | AtPath | ExprPath`
-
-![Path](./grammar/Path.svg)
-
-A `Path` is a `VarPath`, `KeyPath`, `AtPath`, or `ExprPath`, which forms the
-prefix of both `PathSelection` and `PathWithSubSelection`.
-
-In the Rust implementation, there is no separate `Path` struct, as we represent
-both `PathSelection` and `PathWithSubSelection` using the `PathSelection` struct
-and `PathList` enum. The `Path` non-terminal is just a grammatical convenience,
-to avoid repetition between `PathSelection` and `PathWithSubSelection`.
-
-### `PathSelection ::= Path SubSelection?`
+### `PathSelection ::= (VarPath | KeyPath | AtPath | ExprPath) SubSelection?`
 
 ![PathSelection](./grammar/PathSelection.svg)
 
-A `PathSelection` is a `Path` followed by an optional `SubSelection`. The
+A `PathSelection` is one of four path head forms (`VarPath`, `KeyPath`,
+`AtPath`, or `ExprPath`) followed by an optional `SubSelection`. The
 purpose of a `PathSelection` is to extract a single anonymous value from the
 input JSON, without preserving the nested structure of the keys along the path.
 
@@ -538,11 +639,12 @@ element of the array, with `$` taking on the value of each scalar ID in turn.
 See [the FAQ](#what-about-arrays) for more discussion of this array-handling
 behavior.
 
-The `$` variable is also essential for disambiguating a `KeyPath` consisting of
-only one key from a `NamedFieldSelection` with no `Alias`. For example,
-`$.result` extracts the `result` property as an anonymous value from the current
-object, where as `result` would select an object that still has the `result`
-property.
+The `$` variable is also essential for disambiguating a `KeyPath` consisting
+of only one key from a bare single-`Key` `PathSelection` with no `Alias`.
+For example, `$.result` extracts the `result` property as an anonymous value
+from the current object, whereas `result` would select the `result` property
+*and* preserve `result` as the output key (see
+[Single-`Key` path selections](#single-key-path-selections)).
 
 ### `KeyPath ::= Key PathTail`
 
@@ -562,10 +664,11 @@ firstItemName: data.nested.items->first.name
 ```
 
 An important ambiguity arises when you want to extract a `PathSelection`
-consisting of only a single key, such as `data` by itself. Since there is no `.`
-to disambiguate the path from an ordinary `NamedFieldSelection`, the `KeyPath`
-rule is inadequate. Instead, you should use a `VarPath` (which also counts as a
-`PathSelection`), where the variable is the special `$` character, which
+consisting of only a single key, such as `data` by itself. Since there is no
+`.` to distinguish the path from an ordinary single-`Key` `PathSelection`
+(which would preserve `data` as the output key), the `KeyPath` rule is
+inadequate on its own. Instead, you should use a `VarPath` (which also counts
+as a `PathSelection`), where the variable is the special `$` character, which
 represents the current value being processed:
 
 ```graphql
@@ -735,7 +838,7 @@ paths:
 
 ```ebnf
 NonEmptyPathTail ::= "?"? (PathStep "?"?)+ | "?"
-LitExpr          ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
+LitExpr          ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitArray | PathSelection
 LitPath          ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
 ```
 
@@ -865,6 +968,13 @@ parentheses, as in `list->slice(0, 5)` or `kilometers: miles->mul(1.60934)`.
 Methods do not have to take arguments, as in `list->first` or `list->last`,
 which is why `MethodArgs` is optional in `PathStep`.
 
+Unlike `SubSelection` and `LitArray`, `MethodArgs` requires commas between
+arguments. Because argument `LitExpr`s are positional and many of them
+(numbers, string literals, paths with `->` methods) can be adjacent without
+any syntactic delimiter, whitespace-only separation would be ambiguous for
+positional arguments in a way it is not for named object members or array
+elements.
+
 ### `Key ::= Identifier | LitString`
 
 ![Key](./grammar/Key.svg)
@@ -877,7 +987,8 @@ or a `LitString`.
 ![Identifier](./grammar/Identifier.svg)
 
 Any valid GraphQL field name. If you need to select a property that is not
-allowed by this rule, use a `NamedQuotedSelection` instead.
+allowed by this rule, use a quoted `LitString` as the `Key` instead (for
+example, `"kebab-case-key": someField`).
 
 In some languages, identifiers can include `$` characters, but `JSONSelection`
 syntax aims to match GraphQL grammar, which does not allow `$` in field names.
@@ -898,9 +1009,9 @@ powerful ways, e.g. `page: list->slice(0, $limit)`.
 The `LitOpChain` variant supports operator chains like null-coalescing (`??`) and
 none-coalescing (`?!`) operators, allowing expressions like `$($.field ?? "default")`.
 
-Also, as a minor syntactic convenience, `LitObject` literals can have
-`Identifier` or `LitString` keys, whereas JSON objects can have only
-double-quoted string literal keys.
+Also, as a minor syntactic convenience, `LitObject` literals (which are
+just `SubSelection`s) can have `Identifier` or `LitString` `Alias` keys,
+whereas JSON objects can have only double-quoted string literal keys.
 
 #### Null-coalescing operators
 
@@ -972,7 +1083,7 @@ This rule is designed to be extensible for future operators like `&&`, `||`,
 `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `%` while maintaining the
 constraint that operators cannot be mixed within a single chain.
 
-### `LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+`
+### `LitPath ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail`
 
 ![LitPath](./grammar/LitPath.svg)
 
@@ -1021,6 +1132,45 @@ In these examples, only the outermost `$(...)` wrapper is required, though the
 inner wrappers may be used to clarify the structure of the expression, similar
 to parentheses in other languages.
 
+#### Literals followed by a `SubSelection`
+
+Notice that `NonEmptyPathTail` admits only `?`, `.Key`, and `->Identifier`
+continuations — never a `SubSelection`. So a `LitPrimitive`, `LitObject`,
+or `LitArray` whose next token is `{` cannot extend into a `LitPath`,
+and the surrounding `LitExpr` rule's left-to-right alternative search
+must therefore fall through past the `LitPrimitive | LitObject | LitArray`
+alternatives to the trailing `PathSelection` alternative.
+
+For literals whose source token is also a valid `Key` — quoted strings,
+and the identifier-shaped primitives `true` / `false` / `null` — the
+fall-through succeeds via `KeyPath ::= Key PathTail` plus
+`PathSelection ::= … SubSelection?`, yielding a field-reference reading.
+That preserves the v0.3 semantics of source like:
+
+```graphql
+soldTo: "sold-to" { customerNumber partnerName }
+```
+
+which parses as `Alias("soldTo")` over `PathSelection(KeyPath(Quoted("sold-to"), Empty), SubSelection({ customerNumber partnerName }))`.
+
+For numeric/object/array literals, no `Key` reading is available, so
+sources like `5 { a }`, `[1] { a }`, and `{ a: 1 } { b }` are parse
+errors — matching the v0.3 behavior (none of them had a sensible
+reading there either).
+
+When you actually want a literal value with a `{ … }` body — i.e., the
+LitPath you'd get if `NonEmptyPathTail` admitted `SubSelection` — wrap
+the literal in `$(…)` to opt out of the field-reference fall-through:
+
+```graphql
+truth: $(true) { is: $ }
+```
+
+This rule and the JSON-superset property are independent: the
+"literal-token followed by `{`" pattern is not expressible in valid
+JSON (JSON requires `:` or `,` between values), so JSON-shaped input
+pasted into a `LitExpr` context never triggers it.
+
 ### `LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"`
 
 ![LitPrimitive](./grammar/LitPrimitive.svg)
@@ -1058,42 +1208,53 @@ component is present (as in `-123.`), but the fractional component must have at
 least one digit when there is no integer component, since `.` is not a valid
 numeric literal by itself.
 
-### `LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"`
+### `LitObject ::= SubSelection`
 
 ![LitObject](./grammar/LitObject.svg)
 
-A sequence of `LitProperty` items within curly braces, as in JavaScript.
+Starting in `connect/v0.4`, `LitObject` is just another name for
+`SubSelection` — the two rules describe the same syntax, so anywhere a
+braced-object literal can appear inside a `LitExpr` it accepts the full
+`NamedSelection` vocabulary. That means the following all parse as
+object literals:
 
-Trailing commas are not currently allowed, but could be supported in the future.
+```graphql
+# Shorthand single-Key PathSelection, like JavaScript's { a } shorthand:
+literal: $({ a, b })
 
-### `LitProperty ::= Key (":" LitExpr)?`
+# Alias LitExpr — any LitExpr on the right, not just a path:
+literal: $({ a: 1, b: input ?? "default", nested: { x y } })
 
-![LitProperty](./grammar/LitProperty.svg)
+# Spread of another object (path or literal):
+merged:  $({ ...$args, extra: 42 })
+deep:    $({ ...{ a: 1 }, b: 2 })
 
-A key-value pair within a `LitObject`. Note that the `Key` may be either an
-`Identifier` or a `LitString`, as in JavaScript. This is a little different
-from JSON, which allows double-quoted strings only.
+# A mix of alias, bare path, and spread in one literal:
+payload: $({
+  __typename: "Product"
+  id
+  ...$this
+})
+```
 
-Starting in connect/v0.4, shorthand property syntax is supported: `{ a }` is
-equivalent to `{ a: a }`, where the value is a `KeyPath` referencing the same
-name as the key. This mirrors JavaScript's shorthand property syntax and allows
-more concise object literals when passing through input fields unchanged.
+Pre-v0.4, `LitObject` was a distinct rule (`"{" (LitProperty (",")? )* "}"`)
+with its own required-comma separators, its own `Key (":" LitExpr)?` property
+form, and no spread support. Collapsing `LitObject` into `SubSelection`
+removes that duplication and lets one parsing path serve both contexts. The
+separator rules (commas-with-optional-trailing-comma vs. whitespace-only,
+all-or-nothing per brace pair) come from `JSONSelection`, since
+`SubSelection ::= "{" JSONSelection "}"`.
 
 ### `LitArray ::= "[" (LitExpr ("," LitExpr)* ","?)? "]"`
 
 ![LitArray](./grammar/LitArray.svg)
 
-A list of `LitExpr` items within square brackets, as in JavaScript.
-
-Trailing commas are not currently allowed, but could be supported in the future.
-
-### `NO_SPACE ::= !SpacesOrComments`
-
-The `NO_SPACE` non-terminal is used to enforce the absence of whitespace or
-comments between certain tokens. See [Whitespace, comments, and
-`NO_SPACE`](#whitespace-comments-and-no_space) for more information. There is no
-diagram for this rule because the `!` negative lookahead operator is not
-supported by the railroad diagram generator.
+A bracketed, comma-separated list of `LitExpr` values. A trailing comma is
+permitted. Unlike `SubSelection`, `LitArray` does *not* offer a
+whitespace-separated form: commas between elements are required. With the
+infix operators introduced in v0.3, a whitespace-only array such as
+`[a b ?? c]` has no unambiguous parse, so `LitArray` insists on explicit
+commas to keep element boundaries unambiguous.
 
 ### `SpacesOrComments ::= (Spaces | Comment)+`
 

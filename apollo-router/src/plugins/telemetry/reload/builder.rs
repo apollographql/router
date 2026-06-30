@@ -172,6 +172,7 @@ impl<'a> Builder<'a> {
                     unit: None,
                     aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
                     allowed_attribute_keys: None,
+                    cardinality_limit: None,
                 }
                 .into_view_fn(),
             );

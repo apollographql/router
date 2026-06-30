@@ -1,4 +1,6 @@
 mod federation_demo;
+pub mod gh;
+pub mod worktree;
 
 use std::env;
 use std::process::Child;
@@ -97,6 +99,44 @@ macro_rules! npm {
             .status()?;
 
         $crate::anyhow::ensure!(status.success(), "npm command failed");
+    }};
+}
+
+/// Run `git` with the given args from the project root, failing if the exit
+/// status is non-zero.  Stdout/stderr stream to the parent process.
+#[macro_export]
+macro_rules! git {
+    ($args:expr $(,)?) => {{
+        let status = ::std::process::Command::new(which::which("git")?)
+            .args($args)
+            .current_dir(&*PKG_PROJECT_ROOT)
+            .status()?;
+
+        $crate::anyhow::ensure!(status.success(), "git command failed");
+    }};
+}
+
+/// Run `git` with the given args from the project root, capture stdout, and
+/// return it as a `String` with trailing whitespace trimmed.  Fails if the
+/// exit status is non-zero or if stdout is not valid UTF-8.
+#[macro_export]
+macro_rules! git_out {
+    ($args:expr $(,)?) => {{
+        let output = ::std::process::Command::new(which::which("git")?)
+            .args($args)
+            .current_dir(&*PKG_PROJECT_ROOT)
+            .output()?;
+
+        $crate::anyhow::ensure!(
+            output.status.success(),
+            "git command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        String::from_utf8(output.stdout)
+            .map_err(|e| $crate::anyhow::anyhow!("git output was not valid UTF-8: {}", e))?
+            .trim_end()
+            .to_string()
     }};
 }
 

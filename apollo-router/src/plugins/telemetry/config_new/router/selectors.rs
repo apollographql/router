@@ -8,6 +8,7 @@ use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
 use crate::Context;
+use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
@@ -54,10 +55,6 @@ pub(crate) enum RouterSelector {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -65,10 +62,6 @@ pub(crate) enum RouterSelector {
     Env {
         /// The name of the environment variable
         env: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
         /// Avoid unsafe std::env::set_var in tests
@@ -87,10 +80,6 @@ pub(crate) enum RouterSelector {
     OperationName {
         /// The operation name from the query.
         operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -98,10 +87,8 @@ pub(crate) enum RouterSelector {
     RequestHeader {
         /// The name of the request header.
         request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -109,10 +96,6 @@ pub(crate) enum RouterSelector {
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -134,14 +117,28 @@ pub(crate) enum RouterSelector {
         #[serde(deserialize_with = "deserialize_jsonpath")]
         response_errors: JsonPathInst,
     },
+    /// Count of response errors matching a JSONPath filter
+    ResponseErrorsCount {
+        /// JSONPath filter for response errors. Use "$[*]" to count all errors.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors_count: JsonPathInst,
+    },
+    /// Extract a specific field from each error in the response
+    ResponseErrorsField {
+        /// JSONPath to extract from each error. E.g., "$.message" or "$.extensions.code"
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors_field: JsonPathInst,
+    },
     /// A header from the response
     ResponseHeader {
-        /// The name of the request header.
+        /// The name of the response header.
         response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -149,10 +146,6 @@ pub(crate) enum RouterSelector {
     ResponseContext {
         /// The response context key.
         response_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
@@ -184,8 +177,6 @@ pub(crate) enum RouterSelector {
         /// The mode for extracting active subgraph request information
         active_subgraph_requests: ActiveSubgraphRequests,
     },
-    /// Deprecated, should not be used anymore, use static field instead
-    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -237,13 +228,27 @@ impl Selector for RouterSelector {
             RouterSelector::RequestHeader {
                 request_header,
                 default,
-                ..
-            } => request
-                .router_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = request
+                    .router_request
+                    .headers()
+                    .get(request_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    None,
+                    request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::Env {
                 env,
                 default,
@@ -266,13 +271,14 @@ impl Selector for RouterSelector {
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::ResponseBody { response_body } if *response_body => {
                 insert_display_router_response(request);
                 None
             }
-            RouterSelector::ResponseErrors { .. } => {
+            RouterSelector::ResponseErrors { .. }
+            | RouterSelector::ResponseErrorsCount { .. }
+            | RouterSelector::ResponseErrorsField { .. } => {
                 insert_display_router_response(request);
                 None
             }
@@ -314,16 +320,94 @@ impl Selector for RouterSelector {
                             val.maybe_to_otel_value()
                         })
                 }),
+            RouterSelector::ResponseErrorsCount {
+                response_errors_count,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+                .and_then(|v| {
+                    from_str::<serde_json::Value>(&v.0)
+                        .ok()
+                        .and_then(|body_json| {
+                            let errors = body_json.get("errors");
+
+                            let data: serde_json_bytes::Value =
+                                serde_json_bytes::to_value(errors).ok()?;
+
+                            let count = response_errors_count.select(&data).count();
+                            Some(opentelemetry::Value::I64(count as i64))
+                        })
+                }),
+            RouterSelector::ResponseErrorsField {
+                response_errors_field,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+                .and_then(|v| {
+                    from_str::<serde_json::Value>(&v.0)
+                        .ok()
+                        .and_then(|body_json| {
+                            let errors = body_json.get("errors")?.as_array()?;
+
+                            // Extract the specified field from each error
+                            let extracted: Vec<String> = errors
+                                .iter()
+                                .filter_map(|error| {
+                                    let error_bytes: serde_json_bytes::Value =
+                                        serde_json_bytes::to_value(error).ok()?;
+                                    let result = response_errors_field.find(&error_bytes);
+
+                                    // Convert the result to a string representation
+                                    if result.is_null() {
+                                        None
+                                    } else if let Some(s) = result.as_str() {
+                                        Some(s.to_string())
+                                    } else {
+                                        // For non-string values, serialize to JSON string
+                                        Some(result.to_string())
+                                    }
+                                })
+                                .collect();
+
+                            if extracted.is_empty() {
+                                None
+                            } else {
+                                Some(opentelemetry::Value::Array(
+                                    extracted
+                                        .into_iter()
+                                        .map(opentelemetry::StringValue::from)
+                                        .collect::<Vec<_>>()
+                                        .into(),
+                                ))
+                            }
+                        })
+                }),
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
-                ..
-            } => response
-                .response
-                .headers()
-                .get(response_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
-                .or_else(|| default.maybe_to_otel_value()),
+                redact,
+            } => {
+                let header_value = response
+                    .response
+                    .headers()
+                    .get(response_header)
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &response.context,
+                    crate::services::header_masking::Direction::Response,
+                    None,
+                    response_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
+                    .map(|v| v.into())
+                    .or_else(|| default.maybe_to_otel_value())
+            }
             RouterSelector::ResponseStatus { response_status } => match response_status {
                 ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
@@ -403,15 +487,16 @@ impl Selector for RouterSelector {
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
-            RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+            RouterSelector::OnGraphQLError { on_graphql_error } => {
                 let contains_error = response
                     .context
                     .get_json_value(CONTAINS_GRAPHQL_ERROR)
                     .and_then(|value| value.as_bool())
                     .unwrap_or_default();
-                Some(opentelemetry::Value::Bool(contains_error))
+                Some(opentelemetry::Value::Bool(
+                    contains_error == *on_graphql_error,
+                ))
             }
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::StudioOperationId {
                 studio_operation_id,
@@ -428,10 +513,24 @@ impl Selector for RouterSelector {
         }
     }
 
+    fn on_response_event(&self, _response: &(), ctx: &Context) -> Option<opentelemetry::Value> {
+        match self {
+            RouterSelector::OnGraphQLError { on_graphql_error } => {
+                let chunk_has_errors = ctx
+                    .get_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Some(opentelemetry::Value::Bool(
+                    chunk_has_errors == *on_graphql_error,
+                ))
+            }
+            _ => None,
+        }
+    }
+
     fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::ContextId { context_id } if *context_id => {
                 Some(opentelemetry::Value::from(ctx.id.clone()))
@@ -468,7 +567,6 @@ impl Selector for RouterSelector {
 
     fn on_drop(&self) -> Option<opentelemetry::Value> {
         match self {
-            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
@@ -485,7 +583,6 @@ impl Selector for RouterSelector {
                         | RouterSelector::TraceId { .. }
                         | RouterSelector::StudioOperationId { .. }
                         | RouterSelector::Baggage { .. }
-                        | RouterSelector::Static(_)
                         | RouterSelector::Env { .. }
                         | RouterSelector::StaticField { .. }
                         | RouterSelector::ContextId { .. }
@@ -497,7 +594,6 @@ impl Selector for RouterSelector {
                     | RouterSelector::StudioOperationId { .. }
                     | RouterSelector::OperationName { .. }
                     | RouterSelector::Baggage { .. }
-                    | RouterSelector::Static(_)
                     | RouterSelector::Env { .. }
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseHeader { .. }
@@ -509,6 +605,12 @@ impl Selector for RouterSelector {
                     | RouterSelector::RequestDuration { .. }
                     | RouterSelector::OnGraphQLError { .. }
                     | RouterSelector::ContextId { .. }
+                    // TODO: on_response_event is not yet wired in the router's streaming pipeline,
+                    // so these selectors only work for non-streaming (on: response) events.
+                    // See PR #9365 for the supergraph equivalent. Streaming support is a follow-up.
+                    | RouterSelector::ResponseErrors { .. }
+                    | RouterSelector::ResponseErrorsCount { .. }
+                    | RouterSelector::ResponseErrorsField { .. }
             ),
             Stage::ResponseField => false,
             Stage::Error => matches!(
@@ -517,23 +619,21 @@ impl Selector for RouterSelector {
                     | RouterSelector::StudioOperationId { .. }
                     | RouterSelector::OperationName { .. }
                     | RouterSelector::Baggage { .. }
-                    | RouterSelector::Static(_)
                     | RouterSelector::Env { .. }
                     | RouterSelector::StaticField { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::Error { .. }
                     | RouterSelector::ContextId { .. }
             ),
-            Stage::Drop => matches!(
-                self,
-                RouterSelector::Static(_) | RouterSelector::StaticField { .. }
-            ),
+            Stage::Drop => matches!(self, RouterSelector::StaticField { .. }),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use http::StatusCode;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
@@ -563,22 +663,6 @@ mod test {
     use crate::query_planner::APOLLO_OPERATION_ID;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
-
-    #[test]
-    fn router_static() {
-        let selector = RouterSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::RouterRequest::fake_builder()
-                        .build()
-                        .unwrap()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
 
     #[test]
     fn router_static_field() {
@@ -645,7 +729,6 @@ mod test {
     fn router_request_context() {
         let selector = RouterSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -687,7 +770,6 @@ mod test {
     fn router_response_context() {
         let selector = RouterSelector::ResponseContext {
             response_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = crate::context::Context::new();
@@ -774,12 +856,169 @@ mod test {
     }
 
     #[test]
+    fn router_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["authorization".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .context(context)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "Bearer secret".into()
+        ); // gitleaks:allow
+    }
+
+    #[test]
+    fn router_request_header_redact_explicit_mask() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "x-custom".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Mask),
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("x-custom", "some-value")
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_request_header_masked_by_defaults_without_rules() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "authorization".to_string(),
+            redact: None,
+            default: None,
+        };
+        let request = crate::services::RouterRequest::fake_builder()
+            .header("authorization", "Bearer secret") // gitleaks:allow
+            .build()
+            .unwrap();
+        // Fail-secure: no rules in context → the built-in defaults still mask
+        // `authorization`.
+        assert_eq!(
+            selector.on_request(&request).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "***MASKED***".into()
+        );
+    }
+
+    #[test]
+    fn router_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "set-cookie".to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec!["set-cookie".to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let response = crate::services::RouterResponse::fake_builder()
+            .header("set-cookie", "session=abc123")
+            .context(context)
+            .data(serde_json_bytes::json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(&response).unwrap(),
+            "session=abc123".into()
+        );
+    }
+
+    #[test]
     fn router_baggage() {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         subscriber::with_default(subscriber, || {
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
-                redact: None,
                 default: Some("defaulted".into()),
             };
             let span_context = SpanContext::new(
@@ -932,7 +1171,6 @@ mod test {
     fn router_env() {
         let mut selector = RouterSelector::Env {
             env: "SELECTOR_ENV_VARIABLE".to_string(),
-            redact: None,
             default: Some("defaulted".to_string()),
             mocked_env_var: None,
         };
@@ -962,7 +1200,6 @@ mod test {
     fn router_operation_name_string() {
         let selector = RouterSelector::OperationName {
             operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
@@ -1169,5 +1406,205 @@ mod test {
             .build()
             .unwrap();
         assert!(selector.on_request(&request).is_none());
+    }
+
+    #[test]
+    fn router_response_errors_count() {
+        // Test counting all errors
+        let selector = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[*]").unwrap(),
+        };
+        let res = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .data("some data")
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("First error")
+                    .extension_code("ERROR_ONE")
+                    .build(),
+                crate::graphql::Error::builder()
+                    .message("Second error")
+                    .extension_code("ERROR_TWO")
+                    .build(),
+                crate::graphql::Error::builder()
+                    .message("Third error")
+                    .extension_code("NOT_FOUND")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res),
+            Some(opentelemetry::Value::I64(3))
+        );
+
+        // Test counting filtered errors (exclude NOT_FOUND)
+        let selector_filtered = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[?(!(@.extensions.code == 'NOT_FOUND'))]")
+                .unwrap(),
+        };
+        assert_eq!(
+            selector_filtered.on_response(res),
+            Some(opentelemetry::Value::I64(2))
+        );
+
+        // Test with no errors
+        let res_no_errors = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::OK)
+            .data("some data")
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res_no_errors),
+            Some(opentelemetry::Value::I64(0))
+        );
+
+        // Test with single error (mimics timeout scenario)
+        let res_single_error = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::GATEWAY_TIMEOUT)
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Your request has been timed out")
+                    .extension_code("GATEWAY_TIMEOUT")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res_single_error),
+            Some(opentelemetry::Value::I64(1))
+        );
+    }
+
+    #[test]
+    fn router_on_graphql_error_on_response() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CONTAINS_GRAPHQL_ERROR;
+
+        // on_graphql_error: true — true when errors present, false when not
+        let selector_true = RouterSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+        let ctx_with_errors = crate::Context::default();
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors = RouterResponse::fake_builder()
+            .context(ctx_with_errors)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_with_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let response_no_errors = RouterResponse::fake_builder().build().unwrap();
+        assert_eq!(
+            selector_true.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // on_graphql_error: false — inverted
+        let selector_false = RouterSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+        assert_eq!(
+            selector_false.on_response(&response_no_errors),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        let ctx_with_errors2 = crate::Context::default();
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        let response_with_errors2 = RouterResponse::fake_builder()
+            .context(ctx_with_errors2)
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_false.on_response(&response_with_errors2),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn on_response_event_on_graphql_error_true() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        let selector = RouterSelector::OnGraphQLError {
+            on_graphql_error: true,
+        };
+
+        // chunk with errors → returns true
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        // chunk without errors → returns false
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // key absent → defaults to false (no errors)
+        let ctx = crate::Context::default();
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn on_response_event_on_graphql_error_false() {
+        use serde_json_bytes::Value;
+
+        use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::plugins::telemetry::config_new::Selector;
+
+        let selector = RouterSelector::OnGraphQLError {
+            on_graphql_error: false,
+        };
+
+        // chunk without errors → returns true (matches "no errors" condition)
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(true))
+        );
+
+        // chunk with errors → returns false (doesn't match "no errors" condition)
+        let ctx = crate::Context::default();
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        assert_eq!(
+            selector.on_response_event(&(), &ctx),
+            Some(opentelemetry::Value::Bool(false))
+        );
+
+        // Edge case: JSONPath selects a single match whose value is itself an array.
+        // $[0].locations selects the locations array of the first error — this should
+        // count as 1 match (one error touched), not as the length of the locations array.
+        let selector_locations = RouterSelector::ResponseErrorsCount {
+            response_errors_count: JsonPathInst::new("$[0].locations").unwrap(),
+        };
+        let res_with_locations = &crate::services::RouterResponse::fake_builder()
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Error with locations")
+                    .location(crate::graphql::Location { line: 1, column: 1 })
+                    .location(crate::graphql::Location { line: 2, column: 3 })
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector_locations.on_response(res_with_locations),
+            Some(opentelemetry::Value::I64(1))
+        );
     }
 }

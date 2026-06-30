@@ -1,5 +1,11 @@
+mod analysis;
 mod apply_to;
 pub(crate) mod helpers;
+/// Shared `Arc`-shaped reference alias used throughout the json_selection
+/// module — matches shape-rs's own internal `Ref<T> = Arc<T>` convention so
+/// shape and selection-side code can talk about reference-counted handles
+/// using the same vocabulary.
+pub(crate) type Ref<T> = std::sync::Arc<T>;
 mod immutable;
 mod known_var;
 mod lit_expr;
@@ -10,10 +16,13 @@ mod pretty;
 mod selection_set;
 mod selection_trie;
 
-pub use apply_to::*;
 // Pretty code is currently only used in tests, so this cfg is to suppress the
 // unused lint warning. If pretty code is needed in not test code, feel free to
 // remove the `#[cfg(test)]`.
+#[allow(unused_imports)] // Consumers land in follow-up PRs.
+pub(crate) use analysis::SelectionAnalysis;
+pub use apply_to::*;
+pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
 pub use parser::*;
 #[cfg(test)]

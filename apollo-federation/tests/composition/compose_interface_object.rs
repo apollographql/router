@@ -990,3 +990,50 @@ fn interface_object_type_kind_mismatch_labels_correctly_when_object_processed_fi
         )],
     );
 }
+
+#[test]
+fn validate_multiple_overlapping_interface_object_types_in_same_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query { t: T }
+            interface I1 { id: ID! }
+            interface I2 { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type I1 @key(fields: "id") @interfaceObject {
+              id: ID!
+              a: String!
+            }
+            type I2 @key(fields: "id") @interfaceObject {
+              id: ID!
+              b: String!
+            }
+        "#,
+    };
+
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+            interface I1 @key(fields: "id") { id: ID! }
+            interface I2 @key(fields: "id") { id: ID! }
+            type T implements I1 & I2 @key(fields: "id") { id: ID!, t: String }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type "T". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
+        )],
+    );
+}

@@ -443,6 +443,62 @@ mod validations {
             )],
         );
     }
+
+    #[test]
+    fn errors_when_trying_to_use_supergraph_tag_spec() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                schema
+                    @link(url: "https://specs.apollo.dev/link/v1.0")
+                    @link(url: "https://specs.apollo.dev/tag/v0.2")
+                {
+                    query: Query
+                }
+
+                type Query {
+                    q: Int
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[subgraphA] Please import "@tag" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/tag" to avoid potential unexpected behavior in the future."#,
+            )],
+        );
+    }
+
+    #[test]
+    fn errors_when_trying_to_use_supergraph_inaccessible_spec() {
+        let subgraph_a = ServiceDefinition {
+            name: "subgraphA",
+            type_defs: r#"
+                schema
+                    @link(url: "https://specs.apollo.dev/link/v1.0")
+                    @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
+                {
+                    query: Query
+                }
+
+                type Query {
+                    q: Int
+                }
+            "#,
+        };
+
+        let result = compose_services(&[subgraph_a]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "INVALID_LINK_DIRECTIVE_USAGE",
+                r#"[subgraphA] Please import "@inaccessible" from the feature "https://specs.apollo.dev/federation" instead of using "https://specs.apollo.dev/inaccessible" to avoid potential unexpected behavior in the future."#,
+            )],
+        );
+    }
 }
 
 mod shareable {
@@ -884,4 +940,34 @@ mod override_tests {
         let result = compose_services(&[subgraph_a]);
         result.expect("Expected composition to succeed");
     }
+}
+
+#[test]
+fn coerces_unquoted_key_fields_in_fed1_schema() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: id) {
+                id: ID!
+                name: String
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+            type T @key(fields: "id") @extends {
+                id: ID! @external
+                value: Int
+            }
+        "#,
+    };
+
+    let result = compose_services(&[subgraph_a, subgraph_b]);
+    result.expect("Expected composition to succeed with unquoted @key fields argument");
 }

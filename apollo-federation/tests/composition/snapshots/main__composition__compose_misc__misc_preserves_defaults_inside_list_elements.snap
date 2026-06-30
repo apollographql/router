@@ -1,0 +1,7 @@
+---
+source: apollo-federation/tests/composition/compose_misc.rs
+expression: query
+---
+type Query @join__type(graph: SUBGRAPH) {
+  products(sort: [SortInput!] = [{}]): [Product!]!
+}

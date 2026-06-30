@@ -30,7 +30,6 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
@@ -107,9 +106,11 @@ impl Service<SupergraphRequest> for SupergraphService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.query_planner_service
-            .poll_ready(cx)
-            .map_err(|err| err.into())
+        match self.query_planner_service.poll_ready(cx) {
+            Poll::Ready(Ok(())) => {}
+            other => return other.map_err(|err| err.into()),
+        }
+        self.execution_service.poll_ready(cx)
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
@@ -119,16 +120,18 @@ impl Service<SupergraphRequest> for SupergraphService {
         }
 
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let clone = self.query_planner_service.clone();
+        let planning_clone = self.query_planner_service.clone();
+        let planning = std::mem::replace(&mut self.query_planner_service, planning_clone);
 
-        let planning = std::mem::replace(&mut self.query_planner_service, clone);
+        let execution_clone = self.execution_service.clone();
+        let execution = std::mem::replace(&mut self.execution_service, execution_clone);
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
         let fut = service_call(
             planning,
-            self.execution_service.clone(),
+            execution,
             schema,
             req,
             self.strict_variable_validation,
@@ -154,7 +157,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<QueryPlannerService>,
-    execution_service: execution::BoxCloneService,
+    mut execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
     strict_variable_validation: Mode,
@@ -326,7 +329,7 @@ async fn service_call(
                 Ok(res)
             } else {
                 let execution_response = execution_service
-                    .oneshot(
+                    .call(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
@@ -375,9 +378,15 @@ async fn service_call(
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
+                        let header_string = crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Response,
+                            None,
+                            &parts.headers,
+                        );
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.headers"),
-                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                            opentelemetry::Value::String(header_string.into()),
                         ));
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.status"),
@@ -582,14 +591,10 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
             .map(|t| t.config.apollo.clone());
 
-        // The buffer between SubscriptionExecutionLayer and the inner plugin/execution
-        // pipeline provides backpressure: if the execution pipeline is busy, callers
-        // block here rather than propagating poll_ready latency upward.
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
-            .buffered()
             .service(
                 self.plugins.iter().rev().fold(
                     ExecutionService {

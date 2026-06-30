@@ -477,6 +477,7 @@ fn validate_project_config_files() {
                         "INVALIDATION_SHARED_KEY_PRODUCTS",
                         "invalidation-for-products",
                     )
+                    .mocked_env_var("DISTRIBUTED_TRACING_ENDPOINT", "http://example.com")
                     .build()
                     .unwrap();
 
@@ -688,6 +689,38 @@ fn upgrade_old_configuration() {
             }
         }
     }
+}
+
+// Regression: old flat-list headers config must be accepted at startup (Mode::Upgrade)
+// without requiring the operator to manually add the `operations:` wrapper key.
+#[test]
+fn headers_operations_migration_applied_at_startup() {
+    let old_config = r#"
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-request-id
+      - propagate:
+          named: authorization
+"#;
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect("old headers config should be accepted at startup via automatic migration");
+}
+
+#[test]
+fn headers_operations_rejected_without_migration() {
+    let old_config = r#"
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-request-id
+      - propagate:
+          named: authorization
+"#;
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect_err("old headers config should be rejected when migration is not applied");
 }
 
 #[derive(RustEmbed)]

@@ -17,6 +17,7 @@ use hyper_util::rt::TokioIo;
 use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
 use hyper_util::server::conn::auto::Http1Builder;
+use hyper_util::server::graceful::GracefulConnection;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -200,47 +201,48 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
-// This macro unifies the logic tht deals with connections.
-// Ideally this would be a function, but the generics proved too difficult to figure out.
-macro_rules! handle_connection {
-    ($connection:expr, $connection_handle:expr, $connection_shutdown:expr, $connection_shutdown_timeout:expr, $received_first_request:expr) => {
-        let connection = $connection;
-        let mut connection_handle = $connection_handle;
-        let connection_shutdown = $connection_shutdown;
-        let connection_shutdown_timeout = $connection_shutdown_timeout;
-        let received_first_request = $received_first_request;
-        tokio::pin!(connection);
-        tokio::select! {
-            // the connection finished first
-            _res = &mut connection => {
-            }
-            // the shutdown receiver was triggered first,
-            // so we tell the connection to do a graceful shutdown
-            // on the next request, then we wait for it to finish
-            _ = connection_shutdown.cancelled() => {
-                connection_handle.shutdown();
-                connection.as_mut().graceful_shutdown();
-                // Only wait for the connection to close gracfully if we recieved a request.
-                // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
-                if received_first_request.load(Ordering::Relaxed) {
-                    // The connection may still not shutdown so we apply a timeout from the configuration
-                    // Connections stuck terminating will keep the pipeline and everything related to that pipeline
-                    // in memory.
+// Drive a connection until graceful shutdown.
+async fn handle_connection<C, E>(
+    connection: C,
+    mut connection_handle: ConnectionHandle,
+    connection_shutdown: CancellationToken,
+    connection_shutdown_timeout: Duration,
+    received_first_request: Arc<AtomicBool>,
+) where
+    C: Future<Output = Result<(), E>>,
+    C: GracefulConnection<Error = E>,
+{
+    tokio::pin!(connection);
+    tokio::select! {
+        // the connection finished first
+        _res = &mut connection => {
+        }
+        // the shutdown receiver was triggered first,
+        // so we tell the connection to do a graceful shutdown
+        // on the next request, then we wait for it to finish
+        _ = connection_shutdown.cancelled() => {
+            connection_handle.shutdown();
+            connection.as_mut().graceful_shutdown();
+            // Only wait for the connection to close gracfully if we recieved a request.
+            // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
+            if received_first_request.load(Ordering::Relaxed) {
+                // The connection may still not shutdown so we apply a timeout from the configuration
+                // Connections stuck terminating will keep the pipeline and everything related to that pipeline
+                // in memory.
 
-                    if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
-                        tracing::warn!(
-                            timeout = connection_shutdown_timeout.as_secs(),
-                            server.address = connection_handle.address.to_string(),
-                            schema.id = connection_handle.pipeline_ref.schema_id,
-                            config.hash = connection_handle.pipeline_ref.config_hash,
-                            launch.id = connection_handle.pipeline_ref.launch_id,
-                            "connection shutdown exceeded, forcing close",
-                        );
-                    }
+                if connection.timeout(connection_shutdown_timeout).await.is_err() {
+                    tracing::warn!(
+                        timeout = connection_shutdown_timeout.as_secs(),
+                        server.address = connection_handle.address.to_string(),
+                        schema.id = connection_handle.pipeline_ref.schema_id,
+                        config.hash = connection_handle.pipeline_ref.config_hash,
+                        launch.id = connection_handle.pipeline_ref.launch_id,
+                        "connection shutdown exceeded, forcing close",
+                    );
                 }
             }
         }
-    };
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -399,7 +401,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -412,7 +414,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
@@ -456,7 +458,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                 }
                             });
@@ -686,15 +688,19 @@ mod tests {
                 .build()?,
         );
 
-        let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-            move |req| {
-                Ok(SupergraphResponse::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(json!({"response": "yay"}))
-                        .build(),
-                    req.context,
-                ))
-            },
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<crate::services::SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "yay"}))
+                    .build(),
+                req.context,
+            ));
+        });
+        let router_service = router::service::from_supergraph_mock_with_configuration(
+            router_mock,
             configuration.clone(),
         )
         .await;
@@ -725,6 +731,7 @@ mod tests {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         server.shutdown().await?;
+        crate::plugin::test::await_mock_driver(router_driver).await;
 
         Ok(())
     }
