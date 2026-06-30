@@ -2,9 +2,6 @@ supergraph:
   listen: 1.2.3.4:5
 
 telemetry:
-  instrumentation:
-    spans:
-
   apollo:
     otlp_tracing_sampler: 1
     errors:

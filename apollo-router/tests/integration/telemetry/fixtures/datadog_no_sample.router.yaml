@@ -18,7 +18,4 @@ telemetry:
           scheduled_delay: 100ms
         fixed_span_names: false
         enable_span_mapping: false
-  instrumentation:
-    spans:
-
 
