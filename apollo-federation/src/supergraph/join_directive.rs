@@ -13,7 +13,7 @@ use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
 use crate::connectors::spec::ConnectSpecDefinition;
 use crate::error::FederationError;
-use crate::link::DEFAULT_LINK_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -55,7 +55,7 @@ pub(super) fn extract(
         // TODO: Do we need to handle the link directive being renamed?
         let (links, others) = directives
             .into_iter()
-            .partition::<Vec<_>, _>(|(d, _)| d.name == DEFAULT_LINK_NAME);
+            .partition::<Vec<_>, _>(|(d, _)| d.name == LINK_DIRECTIVE_NAME_IN_SPEC);
 
         // After adding links, we'll check the link against a safelist of
         // specs and check_or_add the spec definitions if necessary.
@@ -152,7 +152,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(intf_pos.type_name.clone())
+                    .try_get_type(&intf_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
@@ -198,7 +198,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(intf_field_pos.type_name.clone())
+                    .try_get_type(&intf_field_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
@@ -249,7 +249,7 @@ pub(super) fn extract(
 
                 if subgraph
                     .schema
-                    .try_get_type(obj_pos.type_name.clone())
+                    .try_get_type(&obj_pos.type_name)
                     .map(|t| matches!(t, TypeDefinitionPosition::Object(_)))
                     .unwrap_or_default()
                 {

@@ -1,4 +1,6 @@
 use apollo_compiler::coord;
+use apollo_federation::composition::CompositionOptions;
+use apollo_federation::composition::compose;
 use apollo_federation::composition::upgrade_subgraphs_if_necessary;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
@@ -210,4 +212,136 @@ fn fed2_uses_standard_federation_directive_definitions() {
         " A custom description for the key directive in Fed2 "
         directive @key(fields: federation__FieldSet!) on OBJECT
     "#);
+}
+
+/// Fed1 upgrade must not add @shareable to key fields. Two subgraphs share the
+/// same entity so the upgrader's `add_shareable` logic is exercised — it should
+/// recognize key fields as already shareable and skip them.
+///
+/// This tests an error scenario where schemas include `_entities` / `_service`
+/// on Query without defining the `_Entity` / `_Service` types. Previously,
+/// during expansion, `collect_deep_references` would error on `Query` because those
+/// types don't exist yet. Without the fix, the first error aborted the loop,
+/// leaving later types' @key directives unregistered in `referencers`.
+#[test]
+fn upgrade_does_not_add_shareable_to_key_fields_in_partial_schemas() {
+    // in order to trigger @shareable logic same element has to be defined in multiple schemas
+    let s1 = Subgraph::parse(
+        "s1",
+        "http://s1",
+        r#"
+            type Query {
+                product(id: ID!): Product
+                _entities(representations: [_Any!]!): [_Entity]!
+                _service: _Service!
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                name: String
+            }
+        "#,
+    )
+    .expect("parses")
+    .expand_links()
+    .expect("expands");
+
+    let s2 = Subgraph::parse(
+        "s2",
+        "http://s2",
+        r#"
+            type Query {
+                _entities(representations: [_Any!]!): [_Entity]!
+                _service: _Service!
+            }
+
+            type Product @key(fields: "id") {
+                id: ID!
+                price: Float
+            }
+        "#,
+    )
+    .expect("parses")
+    .expand_links()
+    .expect("expands");
+
+    let mut upgraded = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrade succeeds");
+    upgraded.sort_by(|a, b| a.name.cmp(&b.name));
+
+    assert_snapshot!("s1", upgraded[0].schema_string());
+    assert_snapshot!("s2", upgraded[1].schema_string());
+}
+
+/// Fed v1 subgraph with `@requires` containing an inline fragment type condition that is only
+/// valid in the supergraph should upgrade and compose successfully.
+///
+/// Subgraph A defines two unrelated interfaces (`Animal` and `Pet`) and uses
+/// `@requires(fields: "data { ... on Pet { name } }")` where `data` returns `Animal`.
+/// In subgraph A alone, `Animal` and `Pet` have no type intersection.
+/// Subgraph B defines `Dog implements Animal & Pet`, making the type condition valid
+/// in the supergraph.
+#[test]
+fn fed1_requires_with_cross_subgraph_inline_fragment_type_condition() {
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
+            type Query {
+                records: [Record]
+            }
+
+            interface Animal {
+                id: ID!
+            }
+
+            interface Pet {
+                name: String!
+            }
+
+            type Record @key(fields: "id") @extends {
+                id: ID! @external
+                data: Animal! @external
+                label: String! @requires(fields: "data { id ... on Pet { name } }")
+            }
+        "#,
+    )
+    .expect("parses subgraphA");
+
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
+            type Query {
+                animals: [Animal]
+            }
+
+            interface Animal {
+                id: ID!
+            }
+
+            interface Pet {
+                name: String!
+            }
+
+            type Dog implements Animal & Pet {
+                id: ID!
+                name: String!
+                breed: String!
+            }
+
+            type Cat implements Animal {
+                id: ID!
+                color: String!
+            }
+
+            type Record @key(fields: "id") {
+                id: ID!
+                data: Animal!
+            }
+        "#,
+    )
+    .expect("parses subgraphB");
+
+    compose(vec![subgraph_a, subgraph_b], CompositionOptions::default())
+        .expect("composition succeeds");
 }

@@ -497,11 +497,10 @@ impl SubgraphAuth {
     ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
-                .map_request(move |req: SubgraphRequest| {
-                    let signing_params = signing_params.clone();
-                    req.context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(signing_params));
+                .map_request(move |mut req: SubgraphRequest| {
+                    req.subgraph_request
+                        .extensions_mut()
+                        .insert(signing_params.clone());
                     req
                 })
                 .service(service)
@@ -537,10 +536,10 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::graphql::Request;
-    use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
@@ -639,23 +638,21 @@ mod test {
     async fn test_lattice_body_payload_should_be_unsigned() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                assert_eq!(
-                    "UNSIGNED-PAYLOAD",
-                    http_request
-                        .headers()
-                        .get("x-amz-content-sha256")
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                );
-                true
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            assert_eq!(
+                "UNSIGNED-PAYLOAD",
+                http_request
+                    .headers()
+                    .get("x-amz-content-sha256")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
@@ -678,6 +675,7 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -685,30 +683,44 @@ mod test {
     async fn test_aws_sig_v4_headers() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
-                let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
-                assert_eq!(match authorization_regex.find(authorization_header_str) {
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
+            let authorization_header_str = http_request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, authorization_header_str);
-
-                let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
-                let x_amz_date_header_str = http_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
-                assert_eq!(match x_amz_date_regex.find(x_amz_date_header_str) {
+                    None => "no match",
+                },
+                authorization_header_str
+            );
+            let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
+            let x_amz_date_header_str = http_request
+                .headers()
+                .get("x-amz-date")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match x_amz_date_regex.find(x_amz_date_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, x_amz_date_header_str);
-
-                assert_eq!(http_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
-
-                true
-            })
-            .returning(example_response);
+                    None => "no match",
+                },
+                x_amz_date_header_str
+            );
+            assert_eq!(
+                http_request.headers().get("x-amz-content-sha256").unwrap(),
+                "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c"
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
@@ -731,7 +743,163 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
+    }
+
+    mod signing_leak {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        use tower::Service;
+
+        use super::*;
+        use crate::Context;
+        use crate::graphql::Request;
+        use crate::query_planner::fetch::OperationKind;
+        use crate::services::SubgraphRequest;
+        use crate::services::subgraph;
+
+        async fn call_subgraph(
+            name: &str,
+            context: Context,
+            signing_params: Arc<SigningParams>,
+        ) -> Result<(), BoxError> {
+            let request = SubgraphRequest::builder()
+                .supergraph_request(Arc::new(
+                    http::Request::builder()
+                        .header(http::header::HOST, "host")
+                        .body(Request::builder().query("query").build())
+                        .expect("valid request"),
+                ))
+                .subgraph_request(
+                    http::Request::builder()
+                        .header(http::header::HOST, "rhost")
+                        .uri(format!("https://{name}-endpoint.com"))
+                        .body(Request::builder().query("query").build())
+                        .expect("valid request"),
+                )
+                .operation_kind(OperationKind::Query)
+                .context(context)
+                .subgraph_name(name.to_string())
+                .build();
+
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(super::example_response(req).unwrap());
+            });
+
+            SubgraphAuth { signing_params }
+                .subgraph_service(name, mock.boxed())
+                .ready()
+                .await?
+                .call(request)
+                .await?;
+            crate::plugin::test::await_mock_driver(driver).await;
+
+            Ok(())
+        }
+
+        // Arc<SigningParamsConfig> must survive SubgraphRequest::clone so APQ probe
+        // requests (which clone the request for a potential retry) can be signed.
+        #[tokio::test]
+        async fn test_signing_params_preserved_across_subgraph_request_clone()
+        -> Result<(), BoxError> {
+            let signing_params = Arc::new(
+                make_signing_params(
+                    &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
+                        access_key_id: "id".to_string(),
+                        secret_access_key: "secret".to_string(),
+                        region: "us-east-1".to_string(),
+                        service_name: "execute-api".to_string(),
+                        assume_role: None,
+                    })),
+                    "products",
+                )
+                .await
+                .unwrap(),
+            );
+
+            let mut req = SubgraphRequest::builder()
+                .supergraph_request(Arc::new(
+                    http::Request::builder()
+                        .header(http::header::HOST, "host")
+                        .body(crate::graphql::Request::builder().query("query").build())
+                        .expect("valid request"),
+                ))
+                .subgraph_request(
+                    http::Request::builder()
+                        .header(http::header::HOST, "rhost")
+                        .uri("https://products-endpoint.com")
+                        .body(crate::graphql::Request::builder().query("query").build())
+                        .expect("valid request"),
+                )
+                .operation_kind(OperationKind::Query)
+                .context(Context::new())
+                .subgraph_name("products".to_string())
+                .build();
+            req.subgraph_request
+                .extensions_mut()
+                .insert(signing_params.clone());
+
+            let cloned = req.clone();
+            assert!(
+                cloned
+                    .subgraph_request
+                    .extensions()
+                    .get::<Arc<SigningParamsConfig>>()
+                    .is_some(),
+                "Arc<SigningParamsConfig> must be preserved when SubgraphRequest is cloned for APQ"
+            );
+
+            Ok(())
+        }
+
+        // SigV4 params stored in per-request extensions must not leak to other subgraphs
+        // that share the same operation context.
+        #[tokio::test]
+        async fn test_signing_params_do_not_leak_to_unconfigured_subgraph() -> Result<(), BoxError>
+        {
+            let signing_params = Arc::new(SigningParams {
+                all: None,
+                subgraphs: HashMap::from([(
+                    "products".to_string(),
+                    Arc::new(
+                        make_signing_params(
+                            &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
+                                AWSSigV4HardcodedConfig {
+                                    access_key_id: "id".to_string(),
+                                    secret_access_key: "secret".to_string(),
+                                    region: "us-east-1".to_string(),
+                                    service_name: "execute-api".to_string(),
+                                    assume_role: None,
+                                },
+                            )),
+                            "products",
+                        )
+                        .await
+                        .unwrap(),
+                    ),
+                )]),
+            });
+
+            let shared_context = Context::new();
+
+            call_subgraph("products", shared_context.clone(), signing_params.clone()).await?;
+            call_subgraph("reviews", shared_context.clone(), signing_params.clone()).await?;
+
+            assert!(
+                shared_context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+                    .is_none(),
+                "signing params must not leak into shared context"
+            );
+
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -876,9 +1044,10 @@ mod test {
         service_name: String,
     ) -> http::Request<RouterBody> {
         let signing_params = request
-            .context
+            .subgraph_request
             .extensions()
-            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+            .get::<Arc<SigningParamsConfig>>()
+            .cloned()
             .unwrap();
 
         let http_request = request

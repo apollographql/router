@@ -18,6 +18,7 @@ use apollo_federation::connectors::runtime::http_json_transport::TransportRespon
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
+use apollo_federation::connectors::runtime::responses::handle_mapping_only_response;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
@@ -97,6 +98,11 @@ pub struct Response {
     /// The request context
     pub(crate) context: Context,
 
+    /// Originating federation subgraph name for this connector call. Carried
+    /// on the response (rather than passed through shared context) so parallel
+    /// connector calls don't race when resolving per-subgraph response rules.
+    pub(crate) subgraph_name: String,
+
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -107,6 +113,7 @@ pub struct Response {
 impl Response {
     pub(crate) fn error_new(
         context: Context,
+        subgraph_name: String,
         error: Error,
         message: impl Into<String>,
         response_key: ResponseKey,
@@ -121,6 +128,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name,
             transport_result: Err(error),
             mapped_response,
         }
@@ -151,6 +159,7 @@ impl Response {
 
         Self {
             context,
+            subgraph_name: String::new(),
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
@@ -247,23 +256,56 @@ impl tower::Service<Request> for ConnectorRequestService {
         });
 
         Box::pin(async move {
-            let mut debug_request = (None, Default::default());
-            let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
-                Err(Error::RequestLimitExceeded)
-            } else {
-                let result = match request.transport_request {
-                    TransportRequest::Http(http_request) => {
+            match request.transport_request {
+                // For mapping-only connectors, skip HTTP entirely and apply the selection against {}
+                TransportRequest::MappingOnly => {
+                    let mapped = handle_mapping_only_response(
+                        request.key,
+                        &request.connector,
+                        &request.context,
+                        request.supergraph_request.headers(),
+                    )
+                    .apply_operation(
+                        request
+                            .operation
+                            .as_ref()
+                            .map(|arc_valid_doc| arc_valid_doc.as_ref().as_ref()),
+                        &request.connector.schema_subtypes_map,
+                    );
+                    if matches!(mapped, MappedResponse::Data { .. }) {
+                        tracing::Span::current().record(
+                            crate::plugins::telemetry::consts::OTEL_STATUS_CODE,
+                            crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK,
+                        );
+                    }
+                    Ok(Response {
+                        context: request.context,
+                        subgraph_name: original_subgraph_name,
+                        transport_result: Ok(TransportResponse::MappingOnly),
+                        mapped_response: mapped,
+                    })
+                }
+
+                TransportRequest::Http(http_request) => {
+                    let mut debug_request = (None, Default::default());
+                    let result = if request_limit
+                        .is_some_and(|request_limit| !request_limit.allow())
+                    {
+                        Err(Error::RequestLimitExceeded)
+                    } else {
                         debug_request = http_request.debug;
 
                         log_request(
                             &http_request.inner,
                             log_request_level,
                             request.connector.label.as_ref(),
+                            &request.context,
+                            &original_subgraph_name,
                         );
 
                         let source_name = request.connector.source_config_key();
 
-                        if let Some(http_client_service_factory) =
+                        let result = if let Some(http_client_service_factory) =
                             http_client_service_factory.get(&source_name).cloned()
                         {
                             let (parts, body) = http_request.inner.into_parts();
@@ -271,46 +313,46 @@ impl tower::Service<Request> for ConnectorRequestService {
                                 http::Request::from_parts(parts, router::body::from_bytes(body));
 
                             http_client_service_factory
-                                .create(&original_subgraph_name)
-                                .oneshot(crate::services::http::HttpRequest {
-                                    http_request,
-                                    context: request.context.clone(),
-                                })
-                                .await
-                                .map(|result| result.http_response)
-                                .map_err(|e|
-                                    // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                    // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                    Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                                )
+                                    .create(&original_subgraph_name)
+                                    .oneshot(crate::services::http::HttpRequest {
+                                        http_request,
+                                        context: request.context.clone(),
+                                    })
+                                    .await
+                                    .map(|result| result.http_response)
+                                    .map_err(|e|
+                                        // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                                        // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                                        Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
+                                    )
                         } else {
                             Err(Error::TransportFailure("no http client found".into()))
-                        }
-                    }
-                };
+                        };
 
-                u64_counter!(
-                    "apollo.router.operations.connectors",
-                    "Total number of requests to connectors",
-                    1,
-                    "connector.type" = CONNECTOR_TYPE_HTTP,
-                    "subgraph.name" = original_subgraph_name
-                );
+                        u64_counter!(
+                            "apollo.router.operations.connectors",
+                            "Total number of requests to connectors",
+                            1,
+                            "connector.type" = CONNECTOR_TYPE_HTTP,
+                            "subgraph.name" = original_subgraph_name
+                        );
 
-                result
-            };
+                        result
+                    };
 
-            Ok(process_response(
-                result,
-                request.key,
-                request.connector,
-                &request.context,
-                debug_request,
-                debug.as_ref(),
-                request.supergraph_request,
-                request.operation.clone(),
-            )
-            .await)
+                    Ok(process_response(
+                        result,
+                        request.key,
+                        request.connector,
+                        &request.context,
+                        debug_request,
+                        debug.as_ref(),
+                        request.supergraph_request,
+                        request.operation.clone(),
+                    )
+                    .await)
+                }
+            }
         })
     }
 }
@@ -320,27 +362,22 @@ fn log_request(
     request: &http::Request<String>,
     log_request_level: Option<EventLevel>,
     label: &str,
+    context: &Context,
+    subgraph_name: &str,
 ) {
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
 
-        #[cfg(test)]
-        let headers = {
-            let mut headers: IndexMap<String, http::HeaderValue> = request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            headers.sort_keys();
-            headers
-        };
-        #[cfg(not(test))]
-        let headers = request.headers().clone();
+        let header_string = crate::services::header_masking::masked_headers_for_log(
+            context,
+            crate::services::header_masking::Direction::Request,
+            Some(subgraph_name),
+            request.headers(),
+        );
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,
-            opentelemetry::Value::String(format!("{headers:?}").into()),
+            opentelemetry::Value::String(header_string.into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_METHOD,

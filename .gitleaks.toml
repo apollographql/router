@@ -5,6 +5,7 @@
             '''Cargo.lock$'''
             ,'''^\.changesets\/.+\.md$'''
             ,'''^CHANGELOG\.md$'''
+            ,'''^apollo-router-benchmarks/benches/rhai_string_interning\.rs$'''
         ]
 
 [[ rules ]]

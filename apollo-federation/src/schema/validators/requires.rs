@@ -30,7 +30,7 @@ pub(crate) fn validate_requires_directives(
 ) -> Result<(), FederationError> {
     let requires_directive_name = meta
         .federation_spec_definition()
-        .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
+        .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
         .unwrap_or(FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC);
 
     let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator<RequiresDirective>>> = vec![
@@ -76,9 +76,10 @@ fn invalid_fields_error_from_diagnostics(
     for diagnostic in diagnostics.iter() {
         let mut message = normalize_diagnostic_message(diagnostic);
         if message.starts_with("Cannot query field") {
+            let base = message.trim_end_matches('.');
             message = format!(
-                "{message} If the field is defined in another subgraph, you need to add it to this subgraph with @external."
-            )
+                "{base} (if the field is defined in another subgraph, you need to add it to this subgraph with @external)."
+            );
         }
         errors
             .errors

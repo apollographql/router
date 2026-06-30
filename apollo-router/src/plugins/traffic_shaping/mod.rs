@@ -510,8 +510,14 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.key.clone()),
-                    move |(context, response_key), future| {
+                    |req: &Request| {
+                        (
+                            req.context.clone(),
+                            req.key.clone(),
+                            req.connector.id.subgraph_name.to_string(),
+                        )
+                    },
+                    move |(context, response_key, subgraph_name), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
@@ -519,6 +525,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Elapsed>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::GatewayTimeout,
                                         "Your request has been timed out",
                                         response_key,
@@ -528,6 +535,7 @@ impl PluginPrivate for TrafficShaping {
                                 Err(err) if err.is::<Overloaded>() => {
                                     let response = Response::error_new(
                                         context,
+                                        subgraph_name,
                                         Error::RateLimited,
                                         "Your request has been rate limited",
                                         response_key,
@@ -545,8 +553,9 @@ impl PluginPrivate for TrafficShaping {
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression {
-                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
@@ -663,7 +672,6 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
@@ -839,11 +847,11 @@ mod test {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),
@@ -951,7 +959,9 @@ mod test {
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request;
+                let TransportRequest::Http(ref http_request) = req.transport_request else {
+                    panic!("expected Http transport request");
+                };
 
                 assert_eq!(
                     http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
@@ -1239,20 +1249,23 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockRouterService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        mock_service.expect_call().times(0..3).returning(|_| {
-            Ok(RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
-                .unwrap())
+        // First and third requests pass through; the second is rate-limited by the plugin and
+        // never reaches the inner service.
+        let driver = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    RouterResponse::fake_builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .build()
+                        .unwrap(),
+                );
+            }
         });
-        mock_service
-            .expect_clone()
-            .returning(MockRouterService::new);
 
-        // let mut svc = plugin.router_service(mock_service.clone().boxed());
-        let mut svc = plugin.router_service(mock_service.boxed());
+        let mut svc = plugin.router_service(mock.boxed());
 
         let response: RouterResponse = svc
             .ready()
@@ -1292,6 +1305,7 @@ mod test {
             .await
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

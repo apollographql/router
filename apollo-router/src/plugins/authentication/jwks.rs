@@ -29,6 +29,7 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use parking_lot::RwLock;
+use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -199,7 +200,15 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!(%e, "could not get url");
+                let url = e.url().map(Url::as_str).unwrap_or("<unknown>");
+                let msg = if e.is_timeout() {
+                    "JWKS request timed out"
+                } else if e.is_connect() {
+                    "JWKS request connection failed"
+                } else {
+                    "JWKS request failed"
+                };
+                tracing::error!(url, %e, "{msg}");
                 e
             })
             .ok()?
@@ -450,7 +459,7 @@ pub(super) fn search_jwks(
     } else {
         // Only sort if we need to
         if candidates.len() > 1 {
-            candidates.sort_by(|a, b| a.0.cmp(&b.0));
+            candidates.sort_by_key(|a| a.0);
         }
 
         if found_highest_score {
@@ -573,90 +582,206 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
     }
 }
 
-pub(super) type DecodedClaims = (
-    Option<Issuers>,
-    Option<Audiences>,
-    TokenData<serde_json::Value>,
-);
+pub(super) type DecodedClaims = TokenData<serde_json::Value>;
 
 pub(super) fn decode_jwt(
     jwt: &str,
-    keys: Vec<SearchResult>,
+    search_results: Vec<SearchResult>,
     criteria: JWTCriteria,
 ) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for SearchResult {
-        issuers,
-        audiences,
-        jwk,
-        allow_missing_exp,
-    } in keys.into_iter()
-    {
-        let decoding_key = match DecodingKey::from_jwk(&jwk) {
-            Ok(k) => k,
-            Err(e) => {
-                error = Some((
-                    AuthenticationError::CannotCreateDecodingKey(e),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
+    for search_result in search_results.into_iter() {
+        match validate_jwk_against_jwt(jwt, search_result) {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                error = Some(err);
             }
-        };
-
-        let key_algorithm = match jwk.common.key_algorithm {
-            Some(a) => a,
-            None => {
-                error = Some((
-                    AuthenticationError::JWKHasNoAlgorithm,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
-            }
-        };
-
-        let algorithm = match convert_key_algorithm(key_algorithm) {
-            Some(a) => a,
-            None => {
-                error = Some((
-                    AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
-                continue;
-            }
-        };
-
-        let mut validation = Validation::new(algorithm);
-        validation.validate_nbf = true;
-        // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
-        // we don't validate audience yet, so this is deactivated
-        validation.validate_aud = false;
-        if allow_missing_exp {
-            validation.required_spec_claims.remove("exp");
         }
-
-        match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuers, audiences, v)),
-            Err(e) => {
-                tracing::trace!("JWT decoding failed with error `{e}`");
-                error = Some((
-                    AuthenticationError::CannotDecodeJWT(e),
-                    StatusCode::UNAUTHORIZED,
-                ));
-            }
-        };
     }
 
     match error {
         Some(e) => Err(e),
         None => {
             // We can't find a key to process this JWT.
-            Err((
-                criteria.kid.map_or_else(
-                    || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
-                    AuthenticationError::CannotFindKID,
-                ),
+            let err = match criteria.kid {
+                Some(kid) => AuthenticationError::CannotFindKID(kid),
+                None => AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
+            };
+            Err((err, StatusCode::UNAUTHORIZED))
+        }
+    }
+}
+
+fn validate_jwk_against_jwt(
+    jwt: &str,
+    search_result: SearchResult,
+) -> Result<DecodedClaims, (AuthenticationError, StatusCode)> {
+    let SearchResult {
+        issuers,
+        audiences,
+        jwk,
+        allow_missing_exp,
+    } = search_result;
+
+    let decoding_key = match DecodingKey::from_jwk(&jwk) {
+        Ok(k) => k,
+        Err(e) => {
+            return Err((
+                AuthenticationError::CannotCreateDecodingKey(e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let key_algorithm = match jwk.common.key_algorithm {
+        Some(a) => a,
+        None => {
+            return Err((
+                AuthenticationError::JWKHasNoAlgorithm,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let algorithm = match convert_key_algorithm(key_algorithm) {
+        Some(a) => a,
+        None => {
+            return Err((
+                AuthenticationError::UnsupportedKeyAlgorithm(key_algorithm),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let mut validation = Validation::new(algorithm);
+    validation.validate_nbf = true;
+    // if set to true, it will reject tokens containing an `aud` claim if the validation does not specify an audience
+    // we don't validate audience yet, so this is deactivated
+    validation.validate_aud = false;
+    if allow_missing_exp {
+        validation.required_spec_claims.remove("exp");
+    }
+
+    let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::trace!("JWT decoding failed with error `{e}`");
+            return Err((
+                AuthenticationError::CannotDecodeJWT(e),
                 StatusCode::UNAUTHORIZED,
-            ))
+            ));
+        }
+    };
+
+    if let Some(configured_issuers) = issuers {
+        let maybe_token_issuers = token_data.claims.as_object().and_then(|o| o.get("iss"));
+        if let Err(err) = validate_issuers(&configured_issuers, maybe_token_issuers) {
+            return Err((err, StatusCode::INTERNAL_SERVER_ERROR));
+        }
+    }
+
+    if let Some(configured_audiences) = audiences {
+        let maybe_token_audiences = token_data.claims.as_object().and_then(|o| o.get("aud"));
+        if let Err(err) = validate_audiences(&configured_audiences, maybe_token_audiences) {
+            return Err((err, StatusCode::UNAUTHORIZED));
+        }
+    }
+
+    Ok(token_data)
+}
+
+fn validate_issuers(
+    configured_issuers: &Issuers,
+    token_issuer: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let issuer_error = |actual: String| {
+        // Standardize issuer - sort it and join the elements with a comma
+        let mut issuers: Vec<String> = configured_issuers.iter().cloned().collect();
+        issuers.sort();
+
+        let expected = issuers.join(", ");
+        Err(AuthenticationError::InvalidIssuer {
+            expected,
+            token: actual,
+        })
+    };
+
+    if configured_issuers.is_empty() {
+        // No issuers to compare against
+        return Ok(());
+    }
+
+    match token_issuer {
+        None | Some(Value::Null) => {
+            // No issuer in token; allow this as well
+            Ok(())
+        }
+
+        Some(Value::String(token_issuer)) => {
+            // Check if this issuer is in our list
+            if configured_issuers.contains(token_issuer) {
+                Ok(())
+            } else {
+                issuer_error(token_issuer.to_string())
+            }
+        }
+
+        Some(unexpected_value) => {
+            // If the token has an incorrectly configured issuer, we cannot validate it against
+            // the configured issuers.
+            issuer_error(unexpected_value.to_string())
+        }
+    }
+}
+
+fn validate_audiences(
+    configured_audiences: &Audiences,
+    token_audiences: Option<&serde_json::Value>,
+) -> Result<(), AuthenticationError> {
+    let audience_error = |actual: String| {
+        // Standardize audience - sort it and join the elements with a comma
+        let mut audiences: Vec<String> = configured_audiences.iter().cloned().collect();
+        audiences.sort();
+
+        let expected = audiences.join(", ");
+        Err(AuthenticationError::InvalidAudience { expected, actual })
+    };
+
+    if configured_audiences.is_empty() {
+        // No audiences to compare against
+        return Ok(());
+    }
+
+    let Some(token_audiences) = token_audiences else {
+        return audience_error("<none>".to_string());
+    };
+
+    match token_audiences {
+        Value::String(token_audience) => {
+            // Check if this audience exists in our list
+            if configured_audiences.contains(token_audience) {
+                Ok(())
+            } else {
+                audience_error(token_audience.to_string())
+            }
+        }
+
+        Value::Array(token_audiences_arr) => {
+            // Check if any of these audiences is in our list
+            for token_audience in token_audiences_arr.iter().filter_map(|aud| aud.as_str()) {
+                if configured_audiences.contains(token_audience) {
+                    return Ok(());
+                }
+            }
+
+            // No matches, so return an error
+            audience_error(token_audiences.to_string())
+        }
+
+        unexpected_value => {
+            // If the token has incorrectly configured audiences, we cannot validate it against
+            // the configured audiences.
+            audience_error(unexpected_value.to_string())
         }
     }
 }
@@ -823,5 +948,21 @@ mod test {
 
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::from_secs(3600));
+    }
+
+    /// Verifies that a connection failure to a JWKS URL produces an actionable error log
+    /// that includes both the URL and the failure category (timeout, connection error, etc.)
+    /// rather than a generic "could not get url" message.
+    #[tokio::test]
+    async fn test_get_jwks_unreachable_url_logs_helpful_error() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let url = "http://127.0.0.1:1/jwks.json".parse().expect("valid URL");
+
+        let result = super::get_jwks(url, vec![]).await;
+        assert!(result.is_none());
+
+        assert!(tracing_test::logs_contain("JWKS request connection failed"));
+        assert!(tracing_test::logs_contain("127.0.0.1:1"));
     }
 }

@@ -17,12 +17,15 @@ use hyper_util::rt::TokioIo;
 use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder;
 use hyper_util::server::conn::auto::Http1Builder;
+use hyper_util::server::graceful::GracefulConnection;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
+use tower::Layer;
+use tower_http::normalize_path::NormalizePathLayer;
 use tower_service::Service;
 
 use crate::ListenAddr;
@@ -198,47 +201,48 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
-// This macro unifies the logic tht deals with connections.
-// Ideally this would be a function, but the generics proved too difficult to figure out.
-macro_rules! handle_connection {
-    ($connection:expr, $connection_handle:expr, $connection_shutdown:expr, $connection_shutdown_timeout:expr, $received_first_request:expr) => {
-        let connection = $connection;
-        let mut connection_handle = $connection_handle;
-        let connection_shutdown = $connection_shutdown;
-        let connection_shutdown_timeout = $connection_shutdown_timeout;
-        let received_first_request = $received_first_request;
-        tokio::pin!(connection);
-        tokio::select! {
-            // the connection finished first
-            _res = &mut connection => {
-            }
-            // the shutdown receiver was triggered first,
-            // so we tell the connection to do a graceful shutdown
-            // on the next request, then we wait for it to finish
-            _ = connection_shutdown.cancelled() => {
-                connection_handle.shutdown();
-                connection.as_mut().graceful_shutdown();
-                // Only wait for the connection to close gracfully if we recieved a request.
-                // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
-                if received_first_request.load(Ordering::Relaxed) {
-                    // The connection may still not shutdown so we apply a timeout from the configuration
-                    // Connections stuck terminating will keep the pipeline and everything related to that pipeline
-                    // in memory.
+// Drive a connection until graceful shutdown.
+async fn handle_connection<C, E>(
+    connection: C,
+    mut connection_handle: ConnectionHandle,
+    connection_shutdown: CancellationToken,
+    connection_shutdown_timeout: Duration,
+    received_first_request: Arc<AtomicBool>,
+) where
+    C: Future<Output = Result<(), E>>,
+    C: GracefulConnection<Error = E>,
+{
+    tokio::pin!(connection);
+    tokio::select! {
+        // the connection finished first
+        _res = &mut connection => {
+        }
+        // the shutdown receiver was triggered first,
+        // so we tell the connection to do a graceful shutdown
+        // on the next request, then we wait for it to finish
+        _ = connection_shutdown.cancelled() => {
+            connection_handle.shutdown();
+            connection.as_mut().graceful_shutdown();
+            // Only wait for the connection to close gracfully if we recieved a request.
+            // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
+            if received_first_request.load(Ordering::Relaxed) {
+                // The connection may still not shutdown so we apply a timeout from the configuration
+                // Connections stuck terminating will keep the pipeline and everything related to that pipeline
+                // in memory.
 
-                    if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
-                        tracing::warn!(
-                            timeout = connection_shutdown_timeout.as_secs(),
-                            server.address = connection_handle.address.to_string(),
-                            schema.id = connection_handle.pipeline_ref.schema_id,
-                            config.hash = connection_handle.pipeline_ref.config_hash,
-                            launch.id = connection_handle.pipeline_ref.launch_id,
-                            "connection shutdown exceeded, forcing close",
-                        );
-                    }
+                if connection.timeout(connection_shutdown_timeout).await.is_err() {
+                    tracing::warn!(
+                        timeout = connection_shutdown_timeout.as_secs(),
+                        server.address = connection_handle.address.to_string(),
+                        schema.id = connection_handle.pipeline_ref.schema_id,
+                        config.hash = connection_handle.pipeline_ref.config_hash,
+                        launch.id = connection_handle.pipeline_ref.launch_id,
+                        "connection shutdown exceeded, forcing close",
+                    );
                 }
             }
         }
-    };
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -315,9 +319,9 @@ pub(super) fn serve_router_on_listen_addr(
     configuration: Arc<Configuration>,
     all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
-    let opt_max_http1_headers = configuration.limits.http1_max_request_headers;
-    let opt_max_http1_buf_size = configuration.limits.http1_max_request_buf_size;
-    let opt_max_http2_headers_list_bytes = configuration.limits.http2_max_headers_list_bytes;
+    let opt_max_http1_headers = configuration.limits.router.http1_max_request_headers;
+    let opt_max_http1_buf_size = configuration.limits.router.http1_max_request_buf_size;
+    let opt_max_http2_headers_list_bytes = configuration.limits.router.http2_max_headers_list_bytes;
     let connection_shutdown_timeout = configuration.supergraph.connection_shutdown_timeout;
     let header_read_timeout = configuration.server.http.header_read_timeout;
     let tls_handshake_timeout = configuration.server.http.tls_handshake_timeout;
@@ -339,7 +343,7 @@ pub(super) fn serve_router_on_listen_addr(
                     break;
                 }
                 res = listener.accept() => {
-                    let app = router.clone();
+                    let app = NormalizePathLayer::trim_trailing_slash().layer(router.clone());
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
                     let address = address.clone();
@@ -397,7 +401,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -410,7 +414,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
@@ -454,7 +458,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
-                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request).await;
                                     }
                                 }
                             });
@@ -561,6 +565,11 @@ mod tests {
     use std::sync::Arc;
 
     use axum::BoxError;
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use mime::APPLICATION_JSON;
+    use reqwest::header::CONTENT_TYPE;
+    use serde_json::json;
     use tower::ServiceExt;
     use tower::service_fn;
 
@@ -568,6 +577,8 @@ mod tests {
     use crate::axum_factory::tests::init_with_config;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
+    use crate::graphql;
+    use crate::services::SupergraphResponse;
     use crate::services::router;
     use crate::services::router::body;
 
@@ -666,5 +677,83 @@ mod tests {
             "tried to register two endpoints on `127.0.0.1:4010/`",
             error.to_string()
         )
+    }
+    #[rstest::rstest]
+    #[case::config_does_not_include_slash("/graphql", "/graphql")]
+    #[case::config_does_not_include_slash("/graphql", "/graphql/")]
+    #[case::config_does_not_include_slash("/graphql", "/graphql//")]
+    #[case::config_includes_slash("/graphql/", "/graphql")]
+    #[case::config_includes_slash("/graphql/", "/graphql/")]
+    #[case::config_includes_slash("/graphql/", "/graphql//")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql/")]
+    #[case::config_includes_multiple_slashes("/graphql///", "/graphql//")]
+    #[case::root("/", "")]
+    #[case::root("/", "/")]
+    #[case::wildcard("/graphql/{*rest}", "/graphql/foo/bar")]
+    #[case::wildcard("/graphql/{*rest}", "/graphql/foo/bar/")]
+    #[case::parameter("/graphql/{param}", "/graphql/test")]
+    #[case::parameter("/graphql/{param}", "/graphql/test/")]
+    #[tokio::test]
+    async fn it_supports_paths_regardless_of_trailing_slashes(
+        #[case] config_path: &str,
+        #[case] query_path: &str,
+    ) -> Result<(), BoxError> {
+        let configuration = Arc::new(
+            Configuration::fake_builder()
+                .supergraph(
+                    Supergraph::fake_builder()
+                        .path(config_path.to_string())
+                        .build(),
+                )
+                .build()?,
+        );
+
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<crate::services::SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "yay"}))
+                    .build(),
+                req.context,
+            ));
+        });
+        let router_service = router::service::from_supergraph_mock_with_configuration(
+            router_mock,
+            configuration.clone(),
+        )
+        .await;
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+
+        let (server, _) = init_with_config(router_service, configuration, MultiMap::new()).await?;
+
+        let client = reqwest::Client::builder()
+            .default_headers(default_headers)
+            .build()?;
+
+        let query_url = format!(
+            "{}{query_path}",
+            server.graphql_listen_address().as_ref().unwrap(),
+        );
+
+        let response = client
+            .post(&query_url)
+            .body(json!({ "query": "query { __typename }" }).to_string())
+            .send()
+            .await?;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        server.shutdown().await?;
+        crate::plugin::test::await_mock_driver(router_driver).await;
+
+        Ok(())
     }
 }

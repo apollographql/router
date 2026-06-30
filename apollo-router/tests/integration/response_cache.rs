@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use apollo_router::graphql;
 use apollo_router::services::router;
@@ -12,6 +13,9 @@ use fred::clients::Client;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::types::Builder;
+use fred::types::scan::ScanType;
+use fred::types::scan::Scanner;
+use futures::StreamExt as _;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -42,6 +46,51 @@ async fn redis_client() -> Result<Client, BoxError> {
         Builder::from_config(fred::prelude::Config::from_url(REDIS_URL).unwrap()).build()?;
     client.init().await?;
     Ok(client)
+}
+
+/// Block until Redis responds to PING within `per_attempt` on a freshly built fred
+/// client, retrying for up to `total` before panicking.
+///
+/// Why: the router's response_cache uses fred with a default `default_command_timeout`
+/// of 500ms. When a `TestHarness` spins up a new fred pool under CI load, the pool's
+/// first per-client command can race that 500ms budget if Redis or the host has not
+/// yet stabilised (e.g. another harness is still tearing down its connections, or
+/// the container is warming up). Issuing a PING from a fresh fred client here proves
+/// that a brand-new connection can complete one full request/response round-trip
+/// within the same budget the router will be operating under, which is exactly the
+/// condition the router needs for its first lookup not to time out.
+async fn wait_for_redis_responsive(per_attempt: Duration, total: Duration) {
+    let deadline = Instant::now() + total;
+    let mut last_err: Option<String>;
+    loop {
+        // Build a fresh client each attempt so we exercise the same cold-start path
+        // the router's pool exercises, not a long-lived warm connection.
+        let attempt = async {
+            let config =
+                fred::prelude::Config::from_url(REDIS_URL).map_err(|e| format!("config: {e}"))?;
+            let client = Builder::from_config(config)
+                .build()
+                .map_err(|e| format!("build: {e}"))?;
+            client.init().await.map_err(|e| format!("init: {e}"))?;
+            let _: () = client.ping(None).await.map_err(|e| format!("ping: {e}"))?;
+            // Best-effort tidy-up; ignore errors during teardown.
+            let _ = client.quit().await;
+            Ok::<(), String>(())
+        };
+        match attempt.timeout(per_attempt).await {
+            Ok(Ok(())) => return,
+            Ok(Err(e)) => last_err = Some(e),
+            Err(_) => last_err = Some(format!("PING did not complete within {per_attempt:?}")),
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "redis at {REDIS_URL} was not responsive within {total:?} \
+                 (per-attempt deadline {per_attempt:?}); last error: {}",
+                last_err.unwrap_or_else(|| "<none>".into())
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 fn extract_cache_keys_from_response(response: &graphql::Response) -> Vec<String> {
@@ -97,13 +146,13 @@ fn base_config() -> Value {
         },
         "headers": {
             "all": {
-                "request": [
+                "request": { "operations": [
                     {
                         "propagate": {
                             "named": "private_id"
                         }
                     }
-                ]
+                ]}
             }
         },
         "response_cache": {
@@ -393,7 +442,8 @@ async fn basic_cache_skips_subgraph_request() {
         return;
     }
 
-    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    let config = base_config();
+    let (mut router, subgraph_request_counters) = harness(config.clone(), base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -413,8 +463,13 @@ async fn basic_cache_skips_subgraph_request() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned, so the second request can race the writes. The first request
+    // produces a `products` root cache entry plus one cache entry per reviews
+    // entity (2 entities) → 3 keys minimum. Polling for >= 3 keys proves all
+    // three writes have landed before we issue the cache-hit request below.
+    // Replaces a fixed 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = make_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -440,8 +495,9 @@ async fn private_id_set_at_subgraph_request() {
         return;
     }
 
+    let config = base_config();
     let (mut router, subgraph_request_counters) =
-        harness(base_config(), private_base_subgraphs()).await;
+        harness(config.clone(), private_base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -482,8 +538,13 @@ async fn private_id_set_at_subgraph_request() {
     products: 2
     reviews: 2
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned. The first (no-id) request does not cache; the second
+    // (private_id=123) request produces the first set of cache entries (one
+    // products root + two reviews entities = 3 keys). Poll until those have
+    // landed before issuing the cache-hit request below. Replaces a fixed
+    // 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = makegraphql_request_with_headers(&mut router, headers.clone()).await;
     assert!(headers["cache-control"].contains("private"));
     insta::assert_yaml_snapshot!(body, @r"
@@ -541,7 +602,7 @@ async fn check_cache_tags_from_debugger_data() {
         .and_then(|c| c.as_object_mut())
         .and_then(|c| c.insert("debug".to_string(), true.into()));
 
-    let (mut router, subgraph_request_counters) = harness(config, base_subgraphs()).await;
+    let (mut router, subgraph_request_counters) = harness(config.clone(), base_subgraphs()).await;
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 0
     reviews: 0
@@ -569,8 +630,12 @@ async fn check_cache_tags_from_debugger_data() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The cache insert happens in a background tokio task after the response is
+    // returned. The first request produces a `products` root cache entry plus
+    // one cache entry per reviews entity (2 entities) → 3 keys minimum. Poll
+    // until those have landed before issuing the cache-hit request below.
+    // Replaces a fixed 100 ms sleep that flaked on CI.
+    wait_for_cache_writes(&config, 3).await;
     let (headers, body) = make_debug_graphql_request(&mut router).await;
     assert!(headers["cache-control"].contains("public"));
     assert!(body.errors.is_empty());
@@ -680,8 +745,10 @@ async fn not_cached_without_cache_control_header() {
     products: 1
     reviews: 1
     ");
-    // Needed because insert in the cache is async
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No sleep needed: cache-control is no-store, so neither request writes to
+    // the cache and the second request always re-hits the subgraph regardless
+    // of timing. The previous fixed 100 ms sleep was a copy-pasted defensive
+    // pause with no race to defend against.
 
     let (headers, body) = make_graphql_request(&mut router).await;
     assert_eq!(headers["cache-control"], "no-store");
@@ -832,7 +899,16 @@ async fn cache_control_merging_single_fetch() {
     // Router responds with `max-age` even if a single subgraph used `s-maxage`
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 120, but the response's `max-age` is recomputed from a stored
+    // `created` epoch-seconds value each time it is serialized, so a wall-clock
+    // second can tick between subgraph response and the router writing the
+    // header. Accept 119 or 120 to avoid that race.
+    assert!(
+        (119..=120).contains(&max_age),
+        "expected max-age 119 or 120, got '{cache_control}'"
+    );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -1045,7 +1121,16 @@ async fn cache_control_merging_multi_fetch() {
     // The smaller value is used.
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
-    insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
+    let cache_control = &headers["cache-control"];
+    let max_age = parse_max_age(cache_control);
+    // Usually 60, but the response's `max-age` is recomputed from a stored
+    // `created` epoch-seconds value each time it is serialized, so a wall-clock
+    // second can tick between subgraph response and the router writing the
+    // header. Accept 59 or 60 to avoid that race.
+    assert!(
+        (59..=60).contains(&max_age),
+        "expected max-age 59 or 60, got '{cache_control}'"
+    );
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -1058,11 +1143,26 @@ async fn cache_control_merging_multi_fetch() {
 }
 
 fn parse_max_age(cache_control: &str) -> u32 {
-    cache_control
-        .strip_prefix("max-age=")
-        .and_then(|s| s.strip_suffix(",public"))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
+    let extract_directive_value =
+        |dir: &&str| dir.split('=').nth(1).unwrap().parse::<u32>().unwrap();
+
+    let cache_control_elems = cache_control.split(",").collect::<Vec<&str>>();
+
+    if let Some(s_max_age_directive) = cache_control_elems
+        .iter()
+        .find(|x| x.starts_with("s-maxage"))
+    {
+        return extract_directive_value(s_max_age_directive);
+    }
+
+    if let Some(max_age_directive) = cache_control_elems
+        .iter()
+        .find(|x| x.starts_with("max-age"))
+    {
+        return extract_directive_value(max_age_directive);
+    }
+
+    panic!("expected max-age or s-maxage, got '{cache_control}'");
 }
 
 macro_rules! check_cache_key {
@@ -1134,11 +1234,66 @@ async fn cache_key_exists(
     Ok(count == 1)
 }
 
+/// Polls Redis until at least `expected_min_keys` cache entries exist under the
+/// `response_cache.subgraph.all.redis.namespace` embedded in `config`, with a
+/// generous deadline. This replaces the previous
+/// `tokio::time::sleep(Duration::from_millis(100))` "Needed because insert in
+/// the cache is async" pattern, which was a fixed timing buffer that raced
+/// under CI load — the cache write happens in a background tokio task after
+/// the response is returned, and 100 ms was simply too tight when the host was
+/// busy. Polling the actual redis state until the writes have landed makes
+/// the test deterministic regardless of system load.
+async fn wait_for_cache_writes(config: &Value, expected_min_keys: usize) {
+    let namespace = config
+        .pointer("/response_cache/subgraph/all/redis/namespace")
+        .and_then(|v| v.as_str())
+        .expect(
+            "wait_for_cache_writes() requires a redis namespace at \
+             config.response_cache.subgraph.all.redis.namespace",
+        )
+        .to_owned();
+    let pattern = format!("{namespace}:*");
+    let client = redis_client()
+        .await
+        .expect("connect to redis at 127.0.0.1:6379");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut scanner = client.scan(&pattern, Some(100), Some(ScanType::String));
+        let mut count: usize = 0;
+        while let Some(result) = scanner.next().await {
+            if let Ok(scan_result) = result
+                && let Some(keys) = scan_result.results()
+            {
+                count += keys.len();
+            }
+        }
+        if count >= expected_min_keys {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out after 10s waiting for >= {expected_min_keys} cache key(s) \
+                 under namespace {namespace}; observed {count}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn integration_test_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
+    // The router's response_cache uses fred's default 500ms `default_command_timeout`.
+    // Each `TestHarness::builder()` below spins up a brand-new fred pool, and we have
+    // historically seen the second pool's first per-client lookup time out under CI
+    // load: fred reports the client as "connected" but the first request/response
+    // round-trip exceeds 500ms because the host (or Redis itself) has not yet
+    // stabilised. Prove Redis can serve a fresh-client PING within a budget
+    // comfortably below 500ms before each harness is built, so the router pool's
+    // first command operates against a demonstrably warm Redis.
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
     let namespace = namespace();
     let client = redis_client().await?;
 
@@ -1276,6 +1431,12 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         assert_cache_key_exists!(&namespace, cache_key, &client);
     }
 
+    // Tearing down the first harness's fred pool and standing up the second one's can
+    // briefly contend with Redis. Re-prove the server is responsive before building
+    // the next harness so its pool's first lookup doesn't race the 500ms default
+    // command timeout (see the comment at the top of this test).
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
+
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
             "response_cache": {
@@ -1337,6 +1498,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     for review_key in reviews_cache_keys {
         assert_cache_key_exists!(&namespace, review_key, &client);
     }
+
+    wait_for_redis_responsive(Duration::from_millis(250), Duration::from_secs(10)).await;
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()

@@ -122,7 +122,7 @@ impl Merger {
                 let arg_opt = pos.get_argument(subgraph.schema(), arg_name);
 
                 if let Some(arg) = arg_opt
-                    && let Ok(Some(from_context)) = subgraph.from_context_directive_name()
+                    && let Some(from_context) = subgraph.from_context_directive_name()
                     && arg.directives.iter().any(|d| d.name == from_context)
                 {
                     is_contextual_in_subgraph.insert(*idx, true);
@@ -155,9 +155,8 @@ impl Merger {
                             });
                         } else {
                             self.error_reporter.add_hint(CompositionHint {
-                                code: HintCode::ContextualArgumentNotContextualInAllSubgraphs
-                                    .code()
-                                    .to_string(),
+                                definition: HintCode::ContextualArgumentNotContextualInAllSubgraphs
+                                    .definition(),
                                 message: format!(
                                     "Contextual argument \"{pos}\" will not be included in the supergraph since it is contextual in at least one subgraph",
                                 ),
@@ -364,26 +363,33 @@ impl Merger {
                 dest_default,
                 sources,
                 &self.subgraphs,
-                |v| Some(format!("default value {v}")),
+                |v| Some(format!("default value {}", v.serialize().no_indent())),
                 |pos, idx| {
                     Some(pos.get_default_value(self.subgraphs[idx].schema())
-                            .map(|v| format!("default value {v}"))
+                            .map(|v| format!("default value {}", v.serialize().no_indent()))
                             .unwrap_or_else(|| "no default value".to_string()))
                 },
             );
         } else if is_inconsistent {
+            let elt_kind = if T::is_input_field() {
+                "Input field"
+            } else {
+                "Argument"
+            };
             self.error_reporter.report_mismatch_hint(
                 HintCode::InconsistentDefaultValuePresence,
-                format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
+                format!("{elt_kind} \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
-                        &self.subgraphs,
-                // When inconsistent, we set no default. So, the supergraph element should always
-                // be "no default value". The matching strings drive the ordering in the message.
+                &self.subgraphs,
                 |_| Some("no default value".to_string()),
-                |pos, idx| Some(pos.get_default_value(self.subgraphs[idx].schema())
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "no default value".to_string())),
+                |pos, idx| {
+                    Some(
+                        pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| v.serialize().no_indent().to_string())
+                            .unwrap_or_else(|| "no default value".to_string()),
+                    )
+                },
                 |_, subgraphs| {
                     let subgraphs = subgraphs.unwrap_or_default();
                     format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
@@ -397,20 +403,13 @@ impl Merger {
         Ok(())
     }
 
-    /// Check if two default values are equivalent, considering type coercibility.
-    /// For example, Int value 200 is equivalent to Float value 200.0 when the target type is Float.
     fn are_default_values_equivalent(value1: &Value, value2: &Value, target_type: &Type) -> bool {
-        // TODO: This coercibility check should really come from `apollo_compiler`
-        // First check for direct equality
         if value1 == value2 {
             return true;
         }
 
-        // Check for Int to Float coercibility
-        // According to GraphQL spec, Int values can be coerced to Float
         if target_type.inner_named_type() == "Float" {
             match (value1, value2) {
-                // Int literal coercible to Float literal
                 (Value::Int(int_val), Value::Float(float_val))
                 | (Value::Float(float_val), Value::Int(int_val)) => {
                     let Ok(int_val_parsed) = int_val.try_to_f64() else {

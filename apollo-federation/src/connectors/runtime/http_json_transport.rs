@@ -45,7 +45,10 @@ pub struct HttpResponse {
 #[derive(Debug)]
 pub enum TransportRequest {
     /// A request to an HTTP transport
-    Http(HttpRequest),
+    Http(Box<HttpRequest>),
+    /// A mapping-only request that skips the HTTP transport entirely.
+    /// The selection is applied against an empty object `{}`.
+    MappingOnly,
 }
 
 /// Response from an underlying transport
@@ -55,11 +58,13 @@ pub enum TransportResponse {
     Http(HttpResponse),
     /// A response served from cache (no HTTP transport involved)
     CacheHit,
+    /// A mapping-only response (no HTTP transport involved)
+    MappingOnly,
 }
 
 impl From<HttpRequest> for TransportRequest {
     fn from(value: HttpRequest) -> Self {
-        Self::Http(value)
+        Self::Http(Box::new(value))
     }
 }
 
@@ -168,10 +173,10 @@ pub fn make_request(
     });
 
     Ok((
-        TransportRequest::Http(HttpRequest {
+        TransportRequest::Http(Box::new(HttpRequest {
             inner: request,
             debug: (debug_request, all_problems.clone()),
-        }),
+        })),
         all_problems,
     ))
 }
@@ -472,7 +477,10 @@ mod tests {
         )
         "#);
 
-        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
+        let TransportRequest::Http(http_request) = req.0 else {
+            panic!("expected Http transport request");
+        };
+        let HttpRequest { inner: req, .. } = *http_request;
         let body = req.into_body();
         insta::assert_snapshot!(body, @r#"{"a":42}"#);
     }
@@ -526,7 +534,10 @@ mod tests {
         )
         "#);
 
-        let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
+        let TransportRequest::Http(http_request) = req.0 else {
+            panic!("expected Http transport request");
+        };
+        let HttpRequest { inner: req, .. } = *http_request;
         let body = req.into_body();
         insta::assert_snapshot!(body, @r#"a=42"#);
     }

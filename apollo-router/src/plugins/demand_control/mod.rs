@@ -569,18 +569,21 @@ impl Plugin for DemandControl {
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
                         Err(err) => {
-                            let graphql_errors = err
+                            let mut graphql_errors = err
                                 .into_graphql_errors()
                                 .expect("must be able to convert to graphql error");
-                            graphql_errors.iter().for_each(|mapped_error| {
+                            graphql_errors.iter_mut().for_each(|mapped_error| {
                                 if let Some(Value::String(error_code)) =
                                     mapped_error.extensions.get("code")
                                 {
+                                    // Emit here so the event attaches to the demand_control
+                                    // checkpoint span; mark so the centralized emit skips it.
                                     emit_error_event(
                                         error_code.as_str(),
                                         &mapped_error.message,
                                         mapped_error.path.clone(),
                                     );
+                                    mapped_error.set_span_event_emitted(true);
                                 }
                             });
                             ControlFlow::Break(

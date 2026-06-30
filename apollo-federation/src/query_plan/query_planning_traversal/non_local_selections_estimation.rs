@@ -464,7 +464,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                             let type_condition_in_supergraph_pos = self
                                 .parameters
                                 .supergraph_schema
-                                .get_type(type_condition_pos.type_name().clone())?;
+                                .get_type(type_condition_pos.type_name())?;
                             possible_runtime_types.insert(
                                 self.parameters.supergraph_schema.possible_runtime_types(
                                     type_condition_in_supergraph_pos.try_into()?,
@@ -724,9 +724,7 @@ pub(crate) fn precompute_non_local_selection_metadata(
             .get_mut(node_type_pos.type_name())
             && options_metadata.same_type_options.contains(&node)
         {
-            options_metadata
-                .interface_object_options
-                .extend(options.into_iter());
+            options_metadata.interface_object_options.extend(options);
             continue;
         }
         metadata

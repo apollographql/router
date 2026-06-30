@@ -641,10 +641,13 @@ async fn batch_with_max_size_over_batch_size() {
     }
     "#);
 
-    super::req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
+    // The two `/users-batch` POSTs have no inter-dependency (different `ids`
+    // bodies, neither references the other's result), so their wire arrival
+    // order is non-deterministic. Use Plan::Sequence + Plan::Parallel to
+    // assert without depending on order.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new()
                 .method("POST")
                 .path("/users-batch")
@@ -653,6 +656,7 @@ async fn batch_with_max_size_over_batch_size() {
                 .method("POST")
                 .path("/users-batch")
                 .body(serde_json::json!({ "ids": [6,7] })),
-        ],
-    );
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }

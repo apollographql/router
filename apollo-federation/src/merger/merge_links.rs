@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
@@ -10,15 +7,17 @@ use tracing::trace;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::internal_error;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::metadata::LinkedElement;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
-use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::merger::merge::MergedDirectiveInfo;
 use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
@@ -40,11 +39,17 @@ impl std::fmt::Debug for CoreDirectiveInSubgraphs {
     }
 }
 
-struct CoreDirectiveInSupergraph {
-    spec_in_supergraph: &'static dyn SpecDefinition,
-    name_in_feature: Name,
-    name_in_supergraph: Name,
-    composition_spec: DirectiveCompositionSpecification,
+pub(crate) type SupergraphInfoByIdentity = IndexMap<Identity, SupergraphInfo>;
+
+pub(crate) struct SupergraphInfo {
+    pub(crate) spec_in_supergraph: &'static dyn SpecDefinition,
+    pub(crate) directives: Vec<SupergraphDirectiveInfo>,
+}
+
+pub(crate) struct SupergraphDirectiveInfo {
+    pub(crate) name_in_feature: Name,
+    pub(crate) name_in_supergraph: Name,
+    pub(crate) composition_spec: DirectiveCompositionSpecification,
 }
 
 impl Merger {
@@ -54,10 +59,10 @@ impl Merger {
         trace!("Collecting core directives used in subgraphs");
         // Groups directives by their feature and major version (we use negative numbers for
         // pre-1.0 version numbers on the minor, since all minors are incompatible).
-        let mut directives_per_feature_and_version: HashMap<
+        let mut directives_per_feature_and_version: IndexMap<
             String,
-            HashMap<i32, CoreDirectiveInSubgraphs>,
-        > = HashMap::new();
+            IndexMap<i32, CoreDirectiveInSubgraphs>,
+        > = IndexMap::default();
 
         for subgraph in &self.subgraphs {
             let Some(features) = subgraph.schema().metadata() else {
@@ -65,31 +70,21 @@ impl Merger {
             };
 
             for (directive, referencers) in &subgraph.schema().referencers().directives {
-                let Some(linked_elem) = features.source_link_of_directive(directive) else {
+                let Some(LinkedElement {
+                    link: source,
+                    name_in_spec,
+                }) = features.source_link_of_directive(directive)
+                else {
+                    continue;
+                };
+                let Some(name_in_spec) = name_in_spec else {
                     continue;
                 };
                 if referencers.is_empty() {
                     continue;
                 }
-                let source = linked_elem.link;
-                let import = match linked_elem.import {
-                    Some(import) => import,
-                    None => {
-                        // If there is no explicit import, we create a synthetic import for merging
-                        let Some((_, directive_name_in_spec)) = directive.split_once("__") else {
-                            continue;
-                        };
-                        let Ok(element_name) = Name::new(directive_name_in_spec) else {
-                            continue;
-                        };
-                        Arc::new(Import {
-                            element: element_name,
-                            is_directive: true,
-                            alias: None,
-                        })
-                    }
-                };
-                let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(&source, &import)
+                let Some(composition_spec) =
+                    SPEC_REGISTRY.get_composition_spec(&source, &name_in_spec)
                 else {
                     trace!(
                         "Directive @{directive} from {} has no registered composition spec, skipping",
@@ -109,7 +104,7 @@ impl Merger {
                     )
                 };
 
-                let fqn = format!("{}-{}", import.element, source.url.identity);
+                let fqn = format!("{}-{}", name_in_spec, source.url.identity);
                 let for_feature = directives_per_feature_and_version.entry(fqn).or_default();
 
                 let major = if source.url.version.major > 0 {
@@ -130,7 +125,7 @@ impl Merger {
                     definitions_per_subgraph.insert(subgraph.name.clone(), (**definition).clone());
                     let for_version = CoreDirectiveInSubgraphs {
                         url: source.url.clone(),
-                        name: import.element.clone(),
+                        name: name_in_spec.clone(),
                         definitions_per_subgraph,
                         composition_spec,
                     };
@@ -145,12 +140,12 @@ impl Merger {
             .collect())
     }
 
-    pub(crate) fn validate_and_maybe_add_specs(
+    pub(crate) fn validate_core_directive_info(
         &mut self,
-        directives_merge_info: &[CoreDirectiveInSubgraphs],
-    ) -> Result<(), FederationError> {
-        let mut supergraph_info_by_identity: HashMap<Identity, Vec<CoreDirectiveInSupergraph>> =
-            HashMap::new();
+        directives_merge_info: Vec<CoreDirectiveInSubgraphs>,
+    ) -> Result<SupergraphInfoByIdentity, FederationError> {
+        let mut supergraph_info_by_identity: IndexMap<Identity, SupergraphInfo> =
+            Default::default();
 
         trace!("Determining supergraph names for directives used in subgraphs");
         for subgraph_core_directive in directives_merge_info {
@@ -189,7 +184,7 @@ impl Merger {
                         |def| Some(format!("\"@{}\"", def.name)),
                         |def, _| Some(format!("\"@{}\"", def.name)),
                     );
-                    return Ok(());
+                    return Ok(supergraph_info_by_identity);
                 }
             }
 
@@ -212,30 +207,31 @@ impl Merger {
                 );
                 continue;
             };
+
             let supergraph_info = supergraph_info_by_identity
                 .entry(spec_in_supergraph.identity().clone())
-                .or_default();
-
-            if !supergraph_info
-                .iter()
-                .any(|d| d.name_in_feature == subgraph_core_directive.name)
-            {
-                supergraph_info.push(CoreDirectiveInSupergraph {
+                .or_insert(SupergraphInfo {
                     spec_in_supergraph,
-                    name_in_feature: subgraph_core_directive.name.clone(),
-                    name_in_supergraph: name_in_supergraph.clone(),
-                    composition_spec: subgraph_core_directive.composition_spec.clone(),
+                    directives: Default::default(),
                 });
-            }
 
-            if supergraph_info
-                .iter()
-                .any(|s| s.spec_in_supergraph.url() != spec_in_supergraph.url())
-            {
+            if supergraph_info.spec_in_supergraph.url() != spec_in_supergraph.url() {
                 bail!(
                     "Spec {} directives disagree on version for supergraph",
                     spec_in_supergraph.url()
                 )
+            }
+
+            if !supergraph_info
+                .directives
+                .iter()
+                .any(|d| d.name_in_feature == subgraph_core_directive.name)
+            {
+                supergraph_info.directives.push(SupergraphDirectiveInfo {
+                    name_in_feature: subgraph_core_directive.name.clone(),
+                    name_in_supergraph: name_in_supergraph.clone(),
+                    composition_spec: subgraph_core_directive.composition_spec.clone(),
+                });
             }
 
             if subgraph_core_directive.composition_spec.use_join_directive {
@@ -244,9 +240,42 @@ impl Merger {
             }
         }
 
-        for supergraph_core_directives in supergraph_info_by_identity.values() {
+        Ok(supergraph_info_by_identity)
+    }
+
+    pub(crate) fn maybe_add_specs(
+        &mut self,
+        supergraph_info_by_identity: &SupergraphInfoByIdentity,
+    ) -> Result<(), FederationError> {
+        for SupergraphInfo {
+            spec_in_supergraph,
+            directives,
+        } in supergraph_info_by_identity.values()
+        {
+            let spec_name_in_schema = if self
+                .merged
+                .metadata()
+                .map(|metadata| {
+                    metadata.is_spec_name_in_schema_valid(
+                        &spec_in_supergraph.identity().name,
+                        spec_in_supergraph.identity(),
+                        &self.import_conflicts_by_identity,
+                    )
+                })
+                .unwrap_or(false)
+            {
+                Name::new_unchecked(&spec_in_supergraph.identity().name)
+            } else {
+                self.compute_unique_spec_name_in_schema
+                    .as_mut()
+                    .ok_or_else(|| {
+                        internal_error!(
+                            "compute_unique_spec_name_in_schema() unexpectedly uninitialized"
+                        )
+                    })?(&spec_in_supergraph.identity().name)
+            };
             let mut imports = Vec::new();
-            for supergraph_core_directive in supergraph_core_directives {
+            for supergraph_core_directive in directives {
                 // Directives composed via @join__directive are not imported in the supergraph schema.
                 if supergraph_core_directive
                     .composition_spec
@@ -255,12 +284,8 @@ impl Merger {
                     continue;
                 }
                 let default_name_in_supergraph = Link::directive_name_in_schema_for_core_arguments(
-                    supergraph_core_directive.spec_in_supergraph.url(),
-                    &supergraph_core_directive
-                        .spec_in_supergraph
-                        .url()
-                        .identity
-                        .name,
+                    spec_in_supergraph.url(),
+                    &spec_name_in_schema,
                     &[],
                     &supergraph_core_directive.name_in_feature,
                 );
@@ -282,22 +307,20 @@ impl Merger {
 
             self.link_spec_definition.apply_feature_to_schema(
                 &mut self.merged,
-                supergraph_core_directives[0].spec_in_supergraph,
-                None,
-                supergraph_core_directives[0].spec_in_supergraph.purpose(),
+                *spec_in_supergraph,
+                Some(spec_name_in_schema).take_if(|spec_name_in_schema| {
+                    spec_name_in_schema.as_str() != spec_in_supergraph.identity().name.as_ref()
+                }),
+                spec_in_supergraph.purpose(),
                 Some(imports),
+                |error| Self::push_non_internal_errors(&mut self.error_reporter, error),
             )?;
 
             let Some(links_metadata) = self.merged.metadata() else {
                 bail!("Missing links metadata in supergraph schema");
             };
-            let feature = links_metadata.for_identity(
-                &supergraph_core_directives[0]
-                    .spec_in_supergraph
-                    .url()
-                    .identity,
-            );
-            for supergraph_core_directive in supergraph_core_directives {
+            let feature = links_metadata.for_identity(&spec_in_supergraph.url().identity);
+            for supergraph_core_directive in directives {
                 let arguments_merger = if let Some(merger_factory) = supergraph_core_directive
                     .composition_spec
                     .argument_merger
@@ -322,55 +345,31 @@ impl Merger {
                     );
                 // If we encounter the @inaccessible directive, we need to record its definition so
                 // certain merge validations that care about @inaccessible can act accordingly.
-                if *supergraph_core_directive.spec_in_supergraph.identity()
-                    == Identity::inaccessible_identity()
-                    && supergraph_core_directive.name_in_feature
-                        == supergraph_core_directive
-                            .spec_in_supergraph
-                            .url()
-                            .identity
-                            .name
+                if *spec_in_supergraph.identity() == Identity::inaccessible_identity()
+                    && supergraph_core_directive.name_in_feature == Identity::INACCESSIBLE_NAME
                 {
                     self.inaccessible_directive_name_in_supergraph =
                         Some(supergraph_core_directive.name_in_supergraph.clone());
                 }
 
-                if *supergraph_core_directive.spec_in_supergraph.identity()
-                    == Identity::authenticated_identity()
-                    && supergraph_core_directive.name_in_feature
-                        == supergraph_core_directive
-                            .spec_in_supergraph
-                            .url()
-                            .identity
-                            .name
+                if *spec_in_supergraph.identity() == Identity::authenticated_identity()
+                    && supergraph_core_directive.name_in_feature == Identity::AUTHENTICATED_NAME
                 {
                     self.access_control_directives_in_supergraph.push((
                         AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
                         supergraph_core_directive.name_in_supergraph.clone(),
                     ));
                 }
-                if *supergraph_core_directive.spec_in_supergraph.identity()
-                    == Identity::requires_scopes_identity()
-                    && supergraph_core_directive.name_in_feature
-                        == supergraph_core_directive
-                            .spec_in_supergraph
-                            .url()
-                            .identity
-                            .name
+                if *spec_in_supergraph.identity() == Identity::requires_scopes_identity()
+                    && supergraph_core_directive.name_in_feature == Identity::REQUIRES_SCOPES_NAME
                 {
                     self.access_control_directives_in_supergraph.push((
                         REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
                         supergraph_core_directive.name_in_supergraph.clone(),
                     ));
                 }
-                if *supergraph_core_directive.spec_in_supergraph.identity()
-                    == Identity::policy_identity()
-                    && supergraph_core_directive.name_in_feature
-                        == supergraph_core_directive
-                            .spec_in_supergraph
-                            .url()
-                            .identity
-                            .name
+                if *spec_in_supergraph.identity() == Identity::policy_identity()
+                    && supergraph_core_directive.name_in_feature == Identity::POLICY_NAME
                 {
                     self.access_control_directives_in_supergraph.push((
                         POLICY_DIRECTIVE_NAME_IN_SPEC,

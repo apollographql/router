@@ -10,6 +10,7 @@ use tower::BoxError;
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
 const FILE_CONFIG_WITH_RHAI: &str = include_str!("../fixtures/file_upload/rhai.router.yaml");
+const FILE_CONFIG_BODY_LIMIT: &str = include_str!("../fixtures/file_upload/body_limit.router.yaml");
 
 /// Create a valid handler for the [helper::FileUploadTestServer].
 macro_rules! make_handler {
@@ -1045,6 +1046,463 @@ async fn it_fails_incompatible_query_order() -> Result<(), BoxError> {
         .await
 }
 
+/// Verifies that a file larger than http_max_request_bytes can still be uploaded when the file
+/// itself is within max_file_size. The body limit should apply only to the operations field.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_uploads_file_larger_than_http_max_request_bytes() -> Result<(), BoxError> {
+    // body_limit.router.yaml sets http_max_request_bytes = 50000 (~50 KB) and max_file_size = 5 MB.
+    // This file is 200 KB — well above the global body limit but within the per-file limit.
+    // Without the fix this test fails because Limited<Body> fires while streaming file data.
+    const ONE_KB: usize = 1024;
+    const FILE_SIZE: usize = 200 * ONE_KB;
+    static FILE_DATA: [u8; ONE_KB] = [0xBB; ONE_KB];
+
+    let file = tokio_stream::iter(
+        (0..FILE_SIZE / ONE_KB).map(|_| Ok(bytes::Bytes::from_static(&FILE_DATA))),
+    );
+
+    let request = helper::create_request(vec!["large.bin"], vec![file]);
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_BODY_LIMIT)
+        .handler(make_handler!(helper::verify_stream).with_state((FILE_SIZE, 0xBB)))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "large.bin",
+                  "body": "successfully verified all bytes as '0xBB'"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+/// Verifies that an operations field larger than http_max_request_bytes is still rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_operations_field_larger_than_http_max_request_bytes() -> Result<(), BoxError> {
+    use reqwest::multipart::Form;
+    use reqwest::multipart::Part;
+
+    // body_limit.router.yaml sets http_max_request_bytes = 50000 (~50 KB).
+    // Build an operations field that is larger than 50 KB.
+    let large_query = format!(
+        r#"{{"query":"mutation ($file: Upload) {{ file: singleUpload(file: $file) {{ filename body }} }}","variables":{{"file":null,"padding":"{}"}}}}"#,
+        "x".repeat(60_000),
+    );
+
+    let request = Form::new()
+        .part("operations", Part::text(large_query))
+        .part(
+            "map",
+            Part::text(serde_json::json!({ "0": ["variables.file"] }).to_string()),
+        )
+        .part("0", Part::text("tiny").file_name("tiny.txt"));
+
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_BODY_LIMIT)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            assert!(
+                !response.errors.is_empty(),
+                "expected an error for oversized operations field but got: {response:?}"
+            );
+        })
+        .await
+}
+
+mod body_limits {
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+
+    use axum::Router;
+    use bytes::Bytes;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use rstest::rstest;
+    use serde_json::Value;
+    use tokio::net::TcpListener;
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
+
+    const CONFIG: &str = include_str!("../fixtures/file_upload/small_body_limit.router.yaml");
+    const BOUNDARY: &str = "testboundary";
+
+    fn build_multipart_body(operations: &str, file_data: &[u8]) -> Vec<u8> {
+        let map = r#"{"0":["variables.file"]}"#;
+        let mut body = Vec::new();
+        for (name, content) in [
+            ("operations", operations.as_bytes()),
+            ("map", map.as_bytes()),
+        ] {
+            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+            );
+            body.extend_from_slice(content);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"0\"; filename=\"test.bin\"\r\n\r\n",
+        );
+        body.extend_from_slice(file_data);
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+        body
+    }
+
+    /// Send `body_bytes` to a router backed by a real subgraph handler.
+    /// `chunk_size` controls HTTP chunking: `None` sends the entire body as one frame
+    /// (reproducing curl's default chunked-upload behavior), `Some(n)` splits into n-byte chunks.
+    async fn run(body_bytes: Vec<u8>, chunk_size: Option<usize>) -> (StatusCode, Value) {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let bound = TcpListener::bind(addr).await.unwrap();
+        let bound_url = format!("http://{}", bound.local_addr().unwrap());
+
+        let mut router = IntegrationTest::builder()
+            .config(CONFIG)
+            .subgraph_overrides([("uploads".to_string(), format!("{bound_url}/"))].into())
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "file_upload",
+                "schema.graphql",
+            ]))
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let handler = Router::new().route(
+            "/",
+            axum::routing::post(crate::integration::file_upload::helper::echo_single_file),
+        );
+        tokio::spawn(async {
+            axum::serve(bound, handler.into_make_service())
+                .with_graceful_shutdown(async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+                .unwrap()
+        });
+
+        let body: reqwest::Body = match chunk_size {
+            None => reqwest::Body::wrap_stream(tokio_stream::once(Ok::<_, std::io::Error>(
+                Bytes::from(body_bytes),
+            ))),
+            Some(n) => {
+                let chunks: Vec<Result<Bytes, std::io::Error>> = body_bytes
+                    .chunks(n)
+                    .map(|c| Ok(Bytes::copy_from_slice(c)))
+                    .collect();
+                reqwest::Body::wrap_stream(tokio_stream::iter(chunks))
+            }
+        };
+
+        let url = format!("http://{}", router.bind_address());
+        // Disable HTTP keep-alive so the test's inbound connection closes as soon as the
+        // response is consumed. With pooling enabled (reqwest's default), the connection
+        // sits idle in the client's pool past `graceful_shutdown()`; the router then has
+        // to wait out `connection_shutdown_timeout` (5 s default in this harness) before
+        // its per-connection task exits. That delay plus CI scheduling slack can push
+        // total shutdown past `assert_shutdown`'s 10 s budget and panic the test as
+        // "unable to shutdown router". The race only fires for the `chunk_size_1_None`
+        // variants because they finish uploading the body before the router responds
+        // 413 (so the connection is fully drained and pool-eligible), unlike the
+        // 100-byte-chunked variants which abort mid-upload and force the connection
+        // closed. See `no_keepalive_reqwest_client` in
+        // `tests/integration/subgraph_response.rs` and `tests/integration/coprocessor.rs`
+        // for the same pattern applied elsewhere.
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("reqwest client build");
+        let response = client
+            .post(url)
+            .header(
+                CONTENT_TYPE,
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+
+        let status = response.status();
+        let body = response.json().await.unwrap_or_default();
+        shutdown_tx.send(()).unwrap();
+        router.graceful_shutdown().await;
+        (status, body)
+    }
+
+    const OPS: &str = r#"{"query":"mutation ($file: Upload) { file0: singleUpload(file: $file) { filename body } }","variables":{"file":null}}"#;
+
+    /// A file larger than http_max_request_bytes but within max_file_size should succeed,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_file_larger_than_http_limit(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body(OPS, &vec![0xBBu8; 500]);
+        let (status, body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["errors"].is_null());
+
+        Ok(())
+    }
+
+    /// A file larger than max_file_size should be rejected with a GraphQL error,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_file_exceeding_max_file_size(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let body_bytes = build_multipart_body(OPS, &vec![0xBBu8; 2000]);
+        let (status, body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body["errors"].is_null());
+
+        assert!(
+            body["errors"][0].is_object(),
+            "expected an error for oversized file but got: {body}"
+        );
+
+        Ok(())
+    }
+
+    /// An operations field larger than http_max_request_bytes should be rejected with 413,
+    /// regardless of how many HTTP frames the body arrives in.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_oversized_operations_field(
+        #[values(None, Some(100))] chunk_size: Option<usize>,
+    ) -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        // Operations content that exceeds http_max_request_bytes = 500
+        let large_ops = format!(
+            r#"{{"query":"mutation ($file: Upload) {{ file0: singleUpload(file: $file) {{ filename body }} }}","variables":{{"file":null,"pad":"{}"}}}}"#,
+            "x".repeat(600),
+        );
+        let body_bytes = build_multipart_body(&large_ops, b"tiny");
+        let (status, _body) = run(body_bytes, chunk_size).await;
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+        Ok(())
+    }
+}
+
+mod operation_body_timeout {
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use futures::stream::once;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use serde_json::Value;
+    use tokio::time::sleep;
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
+
+    const STRICT_CONFIG: &str = include_str!("fixtures/file_upload_timeout.router.yaml");
+    const GENEROUS_CONFIG: &str = include_str!("fixtures/file_upload_timeout_generous.router.yaml");
+    const NO_TIMEOUT_CONFIG: &str = include_str!("fixtures/file_upload_no_timeout.router.yaml");
+
+    async fn run(config: &str, body: reqwest::Body) -> (StatusCode, Value) {
+        let mut router = IntegrationTest::builder().config(config).build().await;
+        router.start().await;
+        router.assert_started().await;
+        let url = format!("http://{}", router.bind_address());
+        let response = reqwest::Client::new()
+            .post(&url)
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = response.json().await.unwrap_or_default();
+        router.graceful_shutdown().await;
+        (status, body)
+    }
+
+    fn immediate_body() -> reqwest::Body {
+        reqwest::Body::from(concat!(
+            "--test\r\n",
+            "Content-Disposition: form-data; name=\"operations\"\r\n\r\n",
+            "{\"query\":\"{ __typename }\"}\r\n",
+            "--test--\r\n"
+        ))
+    }
+
+    fn slightly_delayed_body() -> reqwest::Body {
+        // Body arrives after 2s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than the 10s operation_body_timeout in GENEROUS_CONFIG.
+        let stream = once(async {
+            sleep(Duration::from_secs(2)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
+        reqwest::Body::wrap_stream(stream)
+    }
+
+    fn slow_body() -> reqwest::Body {
+        // Body arrives after 5s — longer than the 1s operation_body_timeout in STRICT_CONFIG
+        // but shorter than both the 10s operation_body_timeout in GENEROUS_CONFIG and the 15s
+        // global router timeout, proving it is the operation_body_timeout that fires.
+        let stream = once(async {
+            sleep(Duration::from_secs(5)).await;
+            Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+        });
+        reqwest::Body::wrap_stream(stream)
+    }
+
+    /// Like [`slow_body`] but the stream is racing an external cancellation
+    /// signal. When the caller drops or signals on the returned sender, the
+    /// body errors out instead of producing bytes, which prompts hyper to
+    /// tear down the underlying TCP connection client-side.
+    ///
+    /// This lets the test deterministically close the request body once it
+    /// has observed the server's 504 response. Without it, the body stream
+    /// remained in its 5s sleep at the moment `graceful_shutdown()` was
+    /// invoked, leaving the router with an open connection it could only
+    /// reap after the harness-injected `connection_shutdown_timeout` (also
+    /// 5s) elapsed — a wall-clock race that tripped the 10s shutdown
+    /// deadline on macOS CI runners under scheduler pressure.
+    fn slow_body_with_cancel() -> (reqwest::Body, tokio::sync::oneshot::Sender<()>) {
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let stream = once(async move {
+            tokio::select! {
+                _ = sleep(Duration::from_secs(5)) => {
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+                }
+                _ = cancel_rx => {
+                    Err(std::io::Error::other(
+                        "slow_body cancelled by test after response received",
+                    ))
+                }
+            }
+        });
+        (reqwest::Body::wrap_stream(stream), cancel_tx)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_quickly() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(GENEROUS_CONFIG, immediate_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_when_body_arrives_with_delay() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(GENEROUS_CONFIG, slightly_delayed_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn succeeds_with_slow_body_when_no_timeout_configured() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        let (status, _) = run(NO_TIMEOUT_CONFIG, slow_body()).await;
+        assert_eq!(status, StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn times_out_when_body_is_slow() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+        // Hand-rolled equivalent of `run()` so we can tear down the request
+        // body deterministically before shutting the router down. The
+        // canonical `run()` helper assumes the body stream completes before
+        // `graceful_shutdown()` is called; the timeout path violates that
+        // assumption — the server responds with 504 while the client's body
+        // stream is still mid-sleep, leaving the TCP connection open with a
+        // pending request body. The fix is to cancel that body once the
+        // response is in hand, drop the reqwest client to close the pooled
+        // connection, then signal shutdown to the router.
+        let mut router = IntegrationTest::builder()
+            .config(STRICT_CONFIG)
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+        let url = format!("http://{}", router.bind_address());
+
+        let (body, cancel_tx) = slow_body_with_cancel();
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap_or_default();
+
+        // Signal the still-sleeping body stream to error out, then drop the
+        // reqwest client so its connection pool tears down the TCP socket.
+        // Without this, the router's per-connection task in `handle_connection!`
+        // would race the harness's 5s `connection_shutdown_timeout` against
+        // the body stream's 5s sleep — a coin flip on macOS under load.
+        let _ = cancel_tx.send(());
+        drop(client);
+
+        router.graceful_shutdown().await;
+
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            body["errors"][0]["message"],
+            "The file upload operation body took too long to arrive"
+        );
+        Ok(())
+    }
+}
+
 mod helper {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
@@ -1493,17 +1951,7 @@ mod helper {
             count += chunk.len();
 
             // Make sure that the bytes match what is expected
-            let unexpected = match chunk.into_iter().all_equal_value() {
-                Ok(value) => (value != byte_value).then_some(value),
-                Err(Some((lhs, rhs))) => {
-                    if lhs != byte_value {
-                        Some(lhs)
-                    } else {
-                        Some(rhs)
-                    }
-                }
-                Err(None) => None,
-            };
+            let unexpected = chunk.into_iter().find(|&b| b != byte_value);
             if let Some(unexpected_byte) = unexpected {
                 return Err(FileUploadError::UnexpectedData(byte_value, unexpected_byte));
             }

@@ -26,11 +26,11 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use thiserror::Error;
 
-use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
-use crate::link::DEFAULT_LINK_NAME;
-use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
 use crate::link::Import;
 use crate::link::Link;
+use crate::link::link_spec_definition::IMPORT_TYPE_NAME_IN_SPEC;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::link_spec_definition::PURPOSE_TYPE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -192,15 +192,15 @@ macro_rules! applied_specification {
                         if i.alias.is_some() {
                             Value::Object(vec![
                                 (name!("name"), i.element.as_str().into()),
-                                (name!("as"), i.imported_display_name().to_string().into()),
+                                (name!("as"), i.element_name_in_schema().to_string().into()),
                             ])
                         } else {
-                            i.imported_display_name().to_string().into()
+                            i.element_name_in_schema().to_string().into()
                         }.into()
                     })
                     .collect::<Vec<Node<Value>>>();
                 let mut applied_link_directive = Directive {
-                    name: DEFAULT_LINK_NAME,
+                    name: LINK_DIRECTIVE_NAME_IN_SPEC,
                     arguments: vec![
                         Argument {
                             name: name!("url"),
@@ -221,7 +221,7 @@ macro_rules! applied_specification {
                 if let Some(purpose) = &self.link.purpose {
                     applied_link_directive.arguments.push(Argument {
                         name: name!("for"),
-                        value: Value::Enum(purpose.into()).into(),
+                        value: Value::from(purpose).into(),
                     }.into())
                 }
                 applied_link_directive
@@ -273,6 +273,7 @@ impl FederationSpecDefinitions {
                 .collect::<Vec<Arc<Import>>>(),
             purpose: None,
             spec_alias: None,
+            line_column_range: None,
         })
     }
 
@@ -685,8 +686,8 @@ impl FederationSpecDefinitions {
 
 impl LinkSpecDefinitions {
     pub fn new(link: Link) -> Self {
-        let import_scalar_name = link.type_name_in_schema(&DEFAULT_IMPORT_SCALAR_NAME);
-        let purpose_enum_name = link.type_name_in_schema(&DEFAULT_PURPOSE_ENUM_NAME);
+        let import_scalar_name = link.type_name_in_schema(&IMPORT_TYPE_NAME_IN_SPEC);
+        let purpose_enum_name = link.type_name_in_schema(&PURPOSE_TYPE_NAME_IN_SPEC);
         Self {
             link,
             import_scalar_name,
@@ -741,7 +742,7 @@ impl LinkSpecDefinitions {
     pub fn link_directive_definition(&self) -> Result<DirectiveDefinition, FederationSpecError> {
         Ok(DirectiveDefinition {
             description: None,
-            name: DEFAULT_LINK_NAME,
+            name: LINK_DIRECTIVE_NAME_IN_SPEC,
             arguments: vec![
                 InputValueDefinition {
                     description: None,
@@ -796,6 +797,7 @@ impl Default for LinkSpecDefinitions {
             })],
             purpose: None,
             spec_alias: None,
+            line_column_range: None,
         };
         Self::new(link)
     }
@@ -804,23 +806,13 @@ impl Default for LinkSpecDefinitions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link::spec::APOLLO_SPEC_DOMAIN;
     use crate::link::spec::Identity;
-
-    // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
-    // to define the ground work for that in `apollo-at-link` first.
-    fn federation_link_identity() -> Identity {
-        Identity {
-            domain: APOLLO_SPEC_DOMAIN.to_string(),
-            name: name!("federation"),
-        }
-    }
 
     #[test]
     fn handle_unsupported_federation_version() {
         FederationSpecDefinitions::from_link(Link {
             url: Url {
-                identity: federation_link_identity(),
+                identity: Identity::federation_identity(),
                 version: Version {
                     major: 99,
                     minor: 99,
@@ -829,6 +821,7 @@ mod tests {
             spec_alias: None,
             imports: vec![],
             purpose: None,
+            line_column_range: None,
         })
         .expect_err("federation version 99 is not yet supported");
     }

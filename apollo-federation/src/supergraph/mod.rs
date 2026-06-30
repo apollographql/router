@@ -1,5 +1,4 @@
 mod join_directive;
-mod schema;
 mod subgraph;
 
 use std::fmt::Write;
@@ -39,7 +38,6 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use time::OffsetDateTime;
 
-pub(crate) use self::schema::new_empty_fed_2_subgraph_schema;
 use self::subgraph::FederationSubgraph;
 use self::subgraph::FederationSubgraphs;
 pub use self::subgraph::ValidFederationSubgraph;
@@ -64,6 +62,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::schema::field_set::FieldSetValidation;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -86,6 +85,7 @@ use crate::schema::type_and_directive_specification::ObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
+use crate::subgraph::typestate::new_empty_federation_2_subgraph_schema;
 use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
@@ -220,22 +220,78 @@ pub struct SupergraphMetadata {
     abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
+pub use crate::merger::hints::HintCode;
+
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
 pub struct CompositionHint {
+    pub definition: &'static HintCodeDefinition,
     pub message: String,
-    pub code: String,
     pub locations: Locations,
 }
 
 impl CompositionHint {
     pub fn code(&self) -> &str {
-        &self.code
+        self.definition.code()
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        self.definition.level()
     }
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HintLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+impl HintLevel {
+    pub fn name(&self) -> &'static str {
+        match self {
+            HintLevel::Warn => "WARN",
+            HintLevel::Info => "INFO",
+            HintLevel::Debug => "DEBUG",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HintCodeDefinition {
+    code: String,
+    level: HintLevel,
+    description: String,
+}
+
+impl HintCodeDefinition {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        level: HintLevel,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            level,
+            description: description.into(),
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn level(&self) -> &HintLevel {
+        &self.level
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
     }
 }
 
@@ -302,6 +358,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
     for (_, mut subgraph) in subgraphs {
+        crate::compat::coerce_schema_values(subgraph.schema.schema_mut());
         let valid_subgraph_schema = if validate_extracted_subgraphs {
             match subgraph.schema.validate_or_return_self() {
                 Ok(schema) => schema,
@@ -368,7 +425,7 @@ fn collect_empty_subgraphs(
         let subgraph = FederationSubgraph {
             name: graph_arguments.name.to_owned(),
             url: graph_arguments.url.to_owned(),
-            schema: new_empty_fed_2_subgraph_schema()?,
+            schema: new_empty_federation_2_subgraph_schema()?,
             graph_enum_value: enum_value_name.clone(),
         };
         let federation_link = &subgraph
@@ -527,6 +584,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         remove_inactive_requires_and_provides_from_subgraph(
             supergraph_schema,
             &mut subgraph.schema,
+            FieldSetValidation::Validate,
         )?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
@@ -810,7 +868,7 @@ fn add_empty_type(
             }
             let subgraph_type_definition_position = subgraph
                 .schema
-                .get_type(type_definition_position.type_name().clone())?;
+                .get_type(type_definition_position.type_name())?;
             match &subgraph_type_definition_position {
                 TypeDefinitionPosition::Scalar(_) => {
                     return Err(SingleFederationError::Internal {
@@ -857,7 +915,7 @@ fn add_empty_type(
                 .context_directive(&subgraph.schema, context_name.to_owned())?;
             let subgraph_type_definition_position: CompositeTypeDefinitionPosition = subgraph
                 .schema
-                .get_type(type_definition_position.type_name().clone())?
+                .get_type(type_definition_position.type_name())?
                 .try_into()?;
             subgraph_type_definition_position
                 .insert_directive(&mut subgraph.schema, Component::new(context_directive))?;
@@ -1064,7 +1122,7 @@ fn extract_interface_type_content(
                     ),
                 }
             })?;
-            Ok(match subgraph.schema.get_type(type_name)? {
+            Ok(match subgraph.schema.get_type(&type_name)? {
                 TypeDefinitionPosition::Object(pos) => {
                     if !is_interface_object {
                         return Err(
@@ -1723,45 +1781,37 @@ fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<()
     let mut type_definition_positions: Vec<TypeDefinitionPosition> = Vec::new();
     for (type_name, type_) in schema.schema().types.iter() {
         match type_ {
-            ExtendedType::Object(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        ObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Object(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    ObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Interface(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InterfaceTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Interface(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InterfaceTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::Union(type_) => {
-                if type_.members.is_empty() {
-                    type_definition_positions.push(
-                        UnionTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::Union(type_) if type_.members.is_empty() => {
+                type_definition_positions.push(
+                    UnionTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
-            ExtendedType::InputObject(type_) => {
-                if type_.fields.is_empty() {
-                    type_definition_positions.push(
-                        InputObjectTypeDefinitionPosition {
-                            type_name: type_name.clone(),
-                        }
-                        .into(),
-                    );
-                }
+            ExtendedType::InputObject(type_) if type_.fields.is_empty() => {
+                type_definition_positions.push(
+                    InputObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }
@@ -1816,6 +1866,9 @@ pub(crate) const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecificatio
 pub(crate) const SERVICE_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpecification {
     name: FEDERATION_SERVICE_TYPE_NAME,
     fields: |_schema| {
+        // Federation docs describe `_Service { sdl: String! }`, but the JS implementation uses
+        // nullable `sdl: String`. This Rust spec matches JS for compatibility; move the field to
+        // `Type::NonNullNamed(GRAPHQL_STRING_TYPE_NAME)` when we can align behavior safely.
         [FieldSpecification {
             name: FEDERATION_SDL_FIELD_NAME,
             ty: Type::Named(GRAPHQL_STRING_TYPE_NAME),
@@ -1945,6 +1998,7 @@ fn add_federation_operations(
 pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
     supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
+    field_set_validation: FieldSetValidation,
 ) -> Result<(), FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
     let requires_directive_definition_name = federation_spec_definition
@@ -2000,6 +2054,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
             FieldSetDirectiveKind::Requires,
             &requires_directive_definition_name,
             pos.clone(),
+            &field_set_validation,
         )?;
         remove_inactive_applications(
             supergraph_schema,
@@ -2008,6 +2063,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
             FieldSetDirectiveKind::Provides,
             &provides_directive_definition_name,
             pos,
+            &field_set_validation,
         )?;
     }
 
@@ -2026,6 +2082,7 @@ fn remove_inactive_applications(
     directive_kind: FieldSetDirectiveKind,
     name_in_schema: &Name,
     object_or_interface_field_definition_position: ObjectOrInterfaceFieldDefinitionPosition,
+    field_set_validation: &FieldSetValidation,
 ) -> Result<(), FederationError> {
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
@@ -2036,7 +2093,7 @@ fn remove_inactive_applications(
                     .provides_directive_arguments(directive)?
                     .fields;
                 let Ok(parent_type_pos) = CompositeTypeDefinitionPosition::try_from(
-                    schema.get_type(field.ty.inner_named_type().clone())?,
+                    schema.get_type(field.ty.inner_named_type())?,
                 ) else {
                     // PORT_NOTE: JS composition ignores this error. A proper field set validation
                     //            should be done elsewhere.
@@ -2075,6 +2132,7 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
             true,
+            *field_set_validation,
         )?;
 
         if remove_non_external_leaf_fields(schema, &mut fields)? {
@@ -2218,7 +2276,7 @@ fn is_external_or_has_external_implementations(
     selection: &Node<executable::Field>,
 ) -> Result<bool, FederationError> {
     let type_pos: CompositeTypeDefinitionPosition =
-        schema.get_type(parent_type_name.clone())?.try_into()?;
+        schema.get_type(parent_type_name)?.try_into()?;
     let field_pos = type_pos.field(selection.name.clone())?;
     let field = field_pos.get(schema.schema())?;
     if field.directives.has(external_directive_definition_name) {
@@ -2991,9 +3049,9 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.15", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
-        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r###" @federation__interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"###);
+        assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
     }
 }

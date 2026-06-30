@@ -25,6 +25,9 @@ use tracing::Instrument;
 use tracing::Span;
 
 use super::cache_control::CacheControl;
+use super::cache_tag::CacheTag;
+use super::invalidation_endpoint::IndexMode;
+use super::invalidation_endpoint::InvalidationIndexes;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::record_fetch_error;
@@ -33,11 +36,9 @@ use super::plugin::CACHE_TAG_DIRECTIVE_NAME;
 use super::plugin::CacheHitMiss;
 use super::plugin::CacheSubgraph;
 use super::plugin::ENTITIES;
-use super::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use super::plugin::IntermediateResult;
 use super::plugin::PrivateQueryKey;
 use super::plugin::REPRESENTATIONS;
-use super::plugin::RESPONSE_CACHE_VERSION;
 use super::plugin::StorageInterface;
 use super::plugin::Ttl;
 use super::plugin::assemble_response_from_errors;
@@ -92,6 +93,25 @@ impl ConnectorCacheConfiguration {
     /// Get the configuration for a specific connector source, falling back to `all`.
     pub(crate) fn get(&self, source_name: &str) -> &ConnectorCacheSource {
         self.sources.get(source_name).unwrap_or(&self.all)
+    }
+
+    /// Resolve the effective [`InvalidationIndexes`] for `source_name`. Prefers the per-source
+    /// `invalidation` block, falls back to the `all` block, and finally to
+    /// [`InvalidationIndexes::default`] when neither is configured. Mirrors
+    /// `effective_invalidation_indexes` on the subgraph path so the connector write path and the
+    /// `/invalidation` endpoint stay in lockstep.
+    pub(super) fn effective_indexes(&self, source_name: &str) -> InvalidationIndexes {
+        if let Some(source_invalidation) = self
+            .sources
+            .get(source_name)
+            .and_then(|s| s.invalidation.as_ref())
+        {
+            return source_invalidation.indexes;
+        }
+        if let Some(all_invalidation) = self.all.invalidation.as_ref() {
+            return all_invalidation.indexes;
+        }
+        InvalidationIndexes::default()
     }
 
     /// Returns whether caching is enabled for a specific connector source.
@@ -263,7 +283,7 @@ impl ConnectorCacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            let cache_control = match CacheControl::new(request.supergraph_request.headers(), None)
+            let cache_control = match CacheControl::try_from(request.supergraph_request.headers())
             {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
@@ -287,7 +307,7 @@ impl ConnectorCacheService {
             };
 
             // Don't use cache at all if both no-store and no-cache are set
-            if cache_control.is_no_cache() && cache_control.is_no_store() {
+            if cache_control.no_cache() && cache_control.no_store() {
                 return self.service.call(request).await;
             }
             Some(cache_control)
@@ -319,7 +339,7 @@ impl ConnectorCacheService {
             if self.debug {
                 // Use no_store cache control — this is a known-private query without private_id,
                 // so we won't be storing anything regardless of what the upstream returns
-                let cache_control = CacheControl::no_store();
+                let cache_control = CacheControl::default_no_store();
                 let kind = if is_entity {
                     CacheEntryKind::Entity {
                         typename: "".to_string(),
@@ -334,6 +354,7 @@ impl ConnectorCacheService {
                 let cache_key_context = CacheKeyContext {
                     key: "-".to_string(),
                     invalidation_keys: vec![],
+                    indexes: self.connectors_config.effective_indexes(&source_name),
                     kind,
                     hashed_private_id: None,
                     subgraph_name: source_name.to_string(),
@@ -356,6 +377,7 @@ impl ConnectorCacheService {
             let source_name_span = source_name.clone();
             let private_id_exists = private_id.is_some();
             let is_debug = self.debug;
+            let indexes = self.connectors_config.effective_indexes(&source_name);
             self.handle_entity_query(
                 request,
                 storage,
@@ -366,6 +388,7 @@ impl ConnectorCacheService {
                 request_cache_control,
                 is_known_private,
                 private_query_key,
+                indexes,
             )
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
@@ -394,6 +417,7 @@ impl ConnectorCacheService {
         request_cache_control: Option<CacheControl>,
         is_known_private: bool,
         private_query_key: PrivateQueryKey,
+        indexes: InvalidationIndexes,
     ) -> Result<connect::Response, BoxError> {
         // Get auth metadata from context
         let auth_metadata = request
@@ -498,19 +522,24 @@ impl ConnectorCacheService {
             }
             .hash();
 
-            // Build invalidation keys
-            let mut invalidation_keys = vec![format!(
-                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{typename}"
-            )];
+            // Build typed cache tags, gated on the connector's resolved invalidation indexes.
+            // The whole-source (`Subgraph`) tag is prepended at store time, mirroring dev's
+            // subgraph path.
+            let mut cache_tags: Vec<CacheTag> = Vec::new();
+            if indexes.is_enabled(IndexMode::Type) {
+                cache_tags.push(CacheTag::Type(typename.to_string()));
+            }
             // Extract @cacheTag invalidation keys from the supergraph schema.
-            if let Ok(cache_tag_keys) = get_invalidation_entity_keys_from_schema(
-                &self.supergraph_schema,
-                &connector_synthetic_name,
-                &self.subgraph_enums,
-                typename,
-                representation_obj,
-            ) {
-                invalidation_keys.extend(cache_tag_keys);
+            if indexes.is_enabled(IndexMode::CacheTag)
+                && let Ok(cache_tag_keys) = get_invalidation_entity_keys_from_schema(
+                    &self.supergraph_schema,
+                    &connector_synthetic_name,
+                    &self.subgraph_enums,
+                    typename,
+                    representation_obj,
+                )
+            {
+                cache_tags.extend(cache_tag_keys.into_iter().map(CacheTag::Tag));
             }
 
             // Restore __typename
@@ -518,7 +547,7 @@ impl ConnectorCacheService {
 
             cache_keys.push(CacheMetadata {
                 cache_key,
-                invalidation_keys,
+                cache_tags,
                 entity_key: representation_entity_key,
             });
         }
@@ -548,7 +577,7 @@ impl ConnectorCacheService {
         // without just performing the query, so there's no benefit to hitting the cache
         let cache_result: Vec<Option<CacheEntry>> = if request_cache_control
             .as_ref()
-            .is_some_and(|c| c.is_no_cache())
+            .is_some_and(|c| c.no_cache())
         {
             std::iter::repeat_n(None, cache_keys.len()).collect()
         } else {
@@ -636,7 +665,7 @@ impl ConnectorCacheService {
 
             intermediate_results.push(IntermediateResult {
                 key: metadata.cache_key,
-                invalidation_keys: metadata.invalidation_keys,
+                cache_tags: metadata.cache_tags,
                 typename,
                 entity_key: metadata.entity_key,
                 cache_entry: entry,
@@ -674,7 +703,12 @@ impl ConnectorCacheService {
                     CacheKeyContext {
                         key: ir.key.clone(),
                         hashed_private_id: private_id.clone(),
-                        invalidation_keys: external_invalidation_keys(ir.invalidation_keys.clone()),
+                        invalidation_keys: ir
+                            .cache_tags
+                            .iter()
+                            .filter_map(|t| t.user_value().map(String::from))
+                            .collect(),
+                        indexes,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
                             entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -750,7 +784,7 @@ impl ConnectorCacheService {
                             .unwrap(),
                     };
 
-                    update_cache_control(&context, &CacheControl::no_store());
+                    update_cache_control(&context, &CacheControl::default_no_store());
 
                     return Ok(response);
                 }
@@ -772,6 +806,7 @@ impl ConnectorCacheService {
                 private_query_key,
                 &self.private_queries,
                 &self.lru_size_instrument,
+                indexes,
             )
             .await?;
 
@@ -817,6 +852,7 @@ impl ConnectorCacheService {
         private_query_key: PrivateQueryKey,
         private_queries: &Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
         lru_size_instrument: &LruSizeInstrument,
+        indexes: InvalidationIndexes,
     ) -> Result<(), BoxError> {
         let ConnectorCachedEntities {
             mut results,
@@ -827,11 +863,11 @@ impl ConnectorCacheService {
         let mut response_cache_control = context
             .extensions()
             .with_lock(|lock| lock.get::<CacheControl>().cloned())
-            .unwrap_or_else(CacheControl::no_store);
+            .unwrap_or_else(CacheControl::default_no_store);
 
         // If the request had no-store, propagate that to the response cache control
         if let Some(ref req_cc) = request_cache_control {
-            response_cache_control.no_store |= req_cc.no_store;
+            response_cache_control.merge_no_store(req_cc);
         }
 
         // Track private queries in the LRU so future requests can short-circuit
@@ -889,7 +925,7 @@ impl ConnectorCacheService {
             response.response.body_mut().data = Some(Value::Object(data));
             response.response.body_mut().errors = new_errors;
 
-            update_cache_control(context, &CacheControl::no_store());
+            update_cache_control(context, &CacheControl::default_no_store());
 
             return Ok(());
         };
@@ -911,7 +947,7 @@ impl ConnectorCacheService {
             new_entity_idx,
             IntermediateResult {
                 key,
-                invalidation_keys,
+                cache_tags,
                 typename,
                 entity_key,
                 cache_entry,
@@ -958,15 +994,29 @@ impl ConnectorCacheService {
                             key
                         };
 
+                        // Surface user-facing tags for the debugger before `cache_tags` is moved
+                        // into the stored document.
+                        let user_tags: Vec<String> = cache_tags
+                            .iter()
+                            .filter_map(|t| t.user_value().map(String::from))
+                            .collect();
+
                         if !has_errors
                             && !unstorable_private_response
                             && response_cache_control.should_store()
                         {
+                            // Prepend the whole-source (`Subgraph`) tag at store time, gated on
+                            // the connector's resolved invalidation indexes (mirrors dev's
+                            // subgraph store path).
+                            let mut doc_cache_tags = cache_tags;
+                            if indexes.is_enabled(IndexMode::Subgraph) {
+                                doc_cache_tags.insert(0, CacheTag::Subgraph);
+                            }
                             to_insert.push(Document {
                                 control: response_cache_control.clone(),
                                 data: value.clone(),
                                 key: key.clone(),
-                                invalidation_keys: invalidation_keys.clone(),
+                                cache_tags: doc_cache_tags,
                                 expire: ttl,
                                 debug,
                             });
@@ -977,9 +1027,8 @@ impl ConnectorCacheService {
                                 CacheKeyContext {
                                     key,
                                     hashed_private_id: private_id.clone(),
-                                    invalidation_keys: external_invalidation_keys(
-                                        invalidation_keys,
-                                    ),
+                                    invalidation_keys: user_tags,
+                                    indexes,
                                     kind: CacheEntryKind::Entity {
                                         typename,
                                         entity_key: entity_key.unwrap_or_default(),
@@ -1063,6 +1112,9 @@ pub(super) struct ConnectorRequestCacheService {
     pub(super) subgraph_enums: Arc<HashMap<String, String>>,
     pub(super) private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(super) lru_size_instrument: LruSizeInstrument,
+    /// Resolved invalidation indexes for this connector source, gating which cache-tag layers
+    /// are written on the store path (mirrors the subgraph path).
+    pub(super) indexes: InvalidationIndexes,
 }
 
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
@@ -1153,7 +1205,7 @@ impl ConnectorRequestCacheService {
             .headers()
             .contains_key(&CACHE_CONTROL)
         {
-            let cache_control = match CacheControl::new(request.supergraph_request.headers(), None)
+            let cache_control = match CacheControl::try_from(request.supergraph_request.headers())
             {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
@@ -1164,8 +1216,10 @@ impl ConnectorRequestCacheService {
                             &request.key,
                         )
                         .with_code("INVALID_CACHE_CONTROL_HEADER");
+                    let subgraph_name = request.connector.id.subgraph_name.to_string();
                     return Ok(connector::request_service::Response {
                             context: request.context,
+                            subgraph_name,
                             transport_result: Err(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
@@ -1180,7 +1234,7 @@ impl ConnectorRequestCacheService {
             };
 
             // Don't use cache at all if both no-store and no-cache are set
-            if cache_control.is_no_cache() && cache_control.is_no_store() {
+            if cache_control.no_cache() && cache_control.no_store() {
                 return self.handle_with_cache_control_extraction(request).await;
             }
             Some(cache_control)
@@ -1235,12 +1289,14 @@ impl ConnectorRequestCacheService {
             let context = request.context.clone();
             let source_name = self.source_name.clone();
             let debug = self.debug;
+            let indexes = self.indexes;
             let resp = self.handle_with_cache_control_extraction(request).await?;
 
             if debug {
                 let cache_key_context = CacheKeyContext {
                     key: "-".to_string(),
                     invalidation_keys: vec![],
+                    indexes,
                     kind: CacheEntryKind::RootFields {
                         root_fields: vec![root_field_name],
                     },
@@ -1248,7 +1304,7 @@ impl ConnectorRequestCacheService {
                     subgraph_name: source_name,
                     subgraph_request: debug_request.unwrap_or_default(),
                     source: CacheKeySource::Connector,
-                    cache_control: CacheControl::no_store(),
+                    cache_control: CacheControl::default_no_store(),
                     data: serde_json_bytes::Value::Null,
                     warnings: Vec::new(),
                     should_store: false,
@@ -1322,7 +1378,7 @@ impl ConnectorRequestCacheService {
         // without just performing the query, so there's no benefit to hitting the cache
         let skip_cache_lookup = request_cache_control
             .as_ref()
-            .is_some_and(|c| c.is_no_cache());
+            .is_some_and(|c| c.no_cache());
 
         let lookup_span = tracing::info_span!(
             "response_cache.lookup",
@@ -1374,6 +1430,7 @@ impl ConnectorRequestCacheService {
                             .as_ref()
                             .map(|tags| external_invalidation_keys(tags.iter().cloned()))
                             .unwrap_or_default(),
+                        indexes: self.indexes,
                         kind: CacheEntryKind::RootFields {
                             root_fields: vec![root_field_name.clone()],
                         },
@@ -1389,8 +1446,10 @@ impl ConnectorRequestCacheService {
                     add_cache_key_to_context(&request.context, cache_key_context)?;
                 }
 
+                let subgraph_name = request.connector.id.subgraph_name.to_string();
                 let cached_response = connector::request_service::Response {
                     context: request.context,
+                    subgraph_name,
                     transport_result: Ok(
                         apollo_federation::connectors::runtime::http_json_transport::TransportResponse::CacheHit,
                     ),
@@ -1425,6 +1484,7 @@ impl ConnectorRequestCacheService {
                 let subgraph_enums = self.subgraph_enums.clone();
                 let private_queries = self.private_queries.clone();
                 let lru_size_instrument = self.lru_size_instrument.clone();
+                let indexes = self.indexes;
                 let response = self.handle_with_cache_control_extraction(request).await?;
 
                 // Store in cache if appropriate
@@ -1436,11 +1496,11 @@ impl ConnectorRequestCacheService {
                     let mut cache_control = context
                         .extensions()
                         .with_lock(|lock| lock.get::<CacheControl>().cloned())
-                        .unwrap_or_else(CacheControl::no_store);
+                        .unwrap_or_else(CacheControl::default_no_store);
 
                     // If the request had no-store, propagate that to the response cache control
                     if let Some(ref req_cc) = request_cache_control {
-                        cache_control.no_store |= req_cc.no_store;
+                        cache_control.merge_no_store(req_cc);
                     }
 
                     // Track private queries in the LRU so future requests can short-circuit
@@ -1470,28 +1530,35 @@ impl ConnectorRequestCacheService {
                             .map(Duration::from_secs)
                             .unwrap_or(connector_ttl);
 
-                        let mut invalidation_keys = vec![format!(
-                            "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{}:type:Query",
-                            source_name
-                        )];
+                        // Build typed cache tags for the root document, gated on the connector's
+                        // resolved invalidation indexes (mirrors dev's subgraph root path). The
+                        // root type tag is `Type("Query")`; `Subgraph` is prepended at store time.
+                        let mut cache_tags: Vec<CacheTag> = Vec::new();
+                        if indexes.is_enabled(IndexMode::Type) {
+                            cache_tags.push(CacheTag::Type("Query".to_string()));
+                        }
                         // Extract @cacheTag invalidation keys from the supergraph schema
-                        if let Ok(cache_tag_keys) = get_connector_root_cache_tags(
-                            &supergraph_schema,
-                            &subgraph_enums,
-                            &connector_synthetic_name,
-                            &root_field_name,
-                            &cache_tag_args,
-                        ) {
-                            invalidation_keys.extend(cache_tag_keys);
+                        if indexes.is_enabled(IndexMode::CacheTag)
+                            && let Ok(cache_tag_keys) = get_connector_root_cache_tags(
+                                &supergraph_schema,
+                                &subgraph_enums,
+                                &connector_synthetic_name,
+                                &root_field_name,
+                                &cache_tag_args,
+                            )
+                        {
+                            cache_tags.extend(cache_tag_keys.into_iter().map(CacheTag::Tag));
                         }
 
                         if debug && let Some(debug_req) = debug_request {
                             let cache_key_context = CacheKeyContext {
                                 key: cache_key.clone(),
                                 hashed_private_id: private_id,
-                                invalidation_keys: external_invalidation_keys(
-                                    invalidation_keys.clone(),
-                                ),
+                                invalidation_keys: cache_tags
+                                    .iter()
+                                    .filter_map(|t| t.user_value().map(String::from))
+                                    .collect(),
+                                indexes,
                                 kind: CacheEntryKind::RootFields {
                                     root_fields: vec![root_field_name.clone()],
                                 },
@@ -1507,11 +1574,17 @@ impl ConnectorRequestCacheService {
                             add_cache_key_to_context(&context, cache_key_context)?;
                         }
 
+                        // Prepend the whole-source (`Subgraph`) tag at store time, gated on the
+                        // resolved invalidation indexes.
+                        if indexes.is_enabled(IndexMode::Subgraph) {
+                            cache_tags.insert(0, CacheTag::Subgraph);
+                        }
+
                         let document = Document {
                             key: cache_key,
                             data: data.clone(),
                             control: cache_control,
-                            invalidation_keys,
+                            cache_tags,
                             expire: ttl,
                             debug,
                         };
@@ -1549,10 +1622,9 @@ impl ConnectorRequestCacheService {
             ),
         ) = &response.transport_result
         {
-            let cache_control =
-                CacheControl::new(&http_response.inner.headers, self.connector_ttl.into())
-                    .ok()
-                    .unwrap_or_else(CacheControl::no_store);
+            let cache_control = CacheControl::try_from(&http_response.inner.headers)
+                .unwrap_or_else(|_| CacheControl::default_no_store())
+                .with_default_ttl(Some(self.connector_ttl));
             update_cache_control(&context, &cache_control);
         }
 
@@ -1643,7 +1715,7 @@ fn get_connector_root_cache_tags(
 
 struct CacheMetadata {
     cache_key: String,
-    invalidation_keys: Vec<String>,
+    cache_tags: Vec<CacheTag>,
     // Only set when debug mode is enabled
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }

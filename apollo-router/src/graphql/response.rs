@@ -269,6 +269,18 @@ impl From<ExecutionResponse> for Response {
     }
 }
 
+impl Response {
+    pub(crate) fn all_errors(&self) -> impl Iterator<Item = &Error> {
+        self.errors
+            .iter()
+            .chain(self.incremental.iter().flat_map(|r| r.errors.iter()))
+    }
+
+    pub(crate) fn contains_errors(&self) -> bool {
+        self.all_errors().next().is_some()
+    }
+}
+
 #[cfg(test)]
 impl Response {
     pub(crate) fn errors_with_code<'a>(&'a self, code: &'a str) -> impl Iterator<Item = &'a Error> {

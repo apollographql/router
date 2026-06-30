@@ -1,0 +1,139 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+assertion_line: 698
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.apollo_telemetry_options
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.errors.preview_extended_error_metrics: false
+          opt.field_level_instrumentation_sampler: false
+          opt.metrics.otlp.batch_processor.max_export_timeout: false
+          opt.metrics.otlp.batch_processor.scheduled_delay: false
+          opt.metrics.usage_reports.batch_processor.max_concurrent_exports: false
+          opt.metrics.usage_reports.batch_processor.max_export_timeout: false
+          opt.metrics.usage_reports.batch_processor.scheduled_delay: false
+          opt.metrics_reference_mode: false
+          opt.signature_normalization_algorithm: false
+          opt.tracing.batch_processor.max_concurrent_exports: false
+          opt.tracing.batch_processor.max_export_batch_size: false
+          opt.tracing.batch_processor.max_export_timeout: false
+          opt.tracing.batch_processor.max_queue_size: false
+          opt.tracing.batch_processor.scheduled_delay: false
+- name: apollo.router.config.experimental_chaos
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_cooperative_cancellation
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_expose_query_plan
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_hoist_orphan_errors
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2_keep_alive_interval
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_http2_keep_alive_timeout
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_local_field_metrics
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_log_on_broken_pipe
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_mock_subgraphs
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_otlp_endpoint
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_otlp_metrics_protocol
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_otlp_tracing_protocol
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_paths_limit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_plans_limit
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_prewarm_query_plan_cache
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_response_trace_id
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_reuse_query_plans
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.experimental_type_conditioned_fetching
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.persisted_queries
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.log_unknown: false
+          opt.safelist.enabled: false
+          opt.safelist.require_id: false
+- name: apollo.router.config.traffic_shaping
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.router.rate_limit: false
+          opt.router.timeout: false
+          opt.subgraph.compression: false
+          opt.subgraph.deduplicate_query: false
+          opt.subgraph.http2: true
+          opt.subgraph.rate_limit: false
+          opt.subgraph.timeout: false

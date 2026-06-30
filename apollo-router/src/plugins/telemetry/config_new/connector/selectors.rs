@@ -78,20 +78,16 @@ pub(crate) enum ConnectorSelector {
     HttpRequestHeader {
         /// The name of a connector HTTP request header.
         connector_http_request_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
     ConnectorResponseHeader {
         /// The name of a connector HTTP response header.
         connector_http_response_header: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
         /// Optional redaction pattern.
-        redact: Option<String>,
+        redact: Option<crate::services::header_masking::RedactMode>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -130,20 +126,12 @@ pub(crate) enum ConnectorSelector {
     RequestContext {
         /// The request context key.
         request_context: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
     },
     SupergraphOperationName {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
@@ -184,25 +172,42 @@ impl Selector for ConnectorSelector {
                 .map(opentelemetry::Value::from),
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
-            } if *connector_http_method => Some(opentelemetry::Value::from(
-                request.connector.transport.method.as_str().to_string(),
-            )),
+            } if *connector_http_method => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.method.as_str().to_string())),
             ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
-            } if *connector_url_template => Some(opentelemetry::Value::from(
-                request.connector.transport.connect_template.to_string(),
-            )),
+            } if *connector_url_template => request
+                .connector
+                .transport
+                .as_ref()
+                .map(|t| opentelemetry::Value::from(t.connect_template.to_string())),
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
                 default,
-                ..
+                redact,
             } => {
-                let TransportRequest::Http(ref http_request) = request.transport_request;
-                http_request
+                let TransportRequest::Http(ref http_request) = request.transport_request else {
+                    return default.clone().map(opentelemetry::Value::from);
+                };
+                let header_value = http_request
                     .inner
                     .headers()
                     .get(connector_request_header)
-                    .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                    .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                let value = crate::services::header_masking::redact_header_value(
+                    &request.context,
+                    crate::services::header_masking::Direction::Request,
+                    Some(request.connector.id.subgraph_name.as_str()),
+                    connector_request_header,
+                    header_value,
+                    redact.as_ref(),
+                );
+
+                value
                     .or_else(|| default.clone())
                     .map(opentelemetry::Value::from)
             }
@@ -273,14 +278,25 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseHeader {
                 connector_http_response_header: connector_response_header,
                 default,
-                ..
+                redact,
             } => {
                 if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
-                    http_response
+                    let header_value = http_response
                         .inner
                         .headers
                         .get(connector_response_header)
-                        .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                        .and_then(|h| Some(h.to_str().ok()?.to_string()));
+
+                    let value = crate::services::header_masking::redact_header_value(
+                        &response.context,
+                        crate::services::header_masking::Direction::Response,
+                        Some(response.subgraph_name.as_str()),
+                        connector_response_header,
+                        header_value,
+                        redact.as_ref(),
+                    );
+
+                    value
                         .or_else(|| default.clone())
                         .map(opentelemetry::Value::from)
                 } else {
@@ -475,11 +491,11 @@ mod tests {
                 None,
                 0,
             ),
-            transport: HttpJsonTransport {
+            transport: Some(HttpJsonTransport {
                 source_template: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
                 ..Default::default()
-            },
+            }),
             selection: JSONSelection::empty(),
             config: None,
             max_requests: None,
@@ -525,10 +541,10 @@ mod tests {
         Request {
             context: context.unwrap_or_default(),
             connector: Arc::new(connector()),
-            transport_request: TransportRequest::Http(HttpRequest {
+            transport_request: TransportRequest::Http(Box::new(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
-            }),
+            })),
             key: response_key(),
             mapping_problems: mapping_problems.unwrap_or_default(),
             supergraph_request: Default::default(),
@@ -546,6 +562,7 @@ mod tests {
     ) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name: String::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -567,6 +584,7 @@ mod tests {
     fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name: String::new(),
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
@@ -584,8 +602,13 @@ mod tests {
     }
 
     fn connector_response_with_header() -> Response {
+        connector_response_with_header_for_subgraph(String::new())
+    }
+
+    fn connector_response_with_header_for_subgraph(subgraph_name: String) -> Response {
         Response {
             context: Context::new(),
+            subgraph_name,
             transport_result: Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
@@ -735,6 +758,148 @@ mod tests {
         assert_eq!(
             Some(TEST_HEADER_VALUE.into()),
             selector.on_response(&connector_response_with_header())
+        );
+    }
+
+    #[test]
+    fn connector_request_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::HttpRequestHeader {
+            connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = connector_request(http_request_with_header(), Some(context), None);
+        assert_eq!(Some("***MASKED***".into()), selector.on_request(&request));
+    }
+
+    #[test]
+    fn connector_request_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::HttpRequestHeader {
+            connector_http_request_header: TEST_HEADER_NAME.to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let context = Context::new();
+        context.extensions().with_lock(|lock| lock.insert(map));
+        let request = connector_request(http_request_with_header(), Some(context), None);
+        assert_eq!(
+            Some(TEST_HEADER_VALUE.into()),
+            selector.on_request(&request)
+        );
+    }
+
+    #[test]
+    fn connector_response_header_masking_with_global_rules() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let response = connector_response_with_header();
+        response
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(map));
+        assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
+    }
+
+    #[test]
+    fn connector_response_header_masking_uses_per_subgraph_rules() {
+        use std::collections::HashMap;
+
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::DirectionRules;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: None,
+        };
+        // Global response rules: do not mask TEST_HEADER_NAME.
+        let global = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![],
+            replace_defaults: false,
+        }));
+        // Per-subgraph response rules for "products": do mask TEST_HEADER_NAME.
+        let products = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
+        }));
+        let mut per_sg: HashMap<String, Arc<HeaderMaskingRules>> = HashMap::new();
+        per_sg.insert("products".to_string(), products);
+        let map = Arc::new(MaskingRulesMap::new(
+            DirectionRules::new(global.clone(), HashMap::new()),
+            DirectionRules::new(global, per_sg),
+        ));
+
+        let response = connector_response_with_header_for_subgraph("products".to_string());
+        response.context.extensions().with_lock(|lock| {
+            lock.insert(map);
+        });
+        assert_eq!(Some("***MASKED***".into()), selector.on_response(&response));
+    }
+
+    #[test]
+    fn connector_response_header_redact_allow_overrides_masking() {
+        use crate::configuration::header_masking_config::HeaderMaskingConfig;
+        use crate::services::header_masking::HeaderMaskingRules;
+        use crate::services::header_masking::MaskingRulesMap;
+
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: Some(crate::services::header_masking::RedactMode::Allow),
+            default: None,
+        };
+        let rules = Arc::new(HeaderMaskingRules::from_config(&HeaderMaskingConfig {
+            enabled: true,
+            sensitive_headers: vec![TEST_HEADER_NAME.to_string()],
+            replace_defaults: false,
+        }));
+        let map = Arc::new(MaskingRulesMap::new_test(rules, Default::default()));
+        let response = connector_response_with_header();
+        response
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(map));
+        assert_eq!(
+            Some(TEST_HEADER_VALUE.into()),
+            selector.on_response(&response)
         );
     }
 
@@ -914,7 +1079,6 @@ mod tests {
     fn connector_request_context() {
         let selector = ConnectorSelector::RequestContext {
             request_context: "context_key".to_string(),
-            redact: None,
             default: Some("defaulted".into()),
         };
         let context = Context::new();
@@ -938,7 +1102,6 @@ mod tests {
     fn connector_supergraph_operation_name_string() {
         let selector = ConnectorSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::String,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = Context::new();
@@ -958,7 +1121,6 @@ mod tests {
     fn connector_supergraph_operation_name_hash() {
         let selector = ConnectorSelector::SupergraphOperationName {
             supergraph_operation_name: OperationName::Hash,
-            redact: None,
             default: Some("defaulted".to_string()),
         };
         let context = Context::new();

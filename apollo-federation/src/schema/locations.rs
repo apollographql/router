@@ -1,10 +1,12 @@
 use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::HasLocations;
 use crate::error::Locations;
 use crate::error::SubgraphLocation;
+use crate::link::Link;
 use crate::merger::compose_directive_manager::MergeDirectiveItem;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -53,6 +55,19 @@ impl HasLocations for MergeDirectiveItem {
     }
 }
 
+impl HasLocations for Link {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
+        self.line_column_range
+            .clone()
+            .into_iter()
+            .map(|range| SubgraphLocation {
+                subgraph: subgraph.name.to_string(),
+                range,
+            })
+            .collect()
+    }
+}
+
 impl HasLocations for ExtendedType {
     fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations {
         match self {
@@ -68,14 +83,24 @@ impl HasLocations for ExtendedType {
 
 impl<T> HasLocations for Node<T> {
     fn locations<U: HasMetadata>(&self, subgraph: &Subgraph<U>) -> Locations {
-        subgraph
+        let locations: Locations = subgraph
             .schema()
             .node_locations(self)
             .map(|range| SubgraphLocation {
                 subgraph: subgraph.name.to_string(),
                 range,
             })
-            .collect()
+            .collect();
+        if locations.is_empty() {
+            let default_range =
+                LineColumn { line: 0, column: 0 }..LineColumn { line: 0, column: 0 };
+            vec![SubgraphLocation {
+                subgraph: subgraph.name.to_string(),
+                range: default_range,
+            }]
+        } else {
+            locations
+        }
     }
 }
 

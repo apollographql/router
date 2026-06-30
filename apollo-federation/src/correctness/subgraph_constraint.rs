@@ -97,13 +97,13 @@ impl<'a> SubgraphConstraint<'a> {
                     continue;
                 };
                 let field_type_name = field.ty.inner_named_type();
-                let field_type_pos = subgraph_schema.get_type(field_type_name.clone())?;
+                let field_type_pos = subgraph_schema.get_type(field_type_name)?;
                 if let Ok(composite_type) =
                     CompositeTypeDefinitionPosition::try_from(field_type_pos)
                 {
                     let ground_set = subgraph_schema.possible_runtime_types(composite_type)?;
                     possible_subgraphs.insert(subgraph_name.clone());
-                    subgraph_types.extend(ground_set.into_iter());
+                    subgraph_types.extend(ground_set);
                 }
             }
         }

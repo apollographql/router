@@ -73,7 +73,7 @@ telemetry:
 
 #### Configuring the transport protocol
 
-<MinVersionBadge version="Router v2.14.0" />
+<MinVersionBadge version="Router v2.13.0" />
 
 By default, the router sends GraphOS OTLP data over gRPC. To switch to HTTP protobuf, set `experimental_otlp_tracing_protocol` and `experimental_otlp_metrics_protocol`:
 
@@ -85,6 +85,24 @@ telemetry:
 ```
 
 Use HTTP when your network or proxy infrastructure handles HTTP traffic but not gRPC. For proxy routing, see [HTTP proxy support](#http-proxy-support).
+
+#### Configuring the Apollo Studio sampling rate
+
+You can set an independent sampling rate for traces sent to Apollo Studio using `telemetry.apollo.sampler`. This lets you send a different fraction of traces to Studio than to other exporters:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      common:
+        sampler: 0.1   # 10% of requests are traced globally
+  apollo:
+    sampler: 0.05      # only 5% of requests reach Apollo Studio
+```
+
+The value uses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`, so it's an absolute fraction of all requests. It must not exceed `telemetry.exporters.tracing.common.sampler`; the router returns an error at startup if it does.
+
+If omitted, Apollo Studio receives all spans that pass the common sampler.
 
 ## Reporting field-level traces
 
@@ -157,6 +175,12 @@ telemetry:
 ### `send_headers`
 
 Provide this field to configure which request header names and values are included in trace data that's sent to GraphOS. By default, _no_ header information is sent to GraphOS as a security measure.
+
+<Note>
+
+`send_headers` applies only to incoming client request headers. Subgraph response headers aren't captured by this option, even if they're forwarded to the client response.
+
+</Note>
 
 ```yaml title="router.yaml"
 telemetry:
@@ -359,12 +383,12 @@ An array of names for the variables that the router _will not_ report to GraphOS
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # The percentage of requests will include HTTP request and response headers in traces sent to GraphOS Studio.
+    # The percentage of requests that will include HTTP request headers in traces sent to Studio.
     # This is expensive and should be left at a low value.
     # This cannot be higher than tracing->common->sampler
     field_level_instrumentation_sampler: 0.01 # (default)
 
-    # Include HTTP request and response headers in traces sent to GraphOS Studio
+    # Include HTTP request headers in traces sent to Studio.
     send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
       except: # Send all headers except referer
         - referer
@@ -460,14 +484,7 @@ telemetry:
 
 <MinVersionBadge version="Router v2.14.0" />
 
-The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. Set them before starting your router to route OTLP traffic through a proxy:
-
-```bash
-export HTTPS_PROXY=https://your-proxy.example.com:3128
-export NO_PROXY=localhost,127.0.0.1
-```
-
-The router reads these variables at startup — restart your router for changes to take effect.
+The router's GraphOS OTLP exporters respect the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. For full setup instructions, including TLS certificate configuration for inspecting proxies, see [HTTP proxy configuration](/graphos/routing/self-hosted/containerization/proxy-certificates).
 
 <Note>
 

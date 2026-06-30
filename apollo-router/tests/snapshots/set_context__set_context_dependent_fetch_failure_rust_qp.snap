@@ -20,6 +20,15 @@ expression: response
       "extensions": {
         "service": "Subgraph1"
       }
+    },
+    {
+      "message": "Missing field",
+      "path": [
+        "t"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
+      }
     }
   ],
   "extensions": {
@@ -43,7 +52,7 @@ expression: response
               "operationKind": "query",
               "operationName": "Query_fetch_dependent_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "8403005853231cfa6f0f26073b7486427e74063f1412df07235de112f2c46c5d",
+              "schemaAwareHash": "c0c6da9aa531ea910d873ffc7b7ee12b306522ec0372b016e41ae5b06bc5a79f",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -89,7 +98,7 @@ expression: response
                     "typeCondition": "U"
                   }
                 ],
-                "schemaAwareHash": "da72ac5ab0dbd8c65a9c99af1ee4eb0fbb39021a7ac61aa9168f5121996ed7fb",
+                "schemaAwareHash": "b0547405e37f5ebbbbd93600bffda2afe1664395a2f91aa413c6c4e21bf0512a",
                 "serviceName": "Subgraph1",
                 "variableUsages": [
                   "contextualArgument_1_0"
@@ -107,7 +116,7 @@ expression: response
     },
     "valueCompletion": [
       {
-        "message": "Cannot return null for non-nullable field Query.t",
+        "message": "Cannot return null for non-nullable type T",
         "path": []
       }
     ]

@@ -210,6 +210,71 @@ When requesting 7 books:
 1 Query (0) + 7 book objects (7 * (1 book object (1) + 1 author object (1) + 1 publisher object (1) + 1 address object (5))) = 56 total cost
 ```
 
+#### List-type arguments in `slicingArguments`
+
+When a `slicingArguments` entry references a list-type argument, the router uses the length of that list as the list size. This is useful when your resolver returns one result per input ID or tag, instead of using a numeric paging argument.
+
+```graphql
+type Query {
+  book(id: ID): Book
+  bestsellers: [Book] @listSize(assumedSize: 5)
+  newestAdditions(after: ID, limit: Int!): [Book]
+    @listSize(slicingArguments: ["limit"])
+  #highlight-start
+  booksByIds(ids: [ID!]!): [Book]
+    @listSize(slicingArguments: ["ids"])
+  #highlight-end
+}
+```
+
+With your schema, the router uses the length of the `ids` argument as the list size:
+
+```graphql
+query BooksByIds {
+  booksByIds(ids: ["abc", "def", "ghi"]) {
+    title
+    author {
+      name
+    }
+  }
+}
+```
+
+<ExpansionPanel title="Cost of booksByIds query">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0) + 3 book objects (3 * (1 book object (1) + 1 author object (1))) = 6 total cost
+```
+
+</ExpansionPanel>
+
+This also works when the list is passed using query variables.
+
+```graphql
+query BooksByIds($ids: [ID!]!) {
+  booksByIds(ids: $ids) {
+    title
+    author {
+      name
+    }
+  }
+}
+```
+
+```json title="Query variables"
+{
+  "ids": ["abc", "def", "ghi", "jkl", "mno"]
+}
+```
+
+<ExpansionPanel title="Cost of booksByIds query">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0) + 5 book objects (5 * (1 book object (1) + 1 author object (1))) = 10 total cost
+```
+
+</ExpansionPanel>
+
 #### Nested paths in `slicingArguments`
 
 <MinVersionBadge version="Router v2.12.0" />

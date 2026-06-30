@@ -92,6 +92,15 @@ fn make_service(
 
 /// Send a JSON request through the service and return the response
 async fn send_request(service: HttpClientService, uri: Uri, body: &'static str) -> HttpResponse {
+    try_send_request(service, uri, body).await.unwrap()
+}
+
+/// Like [`send_request`] but returns the `Result` so callers can assert on failures.
+async fn try_send_request(
+    service: HttpClientService,
+    uri: Uri,
+    body: &'static str,
+) -> Result<HttpResponse, BoxError> {
     service
         .oneshot(HttpRequest {
             http_request: http::Request::builder()
@@ -102,7 +111,6 @@ async fn send_request(service: HttpClientService, uri: Uri, body: &'static str) 
             context: Context::new(),
         })
         .await
-        .unwrap()
 }
 
 /// Assert the response is 200 OK with the expected body bytes
@@ -318,6 +326,44 @@ async fn tls_server_with_client_auth(
             {
                 eprintln!("failed to serve connection: {err:#}");
             }
+        });
+    }
+}
+
+/// Test server for TLS with a pre-built [`ServerConfig`].
+///
+/// Unlike [`tls_server`], this variant does not panic when the TLS handshake fails,
+/// making it suitable for negative tests (e.g. certificate rejection).
+async fn tls_server_with_config(
+    listener: TcpListener,
+    tls_config: Arc<ServerConfig>,
+    body: &'static str,
+) {
+    let acceptor = TlsAcceptor::from(tls_config);
+
+    loop {
+        let (stream, _) = listener.accept().await.expect("accepting connections");
+        let acceptor = acceptor.clone();
+        tokio::spawn(async move {
+            let Ok(acceptor_stream) = acceptor.accept(stream).await else {
+                return;
+            };
+            let tokio_stream = TokioIo::new(acceptor_stream);
+
+            let hyper_service =
+                hyper::service::service_fn(move |_request: Request<Incoming>| async {
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body::<Body>(body.into())
+                            .unwrap(),
+                    )
+                });
+
+            let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(tokio_stream, hyper_service)
+                .await;
         });
     }
 }
@@ -556,6 +602,232 @@ mod tls {
                     certificate_chain: load_certs(client_certificate_pem).unwrap(),
                     key: load_key(client_key_pem).unwrap(),
                 })),
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert_response_body(response, r#"{"data": null}"#).await;
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_untrusted_self_signed_is_rejected(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                load_certs(certificate_pem).unwrap(),
+                load_key(key_pem).unwrap(),
+            )
+            .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        // No certificate_authorities configured → client has empty root store
+        let config = Configuration::default();
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected TLS handshake to fail when server cert is not trusted"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_wrong_ca_is_rejected(#[case] kind: ServiceKind) {
+        let server_certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let mut server_certs = load_certs(server_certificate_pem).unwrap();
+        server_certs.extend(load_certs(ca_pem).unwrap());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(server_certs, load_key(key_pem).unwrap())
+            .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        // Client trusts the self-signed cert, but the server presents a CA-signed cert
+        let wrong_ca_pem = include_str!("./testdata/server_self_signed.crt");
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(wrong_ca_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected TLS handshake to fail when client trusts the wrong CA"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_client_auth_missing_cert_is_rejected(#[case] kind: ServiceKind) {
+        let server_certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let server_key_pem = include_str!("./testdata/server.key");
+
+        let mut server_certificates = load_certs(server_certificate_pem).unwrap();
+        let ca_certificate = load_certs(ca_pem).unwrap().remove(0);
+        server_certificates.push(ca_certificate.clone());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut client_auth_roots = RootCertStore::empty();
+        client_auth_roots.add(ca_certificate).unwrap();
+        let client_auth = WebPkiClientVerifier::builder(Arc::new(client_auth_roots))
+            .build()
+            .unwrap();
+        let server_config = Arc::new(
+            ServerConfig::builder()
+                .with_client_cert_verifier(client_auth)
+                .with_single_cert(server_certificates, load_key(server_key_pem).unwrap())
+                .unwrap(),
+        );
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            server_config,
+            r#"{"data": null}"#,
+        ));
+
+        // Client trusts the CA but provides no client certificate
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(ca_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let result = try_send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert!(
+            result.is_err(),
+            "expected connection to fail when server requires client cert but none is provided"
+        );
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_1_3_supported(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config =
+            ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(
+                    load_certs(certificate_pem).unwrap(),
+                    load_key(key_pem).unwrap(),
+                )
+                .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let service = make_service(kind, &config, Default::default());
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = send_request(service, url, r#"{"query":"{ test }"}"#).await;
+        assert_response_body(response, r#"{"data": null}"#).await;
+    }
+
+    #[rstest]
+    #[case::subgraph(ServiceKind::Subgraph)]
+    #[case::connector(ServiceKind::Connector)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_1_2_supported(#[case] kind: ServiceKind) {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut server_config =
+            ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
+                .with_no_client_auth()
+                .with_single_cert(
+                    load_certs(certificate_pem).unwrap(),
+                    load_key(key_pem).unwrap(),
+                )
+                .unwrap();
+        server_config.alpn_protocols = vec![alpn::H2.to_vec(), alpn::HTTP_1_1.to_vec()];
+
+        tokio::task::spawn(tls_server_with_config(
+            listener,
+            Arc::new(server_config),
+            r#"{"data": null}"#,
+        ));
+
+        let mut config = Configuration::default();
+        insert_tls_config(
+            &mut config,
+            kind,
+            TlsClient {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
             },
         );
         let service = make_service(kind, &config, Default::default());
@@ -1219,15 +1491,18 @@ mod pool_idle_timeout {
 
     use super::*;
 
-    /// Server that counts how many TCP connections are accepted
+    /// Server that counts how many TCP connections are accepted and how many are currently open.
     async fn serve_counting(
         listener: TcpListener,
         connection_count: Arc<AtomicUsize>,
+        live_connection_count: Arc<AtomicUsize>,
     ) -> std::io::Result<()> {
         loop {
             let (stream, _) = listener.accept().await?;
             connection_count.fetch_add(1, Ordering::SeqCst);
+            live_connection_count.fetch_add(1, Ordering::SeqCst);
             let io = TokioIo::new(stream);
+            let live = live_connection_count.clone();
             tokio::spawn(async move {
                 let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                     Ok::<_, Infallible>(
@@ -1241,6 +1516,7 @@ mod pool_idle_timeout {
                 let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                     .serve_connection_with_upgrades(io, svc)
                     .await;
+                live.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
@@ -1283,7 +1559,11 @@ mod pool_idle_timeout {
         let socket_addr = listener.local_addr().unwrap();
         let connection_count = Arc::new(AtomicUsize::new(0));
 
-        tokio::task::spawn(serve_counting(listener, connection_count.clone()));
+        tokio::task::spawn(serve_counting(
+            listener,
+            connection_count.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
 
         let mut service = HttpClientService::test_new(
             "test",
@@ -1315,5 +1595,248 @@ mod pool_idle_timeout {
             expected_connections,
             "expected {expected_connections} total TCP connections for timeout {timeout:?} with {sleep_between:?} sleep"
         );
+    }
+
+    /// Regression test: the router does not proactively close idle connections between requests.
+    /// Before this fix, `pool_timer` was unconditionally set, enabling a background eviction task
+    /// that sent TCP closes between requests and caused latency spikes in some network environments.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_idle_connections_not_proactively_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let live_connection_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::task::spawn(serve_counting(
+            listener,
+            Arc::new(AtomicUsize::new(0)),
+            live_connection_count.clone(),
+        ));
+
+        let client_config = crate::configuration::shared::Client {
+            pool_idle_timeout: Some(Duration::from_millis(50)),
+            ..Default::default()
+        };
+        let service = HttpClientService::test_new(
+            "test",
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("read native TLS root certificates")
+                .with_no_client_auth(),
+            client_config,
+        )
+        .expect("can create HttpClientService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+
+        let response = send_request(service.clone(), url.clone(), r#"{"query":"{ a }"}"#).await;
+        assert_eq!(response.http_response.status(), StatusCode::OK);
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection is open after first request"
+        );
+
+        // Sleep well past the 50ms idle timeout. Without pool_timer, no background task fires,
+        // so the connection must still be open in the pool.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            live_connection_count.load(Ordering::SeqCst),
+            1,
+            "connection must not be proactively closed between requests"
+        );
+    }
+}
+
+mod connection_timing_metrics {
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use http::StatusCode;
+    use http::Uri;
+    use opentelemetry_sdk::metrics::data::AggregatedMetrics;
+    use opentelemetry_sdk::metrics::data::MetricData;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    /// Verifies that `apollo.router.connection.acquire.duration` fires once per TCP
+    /// connection established, not once per HTTP request.
+    ///
+    /// Two requests to the same server: the first creates a TCP connection (connector called →
+    /// metric count = 1), the second reuses the pooled connection (connector skipped → count
+    /// stays at 1).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_acquire_duration_fires_for_connections_not_requests() {
+        async {
+            let server = MockServer::start().await;
+            Mock::given(matchers::any())
+                .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data":null}"#))
+                .mount(&server)
+                .await;
+
+            let uri = Uri::from_str(&server.uri()).unwrap();
+
+            let mut service = HttpClientService::test_new(
+                "test",
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("native TLS roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create HttpClientService");
+
+            // First request: establishes a new TCP connection → connector fires.
+            let response = send_request(service.clone(), uri.clone(), r#"{"query":"{ a }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+            // CRITICAL: hyper-util's pool only returns a connection to the pool once the
+            // response body has been fully consumed AND the response is dropped. If we leave
+            // the body undrained, the second request below races against the pool checkout
+            // and may open a second TCP connection — which would (correctly) increment the
+            // metric to 2 and cause the assertion below to fail. The drain + drop here makes
+            // the pool checkout deterministic. See PR #9412/#9406/#9386/#9337 flakes.
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
+            // Even after drain, hyper-util needs the connection task scheduled to
+            // observe body-end and return the connection to its idle set. A short
+            // sleep guarantees this on busy CI runners. Sibling test
+            // `test_pool_idle_timeout_evicts_connections::case::long_timeout_reuses`
+            // uses the same pattern (200ms sleep, expect 1 conn). Well below
+            // the default pool_idle_timeout so the pool keeps the connection.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // Second request: hyper reuses the pooled connection → connector NOT called.
+            tower::ServiceExt::ready(&mut service).await.unwrap();
+            let response = send_request(service, uri, r#"{"query":"{ b }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+            let (_parts, body) = response.http_response.into_parts();
+            let _ = router::body::into_bytes(body).await.unwrap();
+
+            // Metric count = 1, not 2: one connection was established for two HTTP requests.
+            assert_histogram_count!(
+                "apollo.router.connection.acquire.duration",
+                1u64,
+                "subgraph.name" = "test",
+                "network.transport" = "tcp"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Verifies that `apollo.router.connection.acquire.duration` measures only connection
+    /// establishment time, not total request time.
+    ///
+    /// The server delays its response by 200ms. The metric must be recorded before the response
+    /// arrives, and its value must be well under 200ms.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_acquire_duration_does_not_include_response_time() {
+        async {
+            let response_delay = Duration::from_millis(200);
+
+            let server = MockServer::start().await;
+            Mock::given(matchers::any())
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(r#"{"data":null}"#)
+                        .set_delay(response_delay),
+                )
+                .mount(&server)
+                .await;
+
+            let uri = Uri::from_str(&server.uri()).unwrap();
+            let service = HttpClientService::test_new(
+                "test",
+                rustls::ClientConfig::builder()
+                    .with_native_roots()
+                    .expect("native TLS roots")
+                    .with_no_client_auth(),
+                crate::configuration::shared::Client::builder().build(),
+            )
+            .expect("can create HttpClientService");
+
+            let response = send_request(service, uri, r#"{"query":"{ a }"}"#).await;
+            assert_eq!(response.http_response.status(), StatusCode::OK);
+
+            // Extract the actual recorded histogram sum from the metrics data.
+            let acquire_secs = crate::metrics::collect_metrics()
+                .find("apollo.router.connection.acquire.duration")
+                .and_then(|m| {
+                    if let AggregatedMetrics::F64(MetricData::Histogram(h)) = m.data() {
+                        h.data_points().next().map(|dp| dp.sum())
+                    } else {
+                        None
+                    }
+                })
+                .expect("apollo.router.connection.acquire_duration should be recorded");
+
+            // TCP handshake to localhost is in the low-millisecond range; the 200ms response
+            // delay must NOT appear in the metric.
+            assert!(
+                acquire_secs < response_delay.as_secs_f64(),
+                "acquire_duration ({acquire_secs:.4}s) should be less than the server response delay ({:.3}s)",
+                response_delay.as_secs_f64(),
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+}
+
+mod redis_tls_config {
+    //! Exercises the `generate_tls_client_config` → `TlsConnector` path that Redis uses.
+    //!
+    //! The router's Redis integration builds a `tokio_rustls::TlsConnector` from a
+    //! `ClientConfig` produced by `crate::services::generate_tls_client_config` (re-exported
+    //! from `subgraph_service`). These tests verify that this construction succeeds for the
+    //! same cert scenarios used by the HTTP client, catching API breakages in rustls/tokio-rustls
+    //! upgrades even without a live Redis server.
+
+    use super::*;
+
+    #[test]
+    fn custom_ca_produces_valid_connector() {
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let mut root_store = RootCertStore::empty();
+        for cert in load_certs(ca_pem).unwrap() {
+            root_store.add(cert).unwrap();
+        }
+
+        let tls_config =
+            crate::services::generate_tls_client_config(Some(root_store), None).unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    }
+
+    #[test]
+    fn client_auth_produces_valid_connector() {
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let client_cert_pem = include_str!("./testdata/client.crt");
+        let client_key_pem = include_str!("./testdata/client.key");
+
+        let mut root_store = RootCertStore::empty();
+        for cert in load_certs(ca_pem).unwrap() {
+            root_store.add(cert).unwrap();
+        }
+
+        let client_auth = TlsClientAuth {
+            certificate_chain: load_certs(client_cert_pem).unwrap(),
+            key: load_key(client_key_pem).unwrap(),
+        };
+
+        let tls_config =
+            crate::services::generate_tls_client_config(Some(root_store), Some(&client_auth))
+                .unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+    }
+
+    #[test]
+    fn native_roots_produces_valid_connector() {
+        let tls_config = crate::services::generate_tls_client_config(None, None).unwrap();
+        let _connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
     }
 }

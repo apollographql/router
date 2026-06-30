@@ -515,12 +515,16 @@ impl InvalidationRequest {
                 )
             }
             InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
+            // Under Option A the connector source is passed as the `subgraph_name` scope to
+            // `CacheTag::to_redis_key`, so connector invalidation keys must render byte-identically
+            // to `Subgraph`/`Type` with the source as the name. This is the write↔invalidate
+            // string-identity contract.
             InvalidationRequest::ConnectorSource { source } => {
-                format!("version:{RESPONSE_CACHE_VERSION}:connector:{source}")
+                format!("version:{RESPONSE_CACHE_VERSION}:subgraph:{source}")
             }
             InvalidationRequest::ConnectorType { source, r#type } => {
                 format!(
-                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{source}:type:{type}",
+                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:{source}:type:{type}",
                 )
             }
         }
@@ -555,9 +559,11 @@ mod tests {
             source: "mysubgraph.my_api".to_string(),
         };
         let key = req.invalidation_key();
+        // Under Option A the connector source is the scope name, so this renders identically to a
+        // `Subgraph` request with the source as the subgraph name (write↔invalidate identity).
         assert_eq!(
             key,
-            format!("version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api")
+            format!("version:{RESPONSE_CACHE_VERSION}:subgraph:mysubgraph.my_api")
         );
     }
 
@@ -568,10 +574,13 @@ mod tests {
             r#type: "User".to_string(),
         };
         let key = req.invalidation_key();
+        // Renders identically to a `Type` request with the source as the subgraph name, so it
+        // matches `CacheTag::Type(..).to_redis_key(source)` byte-for-byte (write↔invalidate
+        // identity).
         assert_eq!(
             key,
             format!(
-                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api:type:User"
+                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:subgraph:mysubgraph.my_api:type:User"
             )
         );
     }

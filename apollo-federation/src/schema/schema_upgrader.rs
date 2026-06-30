@@ -30,6 +30,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
+use crate::schema::field_set::FieldSetValidation;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -136,10 +137,10 @@ impl SchemaUpgrader {
         // Run pre-upgrade validations to check for issues that would prevent upgrade
         let mut upgrade_metadata = UpgradeMetadata {
             subgraph_name: subgraph.name.clone(),
-            key_directive_name: subgraph.key_directive_name()?.clone(),
-            requires_directive_name: subgraph.requires_directive_name()?.clone(),
-            provides_directive_name: subgraph.provides_directive_name()?.clone(),
-            extends_directive_name: subgraph.extends_directive_name()?.clone(),
+            key_directive_name: subgraph.key_directive_name().clone(),
+            requires_directive_name: subgraph.requires_directive_name().clone(),
+            provides_directive_name: subgraph.provides_directive_name().clone(),
+            extends_directive_name: subgraph.extends_directive_name().clone(),
             metadata: subgraph.metadata().clone(),
             orphan_extension_types: orphan_extensions,
         };
@@ -201,7 +202,7 @@ impl SchemaUpgrader {
         orphan_extension_types
             .into_iter()
             .filter(|type_name| {
-                schema.try_get_type((*type_name).clone()).is_some_and(|ty| {
+                schema.try_get_type(type_name).is_some_and(|ty| {
                     let Ok(ty) = ty.get(schema.schema()) else {
                         return false;
                     };
@@ -247,6 +248,10 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
+                            // TODO this logic only checks for the explicit `extend type` definitions and ignores
+                            //   extensions defined using federation @extends directive. Since fixing it would be
+                            //   a breaking change that could affect some customers, we are keeping current behavior
+                            //   to match JavaScript logic. We should fix this in the future versions.
                             Ok::<bool, FederationError>(
                                 !other_subgraph.is_orphan_extension_type(extended_type.name()),
                             )
@@ -434,6 +439,11 @@ impl SchemaUpgrader {
                         args.fields,
                         false,
                     )? {
+                        // We only consider "top-level" fields, the one of the type on which
+                        // the key is, because that's what fed1 does.
+                        if TypeDefinitionPosition::from(field.parent()) != *ty {
+                            continue;
+                        }
                         let external =
                             field.get_applied_directives(schema, &external_directive.name);
                         if !external.is_empty() {
@@ -511,9 +521,13 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let cloned_schema = schema.clone();
+        // NOTE: we should be passing a supergraph schema so we could verify the remaining `@requires`
+        // field set values are valid. Schema upgrader runs before merge process, we don't have
+        // access to the supergraph so we need to skip the validation.
         remove_inactive_requires_and_provides_from_subgraph(
-            &cloned_schema, // TODO: I don't know what this value should be
+            &cloned_schema,
             schema,
+            FieldSetValidation::Skip,
         )
     }
 
@@ -603,16 +617,27 @@ impl SchemaUpgrader {
             {
                 interface_key_types.insert(pos.type_name.clone());
                 pos.remove_directive_name(schema, key);
+            }
+        }
 
-                let fields: Vec<_> = pos.fields(schema.schema())?.collect();
-                for field in fields {
-                    if let Some(provides) = &upgrade_metadata.provides_directive_name {
-                        field.remove_directive_name(schema, provides);
-                    }
-                    if let Some(requires) = &upgrade_metadata.requires_directive_name {
-                        field.remove_directive_name(schema, requires);
-                    }
-                }
+        if let Some(provides) = &upgrade_metadata.provides_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(provides)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, provides);
+            }
+        }
+        if let Some(requires) = &upgrade_metadata.requires_directive_name {
+            for field in schema
+                .referencers()
+                .get_directive(requires)
+                .interface_fields
+                .clone()
+            {
+                field.remove_directive_name(schema, requires);
             }
         }
 
@@ -635,7 +660,7 @@ impl SchemaUpgrader {
             let field = obj_field_pos.get(schema.schema())?;
             let return_type = field.ty.inner_named_type();
             if schema
-                .try_get_type(return_type.clone())
+                .try_get_type(return_type)
                 .is_some_and(|t| !t.is_composite_type())
             {
                 candidates.insert(obj_field_pos.clone());
@@ -1154,6 +1179,63 @@ mod tests {
 
         scalar link__Import
         "###
+        );
+    }
+
+    #[test]
+    fn preserves_external_on_nested_key_fields() {
+        // When a type extension uses a composite @key that traverses into another
+        // type (e.g. @key(fields: "profile { id }")), the upgrader should only
+        // strip @external from the top-level fields on the extension itself, not
+        // from nested fields on other types.
+        let s1 = Subgraph::parse(
+            "subgraphA",
+            "",
+            r#"
+            extend type Entity @key(fields: "profile { id }") {
+              profile: Profile @external
+              value: Int
+            }
+
+            type Profile {
+              id: ID! @external
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let s2 = Subgraph::parse(
+            "subgraphB",
+            "",
+            r#"
+            type Entity @key(fields: "profile { id }") {
+              profile: Profile
+              name: String
+            }
+
+            type Profile {
+              id: ID!
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        let s1_schema = s1.schema().schema();
+        let profile_id = coord!(Profile.id)
+            .lookup_field(s1_schema)
+            .expect("Profile.id field exists");
+        assert!(
+            profile_id.directives.has("external"),
+            "Profile.id should retain @external after upgrade"
         );
     }
 
@@ -2504,12 +2586,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {
@@ -2607,12 +2686,9 @@ scalar _FieldSet
                 union _Entity = T
 
                 type Query @extends {
-                  """
-                  Union of all types that use the @key directive, including both types native to the schema and extended types
-                  """
+                  t(id: ID!): T
                   _entities(representations: [_Any!]!): [_Entity]!
                   _service: _Service!
-                  t(id: ID!): T
                 }
 
                 type _Service {
@@ -2645,6 +2721,52 @@ scalar _FieldSet
 
                 scalar link__Import
             "###
+        );
+    }
+
+    #[test]
+    fn removes_provides_and_requires_from_interface_fields_without_key() {
+        let s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+            directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+            directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+            directive @extends on OBJECT | INTERFACE
+
+            scalar _FieldSet
+
+            type Query {
+              product: Product
+            }
+
+            type Author @key(fields: "id") {
+              id: ID! @external
+              name: String
+            }
+
+            interface Product {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+
+            type Book implements Product @key(fields: "id") {
+              id: ID!
+              author: Author @provides(fields: "id")
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let result = upgrade_subgraphs_if_necessary(vec![s1]);
+        assert!(
+            result.is_ok(),
+            "Expected upgrade to succeed but got: {:?}",
+            result.err()
         );
     }
 }

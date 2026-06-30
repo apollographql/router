@@ -20,6 +20,7 @@ use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::ExecutionResponse;
 use crate::services::RouterResponse;
@@ -39,9 +40,9 @@ pub(crate) async fn count_subgraph_errors(
 
     let response_body = response.response.body();
     if !response_body.errors.is_empty() {
-        count_operation_errors(&response_body.errors, &context, &errors_config);
+        count_operation_errors(response_body.errors.iter(), &context, &errors_config);
         // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+        let _ = context.insert(COUNTED_ERRORS, to_set(response_body.errors.iter()));
     }
     SubgraphResponse {
         context: response.context,
@@ -60,9 +61,13 @@ pub(crate) async fn count_supergraph_errors(
 
     let (parts, stream) = response.response.into_parts();
 
+    // The inspect closure runs at stream-poll time, outside this scope, so capture the
+    // supergraph span here for the event to attach to.
+    let span = tracing::Span::current();
     let stream = stream.inspect(move |response_body| {
-        if !response_body.errors.is_empty() {
-            count_operation_errors(&response_body.errors, &context, &errors_config);
+        let _enter = span.enter();
+        if response_body.contains_errors() {
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
         }
         if let Some(value_completion) = response_body
             .extensions
@@ -74,11 +79,11 @@ pub(crate) async fn count_supergraph_errors(
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            count_operation_errors(&errors, &context, &errors_config);
+            count_operation_errors(errors.iter(), &context, &errors_config);
         }
 
         // Refresh context with the most up-to-date list of errors
-        let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+        let _ = context.insert(COUNTED_ERRORS, to_set(response_body.all_errors()));
     });
 
     let (first_response, rest) = StreamExt::into_future(stream).await;
@@ -104,11 +109,14 @@ pub(crate) async fn count_execution_errors(
 
     let (parts, stream) = response.response.into_parts();
 
+    // See count_supergraph_errors for why we capture the span.
+    let span = tracing::Span::current();
     let stream = stream.inspect(move |response_body| {
-        if !response_body.errors.is_empty() {
-            count_operation_errors(&response_body.errors, &context, &errors_config);
+        let _enter = span.enter();
+        if response_body.contains_errors() {
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
             // Refresh context with the most up-to-date list of errors
-            let _ = context.insert(COUNTED_ERRORS, to_set(&response_body.errors));
+            let _ = context.insert(COUNTED_ERRORS, to_set(response_body.all_errors()));
         }
     });
 
@@ -141,7 +149,7 @@ pub(crate) async fn count_router_errors(
         .map(|(id, error)| error.with_apollo_id(*id))
         .collect();
     if !errors.is_empty() {
-        count_operation_errors(&errors, &context, &errors_config);
+        count_operation_errors(errors.iter(), &context, &errors_config);
         // Router layer handling is unique in that the list of new errors from context may not
         // include errors we previously counted. Thus, we must combine the set of previously counted
         // errors with the set of new errors here before adding to context.
@@ -156,12 +164,12 @@ pub(crate) async fn count_router_errors(
     }
 }
 
-fn to_set(errors: &[Error]) -> HashSet<Uuid> {
-    errors.iter().map(Error::apollo_id).collect()
+fn to_set<'a>(errors: impl Iterator<Item = &'a Error>) -> HashSet<Uuid> {
+    errors.map(Error::apollo_id).collect()
 }
 
-fn count_operation_errors(
-    errors: &[Error],
+fn count_operation_errors<'a>(
+    errors: impl Iterator<Item = &'a Error>,
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
@@ -227,6 +235,16 @@ fn count_operation_errors(
         let maybe_code = error.extension_code();
 
         if send_otlp_errors {
+            // Skip when an upstream site (connectors, demand_control) already emitted, so
+            // traces carry exactly one event per error. The metric still increments below.
+            if !error.span_event_emitted() {
+                emit_error_event(
+                    maybe_code.as_deref().unwrap_or(""),
+                    &error.message,
+                    error.path.clone(),
+                );
+            }
+
             let severity_str = severity
                 .unwrap_or(tracing::Level::ERROR.as_str())
                 .to_string();

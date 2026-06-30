@@ -17,6 +17,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
+use shape::Shape;
 
 pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
@@ -44,14 +45,14 @@ use crate::connectors::spec::extract_connect_directive_arguments;
 use crate::connectors::spec::extract_source_directive_arguments;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct Connector {
     pub id: ConnectId,
-    pub transport: HttpJsonTransport,
+    /// HTTP transport configuration. `None` for mapping-only connectors (where `http` is omitted).
+    pub transport: Option<HttpJsonTransport>,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
@@ -133,6 +134,28 @@ impl ConnectorErrorsSettings {
                     .flat_map(|m| m.variable_references()),
             )
     }
+
+    /// The static shape of the error-path contribution to the connector's
+    /// output: a union of the shapes of `errors.message`, `errors.extensions`
+    /// (both `@source` and `@connect` levels). Returns `None` when no error
+    /// mappings are configured.
+    pub fn shape(&self) -> Option<Shape> {
+        let parts: Vec<Shape> = [
+            self.message.as_ref(),
+            self.source_extensions.as_ref(),
+            self.connect_extensions.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|s| s.shape())
+        .collect();
+
+        match parts.len() {
+            0 => None,
+            1 => parts.into_iter().next(),
+            _ => Some(Shape::one(parts, [])),
+        }
+    }
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -198,12 +221,12 @@ impl Connector {
             .and_then(|name| source_arguments.iter().find(|s| s.name == name));
         let source_name = source.map(|s| s.name.clone());
 
-        // Create our transport
-        let connect_http = connect
-            .http
-            .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
+        // Create our transport (absent for mapping-only connectors)
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http, spec)?;
+        let transport = connect
+            .http
+            .map(|connect_http| HttpJsonTransport::from_directive(connect_http, source_http, spec))
+            .transpose()?;
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
@@ -219,8 +242,10 @@ impl Connector {
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
         // Collect all variables and subselections used in the request mappings
-        let request_references: IndexSet<VariableReference<Namespace>> =
-            transport.variable_references().collect();
+        let request_references: IndexSet<VariableReference<Namespace>> = transport
+            .as_ref()
+            .map(|t| t.variable_references().collect())
+            .unwrap_or_default();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
         let response_references: IndexSet<VariableReference<Namespace>> = connect
@@ -248,7 +273,7 @@ impl Connector {
         let label = Label::new(
             subgraph_name,
             source_name.as_ref(),
-            &transport,
+            transport.as_ref(),
             entity_resolver.as_ref(),
         );
         let id = ConnectId {
@@ -317,12 +342,17 @@ impl Connector {
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
-        self.transport.variable_references().chain(
-            self.selection
-                .external_var_paths()
-                .into_iter()
-                .flat_map(PathSelection::variable_reference),
-        )
+        let transport_refs = self
+            .transport
+            .as_ref()
+            .into_iter()
+            .flat_map(|t| t.variable_references());
+        let selection_refs = self
+            .selection
+            .external_var_paths()
+            .into_iter()
+            .flat_map(PathSelection::variable_reference);
+        transport_refs.chain(selection_refs)
     }
 
     /// Create a field set for a `@key` using `$args`, `$this`, or `$batch` variables.
@@ -408,6 +438,22 @@ impl Connector {
     pub fn abstract_types(&self) -> IndexSet<String> {
         self.schema_subtypes_map.keys().cloned().collect()
     }
+
+    /// The full static output shape of the connector — the shape of `selection`
+    /// unioned with the shape contributed by the error-path mappings
+    /// (`errors.message` and `errors.extensions`). When no error mappings are
+    /// configured, this is equivalent to `self.selection.shape()`.
+    ///
+    /// Returning the union lets downstream consumers (entity-key checking,
+    /// type walking) reason about both branches of an errors-as-data connector
+    /// rather than seeing only the success path.
+    pub fn output_shape(&self) -> Shape {
+        let selection_shape = self.selection.shape();
+        match self.error_settings.shape() {
+            Some(error_shape) => Shape::one([selection_shape, error_shape], []),
+            None => selection_shape,
+        }
+    }
 }
 
 /// A descriptive label for a connector, used for debugging and logging.
@@ -418,7 +464,7 @@ impl Label {
     fn new(
         subgraph_name: &str,
         source: Option<&SourceName>,
-        transport: &HttpJsonTransport,
+        transport: Option<&HttpJsonTransport>,
         entity_resolver: Option<&EntityResolver>,
     ) -> Self {
         let source = source.map(SourceName::as_str).unwrap_or_default();
@@ -426,10 +472,10 @@ impl Label {
             Some(EntityResolver::TypeBatch) => "[BATCH] ",
             _ => "",
         };
-        Self(format!(
-            "{batch}{subgraph_name}.{source} {}",
-            transport.label()
-        ))
+        let transport_label = transport
+            .map(|t| t.label())
+            .unwrap_or_else(|| "mappingOnly".to_string());
+        Self(format!("{batch}{subgraph_name}.{source} {transport_label}"))
     }
 }
 
@@ -536,7 +582,7 @@ mod tests {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         [
             Connector {
                 id: ConnectId {
@@ -553,115 +599,131 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
-                    source_template: Some(
-                        StringTemplate {
+                transport: Some(
+                    HttpJsonTransport {
+                        source_template: Some(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "https://jsonplaceholder.typicode.com/",
+                                            location: 0..37,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                        connect_template: StringTemplate {
                             parts: [
                                 Constant(
                                     Constant {
-                                        value: "https://jsonplaceholder.typicode.com/",
-                                        location: 0..37,
+                                        value: "/users",
+                                        location: 0..6,
                                     },
                                 ),
                             ],
                         },
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/users",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: [
-                        Header {
-                            name: "authtoken",
-                            source: From(
-                                "x-auth-token",
-                            ),
-                        },
-                        Header {
-                            name: "user-agent",
-                            source: Value(
-                                HeaderValue(
-                                    StringTemplate {
-                                        parts: [
-                                            Constant(
-                                                Constant {
-                                                    value: "Firefox",
-                                                    location: 0..7,
-                                                },
-                                            ),
-                                        ],
-                                    },
+                        method: Get,
+                        headers: [
+                            Header {
+                                name: "authtoken",
+                                source: From(
+                                    "x-auth-token",
                                 ),
-                            ),
-                        },
-                    ],
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                },
+                            },
+                            Header {
+                                name: "user-agent",
+                                source: Value(
+                                    HeaderValue(
+                                        StringTemplate {
+                                            parts: [
+                                                Constant(
+                                                    Constant {
+                                                        value: "Firefox",
+                                                        location: 0..7,
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ),
+                            },
+                        ],
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
+                    },
+                ),
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
                             selections: [
                                 NamedSelection {
                                     prefix: None,
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Key(
-                                                WithRange {
-                                                    node: Field(
-                                                        "id",
+                                    path: WithRange {
+                                        node: Path(
+                                            PathSelection {
+                                                path: WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                0..2,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                2..2,
+                                                            ),
+                                                        },
                                                     ),
                                                     range: Some(
                                                         0..2,
                                                     ),
                                                 },
-                                                WithRange {
-                                                    node: Empty,
-                                                    range: Some(
-                                                        2..2,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..2,
-                                            ),
-                                        },
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
                                     },
                                 },
                                 NamedSelection {
                                     prefix: None,
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Key(
-                                                WithRange {
-                                                    node: Field(
-                                                        "name",
+                                    path: WithRange {
+                                        node: Path(
+                                            PathSelection {
+                                                path: WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "name",
+                                                            ),
+                                                            range: Some(
+                                                                3..7,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                7..7,
+                                                            ),
+                                                        },
                                                     ),
                                                     range: Some(
                                                         3..7,
                                                     ),
                                                 },
-                                                WithRange {
-                                                    node: Empty,
-                                                    range: Some(
-                                                        7..7,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                3..7,
-                                            ),
-                                        },
+                                            },
+                                        ),
+                                        range: Some(
+                                            3..7,
+                                        ),
                                     },
                                 },
                             ],
@@ -711,141 +773,164 @@ mod tests {
                         },
                     ),
                 },
-                transport: HttpJsonTransport {
-                    source_template: Some(
-                        StringTemplate {
+                transport: Some(
+                    HttpJsonTransport {
+                        source_template: Some(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "https://jsonplaceholder.typicode.com/",
+                                            location: 0..37,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                        connect_template: StringTemplate {
                             parts: [
                                 Constant(
                                     Constant {
-                                        value: "https://jsonplaceholder.typicode.com/",
-                                        location: 0..37,
+                                        value: "/posts",
+                                        location: 0..6,
                                     },
                                 ),
                             ],
                         },
-                    ),
-                    connect_template: StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "/posts",
-                                    location: 0..6,
-                                },
-                            ),
-                        ],
-                    },
-                    method: Get,
-                    headers: [
-                        Header {
-                            name: "authtoken",
-                            source: From(
-                                "x-auth-token",
-                            ),
-                        },
-                        Header {
-                            name: "user-agent",
-                            source: Value(
-                                HeaderValue(
-                                    StringTemplate {
-                                        parts: [
-                                            Constant(
-                                                Constant {
-                                                    value: "Firefox",
-                                                    location: 0..7,
-                                                },
-                                            ),
-                                        ],
-                                    },
+                        method: Get,
+                        headers: [
+                            Header {
+                                name: "authtoken",
+                                source: From(
+                                    "x-auth-token",
                                 ),
-                            ),
-                        },
-                    ],
-                    body: None,
-                    source_path: None,
-                    source_query_params: None,
-                    connect_path: None,
-                    connect_query_params: None,
-                },
+                            },
+                            Header {
+                                name: "user-agent",
+                                source: Value(
+                                    HeaderValue(
+                                        StringTemplate {
+                                            parts: [
+                                                Constant(
+                                                    Constant {
+                                                        value: "Firefox",
+                                                        location: 0..7,
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ),
+                            },
+                        ],
+                        body: None,
+                        source_path: None,
+                        source_query_params: None,
+                        connect_path: None,
+                        connect_query_params: None,
+                    },
+                ),
                 selection: JSONSelection {
                     inner: Named(
                         SubSelection {
                             selections: [
                                 NamedSelection {
                                     prefix: None,
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Key(
-                                                WithRange {
-                                                    node: Field(
-                                                        "id",
+                                    path: WithRange {
+                                        node: Path(
+                                            PathSelection {
+                                                path: WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                0..2,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                2..2,
+                                                            ),
+                                                        },
                                                     ),
                                                     range: Some(
                                                         0..2,
                                                     ),
                                                 },
-                                                WithRange {
-                                                    node: Empty,
-                                                    range: Some(
-                                                        2..2,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                0..2,
-                                            ),
-                                        },
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..2,
+                                        ),
                                     },
                                 },
                                 NamedSelection {
                                     prefix: None,
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Key(
-                                                WithRange {
-                                                    node: Field(
-                                                        "title",
+                                    path: WithRange {
+                                        node: Path(
+                                            PathSelection {
+                                                path: WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "title",
+                                                            ),
+                                                            range: Some(
+                                                                3..8,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                8..8,
+                                                            ),
+                                                        },
                                                     ),
                                                     range: Some(
                                                         3..8,
                                                     ),
                                                 },
-                                                WithRange {
-                                                    node: Empty,
-                                                    range: Some(
-                                                        8..8,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                3..8,
-                                            ),
-                                        },
+                                            },
+                                        ),
+                                        range: Some(
+                                            3..8,
+                                        ),
                                     },
                                 },
                                 NamedSelection {
                                     prefix: None,
-                                    path: PathSelection {
-                                        path: WithRange {
-                                            node: Key(
-                                                WithRange {
-                                                    node: Field(
-                                                        "body",
+                                    path: WithRange {
+                                        node: Path(
+                                            PathSelection {
+                                                path: WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "body",
+                                                            ),
+                                                            range: Some(
+                                                                9..13,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                13..13,
+                                                            ),
+                                                        },
                                                     ),
                                                     range: Some(
                                                         9..13,
                                                     ),
                                                 },
-                                                WithRange {
-                                                    node: Empty,
-                                                    range: Some(
-                                                        13..13,
-                                                    ),
-                                                },
-                                            ),
-                                            range: Some(
-                                                9..13,
-                                            ),
-                                        },
+                                            },
+                                        ),
+                                        range: Some(
+                                            9..13,
+                                        ),
                                     },
                                 },
                             ],
@@ -881,7 +966,7 @@ mod tests {
                 ),
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -890,5 +975,82 @@ mod tests {
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
         assert_debug_snapshot!(&connectors);
+    }
+
+    // Tests for CNN-1095: errors-as-data output shape combines selection's
+    // shape with the error-path mappings' shape. The coworker-suggested
+    // `Shape::one([normal_shape, error_shape], [])` pattern is the foundation
+    // downstream consumers (entity-key checker, type walker) can build on.
+    mod output_shape {
+        use shape::ShapeCase;
+
+        use super::*;
+        use crate::connectors::JSONSelection;
+
+        #[test]
+        fn errors_settings_shape_is_none_when_no_mappings_configured() {
+            let settings = ConnectorErrorsSettings::default();
+            assert!(
+                settings.shape().is_none(),
+                "expected None when no error mappings are set"
+            );
+        }
+
+        #[test]
+        fn errors_settings_shape_unions_all_configured_mappings() {
+            let settings = ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                source_extensions: Some(JSONSelection::parse("source_code: error.code").unwrap()),
+                connect_extensions: Some(JSONSelection::parse("code: error.code").unwrap()),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            };
+            let shape = settings
+                .shape()
+                .expect("expected Some shape when message + extensions are configured");
+            assert!(
+                matches!(shape.case(), ShapeCase::One(_)),
+                "expected ShapeCase::One union of message + source/connect extensions, got: {shape:?}"
+            );
+        }
+
+        #[test]
+        fn connector_output_shape_unions_selection_with_errors() {
+            let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+            let subgraph = subgraphs.get("connectors").unwrap();
+            let mut connectors =
+                Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
+            let mut connector = connectors.remove(0);
+
+            // Attach errors-as-data settings so output_shape() produces a union.
+            connector.error_settings = ConnectorErrorsSettings {
+                message: Some(JSONSelection::parse("error.message").unwrap()),
+                source_extensions: None,
+                connect_extensions: Some(JSONSelection::parse("code: error.code").unwrap()),
+                connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
+            };
+
+            let combined = connector.output_shape();
+            assert!(
+                matches!(combined.case(), ShapeCase::One(_)),
+                "expected ShapeCase::One union of selection + errors, got: {combined:?}"
+            );
+        }
+
+        #[test]
+        fn connector_output_shape_with_no_errors_equals_selection_shape() {
+            let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
+            let subgraph = subgraphs.get("connectors").unwrap();
+            let mut connectors =
+                Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
+            let connector = connectors.remove(0);
+
+            // Default error_settings has no mappings, so output_shape() should
+            // be exactly selection.shape().
+            assert_eq!(
+                connector.output_shape(),
+                connector.selection.shape(),
+                "with no error mappings, output_shape should match selection.shape"
+            );
+        }
     }
 }

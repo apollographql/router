@@ -32,7 +32,6 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
-use crate::link::LinksMetadata;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
@@ -50,9 +49,10 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::metadata::LinksMetadata;
 use crate::link::spec::Version;
-use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -121,6 +121,11 @@ impl FederationSchema {
         self.links_metadata.as_deref()
     }
 
+    /// Subgraph metadata after [`FederationBlueprint::on_constructed`] populates it (see [`compute_subgraph_metadata`]).
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.subgraph_metadata.as_deref()
+    }
+
     pub(crate) fn referencers(&self) -> &Referencers {
         &self.referencers
     }
@@ -161,16 +166,20 @@ impl FederationSchema {
 
     pub(crate) fn get_type(
         &self,
-        type_name: Name,
+        type_name: &Name,
     ) -> Result<TypeDefinitionPosition, FederationError> {
-        let type_ =
-            self.schema
-                .types
-                .get(&type_name)
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{type_name}\""),
-                })?;
-        Ok(match type_ {
+        self.try_get_type(type_name).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: format!("Schema has no type \"{type_name}\""),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn try_get_type(&self, type_name: &Name) -> Option<TypeDefinitionPosition> {
+        let type_ = self.schema.types.get(type_name)?;
+        let type_name = type_name.clone();
+        Some(match type_ {
             ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
             ExtendedType::Object(_) => ObjectTypeDefinitionPosition { type_name }.into(),
             ExtendedType::Interface(_) => InterfaceTypeDefinitionPosition { type_name }.into(),
@@ -178,10 +187,6 @@ impl FederationSchema {
             ExtendedType::Enum(_) => EnumTypeDefinitionPosition { type_name }.into(),
             ExtendedType::InputObject(_) => InputObjectTypeDefinitionPosition { type_name }.into(),
         })
-    }
-
-    pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
-        self.get_type(type_name).ok()
     }
 
     pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
@@ -326,12 +331,20 @@ impl FederationSchema {
             .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
     }
 
+    /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
+    ///
+    /// Requires [`Self::subgraph_metadata`] to be populated (e.g. after
+    /// [`FederationBlueprint::on_constructed`]). Matches the Fed 1 branch in
+    /// [`FederationBlueprint::ignore_parsed_field`]. Returns `false` if metadata is missing.
+    pub(crate) fn is_fed_1_subgraph(&self) -> bool {
+        self.subgraph_metadata()
+            .is_some_and(|meta| !meta.is_fed_2_schema())
+    }
+
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
-    fn federation_link(&self) -> Option<&Arc<Link>> {
+    fn federation_link(&self) -> Option<Arc<Link>> {
         self.metadata().and_then(|metadata| {
-            metadata
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            metadata.for_identity(FederationSpecDefinition::latest().identity())
         })
     }
 
@@ -375,9 +388,8 @@ impl FederationSchema {
             let Some(links) = self.metadata() else {
                 bail!("Schema should be a core schema")
             };
-            let Some(federation_link) = links
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            let Some(federation_link) =
+                links.for_identity(FederationSpecDefinition::latest().identity())
             else {
                 bail!("Schema should have the latest federation link")
             };
@@ -1024,7 +1036,7 @@ impl FederationSchema {
     pub(crate) fn list_size_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ListSizeDirective<'_>> {
-        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
+        let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)
         else {
             return Ok(Vec::new());
         };
@@ -1041,18 +1053,15 @@ impl FederationSchema {
                 self,
                 field_definition,
             ) {
-                Ok(Some(list_size_directive)) => {
+                Some(list_size_directive) => {
                     applications.push(Ok(ListSizeDirective {
                         directive: list_size_directive,
                         parent_type: field_definition_position.type_name().clone(),
                         target: field_definition,
                     }));
                 }
-                Ok(None) => {
+                None => {
                     // No listSize directive found, continue
-                }
-                Err(error) => {
-                    applications.push(Err(error));
                 }
             }
         }
@@ -1286,6 +1295,13 @@ impl ValidFederationSchema {
     pub fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
+        // While LinksMetadata::from_schema() partially validated @link usages, we need to run
+        // further @link validations after the schema is confirmed to be valid GraphQL.
+        if let Some(links_metadata) = &schema.links_metadata
+            && let Err(error) = links_metadata.validate_no_shadowing_imports(&schema)
+        {
+            return Err((schema, error));
+        }
         // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
         // metadata requires a valid FederationSchema. Since valid schemas are immutable, we have
         // to jump through some hoops here. We already assume that `schema` is valid GraphQL, so we
@@ -1423,18 +1439,15 @@ pub(crate) trait SchemaElement {
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let extensions = self.extensions();
-        // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // Note: No defined ordering between origins.
-        let first_extension = extensions.first();
-        if let Some(first_extension) = first_extension {
-            // If there is an extension, use the first extension.
-            ComponentOrigin::Extension((*first_extension).clone())
-        } else {
-            // Use the existing definition if exists, or maybe a new definition if no definition
-            // nor extensions exist.
-            ComponentOrigin::Definition
+        let (has_definition, extensions) = self.definition_and_extensions();
+        // Use extension origin only when extensions exist but no definition does
+        // (i.e., only extension elements are populated). Otherwise, use definition.
+        // For more details, see the comments in the `add_to_schema` method.
+        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
+        if !has_definition && let Some(first_extension) = extensions.first() {
+            return ComponentOrigin::Extension((*first_extension).clone());
         }
+        ComponentOrigin::Definition
     }
 }
 

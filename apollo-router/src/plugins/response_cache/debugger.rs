@@ -6,6 +6,7 @@ use crate::Context;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 
 pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
@@ -15,6 +16,11 @@ pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 pub(super) struct CacheKeyContext {
     pub(super) key: String,
     pub(super) invalidation_keys: Vec<String>,
+    /// Invalidation indexes resolved for this entry's subgraph at write time. Surfacing this in
+    /// the debugger lets operators see at a glance which indexes are active, which is essential
+    /// when interpreting absent invalidation keys (e.g., the entry was written under
+    /// `indexes.cache_tag: false`, so user-tag keys are intentionally absent rather than missing).
+    pub(super) indexes: InvalidationIndexes,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     pub(super) subgraph_request: graphql::Request,
@@ -78,7 +84,7 @@ impl CacheKeyContext {
             title: "Cache-Control header documentation".to_string(),
         };
         // Not cached because either no cache-control header set or no-store
-        if self.cache_control.is_no_store() {
+        if self.cache_control.no_store() {
             self.warnings.push(Warning {
                 code: "CACHE_CONTROL_NO_STORE".to_string(),
                 links: vec![cache_control_mdn_docs.clone()],
@@ -93,8 +99,9 @@ impl CacheKeyContext {
                 message: "The subgraph returned a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user.".to_string(),
             });
         }
+
         // TTL
-        match self.cache_control.s_max_age_or_max_age() {
+        match self.cache_control.max_age() {
             Some(maxage) => {
                 // Small maxage less than a minute
                 if maxage < 60 {
@@ -116,17 +123,23 @@ impl CacheKeyContext {
                 }
             }
             None => {
-                // Default ttl
-                self.warnings.push(Warning {
-                    code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
-                    links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
-                    message: "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file).".to_string(),
-                });
+                // Only warn about missing max-age if no-store isn't set; if no-store is set,
+                // the CACHE_CONTROL_NO_STORE warning above already covers the non-caching case.
+                if !self.cache_control.no_store() {
+                    // Default ttl
+                    self.warnings.push(Warning {
+                        code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
+                        links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
+                        message: "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file).".to_string(),
+                    });
+                }
             }
         }
         if let CacheEntryKind::RootFields { root_fields } = &self.kind {
-            // No cache tags on root fields
-            if self.invalidation_keys.is_empty() {
+            // No cache tags on root fields. Only fire this when the cache_tag index is enabled
+            // for the subgraph; otherwise the operator has intentionally opted out of per-tag
+            // indexing and missing @cacheTag directives are the expected, configured state.
+            if self.invalidation_keys.is_empty() && self.indexes.cache_tag {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],

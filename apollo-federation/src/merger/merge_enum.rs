@@ -20,16 +20,14 @@ use crate::schema::position::EnumValueDefinitionPosition;
 use crate::supergraph::CompositionHint;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum EnumExampleAst {
-    #[allow(dead_code)]
     Field(Node<FieldDefinition>),
-    #[allow(dead_code)]
     Input(Node<InputValueDefinition>),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct EnumExample {
-    #[allow(dead_code)]
     pub coordinate: String,
     #[allow(dead_code)]
     pub element_ast: Option<EnumExampleAst>,
@@ -37,15 +35,12 @@ pub(crate) struct EnumExample {
 
 #[derive(Debug, Clone)]
 pub(crate) enum EnumTypeUsage {
-    #[allow(dead_code)]
     Input {
         input_example: EnumExample,
     },
-    #[allow(dead_code)]
     Output {
         output_example: EnumExample,
     },
-    #[allow(dead_code)]
     Both {
         input_example: EnumExample,
         output_example: EnumExample,
@@ -55,7 +50,6 @@ pub(crate) enum EnumTypeUsage {
 
 impl Merger {
     /// Merge enum type from multiple subgraphs
-    #[allow(dead_code)]
     pub(crate) fn merge_enum(
         &mut self,
         sources: Sources<Node<EnumType>>,
@@ -69,7 +63,7 @@ impl Merger {
             // option. We do raise an hint though so users can notice this.
             let usage = EnumTypeUsage::Unused;
             self.error_reporter.add_hint(CompositionHint {
-                code: HintCode::UnusedEnumType.code().to_string(),
+                definition: HintCode::UnusedEnumType.definition(),
                 message: format!(
                     "Enum type \"{}\" is defined but unused. It will be included in the supergraph with all the values appearing in any subgraph (\"as if\" it was only used as an output type).",
                     dest.type_name
@@ -139,7 +133,17 @@ impl Merger {
             directives: Default::default(),
         });
         value_pos.insert(&mut self.merged, dest)?;
-        let pos_sources = map_sources(sources, |source| source.as_ref().map(|_| value_pos.clone()));
+        // Only treat a subgraph as a source for this value's description/directives if it actually
+        // *defines* the value. Mapping over every subgraph that merely declares the enum type would
+        // make subgraphs that omit this value look like they apply the value's directives with empty
+        // arguments, polluting mismatch hints (e.g. INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS
+        // listing subgraphs that don't define the value at all).
+        let pos_sources = map_sources(sources, |source| {
+            source
+                .as_ref()
+                .filter(|enum_type| enum_type.values.contains_key(&value_pos.value_name))
+                .map(|_| value_pos.clone())
+        });
         self.merge_description(&pos_sources, value_pos)?;
         self.record_applied_directives_to_merge(&pos_sources, value_pos)?;
         self.add_join_enum_value(&value_sources, value_pos)?;
@@ -263,31 +267,32 @@ impl Merger {
         dest_name: &Name,
         value_name: &Name,
     ) {
-        // As soon as we find a subgraph that has the type but not the member, we hint.
-        for enum_type in sources.values().flatten() {
-            if !enum_type.values.contains_key(value_name) {
-                self.error_reporter.report_mismatch_hint(
-                    HintCode::InconsistentEnumValueForOutputEnum,
-                    format!(
-                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
-                    ),
-                    dest_name,
-                    sources,
-                    &self.subgraphs,
-                    |_| Some("yes".to_string()),
-                    |source, _| {
-                        if source.values.contains_key(value_name) {
-                            Some("yes".to_string())
-                        } else {
-                            Some("no".to_string())
-                        }
-                    },
-                    |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
-                    |_, subgraphs| format!(" but not in {subgraphs}"),
-                    false,
-                    false,
-                );
-            }
+        if sources
+            .values()
+            .flatten()
+            .any(|e| !e.values.contains_key(value_name))
+        {
+            self.error_reporter.report_mismatch_hint(
+                HintCode::InconsistentEnumValueForOutputEnum,
+                format!(
+                    "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
+                ),
+                dest_name,
+                sources,
+                &self.subgraphs,
+                |_| Some("yes".to_string()),
+                |source, _| {
+                    if source.values.contains_key(value_name) {
+                        Some("yes".to_string())
+                    } else {
+                        Some("no".to_string())
+                    }
+                },
+                |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                |_, subgraphs| format!(" but not in {subgraphs}"),
+                false,
+                false,
+            );
         }
     }
 }
@@ -305,12 +310,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::JOIN_VERSIONS;
     use crate::SpecDefinition;
+    use crate::composition::CompositionOptions;
     use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
     use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::merger::compose_directive_manager::ComposeDirectiveManager;
     use crate::merger::error_reporter::ErrorReporter;
-    use crate::merger::merge::CompositionOptions;
     use crate::schema::FederationSchema;
     use crate::schema::position::EnumTypeDefinitionPosition;
     use crate::utils::FallibleOnceCell;
@@ -452,11 +457,12 @@ pub(crate) mod tests {
             join_spec_definition,
             join_directive_identities: Default::default(),
             directives_using_join_directive: Default::default(),
-            schema_to_import_to_feature_url: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
             applied_directives_to_merge: Default::default(),
             access_control_directives_in_supergraph: Default::default(),
             access_control_additional_sources: FallibleOnceCell::new(),
+            import_conflicts_by_identity: Default::default(),
+            compute_unique_spec_name_in_schema: None,
         })
     }
 }

@@ -519,6 +519,45 @@ connector:
     }
 
     #[tokio::test]
+    async fn test_json_logging_no_duplicate_empty_message() {
+        // otel_error!(name: "op", message = "explicit") expands to:
+        //   error!(name = "op", message = "explicit", "")
+        // The trailing "" sets message = "" while the kv field sets message = "explicit",
+        // producing duplicate JSON keys. Verify the formatter drops the empty-string one.
+        let buff = LogBuffer::default();
+        let json_format = JsonFormat {
+            display_timestamp: false,
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Resource::builder_empty().build(), json_format);
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            error!(
+                name = "export_failure",
+                message = "explicit error message",
+                ""
+            );
+        });
+
+        let raw = buff.to_string();
+        let raw = raw.trim();
+        let parsed: serde_json::Value =
+            serde_json::from_str(raw).expect("output should be valid JSON");
+        assert_eq!(
+            parsed["message"], "explicit error message",
+            "explicit message should be present"
+        );
+        assert!(
+            !raw.contains(r#""message":"""#) && !raw.contains(r#""message": """#),
+            "empty-string message should be dropped; got: {raw}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Json::default();
@@ -818,10 +857,10 @@ connector:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(HttpRequest {
+                let transport_request = TransportRequest::Http(Box::new(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
-                });
+                }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
@@ -831,10 +870,10 @@ connector:
                         None,
                         0,
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -887,6 +926,7 @@ connector:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
@@ -1253,10 +1293,10 @@ subgraph:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(HttpRequest {
+                let transport_request = TransportRequest::Http(Box::new(HttpRequest {
                     inner: http_request,
                     debug: Default::default(),
-                });
+                }));
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
@@ -1266,10 +1306,10 @@ subgraph:
                         None,
                         0,
                     ),
-                    transport: HttpJsonTransport {
+                    transport: Some(HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
                         ..Default::default()
-                    },
+                    }),
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -1322,6 +1362,7 @@ subgraph:
 
                 let connector_response = Response {
                     context: context.clone(),
+                    subgraph_name: String::new(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)

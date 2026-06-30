@@ -84,7 +84,6 @@ where
 }
 
 /// [`Service`] for Synchronous Checkpoints. See [`ServiceBuilderExt::checkpoint()`](crate::layers::ServiceBuilderExt::checkpoint()).
-#[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct CheckpointService<S, Request>
 where
@@ -105,6 +104,24 @@ where
             + Sync
             + 'static,
     >,
+}
+
+impl<S, Request> Clone for CheckpointService<S, Request>
+where
+    S: Clone,
+    // bounds to match the service struct...
+    Request: Send + 'static,
+    S: Service<Request> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Response: Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            checkpoint_fn: self.checkpoint_fn.clone(),
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -175,35 +192,32 @@ mod checkpoint_tests {
 
     use super::*;
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::test::MockExecutionService;
     use crate::services::ExecutionRequest;
     use crate::services::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {
         let expected_label = "from_mock_service";
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let mut execution_service = MockExecutionService::new();
-
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let service_stack = ServiceBuilder::new()
+        let mut service_stack = ServiceBuilder::new()
             .checkpoint(|req: ExecutionRequest| Ok(ControlFlow::Continue(req)))
-            .service(execution_service);
+            .service(mock);
 
-        let request = ExecutionRequest::fake_builder().build();
-
-        let actual_label = service_stack
-            .oneshot(request)
+        let call = service_stack
+            .ready()
+            .await
+            .unwrap()
+            .call(ExecutionRequest::fake_builder().build());
+        let (req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            ExecutionResponse::fake_builder()
+                .label(expected_label.to_string())
+                .context(req.context)
+                .build()
+                .unwrap(),
+        );
+        let actual_label = call
             .await
             .unwrap()
             .next_response()
@@ -211,32 +225,30 @@ mod checkpoint_tests {
             .unwrap()
             .label
             .unwrap();
-
         assert_eq!(actual_label, expected_label)
     }
 
     #[tokio::test]
     async fn test_continue() {
         let expected_label = "from_mock_service";
-        let mut router_service = MockExecutionService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        router_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build()
-                    .unwrap())
-            });
+        let mut service_stack =
+            CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(mock);
 
-        let service_stack =
-            CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(router_service);
-
-        let request = ExecutionRequest::fake_builder().build();
-
-        let actual_label = service_stack
-            .oneshot(request)
+        let call = service_stack
+            .ready()
+            .await
+            .unwrap()
+            .call(ExecutionRequest::fake_builder().build());
+        let (_req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(
+            ExecutionResponse::fake_builder()
+                .label(expected_label.to_string())
+                .build()
+                .unwrap(),
+        );
+        let actual_label = call
             .await
             .unwrap()
             .next_response()
@@ -244,14 +256,12 @@ mod checkpoint_tests {
             .unwrap()
             .label
             .unwrap();
-
         assert_eq!(actual_label, expected_label)
     }
 
     #[tokio::test]
     async fn test_return() {
-        let expected_label = "returned_before_mock_service";
-        let router_service = MockExecutionService::new();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack = CheckpointLayer::new(|_req| {
             Ok(ControlFlow::Break(
@@ -261,12 +271,10 @@ mod checkpoint_tests {
                     .unwrap(),
             ))
         })
-        .layer(router_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+        .layer(mock);
 
         let actual_label = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .unwrap()
             .next_response()
@@ -275,26 +283,26 @@ mod checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, "returned_before_mock_service");
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let router_service = MockExecutionService::new();
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let service_stack = CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error)))
-            .layer(router_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+        let service_stack =
+            CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error))).layer(mock);
 
         let actual_error = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .map(|_| unreachable!())
             .unwrap_err()
             .to_string();
 
-        assert_eq!(actual_error, expected_error)
+        assert_eq!(actual_error, expected_error);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 }
