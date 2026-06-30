@@ -925,6 +925,28 @@ mod tests {
 
             server.shutdown().await.unwrap();
 
+            // emit_connection_rejection_metrics runs in the detached per-connection
+            // task; wait_for_servers() does not await those tasks, so poll until the
+            // metric is observed before asserting its value.
+            let attrs = [opentelemetry::KeyValue::new(
+                "http.response.status_code",
+                431i64,
+            )];
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if crate::metrics::collect_metrics().metric_exists(
+                        "apollo.router.operations",
+                        crate::metrics::test_utils::MetricType::Counter,
+                        &attrs,
+                    ) {
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("timed out waiting for 431 rejection metrics to be emitted");
+
             assert_counter!(
                 "apollo.router.operations",
                 1,
@@ -981,6 +1003,27 @@ mod tests {
             );
 
             server.shutdown().await.unwrap();
+
+            // Same race as the 431 test: emit_connection_rejection_metrics runs in
+            // the detached per-connection task that may outlive wait_for_servers().
+            let attrs = [opentelemetry::KeyValue::new(
+                "http.response.status_code",
+                414i64,
+            )];
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if crate::metrics::collect_metrics().metric_exists(
+                        "apollo.router.operations",
+                        crate::metrics::test_utils::MetricType::Counter,
+                        &attrs,
+                    ) {
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("timed out waiting for 414 rejection metrics to be emitted");
 
             assert_counter!(
                 "apollo.router.operations",
