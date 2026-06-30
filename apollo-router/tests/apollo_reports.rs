@@ -574,13 +574,7 @@ async fn get_batch_trace_report_with_subgraph_mock(
 
 #[allow(clippy::too_many_arguments)]
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
-    service_fn: impl FnOnce(
-        Arc<Mutex<Vec<Report>>>,
-        bool,
-        bool,
-        bool,
-        Option<&'static str>,
-    ) -> Fut,
+    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool, Option<&'static str>) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
     request: router::Request,
@@ -698,145 +692,98 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 
 #[tokio::test(flavor = "multi_thread")]
 async fn non_defer() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
             .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
             .variable("if", true)
             .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
             .build()
             .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_else() {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
         .header(ACCEPT, "multipart/mixed;deferSpec=20220824")
         .build()
         .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
-        let request = make_fake_batch(
-            supergraph::Request::fake_builder()
-                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
-                .operation_name("one")
-                .build()
-                .unwrap()
-                .supergraph_request,
-            Some(("one", "two")),
-        );
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report_with_subgraph_mock(
-            reports,
-            request.into(),
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report =
+        get_batch_trace_report_with_subgraph_mock(reports, request.into(), false, false, None)
+            .await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_with_client_name_http_header() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("apollographql-client-name", "my client")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-name", "my client")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_with_client_version_http_header() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("apollographql-client-version", "my client version")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-version", "my client version")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -937,69 +884,50 @@ async fn test_metrics_with_library_version_request_extension() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_header() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .header("send-header", "Header value")
-            .header("dont-send-header", "Header value")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("send-header", "Header value")
+        .header("dont-send-header", "Header value")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
-        let request = make_fake_batch(
-            supergraph::Request::fake_builder()
-                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
-                .operation_name("one")
-                .header("send-header", "Header value")
-                .header("dont-send-header", "Header value")
-                .build()
-                .unwrap()
-                .supergraph_request,
-            Some(("one", "two")),
-        );
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report_with_subgraph_mock(
-            reports,
-            request.into(),
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .header("send-header", "Header value")
+            .header("dont-send-header", "Header value")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report =
+        get_batch_trace_report_with_subgraph_mock(reports, request.into(), false, false, None)
+            .await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
-        let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
         .variable("sendValue", true)
         .variable("dontSendValue", true)
         .build()
         .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            false,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, false, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1078,45 +1006,31 @@ async fn test_demand_control_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace() {
-        let request = supergraph::Request::fake_builder()
-            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-            .build()
-            .unwrap();
-        let req: router::Request = request.try_into().expect("could not convert request");
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            true,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report_with_subgraph_mock(reports, req, true, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace_batched() {
-        let request = make_fake_batch(
-            supergraph::Request::fake_builder()
-                .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
-                .operation_name("one")
-                .build()
-                .unwrap()
-                .supergraph_request,
-            Some(("one", "two")),
-        );
-        let req: router::Request = request.into();
-        let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report_with_subgraph_mock(
-            reports,
-            req,
-            true,
-            false,
-            None,
-        )
-        .await;
-        assert_report!(report);
+    let request = make_fake_batch(
+        supergraph::Request::fake_builder()
+            .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .operation_name("one")
+            .build()
+            .unwrap()
+            .supergraph_request,
+        Some(("one", "two")),
+    );
+    let req: router::Request = request.into();
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_trace_report_with_subgraph_mock(reports, req, true, false, None).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]

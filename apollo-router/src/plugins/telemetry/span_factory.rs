@@ -20,7 +20,7 @@ pub(crate) enum SpanMode {
 }
 
 impl SpanMode {
-    pub(crate) fn create_router<B>(&self, request: &http::Request<B>) -> ::tracing::span::Span {
+    pub(crate) fn create_router<B>(&self, _request: &http::Request<B>) -> ::tracing::span::Span {
         info_span!(
             ROUTER_SPAN_NAME,
             // Note that http.route and http.request.method are always added by default,
@@ -46,8 +46,7 @@ impl SpanMode {
         info_span!(
             SUPERGRAPH_SPAN_NAME,
             "otel.kind" = "INTERNAL",
-            apollo_private.field_level_instrumentation_ratio =
-                field_level_instrumentation_ratio,
+            apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
             apollo_private.operation_signature = ::tracing::field::Empty,
             apollo_private.graphql.variables = Telemetry::filter_variables_values(
                 &request.supergraph_request.body().variables,
@@ -58,8 +57,8 @@ impl SpanMode {
 
     pub(crate) fn create_subgraph(
         &self,
-        subgraph_name: &str,
-        req: &SubgraphRequest,
+        _subgraph_name: &str,
+        _req: &SubgraphRequest,
     ) -> ::tracing::span::Span {
         info_span!(
             SUBGRAPH_SPAN_NAME,
@@ -69,7 +68,7 @@ impl SpanMode {
         )
     }
 
-    pub(crate) fn create_connector(&self, source_name: &str) -> ::tracing::span::Span {
+    pub(crate) fn create_connector(&self, _source_name: &str) -> ::tracing::span::Span {
         info_span!(
             CONNECT_REQUEST_SPAN_NAME,
             "otel.kind" = "INTERNAL",
