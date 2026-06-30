@@ -1,4 +1,4 @@
-### Connectors: recursive input types no longer hang composition or crash expression validation ([PR #9524](https://github.com/apollographql/router/pull/9524))
+### Prevent recursive input types from hanging composition or crashing expression validation ([PR #9524](https://github.com/apollographql/router/pull/9524))
 
 A self-referential connector input type (e.g. `input Node { child: Node }`) previously caused two problems:
 

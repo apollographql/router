@@ -1,4 +1,4 @@
-### Fix Linux flake in `apollo_reports::test_metrics_with_library_name_http_header` (products subgraph ECONNRESET)
+### Fix Linux flake in `apollo_reports::test_metrics_with_library_name_http_header` (products subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `apollo_reports::test_metrics_with_library_name_http_header` flaked on CircleCI's ARM Linux executor whenever the public Apollo demo subgraphs (`https://*.demo.starstuff.dev/`) reset the TLS connection mid-request. The router surfaced the failure as `SubrequestHttpError { service: "products", reason: "Connection reset by peer (os error 104)" }`, which then turned the recorded metrics shape (no subgraph errors, full `Product`/`Review`/`User` field counts) into a `topProducts: null` error payload, drifting the snapshot. See CircleCI job 378550 for the captured log.
 

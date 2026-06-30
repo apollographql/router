@@ -1,4 +1,4 @@
-### Retry `mise install` in CircleCI to absorb transient GitHub release fetch failures
+### Retry `mise install` in CircleCI to absorb transient GitHub release fetch failures ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 The `install_mise` step in `.circleci/config.yml` ran `mise install` exactly once, so any transient 404 from GitHub releases (mise's aqua backend pulls each pinned tool from `github.com/.../releases/download/...`) failed an otherwise-healthy job. We've seen this surface as three different jobs failing in the same workflow, each on a different tool (kubeconform, protoc, gh) — the signature of intermittent CDN/rate-limit flakes rather than a config bug.
 

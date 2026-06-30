@@ -1,4 +1,4 @@
-### Fix `Cache-Control` parsing and serialization in the response cache ([Issue #ROUTER-1830](https://apollographql.atlassian.net/browse/ROUTER-1830))
+### Fix `Cache-Control` parsing and serialization in the response cache ([PR #9562](https://github.com/apollographql/router/pull/9562))
 
 The response cache's `Cache-Control` handling has been refactored and several bugs fixed:
 

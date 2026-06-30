@@ -1,4 +1,4 @@
-### Fix Linux flake in samples::/enterprise/connectors-defer
+### Fix Linux flake in samples::/enterprise/connectors-defer ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 The `/enterprise/connectors-defer` samples test was intermittently failing on Linux CI with:
 

@@ -1,4 +1,4 @@
-### Connectors: don't flag scalar-list selections as group selections (connect v0.4) ([PR #9636](https://github.com/apollographql/router/pull/9636))
+### Prevent scalar-list selections from being flagged as group selections in connect v0.4 ([PR #9636](https://github.com/apollographql/router/pull/9636))
 
 Composition with connect v0.4 reported a spurious `GROUP_SELECTION_IS_NOT_OBJECT` error for a renamed
 arrow-method projection over a nested-list scalar field — e.g. `data: data->map(@->map(@->toString))`

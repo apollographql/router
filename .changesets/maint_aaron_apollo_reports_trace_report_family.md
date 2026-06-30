@@ -1,4 +1,4 @@
-### Close `apollo_reports` trace-report family flake (8 of 9 callers sandboxed)
+### Close `apollo_reports` trace-report family flake (8 of 9 callers sandboxed) ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 Two `apollo_reports` tests in the trace family flaked in the 2026-05-28 last-24h CI sweep against the public Apollo demo subgraphs:
 

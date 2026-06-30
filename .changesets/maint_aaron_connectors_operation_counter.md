@@ -1,4 +1,4 @@
-### Fix Linux flake in connectors::tests::test_operation_counter
+### Fix Linux flake in connectors::tests::test_operation_counter ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `plugins::connectors::tests::test_operation_counter` was intermittently failing on Linux CI with:
 

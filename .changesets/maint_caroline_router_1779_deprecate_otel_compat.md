@@ -1,4 +1,4 @@
-### Deprecate `apollo_router::otel_compat`
+### Deprecate `apollo_router::otel_compat` ([PR #9573](https://github.com/apollographql/router/pull/9573))
 
 `otel_compat::HeaderExtractor` and `otel_compat::HeaderInjector` are now deprecated. The `opentelemetry_http` crate (v0.31+) already ships identical types that work with `http` 1.x.
 

@@ -1,4 +1,4 @@
-### fix(redis): reduce maintenance worker backpressure via batch-drain and deduplication ([Issue #ROUTER-1915](https://apollographql.atlassian.net/browse/ROUTER-1915))
+### Reduce Redis maintenance worker backpressure with batch-drain and deduplication ([PR #9642](https://github.com/apollographql/router/pull/9642))
 
 The response cache uses Redis ZSETs as invalidation indexes — each cache entry is a member scored by its expiry timestamp. A background maintenance worker periodically calls `ZREMRANGEBYSCORE` to purge expired members. Under heavy write load, the worker's channel could accumulate thousands of identical keys, causing it to issue redundant Redis commands and fall behind.
 

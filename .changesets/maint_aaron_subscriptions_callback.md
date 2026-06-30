@@ -1,4 +1,4 @@
-### Fix Linux flakes in subscriptions::callback startup race pair
+### Fix Linux flakes in subscriptions::callback startup race pair ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 Two sibling tests in `integration::subscriptions::callback` flaked on Linux CI on `test-amd_linux_test` with the same `assert_started`-vs-accept-loop race:
 

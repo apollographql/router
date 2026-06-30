@@ -1,4 +1,4 @@
-### Fix Linux flake in `apollo_otel_traces::test_send_variable_value` (accounts subgraph ECONNRESET)
+### Fix Linux flake in `apollo_otel_traces::test_send_variable_value` (accounts subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `apollo_otel_traces::test_send_variable_value` flaked on CircleCI's Linux executor whenever the public Apollo demo subgraphs (`https://*.demo.starstuff.dev/`) reset the TLS connection mid-request. The router surfaced the failure as `SubrequestHttpError { service: "accounts", reason: "Connection reset by peer (os error 104)" }`, which then turned the `apollo.subgraph.name=accounts` `http_request` span's status from `code: 0` (OK) to `code: 2` (ERROR) and dropped the `apollo_private.ftv1` attribute — both of which the snapshot expects to be present and OK. See the original CircleCI job 377214 for the captured trace log.
 

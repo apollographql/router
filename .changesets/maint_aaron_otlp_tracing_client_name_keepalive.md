@@ -1,4 +1,4 @@
-### Fix Linux flake in otlp::tracing::test_plugin_overridden_client_name_is_included_in_telemetry
+### Fix Linux flake in otlp::tracing::test_plugin_overridden_client_name_is_included_in_telemetry ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `integration::telemetry::otlp::tracing::test_plugin_overridden_client_name_is_included_in_telemetry` flaked on CircleCI's Linux executor with `unable to send successful request to router, error sending request for url (http://127.0.0.1:<port>/)` from `IntegrationTest::execute_query`. The first two iterations of the test loop completed (visible as two successful trace verifications in the captured stdout); the third iteration's outbound HTTP request to the spawned router never reached the router. See CircleCI job 378759.
 

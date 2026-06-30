@@ -8,3 +8,5 @@ my_attribute:
 ```
 
 The object form additionally supports typed values (bool, int, float, array), making it strictly more capable than the string shorthand.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/issues/1766

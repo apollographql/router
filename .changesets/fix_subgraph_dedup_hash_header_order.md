@@ -1,4 +1,4 @@
-### Stabilize subgraph dedup hash against HeaderMap iteration order
+### Stabilize subgraph dedup hash against HeaderMap iteration order ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 The `SubgraphRequest::to_sha256` helper, used as the key for subscription dedup
 and the dedup-cache fast path, iterated `http::HeaderMap` directly. `HeaderMap`

@@ -1,4 +1,4 @@
-### Fix Linux flake in response_cache::integration_test_basic (Redis readiness)
+### Fix Linux flake in response_cache::integration_test_basic (Redis readiness) ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `integration::response_cache::integration_test_basic` was flaking on Linux CI with `Redis error … kind: Timeout` during the second `TestHarness` request. The router's response cache uses fred's default `default_command_timeout` of 500ms; under CI load the second harness's freshly-built fred pool was being asked to issue its first per-client lookup before Redis (or the host) had stabilised after teardown of the first harness's pool, exceeding the 500ms budget.
 

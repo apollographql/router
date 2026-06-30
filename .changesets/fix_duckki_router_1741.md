@@ -1,4 +1,4 @@
-### fix(format_response): Report missing fields as coercion errors and suppress redundant errors ([PR #9549](https://github.com/apollographql/router/pull/9549))
+### Report missing fields as coercion errors and suppress redundant errors ([PR #9549](https://github.com/apollographql/router/pull/9549))
 
 When a requested field is missing from the merged subgraph response, emit a
 `RESPONSE_VALIDATION_FAILED` error in `response.errors` — turned on by

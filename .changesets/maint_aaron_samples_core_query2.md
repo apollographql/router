@@ -1,4 +1,4 @@
-### Fix macOS flake in `samples::/core/query2` (accounts subgraph ECONNRESET)
+### Fix macOS flake in `samples::/core/query2` (accounts subgraph ECONNRESET) ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 `samples::/core/query2` flaked on CircleCI's macOS executor when the public Apollo demo subgraph `https://accounts.demo.starstuff.dev/` reset the TCP connection mid-request. The router surfaced it as `SubrequestHttpError { service: "accounts", reason: "Connection reset by peer (os error 54)" }`, and the assertion diff between the canned `{"me":{"name":"Ada Lovelace"}}` and the resulting error payload failed the test. See CircleCI job 376290 (macOS, `prep-2.14.1`, 2026-05-20).
 

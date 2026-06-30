@@ -1,4 +1,4 @@
-### Connectors: credit fields selected beneath list-shaped methods like `->entries` (connect v0.4) ([PR #9619](https://github.com/apollographql/router/pull/9619))
+### Resolve fields selected beneath list-shaped arrow methods like `->entries` in connect v0.4 ([PR #9619](https://github.com/apollographql/router/pull/9619))
 
 Composition with connect v0.4 reported spurious `CONNECTORS_UNRESOLVED_FIELD` errors for fields selected
 beneath an `->entries` sub-selection — e.g. `attributes: attributes->entries { key value }` against

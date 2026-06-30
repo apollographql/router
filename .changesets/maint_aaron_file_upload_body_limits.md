@@ -1,4 +1,4 @@
-### Fix Linux flake in file_upload::body_limits::rejects_oversized_operations_field
+### Fix Linux flake in file_upload::body_limits::rejects_oversized_operations_field ([PR #9497](https://github.com/apollographql/router/pull/9497))
 
 The `chunk_size_1_None` variant of `file_upload::body_limits::rejects_oversized_operations_field` flaked on Linux CI by panicking at the harness's 10 s `assert_shutdown` deadline with "unable to shutdown router".
 
