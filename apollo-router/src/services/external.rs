@@ -14,7 +14,6 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 #[cfg(unix)]
 use hyperlocal;
-use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,14 +23,11 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt as _;
 use tracing::Instrument;
-use tracing::Span;
 
 use super::PipelineStep;
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
@@ -292,7 +288,7 @@ where
         #[cfg(not(unix))]
         let converted_uri: http::Uri = uri.parse()?;
 
-        let mut http_request = http::Request::builder()
+        let http_request = http::Request::builder()
             .uri(converted_uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")
@@ -323,26 +319,16 @@ where
             "otel.original_name" = "http_request",
         );
 
-        let _enter = http_req_span.enter();
-        get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &prepare_context(Span::current().context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
-            );
-        });
-        drop(_enter);
-
         let request = HttpRequest {
             http_request,
             context,
         };
 
-        let response = client
-            .ready()
-            .await?
-            .call(request)
-            .instrument(http_req_span)
-            .await?;
+        // `in_scope` ensures `Span::current()` == `http_req_span` when `HttpClientService::call`
+        // synchronously injects the traceparent header, so the coprocessor is parented correctly.
+        let client = client.ready().await?;
+        let response_future = http_req_span.in_scope(|| client.call(request));
+        let response = response_future.instrument(http_req_span).await?;
         router::body::into_bytes(response.http_response.into_body())
             .await
             .map_err(BoxError::from)
