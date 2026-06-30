@@ -878,7 +878,6 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
-    add_optional_apollo_plugin!("preview_entity_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -1159,14 +1158,6 @@ mod test {
                     enabled: false
                 "#
             }
-            "preview_entity_cache" => {
-                r#"
-                enabled: true
-                subgraph:
-                  all:
-                    enabled: true
-                "#
-            }
             "response_cache" => {
                 r#"
                 enabled: true
@@ -1347,10 +1338,6 @@ mod test {
         "authentication",
         HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::Authentication, AllowedFeature::Subscriptions]))
     ]
-    #[case::entity_caching(
-        "preview_entity_cache",
-        HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
-    ]
     #[case::response_cache(
         "response_cache",
         HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::ResponseCaching]))
@@ -1442,13 +1429,9 @@ mod test {
         "authentication",
         HashSet::from_iter(vec![AllowedFeature::DemandControl,AllowedFeature::Subscriptions]))
     ]
-    #[case::entity_caching(
-        "preview_entity_cache",
-        HashSet::from_iter(vec![AllowedFeature::DemandControl]))
-    ]
     #[case::response_cache(
         "response_cache",
-        HashSet::from_iter(vec![AllowedFeature::EntityCaching]))
+        HashSet::from_iter(vec![AllowedFeature::Authentication]))
     ]
     #[case::authorization(
         "demand_control",
@@ -1621,7 +1604,6 @@ mod test {
     #[case::authorization("authorization")]
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
-    #[case::entity_cache("preview_entity_cache")]
     #[case::response_cache("response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
