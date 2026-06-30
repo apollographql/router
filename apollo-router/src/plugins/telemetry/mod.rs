@@ -2160,7 +2160,6 @@ mod tests {
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
-    use tower::util::BoxService;
 
     use super::CustomTraceIdPropagator;
     use super::EnabledFeatures;
@@ -2176,9 +2175,6 @@ mod tests {
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::PluginInit;
-    use crate::plugin::test::MockRouterService;
-    use crate::plugin::test::MockSubgraphService;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugins::demand_control::COST_ACTUAL_KEY;
     use crate::plugins::demand_control::COST_ESTIMATED_KEY;
     use crate::plugins::demand_control::COST_RESULT_KEY;
@@ -2279,20 +2275,20 @@ mod tests {
     }
 
     async fn make_supergraph_request(plugin: &dyn DynPlugin) {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                SupergraphResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
                     .data(json!({"data": {"my_value": 2usize}}))
                     .build()
-                    .unwrap())
-            });
-
-        let mut supergraph_service = plugin.supergraph_service(BoxService::new(mock_service));
+                    .unwrap(),
+            );
+        });
+        let mut supergraph_service = plugin.supergraph_service(mock_service.boxed());
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2304,6 +2300,7 @@ mod tests {
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2476,10 +2473,12 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
                     .await;
 
-            let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                move |req: SupergraphRequest| {
-                    Ok(SupergraphResponse::fake_builder()
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .errors(vec![
@@ -2489,11 +2488,11 @@ mod tests {
                                 .build(),
                         ])
                         .build()
-                        .unwrap())
-                },
-            );
+                        .unwrap(),
+                );
+            });
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(mock_bad_request_service.boxed());
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2505,6 +2504,7 @@ mod tests {
                 .next_response()
                 .await
                 .unwrap();
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_counter!(
                 "http.request",
@@ -2526,21 +2526,24 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
                     .await;
 
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(2)
-                .returning(move |req: RouterRequest| {
-                    Ok(RouterResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                });
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        RouterResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .build()
+                            .unwrap(),
+                    );
+                }
+            });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(mock_bad_request_service.boxed());
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2590,6 +2593,8 @@ mod tests {
                 "http.response.status_code" = 400,
                 "acme.my_attribute" = "application/json"
             );
+            drop(bad_request_router_service);
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2603,21 +2608,24 @@ mod tests {
             ))
             .await;
 
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(2)
-                .returning(move |req: RouterRequest| {
-                    Ok(RouterResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                });
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<RouterRequest, RouterResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        RouterResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .build()
+                            .unwrap(),
+                    );
+                }
+            });
             let mut bad_request_router_service =
-                plugin.router_service(BoxService::new(mock_bad_request_service));
+                plugin.router_service(mock_bad_request_service.boxed());
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2679,6 +2687,8 @@ mod tests {
                 "error.type" = "Bad Request",
                 "network.protocol.version" = "HTTP/1.1"
             );
+            drop(bad_request_router_service);
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2691,20 +2701,24 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
                     .await;
 
-            let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service.expect_call().times(3).returning(
-                move |req: SupergraphRequest| {
-                    Ok(SupergraphResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
-                        .build()
-                        .unwrap())
-                },
-            );
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..3 {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        SupergraphResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .build()
+                            .unwrap(),
+                    );
+                }
+            });
             let mut bad_request_supergraph_service =
-                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+                plugin.supergraph_service(mock_bad_request_service.boxed());
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2782,6 +2796,8 @@ mod tests {
                 "graphql_query" = "Query test { me {name} }",
                 "graphql.document" = "Query test { me {name} }"
             );
+            drop(bad_request_supergraph_service);
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2795,9 +2811,11 @@ mod tests {
             ))
             .await;
 
-            let mut mock_bad_request_service = MockSubgraphService::new();
-            mock_bad_request_service.expect_call().times(2).returning(
-                move |req: SubgraphRequest| {
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
@@ -2810,16 +2828,18 @@ mod tests {
                             .extension_code("NOK")
                             .build(),
                     ];
-                    Ok(SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .headers(headers)
-                        .errors(errors)
-                        .build())
-                },
-            );
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .headers(headers)
+                            .errors(errors)
+                            .build(),
+                    );
+                }
+            });
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", mock_bad_request_service.boxed());
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2884,6 +2904,8 @@ mod tests {
                 subgraph.name = "test"
             );
             assert_histogram_not_exists!("http.client.request.duration", f64);
+            drop(bad_request_subgraph_service);
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -2897,9 +2919,11 @@ mod tests {
                     .await,
             );
 
-            let mut mock_bad_request_service = MockSubgraphService::new();
-            mock_bad_request_service.expect_call().times(2).returning(
-                move |req: SubgraphRequest| {
+            let (mock_bad_request_service, mut handle) =
+                tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (req, responder) = handle.next_request().await.unwrap();
                     let mut headers = HeaderMap::new();
                     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
                     let errors = vec![
@@ -2912,16 +2936,18 @@ mod tests {
                             .extension_code("NOK")
                             .build(),
                     ];
-                    Ok(SubgraphResponse::fake_builder()
-                        .context(req.context)
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .headers(headers)
-                        .errors(errors)
-                        .build())
-                },
-            );
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .headers(headers)
+                            .errors(errors)
+                            .build(),
+                    );
+                }
+            });
             let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", BoxService::new(mock_bad_request_service));
+                plugin.subgraph_service("test", mock_bad_request_service.boxed());
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2985,6 +3011,8 @@ mod tests {
                 ])),
                 subgraph.name = "test"
             );
+            drop(bad_request_subgraph_service);
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3001,11 +3029,11 @@ mod tests {
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
         let ftv1_counter_cloned = ftv1_counter.clone();
 
-        let mut mock_request_service = MockSupergraphService::new();
-        mock_request_service
-            .expect_call()
-            .times(10)
-            .returning(move |req: SupergraphRequest| {
+        let (mock_request_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            for _ in 0..10 {
+                let (req, responder) = handle.next_request().await.unwrap();
                 if req
                     .context
                     .extensions()
@@ -3013,16 +3041,19 @@ mod tests {
                 {
                     ftv1_counter_cloned.fetch_add(1, Ordering::Relaxed);
                 }
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .status_code(StatusCode::OK)
-                    .header("content-type", "application/json")
-                    .data(json!({"errors": [{"message": "nope"}]}))
-                    .build()
-                    .unwrap())
-            });
+                responder.send_response(
+                    SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::OK)
+                        .header("content-type", "application/json")
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap(),
+                );
+            }
+        });
         let mut request_supergraph_service =
-            plugin.supergraph_service(BoxService::new(mock_request_service));
+            plugin.supergraph_service(mock_request_service.boxed());
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3045,6 +3076,8 @@ mod tests {
                 .unwrap();
         }
         // It should be 100% because when we set preview_datadog_agent_sampling, we only take the value of field_level_instrumentation_sampler
+        drop(request_supergraph_service);
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
@@ -3055,23 +3088,23 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
                     .await;
 
-            let mut mock_subgraph_service = MockSubgraphService::new();
-            mock_subgraph_service
-                .expect_call()
-                .times(1)
-                .returning(move |req: SubgraphRequest| {
-                    let mut extension = Object::new();
-                    extension.insert(
-                        serde_json_bytes::ByteString::from("status"),
-                        serde_json_bytes::Value::String(ByteString::from(
-                            "custom_error_for_propagation",
-                        )),
-                    );
-                    let _ = req
-                        .context
-                        .insert("my_key", "my_custom_attribute_from_context".to_string())
-                        .unwrap();
-                    Ok(SubgraphResponse::fake_builder()
+            let (mock_subgraph_service, mut handle) =
+                tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                let mut extension = Object::new();
+                extension.insert(
+                    serde_json_bytes::ByteString::from("status"),
+                    serde_json_bytes::Value::String(ByteString::from(
+                        "custom_error_for_propagation",
+                    )),
+                );
+                let _ = req
+                    .context
+                    .insert("my_key", "my_custom_attribute_from_context".to_string())
+                    .unwrap();
+                responder.send_response(
+                    SubgraphResponse::fake_builder()
                         .context(req.context)
                         .error(
                             Error::builder()
@@ -3080,11 +3113,12 @@ mod tests {
                                 .extension_code("FETCH_ERROR")
                                 .build(),
                         )
-                        .build())
-                });
+                        .build(),
+                );
+            });
 
             let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+                plugin.subgraph_service("my_subgraph_name", mock_subgraph_service.boxed());
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3117,6 +3151,7 @@ mod tests {
                 "subgraph" = "my_subgraph_name",
                 "subgraph_error_extended_code" = "FETCH_ERROR"
             );
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3129,21 +3164,20 @@ mod tests {
                 create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
                     .await;
 
-            let mut mock_subgraph_service_in_error = MockSubgraphService::new();
-            mock_subgraph_service_in_error
-                .expect_call()
-                .times(1)
-                .returning(move |_req: SubgraphRequest| {
-                    Err(Box::new(FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: String::from("my_subgraph_name_error"),
-                        reason: String::from("cannot contact the subgraph"),
-                    }))
+            let (mock_subgraph_service_in_error, mut handle) =
+                tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_error(FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: String::from("my_subgraph_name_error"),
+                    reason: String::from("cannot contact the subgraph"),
                 });
+            });
 
             let mut subgraph_service = plugin.subgraph_service(
                 "my_subgraph_name_error",
-                BoxService::new(mock_subgraph_service_in_error),
+                mock_subgraph_service_in_error.boxed(),
             );
 
             let subgraph_req = SubgraphRequest::fake_builder()
@@ -3176,6 +3210,7 @@ mod tests {
                 "subgraph" = "my_subgraph_name_error",
                 "query_from_request" = "query { test }"
             );
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_metrics()
         .await;
@@ -3431,45 +3466,45 @@ mod tests {
     }
 
     async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                req.context.extensions().with_lock(|lock| {
-                    lock.insert(cost_details.clone());
-                });
-                req.context
-                    .insert(COST_ESTIMATED_KEY, cost_details.estimated)
-                    .unwrap();
-                req.context
-                    .insert(COST_ACTUAL_KEY, cost_details.actual)
-                    .unwrap();
-                req.context
-                    .insert(COST_RESULT_KEY, cost_details.result.to_string())
-                    .unwrap();
-                req.context
-                    .insert(COST_STRATEGY_KEY, cost_details.strategy.to_string())
-                    .unwrap();
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            req.context.extensions().with_lock(|lock| {
+                lock.insert(cost_details.clone());
+            });
+            req.context
+                .insert(COST_ESTIMATED_KEY, cost_details.estimated)
+                .unwrap();
+            req.context
+                .insert(COST_ACTUAL_KEY, cost_details.actual)
+                .unwrap();
+            req.context
+                .insert(COST_RESULT_KEY, cost_details.result.to_string())
+                .unwrap();
+            req.context
+                .insert(COST_STRATEGY_KEY, cost_details.strategy.to_string())
+                .unwrap();
 
-                let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
-                    DemandControlError::EstimatedCostTooExpensive {
-                        estimated_cost: cost_details.estimated,
-                        max_cost: (cost_details.estimated - 5.0).max(0.0),
-                    }
-                    .into_graphql_errors()
-                    .unwrap()
-                } else if cost_details.result == "COST_ACTUAL_TOO_EXPENSIVE" {
-                    DemandControlError::ActualCostTooExpensive {
-                        actual_cost: cost_details.actual,
-                        max_cost: (cost_details.actual - 5.0).max(0.0),
-                    }
-                    .into_graphql_errors()
-                    .unwrap()
-                } else {
-                    Vec::new()
-                };
+            let errors = if cost_details.result == "COST_ESTIMATED_TOO_EXPENSIVE" {
+                DemandControlError::EstimatedCostTooExpensive {
+                    estimated_cost: cost_details.estimated,
+                    max_cost: (cost_details.estimated - 5.0).max(0.0),
+                }
+                .into_graphql_errors()
+                .unwrap()
+            } else if cost_details.result == "COST_ACTUAL_TOO_EXPENSIVE" {
+                DemandControlError::ActualCostTooExpensive {
+                    actual_cost: cost_details.actual,
+                    max_cost: (cost_details.actual - 5.0).max(0.0),
+                }
+                .into_graphql_errors()
+                .unwrap()
+            } else {
+                Vec::new()
+            };
 
+            responder.send_response(
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .data(
@@ -3477,9 +3512,11 @@ mod tests {
                             .unwrap(),
                     )
                     .build()
-            });
+                    .unwrap(),
+            );
+        });
 
-        let mut service = plugin.supergraph_service(BoxService::new(mock_service));
+        let mut service = plugin.supergraph_service(mock_service.boxed());
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()
@@ -3491,6 +3528,7 @@ mod tests {
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
