@@ -358,7 +358,6 @@ impl PluginPrivate for Telemetry {
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let config_checkpoint = self.config.clone();
-        let span_mode = config.instrumentation.spans.mode;
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
@@ -427,7 +426,7 @@ impl PluginPrivate for Telemetry {
                 {
                     current
                 } else {
-                    span_mode.create_router(&request.router_request)
+                    SpanMode::SpecCompliant.create_router(&request.router_request)
                 }
             }))
             .checkpoint(move |req: router::Request| {
@@ -721,7 +720,6 @@ impl PluginPrivate for Telemetry {
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let config = self.config.clone();
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
@@ -740,7 +738,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
-                span_mode.create_supergraph(
+                SpanMode::SpecCompliant.create_supergraph(
                     &config_instrument.apollo,
                     supergraph_req,
                     field_level_instrumentation_ratio,
@@ -950,7 +948,6 @@ impl PluginPrivate for Telemetry {
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
         let config = self.config.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
@@ -970,7 +967,7 @@ impl PluginPrivate for Telemetry {
             .cache_custom_instruments
             .clone();
         ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
+            .instrument(move |req: &SubgraphRequest| SpanMode::SpecCompliant.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
@@ -1090,7 +1087,6 @@ impl PluginPrivate for Telemetry {
     ) -> connector::request_service::BoxCloneService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        let span_mode = self.config.instrumentation.spans.mode;
         let static_connector_instruments = self
             .builtin_instruments
             .read()
@@ -1103,7 +1099,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |_req: &connector::request_service::Request| {
-                span_mode.create_connector(source_name.as_str())
+                SpanMode::SpecCompliant.create_connector(source_name.as_str())
             })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {

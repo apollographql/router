@@ -18,7 +18,6 @@ use crate::uplink::license_enforcement::LicenseState;
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
     pub(crate) license: Arc<LicenseState>,
-    pub(crate) span_mode: SpanMode,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -37,10 +36,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            self.span_mode.create_router(request)
+            SpanMode::SpecCompliant.create_router(request)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            self.span_mode.create_router(request)
+            SpanMode::SpecCompliant.create_router(request)
         };
         if matches!(
             &*self.license,
