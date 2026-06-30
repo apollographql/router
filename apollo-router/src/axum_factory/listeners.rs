@@ -801,15 +801,19 @@ mod tests {
                 .build()?,
         );
 
-        let router_service = router::service::from_supergraph_mock_callback_and_configuration(
-            move |req| {
-                Ok(SupergraphResponse::new_from_graphql_response(
-                    graphql::Response::builder()
-                        .data(json!({"response": "yay"}))
-                        .build(),
-                    req.context,
-                ))
-            },
+        let (router_mock, mut router_handle) =
+            tower_test::mock::pair::<crate::services::SupergraphRequest, SupergraphResponse>();
+        let router_driver = tokio::spawn(async move {
+            let (req, responder) = router_handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "yay"}))
+                    .build(),
+                req.context,
+            ));
+        });
+        let router_service = router::service::from_supergraph_mock_with_configuration(
+            router_mock,
             configuration.clone(),
         )
         .await;
@@ -840,6 +844,7 @@ mod tests {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         server.shutdown().await?;
+        crate::plugin::test::await_mock_driver(router_driver).await;
 
         Ok(())
     }
