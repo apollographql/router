@@ -2,7 +2,7 @@
 
 The `MockRouterService`, `MockSupergraphService`, `MockExecutionService`, `MockSubgraphService`, `MockConnectorService`, and `MockHttpClientService` types exported from `apollo_router::plugin::test` are now deprecated and will be removed in Router 3.0.
 
-Migrate tests to use [`tower_test::mock::pair`](https://docs.rs/tower-test/latest/tower_test/mock/fn.pair.html) directly:
+In your Rust plugins, migrate tests to use [`tower_test::mock::pair`](https://docs.rs/tower-test/latest/tower_test/mock/fn.pair.html) directly:
 
 ```rust
 // Before
