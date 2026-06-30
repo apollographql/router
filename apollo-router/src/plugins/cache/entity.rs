@@ -206,6 +206,14 @@ impl PluginPrivate for EntityCache {
     where
         Self: Sized,
     {
+        if init.config.enabled {
+            tracing::warn!(
+                "The `apollo.preview_entity_cache` plugin is deprecated and will be removed \
+                 in Router 3.0. Migrate to `apollo.response_cache`, which supersedes it. \
+                 See https://www.apollographql.com/docs/graphos/routing/performance/caching/overview"
+            );
+        }
+
         let entity_type = init
             .supergraph_schema
             .schema_definition
@@ -2167,6 +2175,24 @@ mod tests {
         assert_eq!(
             hash,
             "e5faa4c491214ed07f53acc65189e6efacc8b7eedc0d88055d86a5307671f0e3"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deprecation_warning_on_startup() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
+
+        let config: Config =
+            serde_json::from_value(serde_json::json!({ "enabled": true, "subgraph": {} })).unwrap();
+        let init = crate::plugin::PluginInit::fake_builder()
+            .config(config)
+            .build();
+
+        EntityCache::new(init).await.expect("plugin should init");
+        assert!(
+            tracing_test::logs_contain("apollo.preview_entity_cache"),
+            "expected deprecation warning to be logged"
         );
     }
 }
