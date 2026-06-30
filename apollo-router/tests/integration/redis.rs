@@ -85,13 +85,38 @@ async fn find_redis_key_matching(
     all_keys.into_iter().next()
 }
 
-/// Find a key matching the pattern that is not equal to `exclude_key`.
-/// Used when multiple keys match the same pattern and we need a different one (e.g. a second entity cache key).
-async fn find_redis_key_matching_different_from(
+/// Scan for all keys matching the pattern and return them as a sorted Vec.
+async fn find_all_redis_keys_matching(
     client: &RedisClient,
     namespace: &str,
     pattern: &str,
-    exclude_key: &str,
+) -> Vec<String> {
+    let full_pattern = format!("{namespace}:{pattern}");
+    let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
+    let mut all_keys = Vec::new();
+
+    while let Some(result) = scanner.next().await {
+        if let Ok(ref scan_result) = result
+            && let Some(keys) = scan_result.results()
+        {
+            for key in keys {
+                if let Some(s) = key.as_str() {
+                    all_keys.push(s.to_string());
+                }
+            }
+        }
+    }
+    all_keys.sort();
+    all_keys
+}
+
+/// Find a key matching the pattern that is NOT in `exclude_keys`.
+/// This is deterministic even when Redis SCAN returns keys in arbitrary order (e.g. Redis 7.4.9+).
+async fn find_redis_key_matching_not_in(
+    client: &RedisClient,
+    namespace: &str,
+    pattern: &str,
+    exclude_keys: &[String],
 ) -> Option<String> {
     let full_pattern = format!("{namespace}:{pattern}");
     let mut scanner = client.scan(&full_pattern, Some(100), Some(ScanType::String));
@@ -109,7 +134,7 @@ async fn find_redis_key_matching_different_from(
         }
     }
     all_keys.sort();
-    all_keys.into_iter().find(|k| k != exclude_key)
+    all_keys.into_iter().find(|k| !exclude_keys.contains(k))
 }
 
 fn make_redis_url(ports: &[&str]) -> Option<String> {
@@ -586,6 +611,16 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     let v: Value = client.get(&reviews_key).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
+    // Snapshot the set of reviews entity keys known before the second request so we can
+    // deterministically identify the new key added by the second request even if Redis SCAN
+    // returns keys in a different order (Redis 7.4.9 changed SCAN ordering).
+    let known_reviews_keys = find_all_redis_keys_matching(
+        &client,
+        &namespace,
+        "version:*:subgraph:reviews:type:Product:*",
+    )
+    .await;
+
     // we abuse the query shape to return a response with a different but overlapping set of entities
     let mut subgraphs = MockedSubgraphs::default();
     subgraphs.insert(
@@ -695,12 +730,14 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    // Find a different reviews entity key than the first (the second request fetched entity for product 3)
-    let reviews_key_2 = find_redis_key_matching_different_from(
+    // Find a reviews entity key added by the second request (for product 3), excluding all keys
+    // that existed before it ran. Using an exclusion set rather than a single exclude_key makes
+    // this deterministic under Redis 7.4.9+'s changed SCAN ordering.
+    let reviews_key_2 = find_redis_key_matching_not_in(
         &client,
         &namespace,
         "version:*:subgraph:reviews:type:Product:*",
-        &reviews_key,
+        &known_reviews_keys,
     )
     .await
     .expect("second reviews entity cache key should exist");

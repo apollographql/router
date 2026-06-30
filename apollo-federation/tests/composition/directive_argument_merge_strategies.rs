@@ -60,14 +60,14 @@ mod tests {
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @cost is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { weight: MAX }"#,
+                    r#"Directive @cost is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "weight": MAX }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @cost is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { weight: MAX }"#,
+                    r#"Directive @cost is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "weight": MAX }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -152,14 +152,14 @@ mod tests {
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @requiresScopes is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: DNF_CONJUNCTION }"#,
+                    r#"Directive @requiresScopes is applied to "T" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "scopes": DNF_CONJUNCTION }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @requiresScopes is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { scopes: DNF_CONJUNCTION }"#,
+                    r#"Directive @requiresScopes is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "scopes": DNF_CONJUNCTION }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -255,14 +255,14 @@ mod tests {
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "Query.t" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "Query.t" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -369,14 +369,14 @@ mod tests {
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "Query.t" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "Query.t" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -501,14 +501,14 @@ mod tests {
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
             CompositionHint {
                 definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
                 message: String::from(
-                    r#"Directive @listSize is applied to "T.b" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                    r#"Directive @listSize is applied to "T.b" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
                 ),
                 locations: Vec::new(),
             },
@@ -606,7 +606,7 @@ mod tests {
         let expected_hints = vec![CompositionHint {
             definition: HintCode::MergedNonRepeatableDirectiveArguments.definition(),
             message: String::from(
-                r#"Directive @listSize is applied to "Query.items" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                r#"Directive @listSize is applied to "Query.items" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "assumedSize": NULLABLE_MAX, "slicingArguments": NULLABLE_UNION, "sizedFields": NULLABLE_UNION, "requireOneSlicingArgument": NULLABLE_AND }"#,
             ),
             locations: Vec::new(),
         }];

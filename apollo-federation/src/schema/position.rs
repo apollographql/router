@@ -35,7 +35,7 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::database::links_metadata;
+use crate::link::metadata::LinksMetadata;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::merge_argument::HasArguments;
 use crate::merger::merge_argument::HasDefaultValue;
@@ -2098,7 +2098,7 @@ impl SchemaDefinitionPosition {
             .directives
             .insert(index, directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)?;
-        schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
+        schema.links_metadata = LinksMetadata::from_schema(&schema.schema)?.map(Box::new);
         Ok(())
     }
 
@@ -2115,7 +2115,7 @@ impl SchemaDefinitionPosition {
             .directives
             .retain(|other_directive| other_directive.name != name);
         if is_link {
-            schema.links_metadata = links_metadata(&schema.schema)?.map(Box::new);
+            schema.links_metadata = LinksMetadata::from_schema(&schema.schema)?.map(Box::new);
         }
         Ok(())
     }
@@ -2179,9 +2179,9 @@ impl SchemaDefinitionPosition {
     fn is_link(schema: &FederationSchema, name: &str) -> Result<bool, FederationError> {
         Ok(match schema.metadata() {
             Some(metadata) => {
-                let link_spec_definition = metadata.link_spec_definition()?;
+                let link_spec_definition = metadata.link_spec_definition();
                 let link_name_in_schema = link_spec_definition
-                    .directive_name_in_schema(schema, &link_spec_definition.identity().name)
+                    .directive_name_in_schema(schema, link_spec_definition.name())
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: "Unexpectedly could not find core/link spec usage".to_owned(),
                     })?;
@@ -7977,7 +7977,7 @@ impl FederationSchema {
     }
 
     pub(crate) fn collect_links_metadata(&mut self) -> Result<(), FederationError> {
-        self.links_metadata = links_metadata(self.schema())?.map(Box::new);
+        self.links_metadata = LinksMetadata::from_schema(self.schema())?.map(Box::new);
         Ok(())
     }
 

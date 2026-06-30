@@ -2190,3 +2190,67 @@ mod external_types {
         assert_no_hints(&composition_result);
     }
 }
+
+mod directive_argument_inconsistencies {
+    use super::*;
+
+    /// Regression: when an enum value is defined in only some subgraphs and carries inconsistent
+    /// `@deprecated` arguments, the INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS hint must only
+    /// reference subgraphs that actually *define the value*. Previously RS listed every subgraph
+    /// that merely declared the enum type (treating a missing value as "empty arguments").
+    #[test]
+    fn inconsistent_enum_value_directive_args_only_lists_defining_subgraphs() {
+        // Subgraph1/2 define V with @deprecated(reason: "use W") -> the chosen (most-used) value.
+        let s1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query { a: E }
+                enum E { V @deprecated(reason: "use W") W }
+            "#,
+        };
+        let s2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query { b: E }
+                enum E { V @deprecated(reason: "use W") W }
+            "#,
+        };
+        // Subgraph3 applies @deprecated with NO args -> a second, incompatible application that
+        // triggers the INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS hint.
+        let s3 = ServiceDefinition {
+            name: "Subgraph3",
+            type_defs: r#"
+                type Query { c: E }
+                enum E { V @deprecated W }
+            "#,
+        };
+        // Subgraph4 defines V but WITHOUT @deprecated -> the divergent "empty" group; it *does*
+        // define the value, so it is legitimately listed.
+        let s4 = ServiceDefinition {
+            name: "Subgraph4",
+            type_defs: r#"
+                type Query { d: E }
+                enum E { V W }
+            "#,
+        };
+        // Subgraph5 declares the enum but does NOT define V -> must NOT appear in the hint.
+        let s5 = ServiceDefinition {
+            name: "Subgraph5",
+            type_defs: r#"
+                type Query { e: E }
+                enum E { W }
+            "#,
+        };
+
+        let result =
+            compose_as_fed2_subgraphs(&[s1, s2, s3, s4, s5]).expect("should successfully compose");
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_NON_REPEATABLE_DIRECTIVE_ARGUMENTS",
+            "Non-repeatable directive @deprecated is applied to \"E.V\" in multiple \
+            subgraphs but with incompatible arguments. The supergraph will use arguments {reason: \"use W\"} \
+            (from subgraphs \"Subgraph1\" and \"Subgraph2\"), but found no arguments in subgraph \"Subgraph3\" \
+            and  in subgraph \"Subgraph4\".",
+        );
+    }
+}

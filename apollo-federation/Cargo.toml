@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.15.0"
+version = "2.15.1"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -17,9 +17,14 @@ autotests = false                                      # Integration tests are m
 snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
+# Builds the `connect-migrate` binary in `connectors/migration/`.
+# Pulls in clap + apollo-parser only when the binary is being built.
+connect-migrate = ["dep:clap", "dep:apollo-parser", "time/formatting"]
 
 [dependencies]
 apollo-compiler.workspace = true
+apollo-parser = { workspace = true, optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
 time = { version = "0.3.34", default-features = false, features = [
   "local-offset",
 ] }
@@ -30,7 +35,7 @@ derive_more = { version = "2.0.0", features = [
 ] }
 encoding_rs.workspace = true
 http.workspace = true
-hashbrown = "0.16.0"
+hashbrown = "0.17.0"
 heck.workspace = true
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
@@ -88,3 +93,8 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+[[bin]]
+name = "connect-migrate"
+path = "src/connectors/migration/main.rs"
+required-features = ["connect-migrate"]

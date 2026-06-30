@@ -44,8 +44,6 @@ use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -145,12 +143,8 @@ impl Service<RouterRequest> for RouterService {
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback_and_configuration(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock_with_configuration(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -158,18 +152,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    let mut supergraph_service = MockSupergraphService::new();
-
-    supergraph_service.expect_clone().returning(move || {
-        let cloned_callback = supergraph_callback.clone();
-        let mut supergraph_service = MockSupergraphService::new();
-        supergraph_service.expect_call().returning(cloned_callback);
-        supergraph_service
-    });
-
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| mock.clone().boxed())
         .build_common()
         .await
         .unwrap();
@@ -186,23 +171,15 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    from_supergraph_mock_callback_and_configuration(
-        supergraph_callback,
-        Arc::new(Configuration::default()),
-    )
-    .await
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
 
 #[cfg(test)]
@@ -212,14 +189,13 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    let mut supergraph_service = MockSupergraphService::new();
-    supergraph_service
-        .expect_clone()
-        .returning(MockSupergraphService::new);
+    // The handle is intentionally discarded — empty() creates a service that is never expected
+    // to be called. Any call would block indefinitely.
+    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .supergraph_hook(move |_| mock.clone().boxed())
         .build_common()
         .await
         .unwrap();
@@ -311,9 +287,25 @@ where
                 #[cfg(not(test))]
                 let headers = &parts.headers;
 
+                let header_string = {
+                    #[cfg(test)]
+                    {
+                        // Deterministic output for snapshot/log assertions.
+                        format!("{:?}", headers)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        crate::services::header_masking::masked_headers_for_log(
+                            &context,
+                            crate::services::header_masking::Direction::Request,
+                            None,
+                            headers,
+                        )
+                    }
+                };
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_HEADERS,
-                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    opentelemetry::Value::String(header_string.into()),
                 ));
                 attrs.push(KeyValue::new(
                     HTTP_REQUEST_METHOD,

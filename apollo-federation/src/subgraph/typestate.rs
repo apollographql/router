@@ -27,7 +27,6 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::error::SubgraphLocation;
 use crate::internal_error;
-use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -41,6 +40,7 @@ use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
@@ -270,7 +270,7 @@ impl Subgraph<Initial> {
             .make_mut()
             .directives
             .push(Component::new(Directive {
-                name: Identity::link_identity().name,
+                name: Identity::LINK_NAME,
                 arguments: vec![
                     Node::new(ast::Argument {
                         name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
@@ -768,7 +768,7 @@ pub(crate) fn schema_as_fed2_subgraph(
     use_latest: bool,
 ) -> Result<(), FederationError> {
     let (link_name_in_schema, metadata) = if let Some(metadata) = schema.metadata() {
-        let link_spec = metadata.link_spec_definition()?;
+        let link_spec = metadata.link_spec_definition();
         // We don't accept pre-1.0 @core: this avoid having to care about what the name
         // of the argument below is, and why would be bother?
         ensure!(
@@ -779,10 +779,7 @@ pub(crate) fn schema_as_fed2_subgraph(
             "Fed2 schema must use @link with version >= 1.0, but schema uses {spec_url}",
             spec_url = link_spec.url()
         );
-        let Some(link) = link_spec.link_in_schema(schema) else {
-            bail!("Core schema is missing the link spec link directive");
-        };
-        (link.spec_name_in_schema().clone(), metadata)
+        (metadata.link_itself().spec_name_in_schema(), metadata)
     } else {
         let link_spec = LinkSpecDefinition::latest();
         let link_name_in_schema = add_link_spec_to_schema(schema, link_spec)?;
@@ -931,7 +928,7 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
         .schema_definition
         .directives
         .iter()
-        .find(|d| d.name == DEFAULT_LINK_NAME)
+        .find(|d| d.name == LINK_DIRECTIVE_NAME_IN_SPEC)
         .cloned()
     {
         // only try to add it if there is no directive definition for it
@@ -986,7 +983,7 @@ fn add_link_spec_to_schema(
     schema: &mut FederationSchema,
     link_spec: &'static LinkSpecDefinition,
 ) -> Result<Name, FederationError> {
-    let link_spec_name = &link_spec.identity().name;
+    let link_spec_name = link_spec.name();
     let alias = find_unused_name_for_directive(schema, link_spec_name)?;
     let link_name_in_schema = alias.clone().unwrap_or_else(|| link_spec_name.clone());
     link_spec.add_to_schema(schema, alias)?;
@@ -1002,7 +999,7 @@ pub(crate) fn has_federation_spec_link(schema: &Schema) -> bool {
 }
 
 fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
-    if directive.name != DEFAULT_LINK_NAME {
+    if directive.name != LINK_DIRECTIVE_NAME_IN_SPEC {
         return false;
     }
     let Ok(url_arg) = directive.argument_by_name(&LINK_DIRECTIVE_URL_ARGUMENT_NAME, schema) else {

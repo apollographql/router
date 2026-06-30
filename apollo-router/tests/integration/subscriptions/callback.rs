@@ -22,8 +22,13 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server that will send callbacks
-    let subgraph_server =
-        start_callback_subgraph_server(nb_events, interval_ms, callback_url.clone()).await;
+    let subgraph_server = start_callback_subgraph_server(
+        nb_events,
+        interval_ms,
+        callback_url.clone(),
+        callback_state.subscription_ids.clone(),
+    )
+    .await;
 
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
@@ -157,7 +162,7 @@ async fn wait_for_callbacks(
 async fn wait_for_router_ready(url: &str, deadline: tokio::time::Duration) {
     let start = tokio::time::Instant::now();
     let client = reqwest::Client::builder()
-        .timeout(tokio::time::Duration::from_secs(1))
+        .timeout(tokio::time::Duration::from_millis(200))
         .build()
         .expect("build reqwest client");
     while start.elapsed() < deadline {
@@ -393,6 +398,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         custom_payloads.clone(),
         interval_ms,
         callback_url.clone(),
+        callback_state.subscription_ids.clone(),
     )
     .await;
 
@@ -422,7 +428,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
     // scheduling pressure (the failure surface previously observed
     // on `test-amd_linux_test`).
     let router_url = format!("http://{}/", router.bind_address());
-    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(60)).await;
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(90)).await;
 
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
 
@@ -515,6 +521,7 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
         custom_payloads.clone(),
         interval_ms,
         callback_url.clone(),
+        callback_state.subscription_ids.clone(),
     )
     .await;
 
@@ -542,7 +549,7 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
     // surface that crashed this test on CircleCI build 378842,
     // `test-amd_linux_test`).
     let router_url = format!("http://{}/", router.bind_address());
-    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(60)).await;
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(90)).await;
 
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 2) { name reviews { body } } }"#;
 

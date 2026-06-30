@@ -1,0 +1,17 @@
+fragment SharedEnumFragment on EverythingResponse {
+    enumResponse
+}
+
+query DeduplicatedFragmentQuery {
+  noInputQuery {
+    ...on EverythingResponse {
+      ...SharedEnumFragment
+    }
+    ...on EverythingResponse {
+      ...SharedEnumFragment
+    }
+    ...on EverythingResponse {
+      ...SharedEnumFragment
+    }
+  }
+}
