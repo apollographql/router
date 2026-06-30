@@ -24,6 +24,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt as _;
 use tracing::Instrument;
+use tracing::Span;
 
 use super::PipelineStep;
 use super::subgraph::SubgraphRequestId;
@@ -322,12 +323,14 @@ where
             "otel.original_name" = "http_request",
         );
 
+        let _enter = http_req_span.enter();
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &prepare_context(http_req_span.context()),
+                &prepare_context(Span::current().context()),
                 &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
             );
         });
+        drop(_enter);
 
         let request = HttpRequest {
             http_request,
@@ -548,4 +551,5 @@ mod test {
         .with_subscriber(assert_snapshot_subscriber!())
         .await;
     }
+
 }
