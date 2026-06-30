@@ -14,8 +14,7 @@ telemetry:
 # After
 telemetry:
   instrumentation:
-    spans:
-      mode: spec_compliant
+    spans: {}
 ```
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/ROUTER-1773
