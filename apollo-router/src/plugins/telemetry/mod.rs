@@ -614,35 +614,6 @@ impl PluginPrivate for Telemetry {
                     Self::plugin_metrics(&config);
 
                     async move {
-<<<<<<< HEAD
-=======
-                        // NB: client name and version must be picked up here, rather than in the
-                        //  `req_fn` of this `map_future_with_request_data` call, to allow plugins
-                        //  at the router service to modify the name and version.
-                        let client_name = get_client_attribute_from_context(
-                            &ctx,
-                            CLIENT_NAME,
-                            DEPRECATED_CLIENT_NAME,
-                            &CLIENT_NAME_DEPRECATED_WARNED,
-                        );
-                        let client_version = get_client_attribute_from_context(
-                            &ctx,
-                            CLIENT_VERSION,
-                            DEPRECATED_CLIENT_VERSION,
-                            &CLIENT_VERSION_DEPRECATED_WARNED,
-                        );
-
-                        if let Some(key) = client_name_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_name.unwrap_or_default()));
-                        }
-
-                        if let Some(key) = client_version_key {
-                            custom_attributes
-                                .push(KeyValue::new(key, client_version.unwrap_or_default()));
-                        }
-
->>>>>>> origin/dev
                         if let Some(http_server_response_body_size) =
                             &custom_instruments.http_server_response_body_size
                         {
