@@ -352,7 +352,6 @@ impl PluginPrivate for Telemetry {
     }
 
     fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
-        let config = self.config.clone();
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();

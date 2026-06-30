@@ -631,8 +631,6 @@ pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use tower::Service;
