@@ -152,89 +152,61 @@ mod forbid_http_get_mutations_tests {
     use crate::Context;
     use crate::assert_error_eq_ignoring_id;
     use crate::error::Error;
-    use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
-        let mut mock_service = MockSupergraphService::new();
-
-        mock_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
-
-        let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
-
-        let services = service_stack.ready().await.unwrap();
-        services
-            .call(http_post_query_plan_request)
+        let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        });
+        AllowOnlyHttpPostMutationsLayer::default()
+            .layer(mock)
+            .oneshot(create_request(Method::POST, OperationKind::Query))
             .await
             .unwrap()
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn it_lets_http_post_mutations_pass_through() {
-        let mut mock_service = MockSupergraphService::new();
-
-        mock_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
-
-        let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
-
-        let services = service_stack.ready().await.unwrap();
-        services
-            .call(http_post_query_plan_request)
+        let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        });
+        AllowOnlyHttpPostMutationsLayer::default()
+            .layer(mock)
+            .oneshot(create_request(Method::POST, OperationKind::Mutation))
             .await
             .unwrap()
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn it_lets_http_get_queries_pass_through() {
-        let mut mock_service = MockSupergraphService::new();
-
-        mock_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
-
-        let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
-
-        let services = service_stack.ready().await.unwrap();
-        services
-            .call(http_post_query_plan_request)
+        let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        });
+        AllowOnlyHttpPostMutationsLayer::default()
+            .layer(mock)
+            .oneshot(create_request(Method::GET, OperationKind::Query))
             .await
             .unwrap()
             .next_response()
             .await
             .unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -246,7 +218,7 @@ mod forbid_http_get_mutations_tests {
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
-        let forbidden_requests = [
+        let forbidden_methods = [
             Method::GET,
             Method::HEAD,
             Method::OPTIONS,
@@ -255,21 +227,16 @@ mod forbid_http_get_mutations_tests {
             Method::TRACE,
             Method::CONNECT,
             Method::PATCH,
-        ]
-        .into_iter()
-        .map(|method| create_request(method, OperationKind::Mutation));
+        ];
 
-        for request in forbidden_requests {
-            let mut mock_service = MockSupergraphService::new();
-
-            mock_service
-                .expect_clone()
-                .returning(MockSupergraphService::new);
-
-            let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
-            let services = service_stack.ready().await.unwrap();
-
-            let mut error_response = services.call(request).await.unwrap();
+        for method in forbidden_methods {
+            // Inner service is never reached — the layer rejects the request.
+            let (mock, handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+            let mut error_response = AllowOnlyHttpPostMutationsLayer::default()
+                .layer(mock)
+                .oneshot(create_request(method, OperationKind::Mutation))
+                .await
+                .unwrap();
             let response = error_response.next_response().await.unwrap();
 
             assert_eq!(expected_status, error_response.response.status());
@@ -278,6 +245,7 @@ mod forbid_http_get_mutations_tests {
                 error_response.response.headers().get("Allow").unwrap()
             );
             assert_error_eq_ignoring_id!(expected_error, response.errors[0]);
+            crate::plugin::test::assert_no_mock_calls(handle).await;
         }
     }
 

@@ -249,6 +249,7 @@ tonic = { version = "0.14.5", features = [
 tower.workspace = true
 tower-http = { version = "0.6.2", features = ["full"] }
 tower-service = "0.3.2"
+tower-test = "0.4.0"
 tracing = "0.1.40"
 tracing-core = "0.1.32"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
@@ -350,7 +351,6 @@ tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
 ] }
-tower-test = "0.4.0"
 multer = { version = "3.1.0", features = ["json"] }
 
 # See note above in this file about `^tracing` packages which also applies to
