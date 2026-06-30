@@ -1951,17 +1951,7 @@ mod helper {
             count += chunk.len();
 
             // Make sure that the bytes match what is expected
-            let unexpected = match chunk.into_iter().all_equal_value() {
-                Ok(value) => (value != byte_value).then_some(value),
-                Err(Some((lhs, rhs))) => {
-                    if lhs != byte_value {
-                        Some(lhs)
-                    } else {
-                        Some(rhs)
-                    }
-                }
-                Err(None) => None,
-            };
+            let unexpected = chunk.into_iter().find(|&b| b != byte_value);
             if let Some(unexpected_byte) = unexpected {
                 return Err(FileUploadError::UnexpectedData(byte_value, unexpected_byte));
             }
