@@ -9,7 +9,6 @@ use tower_http::trace::MakeSpan;
 use tower_service::Service;
 use tracing::Span;
 
-use crate::plugins::telemetry::SpanMode;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
@@ -36,10 +35,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            SpanMode::SpecCompliant.create_router(request)
+            crate::plugins::telemetry::span_factory::create_router(request)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            SpanMode::SpecCompliant.create_router(request)
+            crate::plugins::telemetry::span_factory::create_router(request)
         };
         if matches!(
             &*self.license,

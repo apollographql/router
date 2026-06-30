@@ -73,7 +73,6 @@ use self::config_new::subgraph::events::SubgraphEvents;
 use self::config_new::subgraph::instruments::SubgraphInstruments;
 use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
-pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
@@ -163,7 +162,7 @@ mod otlp;
 pub(crate) mod reload;
 pub(crate) mod resource;
 pub(crate) mod span_ext;
-mod span_factory;
+pub(crate) mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
@@ -426,7 +425,7 @@ impl PluginPrivate for Telemetry {
                 {
                     current
                 } else {
-                    SpanMode::SpecCompliant.create_router(&request.router_request)
+                    span_factory::create_router(&request.router_request)
                 }
             }))
             .checkpoint(move |req: router::Request| {
@@ -738,7 +737,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
-                SpanMode::SpecCompliant.create_supergraph(
+                span_factory::create_supergraph(
                     &config_instrument.apollo,
                     supergraph_req,
                     field_level_instrumentation_ratio,
@@ -967,7 +966,7 @@ impl PluginPrivate for Telemetry {
             .cache_custom_instruments
             .clone();
         ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| SpanMode::SpecCompliant.create_subgraph(name.as_str(), req))
+            .instrument(move |req: &SubgraphRequest| span_factory::create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
@@ -1099,7 +1098,7 @@ impl PluginPrivate for Telemetry {
             .clone();
         ServiceBuilder::new()
             .instrument(move |_req: &connector::request_service::Request| {
-                SpanMode::SpecCompliant.create_connector(source_name.as_str())
+                span_factory::create_connector(source_name.as_str())
             })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {
