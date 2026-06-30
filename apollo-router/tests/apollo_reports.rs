@@ -64,7 +64,6 @@ static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(||
 });
 
 async fn config(
-    use_legacy_request_span: bool,
     reports: Arc<Mutex<Vec<Report>>>,
     demand_control: bool,
     experimental_field_stats: bool,
@@ -92,11 +91,6 @@ async fn config(
         Some(serde_json::Value::String(format!("http://{addr}")))
     })
     .expect("Could not sub in endpoint");
-    config =
-        jsonpath_lib::replace_with(config, "$.telemetry.spans.legacy_request_span", &mut |_| {
-            Some(serde_json::Value::Bool(use_legacy_request_span))
-        })
-        .expect("Could not sub in endpoint");
     config = jsonpath_lib::replace_with(config, "$.demand_control.enabled", &mut |_| {
         Some(serde_json::Value::Bool(demand_control))
     })
@@ -113,14 +107,12 @@ async fn config(
 
 async fn get_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(
-        use_legacy_request_span,
         reports,
         demand_control,
         experimental_local_field_metrics,
@@ -241,14 +233,12 @@ async fn start_demo_subgraphs_mock_server() -> MockServer {
 /// `start_demo_subgraphs_mock_server` for the broader root cause.
 async fn get_router_service_with_subgraph_mock(
     reports: Arc<Mutex<Vec<Report>>>,
-    use_legacy_request_span: bool,
     _mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, mut config) = config(
-        use_legacy_request_span,
         reports,
         demand_control,
         experimental_local_field_metrics,
@@ -291,14 +281,12 @@ async fn get_router_service_with_subgraph_mock(
 
 async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(
-        use_legacy_request_span,
         reports,
         demand_control,
         experimental_local_field_metrics,
@@ -332,14 +320,12 @@ async fn get_batch_router_service(
 /// ROUTER-1814 for the underlying flake.
 async fn get_batch_router_service_with_subgraph_mock(
     reports: Arc<Mutex<Vec<Report>>>,
-    use_legacy_request_span: bool,
     _mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, mut config) = config(
-        use_legacy_request_span,
         reports,
         demand_control,
         experimental_local_field_metrics,
@@ -465,7 +451,6 @@ async fn get_metrics_report(
         get_router_service,
         reports,
         false,
-        false,
         request,
         demand_control,
         experimental_local_field_metrics,
@@ -490,7 +475,6 @@ async fn get_metrics_report_mocked(
     get_report(
         get_router_service,
         reports,
-        false,
         true,
         request,
         false,
@@ -516,7 +500,6 @@ async fn get_metrics_report_with_subgraph_mock(
         get_router_service_with_subgraph_mock,
         reports,
         false,
-        false,
         request,
         demand_control,
         experimental_local_field_metrics,
@@ -535,7 +518,6 @@ async fn get_metrics_report_with_subgraph_mock(
 async fn get_trace_report_with_subgraph_mock(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
-    use_legacy_request_span: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&'static str>,
@@ -543,7 +525,6 @@ async fn get_trace_report_with_subgraph_mock(
     get_report(
         get_router_service_with_subgraph_mock,
         reports,
-        use_legacy_request_span,
         false,
         request,
         demand_control,
@@ -567,7 +548,6 @@ async fn get_trace_report_with_subgraph_mock(
 async fn get_batch_trace_report_with_subgraph_mock(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
-    use_legacy_request_span: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
     config_str: Option<&'static str>,
@@ -575,7 +555,6 @@ async fn get_batch_trace_report_with_subgraph_mock(
     get_report(
         get_batch_router_service_with_subgraph_mock,
         reports,
-        use_legacy_request_span,
         false,
         request,
         demand_control,
@@ -600,11 +579,9 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
         bool,
         bool,
         bool,
-        bool,
         Option<&'static str>,
     ) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
-    use_legacy_request_span: bool,
     mocked: bool,
     request: router::Request,
     demand_control: bool,
@@ -618,7 +595,6 @@ where
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
         reports.clone(),
-        use_legacy_request_span,
         mocked,
         demand_control,
         experimental_local_field_metrics,
@@ -681,7 +657,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 ) -> u64 {
     reports.lock().await.clear();
     let (task, mut service) =
-        get_batch_router_service(reports.clone(), mocked, false, false, false, None).await;
+        get_batch_router_service(reports.clone(), mocked, false, false, None).await;
     let response = service
         .ready()
         .await
@@ -722,7 +698,6 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 
 #[tokio::test(flavor = "multi_thread")]
 async fn non_defer() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .build()
@@ -732,19 +707,16 @@ async fn non_defer() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
             .variable("if", true)
@@ -756,19 +728,16 @@ async fn test_condition_if() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_else() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
@@ -780,19 +749,16 @@ async fn test_condition_else() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .build()
@@ -802,19 +768,16 @@ async fn test_trace_id() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
-    for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
                 .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -828,19 +791,16 @@ async fn test_batch_trace_id() {
         let report = get_batch_trace_report_with_subgraph_mock(
             reports,
             request.into(),
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_with_client_name_http_header() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .header("apollographql-client-name", "my client")
@@ -851,19 +811,16 @@ async fn test_trace_with_client_name_http_header() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_with_client_version_http_header() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .header("apollographql-client-version", "my client version")
@@ -874,14 +831,12 @@ async fn test_trace_with_client_version_http_header() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -982,7 +937,6 @@ async fn test_metrics_with_library_version_request_extension() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_header() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .header("send-header", "Header value")
@@ -994,19 +948,16 @@ async fn test_send_header() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
-    for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
                 .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -1022,19 +973,16 @@ async fn test_batch_send_header() {
         let report = get_batch_trace_report_with_subgraph_mock(
             reports,
             request.into(),
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
         .variable("sendValue", true)
@@ -1046,14 +994,12 @@ async fn test_send_variable_value() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             false,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1132,7 +1078,6 @@ async fn test_demand_control_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace() {
-    for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
             .build()
@@ -1142,19 +1087,16 @@ async fn test_demand_control_trace() {
         let report = get_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             true,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace_batched() {
-    for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
                 .query("query one {topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -1169,14 +1111,12 @@ async fn test_demand_control_trace_batched() {
         let report = get_batch_trace_report_with_subgraph_mock(
             reports,
             req,
-            use_legacy_request_span,
             true,
             false,
             None,
         )
         .await;
         assert_report!(report);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
