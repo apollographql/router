@@ -22,6 +22,7 @@ use serde::de::DeserializeOwned;
 use strum::Display;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceExt as _;
 use tracing::Instrument;
 
 use super::PipelineStep;
@@ -333,7 +334,12 @@ where
             context,
         };
 
-        let response = client.call(request).instrument(http_req_span).await?;
+        let response = client
+            .ready()
+            .await?
+            .call(request)
+            .instrument(http_req_span)
+            .await?;
         router::body::into_bytes(response.http_response.into_body())
             .await
             .map_err(BoxError::from)
