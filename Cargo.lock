@@ -18,6 +18,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -172,9 +173,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "apollo-compiler"
@@ -576,6 +577,7 @@ dependencies = [
  "serde_json_bytes",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -1361,6 +1363,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -1727,6 +1730,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -2626,6 +2630,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
  "tracing",
 ]
 
@@ -2639,6 +2644,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -3986,6 +3992,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -4717,6 +4724,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -5331,6 +5339,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -5903,6 +5912,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tower-test",
 ]
 
 [[package]]
@@ -5965,9 +5975,9 @@ dependencies = [
 
 [[package]]
 name = "ron"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4147b952f3f819eca0e99527022f7d6a8d05f111aeb0a62960c74eb283bec8fc"
+checksum = "81116b9531d61eabc41aeb228e4b6b2435bcca3233b98cf3b3077d4e6e9debb3"
 dependencies = [
  "bitflags 2.11.0",
  "once_cell",
