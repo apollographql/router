@@ -10333,22 +10333,6 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
-        "shared_key": {
-          "default": "",
-          "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphInvalidationConfig2": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable the invalidation",
-          "type": "boolean"
-        },
         "indexes": {
           "allOf": [
             {
