@@ -1,5 +1,23 @@
 //! Various utility functions and core structures used to implement batching support within
 //! the router.
+//!
+//! Batching works roughly along these lines:
+//! - At the router service, a batch query is split apart into multiple requests.
+//! - A single [Batch] structure is created, which is responsible for handling the batch lifecycle.
+//! - Each individual request gets a [BatchQuery] extension.
+//! - After query planning of each individual request, that request's [BatchQuery::set_query_hashes]
+//!   is called to set the expected number of subgraph requests. This includes only the subgraph
+//!   requests that are unconditionally executed, not subsequent entity fetches for example that can
+//!   only be executed based on data obtained during query plan execution.
+//! - Once each subgraph request that is part of the batch reaches the subgraph service, instead of
+//!   submitting the request to the HTTP client, it calls into [BatchQuery::signal_progress]. This
+//!   is how subgraph requests are eventually batched up. When a [BatchQuery] has received all
+//!   expected progress calls (per [BatchQuery::set_query_hashes]), that query is considered
+//!   "finished".
+//! - The [Batch] lifecycle handler receives messages from each [BatchQuery]. Once _all_
+//!   [BatchQuery]s are finished, no more messages come in, and this is when the [Batch] lifecycle
+//!   handler actually batches up the requests to each subgraph, and sends the batched subgraph
+//!   requests to the HTTP client.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
