@@ -631,9 +631,9 @@ async fn test_redis_emits_configuration_error_metric() {
             "subgraph": {
                 "all": {
                     "enabled": true,
+                    "ttl": "10m",
                     "redis": {
                         "urls": ["redis://127.0.0.1:1"], // port 1 is not Redis; connection will be refused
-                        "ttl": "10m",
                         "required_to_start": false, // don't fail startup, allow errors during runtime
                     },
                 },
