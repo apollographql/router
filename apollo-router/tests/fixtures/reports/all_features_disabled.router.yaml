@@ -24,7 +24,6 @@ demand_control:
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
   exporters:
     tracing:
       experimental_response_trace_id:

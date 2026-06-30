@@ -18,5 +18,4 @@ telemetry:
         enable_span_mapping: false
   instrumentation:
     spans:
-      mode: spec_compliant
 

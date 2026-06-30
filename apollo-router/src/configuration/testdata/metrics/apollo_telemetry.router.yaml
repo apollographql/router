@@ -4,7 +4,6 @@ supergraph:
 telemetry:
   instrumentation:
     spans:
-      mode: spec_compliant
 
   apollo:
     otlp_tracing_sampler: 1
