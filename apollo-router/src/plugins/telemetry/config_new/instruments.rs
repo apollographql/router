@@ -4106,4 +4106,72 @@ mod tests {
         // When unit is "ms", 1500us should be 1.5 milliseconds
         assert_eq!(duration_to_f64(duration, "ms"), 1.5);
     }
+
+    /// Verify that the `RouterInstruments::on_response` dispatch to `subscriptions_terminated`
+    /// is wired up end-to-end. If the delegation were removed or mis-wired, `stashed_attributes`
+    /// would be empty and the `subgraph.name`/`client.name` labels would silently disappear from
+    /// the metric — exactly the regression this PR guards against.
+    #[tokio::test]
+    async fn test_router_instruments_on_response_wires_subscriptions_terminated() {
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "router": {
+                        "apollo.router.operations.subscriptions.terminated.client": {
+                            "attributes": {
+                                "reason": true,
+                                "subgraph.name": true,
+                                "client.name": true
+                            }
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let router_instruments =
+                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
+
+            let ctx = Context::new();
+            ctx.insert(
+                SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY,
+                "products".to_string(),
+            )
+            .unwrap();
+            ctx.insert(CLIENT_NAME, "ios-client".to_string()).unwrap();
+
+            let router_req = RouterRequest::fake_builder()
+                .context(ctx.clone())
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+
+            let router_response = RouterResponse::fake_builder()
+                .context(ctx.clone())
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            // Extract the counter stashed into context extensions by on_request, which now
+            // carries the attributes populated by on_response via the shared Arc.
+            let counter = ctx
+                .extensions()
+                .with_lock(|lock| lock.get::<SubscriptionsTerminatedCounter>().cloned())
+                .expect("counter must be present after on_request");
+
+            counter.record("server_close");
+
+            assert_counter!(
+                "apollo.router.operations.subscriptions.terminated.client",
+                1,
+                "reason" = "server_close",
+                "subgraph.name" = "products",
+                "client.name" = "ios-client"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
 }
