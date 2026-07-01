@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use indexmap::map::Entry;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -167,6 +168,15 @@ impl OpPathTree {
         self.childs
             .iter()
             .fallible_all(|child| child.tree.is_all_in_same_subgraph_internal(target))
+    }
+
+    pub(crate) fn collect_subgraphs(&self, out: &mut IndexSet<Arc<str>>) {
+        if let Ok(w) = self.graph.node_weight(self.node) {
+            out.insert(w.source.clone());
+        }
+        for child in &self.childs {
+            child.tree.collect_subgraphs(out);
+        }
     }
 
     fn fmt_internal(

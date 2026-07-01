@@ -4,6 +4,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
@@ -113,6 +114,7 @@ struct CachedConditionEntry {
     context: OpGraphPathContext,
     excluded_destinations: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
+    used_subgraphs: IndexSet<Arc<str>>,
 }
 
 pub(crate) struct ConditionResolverCache {
@@ -140,11 +142,33 @@ impl ConditionResolverCache {
 
         if let Some(entries) = self.edge_states.get(&edge) {
             for cached in entries {
-                if &cached.context == context
-                    && &cached.excluded_destinations == excluded_destinations
-                    && &cached.excluded_conditions == excluded_conditions
-                {
+                let destinations_match = &cached.excluded_destinations == excluded_destinations;
+                let conditions_match = &cached.excluded_conditions == excluded_conditions;
+
+                if &cached.context == context && destinations_match && conditions_match {
                     return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
+                }
+
+                // Path-aware satisfied reuse: if the cached resolution's path tree doesn't
+                // traverse any of the newly-excluded destinations, the path is still
+                // available and the cached result is valid. We require exact match on
+                // excluded conditions because fewer condition exclusions could open up
+                // better paths that weren't explored when the cached result was computed.
+                if &cached.context == context
+                    && conditions_match
+                    && matches!(&cached.resolution, ConditionResolution::Satisfied { .. })
+                {
+                    let destinations_ok = destinations_match
+                        || (!cached.used_subgraphs.is_empty() && {
+                            let any_conflict = excluded_destinations
+                                .newly_excluded_in(&cached.excluded_destinations)
+                                .any(|dest| cached.used_subgraphs.contains(dest));
+                            !any_conflict
+                        });
+
+                    if destinations_ok {
+                        return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
+                    }
                 }
             }
             ConditionResolutionCacheResult::Miss
@@ -161,6 +185,17 @@ impl ConditionResolverCache {
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
     ) {
+        let used_subgraphs = if let ConditionResolution::Satisfied {
+            path_tree: Some(ref tree),
+            ..
+        } = resolution
+        {
+            let mut subgraphs = IndexSet::default();
+            tree.collect_subgraphs(&mut subgraphs);
+            subgraphs
+        } else {
+            Default::default()
+        };
         self.edge_states
             .entry(edge)
             .or_default()
@@ -169,6 +204,7 @@ impl ConditionResolverCache {
                 context,
                 excluded_destinations,
                 excluded_conditions,
+                used_subgraphs,
             });
     }
 }

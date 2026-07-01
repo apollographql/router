@@ -243,6 +243,16 @@ impl ExcludedDestinations {
             .any(|excluded| excluded.as_ref() == destination)
     }
 
+    pub(crate) fn newly_excluded_in<'a>(
+        &'a self,
+        other: &'a ExcludedDestinations,
+    ) -> impl Iterator<Item = &'a str> + 'a {
+        self.0
+            .iter()
+            .filter(move |d| !other.is_excluded(d))
+            .map(|d| d.as_ref())
+    }
+
     fn add_excluded(&self, destination: &Arc<str>) -> Self {
         if !self.is_excluded(destination) {
             let mut new = self.0.as_ref().clone();
