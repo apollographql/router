@@ -368,15 +368,16 @@ where
                 .await;
             if entry.is_first() {
                 loop {
-                    let request = QueryPlannerRequest {
-                        query: query.clone(),
-                        operation_name: operation_name.clone(),
-                        document: doc.clone(),
-                        metadata: caching_key.metadata.clone(),
-                        plan_options: caching_key.plan_options.clone(),
-                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
-                        variables: Default::default(),
-                    };
+                    let request = QueryPlannerRequest::builder()
+                        .query(query.clone())
+                        .and_operation_name(operation_name.clone())
+                        .document(doc.clone())
+                        .metadata(caching_key.metadata.clone())
+                        .plan_options(caching_key.plan_options.clone())
+                        .compute_job_type(ComputeJobType::QueryPlanningWarmup)
+                        .variables(Default::default())
+                        .build();
+
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
                         Err(_) => break 'all_cache_keys_loop,
