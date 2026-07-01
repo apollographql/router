@@ -1,6 +1,9 @@
 # Changelog
 
-All notable changes to `apollo-federation` will be documented in this file.
+All notable changes to Apollo Composition are documented in this file.
+
+> [!NOTE]
+> Query planner changes are documented in the router [CHANGELOG](../CHANGELOG.md).
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -17,91 +20,79 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Maintenance
 ## Documentation-->
 
-# [0.0.11](https://crates.io/crates/apollo-federation/0.0.11) - 2024-04-12
 
-## Fixes
-- Forbid aliases in `@requires(fields:)` / `@key(fields:)` argument, by [duckki] in [pull/251]
 
-## Features
-- Expose subgraphs schemas to crate consumers, by [SimonSapin] in [pull/257]
+# [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop]
+Adds support for Apollo Federation v2.15.
 
-[duckki]: https://github.com/duckki
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[SimonSapin]: https://github.com/SimonSapin
-[pull/251]: https://github.com/apollographql/federation-next/pull/251
-[pull/257]: https://github.com/apollographql/federation-next/pull/257
+This is the first Rust-native Apollo composition release. It introduces no new directives or composition behavior.
+Rust composition generates semantically equivalent supergraphs to the previous JavaScript binaries. However, the rewrite
+does surface a number of validation and error-reporting improvements, detailed below, that were previously inconsistent
+or missing.
 
-# [0.0.10](https://crates.io/crates/apollo-federation/0.0.10) - 2024-04-09
+## Additional validations
 
-## Features
-- Query plan changes for initial router integration, by [SimonSapin] in [pull/240]
-- Mark join/v0.4 spec as supported for non-query planning purpose, by [SimonSapin] in [pull/233], [pull/237]
-- Continued work on core query planning implementation, by [duckki], [SimonSapin], [TylerBloom]
+### Disallow interfaces implementing `@interfaceObject`
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop] in [pull/253]
+Federation currently doesn't support this pattern and will emit `INTERFACE_OBJECT_USAGE_ERROR` error when it detects such a scenario.
 
-[duckki]: https://github.com/duckki
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[SimonSapin]: https://github.com/SimonSapin
-[TylerBloom]: https://github.com/TylerBloom
-[pull/233]: https://github.com/apollographql/federation-next/pull/233
-[pull/237]: https://github.com/apollographql/federation-next/pull/237
-[pull/240]: https://github.com/apollographql/federation-next/pull/240
-[pull/253]: https://github.com/apollographql/federation-next/pull/253
+### Override label validation
 
-# [0.0.9](https://crates.io/crates/apollo-federation/0.0.9) - 2024-03-20
+Composition now drops the `@override` labels if they don't reference a valid subgraph.
 
-## Features
-- Continued work on core query planning implementation, by [goto-bus-stop] in [pull/229]
+### External field validation
 
-## Maintenance
-- Update `apollo-compiler`, by [goto-bus-stop] in [pull/230]
+Composition now correctly validates merged directive usage on `@external` fields  and emits `MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL`
+error on failures.
 
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/229]: https://github.com/apollographql/federation-next/pull/229
-[pull/230]: https://github.com/apollographql/federation-next/pull/230
+### Custom spec URL validation
 
-# [0.0.8](https://crates.io/crates/apollo-federation/0.0.8) - 2024-03-06
+Composition now rejects custom spec imports that specify the Apollo spec domain `https://specs.apollo.dev`. Custom spec
+URLs are now checked against Apollo spec domain to prevent future collisions with new Apollo specs.
 
-## Features
-- Support legacy `@core` link syntax, by [goto-bus-stop] in [pull/224]  
-  This is not meant to be a long term feature, `@core()` is not intended
-  to be supported in most of the codebase.
-- Continued work on core query planning implementation, by [SimonSapin], [goto-bus-stop] in [pull/172], [pull/175]
+### Input object validation
 
-## Maintenance
-- `@link(url: String!)` argument is non-null, by [SimonSapin] in [pull/220]
-- Enable operation normalization tests using `@defer`, by [goto-bus-stop] in [pull/224]
+Composition now validates user-provided default object values to ensure they're valid (i.e. all fields are optional
+or have default values). Invalid values are removed from the supergraph.
 
-[SimonSapin]: https://github.com/SimonSapin
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/172]: https://github.com/apollographql/federation-next/pull/172
-[pull/175]: https://github.com/apollographql/federation-next/pull/175
-[pull/220]: https://github.com/apollographql/federation-next/pull/220
-[pull/223]: https://github.com/apollographql/federation-next/pull/223
-[pull/224]: https://github.com/apollographql/federation-next/pull/224
+### `@tag` validations
 
-# [0.0.7](https://crates.io/crates/apollo-federation/0.0.7) - 2024-02-22
+Composition now runs `@tag` validations as part of the main process (previously they were checked during contract variant
+generation only).
 
-## Features
-- Continued work on core query planning implementation, by [SimonSapin] in [pull/121]
+### Root type inference fix
 
-## Fixes
-- Fix `@defer` directive definition in API schema generation, by [goto-bus-stop] in [pull/221]
+Composition ensures that it only infers default root operation types (e.g. `Mutation`) if they aren't referenced by
+other schema elements.
 
-[SimonSapin]: https://github.com/SimonSapin
-[goto-bus-stop]: https://github.com/goto-bus-stop
-[pull/121]: https://github.com/apollographql/federation-next/pull/121
-[pull/221]: https://github.com/apollographql/federation-next/pull/221
+### Stricter `FieldSet` coercion rules
 
-# [0.0.3](https://crates.io/crates/apollo-federation/0.0.3) - 2023-11-08
+`_FieldSet/FieldSet` is a custom scalar that represents a GraphQL selection set (minus brackets). While Apollo expects this
+value to be a `String`, the system accepted additional values due to auto-coercion logic.
 
-## Features
-- Extracting subgraph information from a supergraph for the purposes of query planning by [sachindshinde] in [pull/56]
+## Cosmetic changes
 
-[sachindshinde]: https://github.com/sachindshinde
-[pull/56]: https://github.com/apollographql/federation-next/pull/56
+### Additional hints
+
+The merge process now correctly emits hints on composition failure.
+
+### Empty object vs expanded object
+
+Composition now auto expands input objects explicitly specifying all the default values for the fields (e.g. `input: SortAndFilter = {}`
+becomes `input: SortAndFilter = { limit: 100, sort: DESC }`).
+
+### Value coercion
+
+Whenever your subgraph defines a default value with a coercible value (e.g., a default value of `Int` for a field that accepts `Float`),
+this value now coerces to the appropriate target type (e.g. `weight: Float = 1` becomes `weight: Float = 1.0`).
+
+### Example queries
+
+Due to differences in underlying data structures and libraries, this new composition version might include different
+example operations in the hint messages.
+
+### Rich error diagnostics
+
+`apollo-compiler` provides rich error diagnostics (with line numbers and references to the schema) for GraphQL errors.
+
