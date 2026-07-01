@@ -647,6 +647,7 @@ mod tests {
     use crate::spec::query::subselections::SubSelectionValue;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
+    const SUBSCRIPTION_SCHEMA: &str = include_str!("testdata/schema_subscription.graphql");
 
     #[test(tokio::test)]
     async fn test_plan() {
@@ -770,13 +771,20 @@ mod tests {
     #[test(tokio::test)]
     async fn test_plan_error() {
         let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
+        let schema = Arc::new(Schema::parse(SUBSCRIPTION_SCHEMA, &config).unwrap());
 
         let mut service = QueryPlannerService::new(schema.clone(), config.clone())
             .await
             .unwrap();
 
-        let query = ""; // empty query is invalid
+        // subscription with @defer cannot be query planned
+        let query = r#"
+            subscription {
+                userWasCreated {
+                  ... @defer(label: "name") { username }
+                }
+            }
+        "#;
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
 
         let result = service
@@ -804,7 +812,7 @@ mod tests {
         };
 
         assert_eq!(
-            "spec error: parsing error: [1:1] syntax error: Unexpected <EOF>.",
+            "Federation error: @defer is not supported on subscriptions",
             err.to_string()
         );
     }
