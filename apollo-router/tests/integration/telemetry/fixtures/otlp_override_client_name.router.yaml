@@ -2,6 +2,7 @@ rhai:
   scripts: "tests/integration/telemetry/fixtures"
   main: "override_client_name.rhai"
 telemetry:
+  instrumentation:
     events:
       router:
         request: info
