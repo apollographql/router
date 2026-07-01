@@ -561,9 +561,13 @@ mod test {
 
         async {
             // Simulate the enclosing span that wraps the entire coprocessor call.
-            let external_plugin = tracing::info_span!("external_plugin");
-            let external_plugin_id = external_plugin.id();
-            let _enter = external_plugin.enter();
+let external_plugin = tracing::info_span!("external_plugin");
+let external_plugin_id = external_plugin.id();
+assert!(
+    external_plugin_id.is_some(),
+    "test requires external_plugin span to be enabled and have an id"
+);
+let _enter = external_plugin.enter();
 
             let service = service_fn(move |req: HttpRequest| {
                 // Capture which span is *current* when client.call() runs synchronously.
