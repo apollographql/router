@@ -177,6 +177,8 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
+    static EMPTY_QUERY: &str =
+        r#"query NoPlanning { topProducts(first: 5) @skip(if: true) { upc } }"#;
 
     async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
         let mut extensions = Object::new();
@@ -323,6 +325,30 @@ mod tests {
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
+        assert!(response.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_expose_empty_query_plan() {
+        let response = execute_supergraph_test(
+            EMPTY_QUERY,
+            build_mock_supergraph(serde_json::json! {{
+                "plugins": {
+                    "experimental.expose_query_plan": true
+                }
+            }})
+            .await,
+        )
+        .await;
+
+        // Since we're exposing the query plan, the extensions better not be empty! See the test
+        // for not exposing query plans to know why the assumption that a non-empty extension means
+        // we have a query plan
+        assert!(!response.extensions.is_empty());
+
+        // Since this is a full-run (ie, not a dry-run), we should have data
+        assert!(response.data.is_some());
+        assert!(response.errors.is_empty());
     }
 
     #[tokio::test]
@@ -345,5 +371,6 @@ mod tests {
 
         // Since this is a dry-run, we shouldn't have any data
         assert!(response.data.is_none());
+        assert!(response.errors.is_empty());
     }
 }
