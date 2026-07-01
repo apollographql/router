@@ -34,36 +34,23 @@ fn main() -> Result<()> {
 mod tests {
 
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
-    async fn build_a_test_harness() -> router::BoxCloneService {
-        // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockSupergraphService::new();
-
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
-        let expected_mock_response_data = "response created within the mock";
-
-        // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockSupergraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: supergraph::Request| {
-                    Ok(supergraph::Response::fake_builder()
-                        .data(expected_mock_response_data)
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
-            mock_service
-                .expect_clone()
-                .returning(test::MockSupergraphService::new);
-            mock_service
+    async fn build_a_test_harness() -> (router::BoxCloneService, tokio::task::JoinHandle<()>) {
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_builder()
+                    .data("response created within the mock")
+                    .context(req.context)
+                    .build()
+                    .unwrap(),
+            );
         });
 
         #[cfg(target_os = "windows")]
@@ -102,23 +89,24 @@ mod tests {
             }
         });
 
-        apollo_router::TestHarness::builder()
+        let harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
             .supergraph_hook(move |_| mock_service.clone().boxed_clone())
             .build_router()
             .await
-            .unwrap()
+            .unwrap();
+        (harness, driver)
     }
 
     #[tokio::test]
     async fn load_plugin() {
-        let _test_harness = build_a_test_harness().await;
+        let (_test_harness, _driver) = build_a_test_harness().await;
     }
 
     #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let (test_harness, driver) = build_a_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -153,5 +141,9 @@ mod tests {
         let expected_mock_response_data = "response created within the mock";
         // with the expected message
         assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out — service was not called within 5 s")
+            .unwrap();
     }
 }

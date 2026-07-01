@@ -1,0 +1,38 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "https://api.example.com" })
+
+# Fields selected beneath an ->entries sub-selection must be credited to the
+# declared entry type. ->entries has a statically known list shape, so the
+# shape-based validator (v0.4+) must walk Array shapes; previously it dropped
+# them, leaving AttributesEntry.key / AttributesEntry.value spuriously
+# unresolved (CONNECTORS_UNRESOLVED_FIELD). v0.1-v0.3 are unaffected (legacy
+# AST-visitor validator).
+
+type Thing {
+    name: String
+    attributes: [AttributesEntry]
+}
+
+type AttributesEntry {
+    key: String
+    value: String
+}
+
+type Query {
+    thing: Thing
+    @connect(
+        source: "api"
+        http: { GET: "/thing" }
+        selection: """
+        name
+        attributes: attributes->entries {
+            key
+            value
+        }
+        """
+    )
+}

@@ -22,8 +22,13 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server that will send callbacks
-    let subgraph_server =
-        start_callback_subgraph_server(nb_events, interval_ms, callback_url.clone()).await;
+    let subgraph_server = start_callback_subgraph_server(
+        nb_events,
+        interval_ms,
+        callback_url.clone(),
+        callback_state.subscription_ids.clone(),
+    )
+    .await;
 
     // Create router with port reservations
     let mut router = IntegrationTest::builder()
@@ -393,6 +398,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
         custom_payloads.clone(),
         interval_ms,
         callback_url.clone(),
+        callback_state.subscription_ids.clone(),
     )
     .await;
 
@@ -515,6 +521,7 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
         custom_payloads.clone(),
         interval_ms,
         callback_url.clone(),
+        callback_state.subscription_ids.clone(),
     )
     .await;
 

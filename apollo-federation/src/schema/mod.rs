@@ -342,11 +342,9 @@ impl FederationSchema {
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
-    fn federation_link(&self) -> Option<&Arc<Link>> {
+    fn federation_link(&self) -> Option<Arc<Link>> {
         self.metadata().and_then(|metadata| {
-            metadata
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            metadata.for_identity(FederationSpecDefinition::latest().identity())
         })
     }
 
@@ -390,9 +388,8 @@ impl FederationSchema {
             let Some(links) = self.metadata() else {
                 bail!("Schema should be a core schema")
             };
-            let Some(federation_link) = links
-                .by_identity
-                .get(FederationSpecDefinition::latest().identity())
+            let Some(federation_link) =
+                links.for_identity(FederationSpecDefinition::latest().identity())
             else {
                 bail!("Schema should have the latest federation link")
             };
@@ -1298,6 +1295,13 @@ impl ValidFederationSchema {
     pub fn new_assume_valid(
         mut schema: FederationSchema,
     ) -> Result<ValidFederationSchema, (FederationSchema, FederationError)> {
+        // While LinksMetadata::from_schema() partially validated @link usages, we need to run
+        // further @link validations after the schema is confirmed to be valid GraphQL.
+        if let Some(links_metadata) = &schema.links_metadata
+            && let Err(error) = links_metadata.validate_no_shadowing_imports(&schema)
+        {
+            return Err((schema, error));
+        }
         // Populating subgraph metadata requires a mutable FederationSchema, while computing the subgraph
         // metadata requires a valid FederationSchema. Since valid schemas are immutable, we have
         // to jump through some hoops here. We already assume that `schema` is valid GraphQL, so we

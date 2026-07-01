@@ -140,9 +140,24 @@ fn find_shape(
         );
     };
 
-    // Compute the shape of the find condition argument
+    // Compute the shape of the find condition argument.
+    //
+    // The runtime applies the condition once per array element (`@` = element),
+    // so the condition must be shaped against the array's ELEMENT shape, not the
+    // whole array. Passing `input_shape` directly only happened to work when the
+    // input was `Unknown` (the lenient check below accepts it); for a concrete
+    // list — e.g. the output of a prior `->filter`, which is `List<…>` — a
+    // condition like `@.field->gt(…)` mapped `.field` across the list and then
+    // applied the comparison to a list, yielding a non-boolean shape and a
+    // spurious `Error<"->find condition must return a boolean value">`. That
+    // error then propagated into expansion as an empty output object type.
+    // Unlike `->filter`, `->find` returns a single item (not a list), so it is
+    // only ever the *victim* of this mismatch (as the terminal consumer of a
+    // list-producing method like `->filter`/`->map`), never the producer.
+    // `any_item` matches the per-element runtime semantics and is robust to
+    // chaining.
     let condition_shape =
-        first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
+        first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape);
 
     // Validate that the condition evaluates to a boolean or
     // something that could become a boolean
@@ -166,6 +181,7 @@ fn find_shape(
 
 #[cfg(test)]
 mod method_tests {
+    use serde_json_bytes::Value as JSON;
     use serde_json_bytes::json;
 
     use crate::connectors::ConnectSpec;
@@ -324,6 +340,76 @@ mod method_tests {
             ),
         );
     }
+
+    // Moderately complex chains of the iterative array methods, verifying the
+    // runtime produces the expected values. These complement the shape-level
+    // regression coverage (`find_shape_supports_concrete_list_condition` and the
+    // `chained_methods_v0_4.graphql` expand fixture): here we confirm behavior,
+    // there we confirm the chained element shapes don't collapse.
+    fn chain_data() -> JSON {
+        json!({
+            "results": [
+                { "id": "1", "name": "alpha", "status": "A", "rank": 0 },
+                { "id": "2", "name": "bravo", "status": "A", "rank": 5 },
+                { "id": "3", "name": "charlie", "status": "B", "rank": 9 },
+            ],
+        })
+    }
+
+    #[test]
+    fn find_should_work_after_filter() {
+        // filter -> find: filter hands find a concrete list; find returns the
+        // first surviving element whose rank is positive.
+        assert_eq!(
+            selection!("$.results->filter(@.status->eq(\"A\"))->find(@.rank->gt(0))")
+                .apply_to(&chain_data()),
+            (
+                Some(json!({ "id": "2", "name": "bravo", "status": "A", "rank": 5 })),
+                vec![]
+            ),
+        );
+    }
+
+    #[test]
+    fn find_should_work_after_map() {
+        // map -> find: map produces the concrete list consumed by find.
+        assert_eq!(
+            selection!("$.results->map(@)->find(@.rank->gt(0))").apply_to(&chain_data()),
+            (
+                Some(json!({ "id": "2", "name": "bravo", "status": "A", "rank": 5 })),
+                vec![]
+            ),
+        );
+    }
+
+    #[test]
+    fn find_should_work_after_filter_then_map() {
+        // filter -> map -> find: three-method chain, find terminal.
+        assert_eq!(
+            selection!("$.results->filter(@.status->eq(\"A\"))->map(@)->find(@.rank->gt(0))")
+                .apply_to(&chain_data()),
+            (
+                Some(json!({ "id": "2", "name": "bravo", "status": "A", "rank": 5 })),
+                vec![]
+            ),
+        );
+    }
+
+    #[test]
+    fn map_then_filter_should_chain() {
+        // map -> filter: map produces the concrete list, filter is the terminal
+        // consumer and returns every element with a positive rank.
+        assert_eq!(
+            selection!("$.results->map(@)->filter(@.rank->gt(0))").apply_to(&chain_data()),
+            (
+                Some(json!([
+                    { "id": "2", "name": "bravo", "status": "A", "rank": 5 },
+                    { "id": "3", "name": "charlie", "status": "B", "rank": 9 },
+                ])),
+                vec![]
+            ),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -332,10 +418,12 @@ mod shape_tests {
     use shape::location::SourceId;
 
     use super::*;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::Key;
     use crate::connectors::PathSelection;
     use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::lit_expr::LitExpr;
+    use crate::connectors::json_selection::location::new_span_with_spec;
 
     fn get_location() -> Location {
         Location {
@@ -467,6 +555,43 @@ mod shape_tests {
         let input_shape = Shape::list(Shape::int([]), []);
         // Unknown shapes should be accepted as they could produce boolean values at runtime
         let result = get_shape(vec![path.into_with_range()], input_shape.clone());
+        assert_eq!(
+            result,
+            Shape::one([Shape::none(), input_shape.any_item([])], [])
+        );
+    }
+
+    // Parse a `@`-rooted condition expression (e.g. `@.x->eq(true)`) the way it
+    // appears inside `->find(...)`.
+    fn parse_condition(input: &str) -> WithRange<LitExpr> {
+        LitExpr::parse(new_span_with_spec(input, ConnectSpec::V0_4))
+            .unwrap()
+            .1
+    }
+
+    // Regression: `->find` must shape its condition against the array's element,
+    // not the whole array. Unlike `->filter`, `->find` returns a single item, so
+    // it is never the *producer* in a chain — but it is still a *victim* as the
+    // terminal consumer of a list-producing method (`->filter`/`->map`), which
+    // hands it a concrete `List<…>`. Before the fix, `->find`'s condition
+    // (`@.field->gt(0)`) mapped `.field` across that list and applied `->gt` to a
+    // list, producing `Error<"->find condition must return a boolean value">`.
+    // The expander turned that error shape into an empty output object type,
+    // which slipped past release builds (validation skipped) and surfaced
+    // downstream as a composition `SATISFIABILITY_ERROR`. A bare `->find` over an
+    // `Unknown` input does *not* reproduce this (the lenient check accepts it),
+    // so the concrete list input below is essential.
+    // See integration fixture `chained_methods_v0_4.graphql`.
+    #[test]
+    fn find_shape_supports_concrete_list_condition() {
+        // The concrete `List<Unknown>` a prior `->filter`/`->map` produces.
+        let input_shape = Shape::list(Shape::unknown([]), []);
+        let result = get_shape(vec![parse_condition("@.rank->gt(0)")], input_shape.clone());
+        assert!(
+            !matches!(result.case(), ShapeCase::Error(_)),
+            "->find over a concrete list produced an error shape (regression): {}",
+            result.pretty_print()
+        );
         assert_eq!(
             result,
             Shape::one([Shape::none(), input_shape.any_item([])], [])

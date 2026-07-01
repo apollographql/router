@@ -43,8 +43,6 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -142,33 +140,9 @@ impl Service<RouterRequest> for RouterService {
     }
 }
 
-/// Creates a MockSupergraphService that can be called and cloned an arbitrary number of times.
-/// Each clone also has the callback and is itself callable and clonable.
-/// This is necessary because AsyncCheckpointService::call() unconditionally clones its inner
-/// service, so clones of the mock must also support being called on subsequent requests.
 #[cfg(test)]
-pub(crate) fn make_supergraph_mock_with_callback(
-    callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + Clone
-    + 'static,
-) -> MockSupergraphService {
-    let callback_for_clone = callback.clone();
-    let mut m = MockSupergraphService::new();
-    m.expect_call().returning(callback);
-    m.expect_clone()
-        .returning(move || make_supergraph_mock_with_callback(callback_for_clone.clone()));
-    m
-}
-
-#[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback_and_configuration(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock_with_configuration(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -177,15 +151,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    let mut supergraph_service = MockSupergraphService::new();
-
-    supergraph_service
-        .expect_clone()
-        .returning(move || make_supergraph_mock_with_callback(supergraph_callback.clone()));
-
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(configuration.clone())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
@@ -202,12 +170,8 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
-    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-    + Send
-    + Sync
-    + 'static
-    + Clone,
+pub(crate) async fn from_supergraph_mock(
+    mock: tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -215,11 +179,7 @@ pub(crate) async fn from_supergraph_mock_callback(
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send
 + Clone {
-    from_supergraph_mock_callback_and_configuration(
-        supergraph_callback,
-        Arc::new(Configuration::default()),
-    )
-    .await
+    from_supergraph_mock_with_configuration(mock, Arc::new(Configuration::default())).await
 }
 
 #[cfg(test)]
@@ -229,14 +189,13 @@ pub(crate) async fn empty() -> impl Service<
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    let mut supergraph_service = MockSupergraphService::new();
-    supergraph_service
-        .expect_clone()
-        .returning(MockSupergraphService::new);
+    // The handle is intentionally discarded — empty() creates a service that is never expected
+    // to be called. Any call would block indefinitely.
+    let (mock, _handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
     let (_, _, supergraph_creator) = crate::TestHarness::builder()
         .configuration(Default::default())
-        .supergraph_hook(move |_| supergraph_service.clone().boxed_clone())
+        .supergraph_hook(move |_| mock.clone().boxed_clone())
         .build_common()
         .await
         .unwrap();
