@@ -309,6 +309,9 @@ async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
+    // `service` is a shared `&str`, but the various error/telemetry sinks below need an
+    // owned copy; compute it once here instead of re-converting at each call site.
+    let service_name = service.to_string();
 
     // Update our batching metrics (just before we fetch)
     u64_histogram!(
@@ -316,7 +319,7 @@ async fn process_batch(
         "Number of queries contained within each query batch",
         listener_count as u64,
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.to_string()
+        subgraph = service_name.clone()
     );
 
     u64_counter!(
@@ -326,7 +329,7 @@ async fn process_batch(
         // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
         // Also, other metrics use a different convention to report the subgraph name
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.to_string()
+        subgraph = service_name.clone()
     );
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
@@ -342,14 +345,14 @@ async fn process_batch(
                 .body(err.to_graphql_error(None))
                 .map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.to_string(),
+                    service: service_name.clone(),
                     reason: format!("cannot create the http response from error: {err:?}"),
                 })?;
             let (parts, body) = resp.into_parts();
             let body =
                 serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.to_string(),
+                    service: service_name.clone(),
                     reason: format!("cannot serialize the error: {err:?}"),
                 })?;
             (
@@ -395,7 +398,7 @@ async fn process_batch(
         }
         attrs.push(KeyValue::new(
             Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service.to_string().into()),
+            opentelemetry::Value::String(service_name.clone().into()),
         ));
         log_event(
             event.level,
@@ -412,25 +415,25 @@ async fn process_batch(
     );
     let value =
         serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
-            service: service.to_string(),
+            service: service_name.clone(),
             reason: "no body in response".to_string(),
         })??)
         .map_err(|error| FetchError::SubrequestMalformedResponse {
-            service: service.to_string(),
+            service: service_name.clone(),
             reason: error.to_string(),
         })?;
 
     tracing::debug!("json value from body is: {value:?}");
 
     let array = ensure_array!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-        service: service.to_string(),
+        service: service_name.clone(),
         reason: error.to_string(),
     })?;
     let mut graphql_responses = Vec::with_capacity(array.len());
     for value in array {
         let object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service.to_string(),
+                service: service_name.clone(),
                 reason: error.to_string(),
             })?;
 
@@ -440,7 +443,7 @@ async fn process_batch(
             serde_json::to_vec(&object)
                 .map(|v| v.into())
                 .map_err(|error| FetchError::SubrequestMalformedResponse {
-                    service: service.to_string(),
+                    service: service_name.clone(),
                     reason: error.to_string(),
                 }),
         );
@@ -455,7 +458,7 @@ async fn process_batch(
     // response
     if graphql_responses.len() != contexts.len() {
         return Err(FetchError::SubrequestBatchingError {
-            service: service.to_string(),
+            service: service_name.clone(),
             reason: format!(
                 "number of contexts ({}) is not equal to number of graphql responses ({})",
                 contexts.len(),
@@ -482,7 +485,7 @@ async fn process_batch(
                     let resp = SubgraphResponse::new_from_response(
                         http_res,
                         context,
-                        service.to_string(),
+                        service_name.clone(),
                         id,
                     );
 
