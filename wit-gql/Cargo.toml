@@ -1,0 +1,11 @@
+[package]
+name = "wit-gql"
+version = "0.1.0"
+edition = "2021"
+description = "Decode a WebAssembly component's WIT and map its exported functions to a GraphQL schema. Shared by the wit-to-gql CLI and the Apollo Router wasm data-source integration so SDL generation and runtime dispatch never drift."
+publish = false
+
+[dependencies]
+anyhow = "1"
+wit-component = "0.252"
+wit-parser = "0.252"

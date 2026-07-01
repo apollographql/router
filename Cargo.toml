@@ -6,6 +6,7 @@ members = [
     "apollo-router-benchmarks",
     "apollo-federation",
     "apollo-federation/cli",
+    "wit-gql",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
     "examples/cache-control/rhai",
