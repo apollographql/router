@@ -589,13 +589,15 @@ async fn notify_batch_query(
     Ok(())
 }
 
-type BatchInfo = (
-    (
-        String,
-        crate::services::http::BoxCloneService,
-        http::Request<RouterBody>,
-        Vec<(Context, SubgraphRequestId)>,
-    ),
+struct BatchInfo {
+    service: String,
+    http_client: crate::services::http::BoxCloneService,
+    request: http::Request<RouterBody>,
+    contexts: Vec<(Context, SubgraphRequestId)>,
+}
+
+type BatchResult = (
+    BatchInfo,
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -609,17 +611,25 @@ pub(crate) async fn process_batches(
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
             let SubgraphBatchRequest {
-                http_client: client,
+                http_client,
                 contexts,
                 request,
                 txs,
             } = assemble_batch(requests).await?;
 
-            Ok(((service, client, request, contexts), txs))
+            Ok((
+                BatchInfo {
+                    service,
+                    http_client,
+                    request,
+                    contexts,
+                },
+                txs,
+            ))
         }))
         .await
         .into_iter()
-        .filter_map(|x: Result<BatchInfo, BoxError>| x.map_err(|e| errors.push(e)).ok())
+        .filter_map(|x: Result<BatchResult, BoxError>| x.map_err(|e| errors.push(e)).ok())
         .unzip();
 
     // If errors isn't empty, then process_batches cannot proceed. Let's log out the errors and
@@ -641,16 +651,23 @@ pub(crate) async fn process_batches(
         )
         .into());
     }
-    let batch_futures =
-        info.into_iter()
-            .zip_eq(txs)
-            .map(|((service, http_client, request, contexts), senders)| async move {
-                let listener_count = senders.len();
-                let batch_result =
-                    process_batch(http_client, &service, contexts, request, listener_count).await;
+    let batch_futures = info.into_iter().zip_eq(txs).map(
+        |(
+            BatchInfo {
+                service,
+                http_client,
+                request,
+                contexts,
+            },
+            senders,
+        )| async move {
+            let listener_count = senders.len();
+            let batch_result =
+                process_batch(http_client, &service, contexts, request, listener_count).await;
 
-                notify_batch_query(service, senders, batch_result).await
-            });
+            notify_batch_query(service, senders, batch_result).await
+        },
+    );
 
     futures::future::try_join_all(batch_futures).await?;
 
