@@ -171,6 +171,7 @@ fn subgraph_service_factory(
         // Required for subscriptions: we are not testing that here
         Default::default(),
         None,
+        Default::default(),
     )
 }
 
