@@ -541,17 +541,34 @@ where
             .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned())
             .unwrap_or_default();
 
+        let query_planner::CachingRequest {
+            query,
+            operation_name,
+            context,
+            variables,
+        } = request;
+
+        // Build the inner query planner request.
+        let request = QueryPlannerRequest::builder()
+            .query(&query)
+            .and_operation_name(operation_name.clone())
+            .document(doc.clone())
+            .metadata(metadata.clone())
+            .plan_options(plan_options.clone())
+            .compute_job_type(ComputeJobType::QueryPlanning)
+            .variables(variables)
+            .build();
+
+        // Check the cache first
         let caching_key = CachingQueryKey {
-            query: request.query.clone(),
-            operation: request.operation_name.to_owned(),
+            query: query.clone(),
+            operation: operation_name.clone(),
             hash: doc.hash.clone(),
-            schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
+            schema_id: self.schema.schema_id.clone(),
             config_mode_hash: self.config_mode_hash.clone(),
         };
-
-        let context = request.context.clone();
         let entry = self
             .cache
             .get(&caching_key, |v| {
@@ -560,23 +577,6 @@ where
             .await;
 
         if entry.is_first() {
-            let query_planner::CachingRequest {
-                query,
-                operation_name,
-                context,
-                variables,
-            } = request;
-
-            let request = QueryPlannerRequest::builder()
-                .query(&query)
-                .and_operation_name(operation_name)
-                .document(doc)
-                .metadata(caching_key.metadata)
-                .plan_options(caching_key.plan_options)
-                .compute_job_type(ComputeJobType::QueryPlanning)
-                .variables(variables)
-                .build();
-
             let planning_task = async move {
                 let service = match self.delegate.ready().await {
                     Ok(service) => service,
@@ -839,8 +839,8 @@ where
                         crate::spec::operation_limits::check_measured(
                             &plan.query_metrics,
                             &self.config_limits,
-                            &caching_key.query,
-                            caching_key.operation.as_deref(),
+                            &query,
+                            operation_name.as_deref(),
                         )
                         .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
                     }
