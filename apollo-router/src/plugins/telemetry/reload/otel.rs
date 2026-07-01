@@ -110,7 +110,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
                 .with(DynAttributeLayer::new())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
-                .with(WarnLegacyMetricsLayer)
                 // Rate limit OpenTelemetry internal log messages to avoid log spam when things go wrong
                 .with(RateLimitLayer::new(
                     "opentelemetry",
@@ -201,61 +200,5 @@ where
                 trace_id.clone()
             }
         })
-    }
-}
-
-const LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
-const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
-const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
-const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
-
-/// REMOVE in 3.0
-/// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
-struct WarnLegacyMetricsLayer;
-
-// We can't use the tracing macros inside our `on_event` callback, instead we have to manually
-// produce an event, which requires a significant amount of ceremony.
-// This metadata mimicks what `tracing::error!()` does.
-static WARN_LEGACY_METRIC_CALLSITE: tracing_core::callsite::DefaultCallsite =
-    tracing_core::callsite::DefaultCallsite::new(&WARN_LEGACY_METRIC_METADATA);
-static WARN_LEGACY_METRIC_METADATA: tracing_core::Metadata = tracing_core::metadata! {
-    name: "warn_legacy_metric",
-    target: module_path!(),
-    level: tracing_core::Level::ERROR,
-    fields: &["message", "metric_name"],
-    callsite: &WARN_LEGACY_METRIC_CALLSITE,
-    kind: tracing_core::metadata::Kind::EVENT,
-};
-
-impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if let Some(field) = event.fields().find(|field| {
-            field
-                .name()
-                .starts_with(LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_COUNTER)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_HISTOGRAM)
-                || field.name().starts_with(LEGACY_METRIC_PREFIX_VALUE)
-        }) {
-            // Doing all this manually is a flippin nightmare!
-            // We allocate a bunch but I reckon it's fine because this only happens in a deprecated
-            // code path that we want people to upgrade from.
-            let fields = WARN_LEGACY_METRIC_METADATA.fields();
-            let message_field = fields.field("message").unwrap();
-            let message =
-                "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry"
-                    .to_string();
-            let name_field = fields.field("metric_name").unwrap();
-            let metric_name = field.name().to_string();
-            let value_set = &[
-                (&message_field, Some(&message as &dyn tracing::Value)),
-                (&name_field, Some(&metric_name as &dyn tracing::Value)),
-            ];
-            let value_set = fields.value_set(value_set);
-            ctx.event(&tracing_core::Event::new(
-                &WARN_LEGACY_METRIC_METADATA,
-                &value_set,
-            ));
-        }
     }
 }
