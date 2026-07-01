@@ -581,13 +581,6 @@ fn emit_connection_rejection_metrics(status_code: u16, start: Instant, span_mode
     let elapsed_s = elapsed.as_secs_f64();
     let elapsed_ns = elapsed.as_nanos() as i64;
 
-    u64_counter!(
-        "apollo.router.operations",
-        "The number of graphql operations performed by the Router",
-        1,
-        "http.response.status_code" = status_code as i64
-    );
-
     // Same name, unit, and description as the histogram created by RouterInstruments so that
     // APM tools aggregate these rejected requests together with normal request durations.
     f64_histogram_with_unit!(
@@ -855,11 +848,6 @@ mod tests {
     async fn emit_connection_rejection_metrics_records_431() {
         async {
             emit_connection_rejection_metrics(431, Instant::now(), SpanMode::default());
-            assert_counter!(
-                "apollo.router.operations",
-                1,
-                "http.response.status_code" = 431i64
-            );
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
@@ -874,11 +862,6 @@ mod tests {
     async fn emit_connection_rejection_metrics_records_414() {
         async {
             emit_connection_rejection_metrics(414, Instant::now(), SpanMode::default());
-            assert_counter!(
-                "apollo.router.operations",
-                1,
-                "http.response.status_code" = 414i64
-            );
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
@@ -930,33 +913,6 @@ mod tests {
 
             server.shutdown().await.unwrap();
 
-            // emit_connection_rejection_metrics runs in the detached per-connection
-            // task; wait_for_servers() does not await those tasks, so poll until the
-            // metric is observed before asserting its value.
-            let attrs = [opentelemetry::KeyValue::new(
-                "http.response.status_code",
-                431i64,
-            )];
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    if crate::metrics::collect_metrics().metric_exists(
-                        "apollo.router.operations",
-                        crate::metrics::test_utils::MetricType::Counter,
-                        &attrs,
-                    ) {
-                        return;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-            .expect("timed out waiting for 431 rejection metrics to be emitted");
-
-            assert_counter!(
-                "apollo.router.operations",
-                1,
-                "http.response.status_code" = 431i64
-            );
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
@@ -1009,32 +965,6 @@ mod tests {
 
             server.shutdown().await.unwrap();
 
-            // Same race as the 431 test: emit_connection_rejection_metrics runs in
-            // the detached per-connection task that may outlive wait_for_servers().
-            let attrs = [opentelemetry::KeyValue::new(
-                "http.response.status_code",
-                414i64,
-            )];
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    if crate::metrics::collect_metrics().metric_exists(
-                        "apollo.router.operations",
-                        crate::metrics::test_utils::MetricType::Counter,
-                        &attrs,
-                    ) {
-                        return;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-            .expect("timed out waiting for 414 rejection metrics to be emitted");
-
-            assert_counter!(
-                "apollo.router.operations",
-                1,
-                "http.response.status_code" = 414i64
-            );
             assert_histogram_count!(
                 "http.server.request.duration",
                 1,
