@@ -286,30 +286,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_persisted_query_not_found_message_retries_with_query() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqnf_message_response(req.context));
-                }
-                assert!(
-                    req.subgraph_request.body().query.is_some(),
-                    "retry should include the full query"
-                );
-                assert!(
-                    req.subgraph_request
-                        .body()
-                        .extensions
-                        .contains_key(PERSISTED_QUERY_KEY),
-                    "retry should keep the persistedQuery hash"
-                );
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(pqnf_message_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert!(
+                req.subgraph_request.body().query.is_some(),
+                "retry should include the full query"
+            );
+            assert!(
+                req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY),
+                "retry should keep the persistedQuery hash"
+            );
+            responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -318,20 +317,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_persisted_query_not_found_extension_code_retries_with_query() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqnf_extension_code_response(req.context));
-                }
-                assert!(req.subgraph_request.body().query.is_some());
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(pqnf_extension_code_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert!(req.subgraph_request.body().query.is_some());
+            responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -340,33 +338,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_persisted_query_not_supported_message_disables_apq() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqns_message_response(req.context));
-                }
-                assert!(
-                    req.subgraph_request.body().query.is_some(),
-                    "retry should include the full query"
-                );
-                assert!(
-                    !req.subgraph_request
-                        .body()
-                        .extensions
-                        .contains_key(PERSISTED_QUERY_KEY),
-                    "persistedQuery extension should be removed for PQNS retry"
-                );
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(pqns_message_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert!(
+                req.subgraph_request.body().query.is_some(),
+                "retry should include the full query"
+            );
+            assert!(
+                !req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY),
+                "persistedQuery extension should be removed for PQNS retry"
+            );
+            responder.send_response(success_response(req.context));
         });
 
         let layer = SubgraphApqLayer::new(true);
-        let svc = layer.layer(inner);
+        let svc = layer.layer(mock);
         assert!(svc.enabled.load(Relaxed), "APQ should start enabled");
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -379,29 +376,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_persisted_query_not_supported_extension_code_disables_apq() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqns_extension_code_response(req.context));
-                }
-                assert!(req.subgraph_request.body().query.is_some());
-                assert!(
-                    !req.subgraph_request
-                        .body()
-                        .extensions
-                        .contains_key(PERSISTED_QUERY_KEY)
-                );
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(pqns_extension_code_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert!(req.subgraph_request.body().query.is_some());
+            assert!(
+                !req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY)
+            );
+            responder.send_response(success_response(req.context));
         });
 
         let layer = SubgraphApqLayer::new(true);
-        let svc = layer.layer(inner);
+        let svc = layer.layer(mock);
         assert!(svc.enabled.load(Relaxed));
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -457,38 +453,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_apq_not_found_retry_preserves_original_body() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                assert!(
-                    req.subgraph_request
-                        .body()
-                        .extensions
-                        .contains_key(PERSISTED_QUERY_KEY),
-                    "both attempts should include the persistedQuery hash"
-                );
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqnf_message_response(req.context));
-                }
-                let body = req.subgraph_request.body();
-                assert_eq!(
-                    body.query.as_deref(),
-                    Some(APQ_TEST_QUERY),
-                    "retry should send the original query string"
-                );
-                assert_eq!(
-                    body.operation_name.as_deref(),
-                    Some("MyOp"),
-                    "operation_name should be preserved on retry"
-                );
-                assert_eq!(
-                    body.variables.get("id"),
-                    Some(&serde_json_bytes::json!("42")),
-                    "variables should be preserved on retry"
-                );
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert!(
+                req.subgraph_request
+                    .body()
+                    .extensions
+                    .contains_key(PERSISTED_QUERY_KEY),
+                "both attempts should include the persistedQuery hash"
+            );
+            responder.send_response(pqnf_message_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            let body = req.subgraph_request.body();
+            assert!(
+                body.extensions.contains_key(PERSISTED_QUERY_KEY),
+                "both attempts should include the persistedQuery hash"
+            );
+            assert_eq!(
+                body.query.as_deref(),
+                Some(APQ_TEST_QUERY),
+                "retry should send the original query string"
+            );
+            assert_eq!(
+                body.operation_name.as_deref(),
+                Some("MyOp"),
+                "operation_name should be preserved on retry"
+            );
+            assert_eq!(
+                body.variables.get("id"),
+                Some(&serde_json_bytes::json!("42")),
+                "variables should be preserved on retry"
+            );
+            responder.send_response(success_response(req.context));
         });
 
         let gql_body = crate::graphql::Request {
@@ -509,36 +507,35 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
     }
 
     #[tokio::test]
     async fn test_apq_not_supported_retry_restores_original_body() {
-        let call_count = Arc::new(AtomicUsize::new(0));
-        let inner = tower::service_fn(move |req: SubgraphRequest| {
-            let n = call_count.fetch_add(1, Relaxed);
-            async move {
-                if n == 0 {
-                    return Ok::<_, BoxError>(pqns_message_response(req.context));
-                }
-                let body = req.subgraph_request.body();
-                assert_eq!(
-                    body.query.as_deref(),
-                    Some(APQ_TEST_QUERY),
-                    "retry should send the original query string"
-                );
-                assert!(
-                    !body.extensions.contains_key(PERSISTED_QUERY_KEY),
-                    "persistedQuery extension should be removed on PQNS retry"
-                );
-                assert!(
-                    body.extensions.contains_key("myExt"),
-                    "other extensions should be preserved on retry"
-                );
-                Ok(success_response(req.context))
-            }
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(pqns_message_response(req.context));
+
+            let (req, responder) = handle.next_request().await.unwrap();
+            let body = req.subgraph_request.body();
+            assert_eq!(
+                body.query.as_deref(),
+                Some(APQ_TEST_QUERY),
+                "retry should send the original query string"
+            );
+            assert!(
+                !body.extensions.contains_key(PERSISTED_QUERY_KEY),
+                "persistedQuery extension should be removed on PQNS retry"
+            );
+            assert!(
+                body.extensions.contains_key("myExt"),
+                "other extensions should be preserved on retry"
+            );
+            responder.send_response(success_response(req.context));
         });
 
         let gql_body = crate::graphql::Request {
@@ -559,8 +556,9 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
     }
 
