@@ -192,11 +192,11 @@ async fn subscription_task(
     let sender = sub_params.client_sender;
 
     // Get the rest of the query_plan to execute for subscription events
-    let query_plan = match &*query_plan.root {
-        crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
+    let query_plan = match query_plan.root.as_deref() {
+        Some(crate::query_planner::PlanNode::Subscription { rest, .. }) => rest.clone().map(|r| {
             Arc::new(QueryPlan {
                 usage_reporting: query_plan.usage_reporting.clone(),
-                root: Arc::new(*r),
+                root: Some(Arc::new(*r)),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
                 query_metrics: query_plan.query_metrics,
@@ -282,13 +282,21 @@ async fn subscription_task(
                 match message {
                     Some(mut val) => {
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_subscription_event(&supergraph_http_request, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_subscription_event(
+                            &supergraph_http_request,
+                            execution_service.clone(),
+                            query_plan.as_ref(),
+                            context.clone(),
+                            val,
+                            sender.clone(),
+                        )
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
                                 apollo_private.operation_signature = %operation_signature,
                                 apollo_private.duration_ns = field::Empty,)
-                            ).await;
+                            )
+                            .await;
                         if let Err(err) = res {
                             tracing::error!("cannot send the subscription to the client: {err:?}");
                             break;

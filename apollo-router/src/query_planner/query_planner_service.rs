@@ -360,32 +360,27 @@ impl QueryPlannerService {
             &self.signature_normalization_algorithm,
         );
 
-        if let Some(node) = query_plan_root_node {
-            u64_histogram!(
-                "apollo.router.query_planning.plan.evaluated_plans",
-                "Number of query plans evaluated for a query before choosing the best one",
-                evaluated_plan_count
-            );
-            u64_histogram!(
-                "apollo.router.query_planning.plan.evaluated_paths",
-                "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
-                evaluated_plan_paths
-            );
+        u64_histogram!(
+            "apollo.router.query_planning.plan.evaluated_plans",
+            "Number of query plans evaluated for a query before choosing the best one",
+            evaluated_plan_count
+        );
+        u64_histogram!(
+            "apollo.router.query_planning.plan.evaluated_paths",
+            "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
+            evaluated_plan_paths
+        );
 
-            Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(super::QueryPlan {
-                    usage_reporting: Arc::new(usage_reporting),
-                    root: node,
-                    formatted_query_plan,
-                    query: Arc::new(selections),
-                    query_metrics,
-                    estimated_size: Default::default(),
-                }),
-            })
-        } else {
-            failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting.get_stats_report_key()).into())
-        }
+        Ok(QueryPlannerContent::Plan {
+            plan: Arc::new(super::QueryPlan {
+                usage_reporting: Arc::new(usage_reporting),
+                root: query_plan_root_node,
+                formatted_query_plan,
+                query: Arc::new(selections),
+                query_metrics,
+                estimated_size: Default::default(),
+            }),
+        })
     }
 }
 
@@ -500,18 +495,6 @@ impl QueryPlannerService {
             )
             .await?;
 
-        if selections.operation.selection_set.is_empty() {
-            // All selections have @skip(true) or @include(false)
-            // Return an empty response now to avoid dealing with an empty query plan later
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(
-                    graphql::Response::builder()
-                        .data(Value::Object(Default::default()))
-                        .build(),
-                ),
-            });
-        }
-
         match self
             .introspection
             .maybe_execute(&self.schema, &key, &doc, variables)
@@ -525,6 +508,7 @@ impl QueryPlannerService {
             }
         }
 
+        // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
             match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
             {
@@ -735,7 +719,7 @@ mod tests {
             .parse_selections(query.to_string(), None, &doc, &mut query_metrics)
             .await
             .unwrap();
-        let err =
+        let _err =
             // test the planning part separately because it is a valid introspection query
             // it should be caught by the introspection part, but just in case, we check
             // that the query planner would return an empty plan error if it received an
@@ -753,19 +737,7 @@ mod tests {
             )
                 .await
                 .unwrap_err();
-
-        match err {
-            MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
-                stats_report_key,
-            )) => {
-                insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", stats_report_key);
-                });
-            }
-            e => {
-                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
-            }
-        }
+        // TODO(@goto-bus-stop): This should actually succeed
     }
 
     #[test(tokio::test)]
@@ -1108,7 +1080,11 @@ mod tests {
             .unwrap();
 
         if let QueryPlannerContent::Plan { plan, .. } = result {
-            check_query_plan_coverage(&plan.root, None, &plan.query.subselections);
+            check_query_plan_coverage(
+                plan.root.as_ref().expect("non-empty query plan"),
+                None,
+                &plan.query.subselections,
+            );
 
             let mut keys: Vec<String> = Vec::new();
             for (key, value) in plan.query.subselections.iter() {

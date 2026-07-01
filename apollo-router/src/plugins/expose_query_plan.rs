@@ -71,7 +71,9 @@ impl Plugin for ExposeQueryPlan {
 
                 if !matches!(setting, Setting::Disabled) {
                     let plan =
-                        replace_connector_service_names(req.query_plan.root.clone(), &req.context);
+                        req.query_plan.root.clone().map(|root_node| {
+                            replace_connector_service_names(root_node, &req.context)
+                        });
                     let text = replace_connector_service_names_text(
                         req.query_plan.formatted_query_plan.clone(),
                         &req.context,
@@ -137,7 +139,10 @@ impl Plugin for ExposeQueryPlan {
                                 {
                                     first
                                         .extensions
-                                        .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY) }));
+                                        .insert("apolloQueryPlan", json!({
+                                            "object": { "kind": "QueryPlan", "node": plan },
+                                            "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY),
+                                        }));
                                 }
                             res.response = http::Response::from_parts(
                                 parts,
