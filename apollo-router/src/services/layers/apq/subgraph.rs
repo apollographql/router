@@ -676,7 +676,8 @@ mod tests {
                         name,
                         &Configuration::default(),
                         crate::configuration::shared::Client::default(),
-                    ),
+                    )
+                    .create(name),
                 )
                 .expect("can create a SubgraphService"),
             )

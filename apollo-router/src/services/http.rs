@@ -43,7 +43,7 @@ impl HttpClientServiceFactory {
 
     #[cfg(test)]
     pub(crate) fn from_config(
-        service: impl Into<String>,
+        service: &str,
         configuration: &crate::Configuration,
         client_config: crate::configuration::shared::Client,
     ) -> Self {
