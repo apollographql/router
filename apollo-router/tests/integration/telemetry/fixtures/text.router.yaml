@@ -1,8 +1,6 @@
 telemetry:
 
   instrumentation:
-    spans:
-      mode: spec_compliant
     events:
       router:
         # Standard events

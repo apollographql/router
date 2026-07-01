@@ -19,7 +19,6 @@ telemetry:
 
   instrumentation:
     spans:
-      mode: spec_compliant
       router:
         attributes:
           graphql.operation.name:
