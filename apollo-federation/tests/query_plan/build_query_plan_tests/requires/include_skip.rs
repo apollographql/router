@@ -388,3 +388,227 @@ fn selections_are_not_overwritten_after_removing_directives() {
         "###
     );
 }
+
+#[test]
+fn sibling_requires_not_gated_by_sibling_include() {
+    // Two sibling fields on Container both @requires(fields: "externalId"), but only one
+    // is conditional. Since `conditionalField` is processed first, its @requires resolution
+    // for `externalId` is cached with the @include context. Without the fix, `items` gets
+    // a cache hit with this context-polluted resolution and `externalId` is wrongly gated
+    // behind @include.
+    //
+    // Expected: `externalId` is fetched unconditionally (needed for `items`).
+    let planner = planner!(
+        Subgraph1: r#"
+            type Query {
+              container: Container
+            }
+            type Container @key(fields: "id") {
+              id: ID!
+              externalId: ID!
+            }
+        "#,
+        Subgraph2: r#"
+            type Container @key(fields: "id") {
+              id: ID!
+              externalId: ID! @external
+              conditionalField: String @requires(fields: "externalId")
+              items: [Item] @requires(fields: "externalId")
+            }
+            type Item {
+              id: ID!
+              quantity: Int!
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query Test($cond: Boolean!) {
+              container {
+                conditionalField @include(if: $cond)
+                items {
+                  id
+                  quantity
+                }
+              }
+            }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "Subgraph1") {
+                {
+                  container {
+                    __typename
+                    id
+                    externalId
+                    ... on Container @include(if: $cond) {
+                      externalId
+                    }
+                  }
+                }
+              },
+              Flatten(path: "container") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on Container {
+                      __typename
+                      id
+                      externalId
+                    }
+                  } =>
+                  {
+                    ... on Container {
+                      conditionalField @include(if: $cond)
+                      items {
+                        id
+                        quantity
+                      }
+                    }
+                  }
+                },
+              },
+            },
+          }
+        "###
+    );
+}
+
+#[test]
+fn requires_input_not_gated_by_unrelated_include() {
+    // Two root fields return the same entity type — one conditional, one unconditional.
+    // The entity field `state` has @requires(fields: "locationId") which lives in a
+    // separate subgraph, forcing cross-subgraph key resolution. Since `conditionalLevel`
+    // is processed first, its resolution is cached with the @include context. Without the
+    // fix, `directLevel`'s resolution gets a cache hit with this context-polluted result
+    // and `locationId` is wrongly gated behind @include.
+    //
+    // Expected: `directLevel`'s fetch to SubgraphB fetches `locationId` unconditionally.
+    // The entire `conditionalLevel` path is inside Include(if: $cond).
+    let planner = planner!(
+        SubgraphA: r#"
+            type Query {
+              directLevel: Level
+              conditionalLevel: Level
+            }
+            type Level @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+        SubgraphB: r#"
+            type Level @key(fields: "id") {
+              id: ID!
+              locationId: ID!
+            }
+        "#,
+        SubgraphC: r#"
+            type Level @key(fields: "id") {
+              id: ID!
+              locationId: ID! @external
+              state: String! @requires(fields: "locationId")
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            query Test($cond: Boolean!) {
+              conditionalLevel @include(if: $cond) {
+                state
+              }
+              directLevel {
+                state
+              }
+            }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "SubgraphA") {
+                {
+                  conditionalLevel @include(if: $cond) {
+                    __typename
+                    id
+                  }
+                  directLevel {
+                    __typename
+                    id
+                  }
+                }
+              },
+              Parallel {
+                Sequence {
+                  Flatten(path: "directLevel") {
+                    Fetch(service: "SubgraphB") {
+                      {
+                        ... on Level {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on Level {
+                          locationId
+                        }
+                      }
+                    },
+                  },
+                  Flatten(path: "directLevel") {
+                    Fetch(service: "SubgraphC") {
+                      {
+                        ... on Level {
+                          __typename
+                          locationId
+                          id
+                        }
+                      } =>
+                      {
+                        ... on Level {
+                          state
+                        }
+                      }
+                    },
+                  },
+                },
+                Include(if: $cond) {
+                  Sequence {
+                    Flatten(path: "conditionalLevel") {
+                      Fetch(service: "SubgraphB") {
+                        {
+                          ... on Level {
+                            __typename
+                            id
+                          }
+                        } =>
+                        {
+                          ... on Level {
+                            locationId
+                          }
+                        }
+                      },
+                    },
+                    Flatten(path: "conditionalLevel") {
+                      Fetch(service: "SubgraphC") {
+                        {
+                          ... on Level {
+                            __typename
+                            locationId
+                            id
+                          }
+                        } =>
+                        {
+                          ... on Level {
+                            state
+                          }
+                        }
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          }
+        "###
+    );
+}

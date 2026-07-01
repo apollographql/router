@@ -111,17 +111,17 @@ pub(crate) enum ConditionResolutionCacheResult {
 
 struct CachedConditionEntry {
     resolution: ConditionResolution,
+    context: OpGraphPathContext,
     excluded_destinations: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
 }
 
 pub(crate) struct ConditionResolverCache {
     // For every edge having a condition, we cache the resolution of its conditions when possible.
-    // Each edge may have multiple cached entries, one per distinct set of excluded destinations
-    // seen during resolution. Excluded destinations affect the resolution by preventing key-jump
-    // cycles (e.g. A→B→A). Since the algorithm always tries keys in the same order (the order
-    // of edges in the query graph), we can store and look up entries by exact match on the
-    // excluded destinations.
+    // Each edge may have multiple cached entries, keyed by (context, excluded_destinations,
+    // excluded_conditions). The context carries @include/@skip state from the operation path —
+    // resolutions computed under different conditions produce different path trees, so they
+    // must be cached separately.
     //
     // The cache is shared across recursion depths so that results discovered at any depth are
     // visible to all other depths within the same query plan.
@@ -143,22 +143,16 @@ impl ConditionResolverCache {
         excluded_conditions: &ExcludedConditions,
         extra_conditions: Option<&SelectionSet>,
     ) -> ConditionResolutionCacheResult {
-        // We don't cache when there are extra conditions or a non-empty context. Extra conditions
-        // come from edges whose conditions are supplied externally rather than from the edge weight,
-        // and the context carries @include/@skip state that would need to be threaded into the
-        // resolution's path tree. Caching per-context is possible but not yet implemented.
-        // TODO: we could cache with an empty context and then apply the proper transformation on
-        // the cached value's `pathTree` when the context is not empty. The context would need to be
-        // added to the trigger of key edges in the resolution path tree when appropriate. The
-        // context is about active @include/@skip and it's not used that commonly, so this is
-        // probably not an urgent improvement.
-        if extra_conditions.is_some() || !context.is_empty() {
+        // Extra conditions come from edges whose conditions are supplied externally rather
+        // than from the edge weight — these are not cacheable.
+        if extra_conditions.is_some() {
             return ConditionResolutionCacheResult::NotApplicable;
         }
 
         if let Some(entries) = self.edge_states.get(&edge) {
             for cached in entries {
-                if &cached.excluded_destinations == excluded_destinations
+                if &cached.context == context
+                    && &cached.excluded_destinations == excluded_destinations
                     && &cached.excluded_conditions == excluded_conditions
                 {
                     return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
@@ -175,17 +169,20 @@ impl ConditionResolverCache {
         &mut self,
         edge: EdgeIndex,
         resolution: ConditionResolution,
+        context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
     ) {
         let entries = self.edge_states.entry(edge).or_default();
         let already_exists = entries.iter().any(|e| {
-            e.excluded_destinations == excluded_destinations
+            e.context == context
+                && e.excluded_destinations == excluded_destinations
                 && e.excluded_conditions == excluded_conditions
         });
         if !already_exists {
             entries.push(CachedConditionEntry {
                 resolution,
+                context,
                 excluded_destinations,
                 excluded_conditions,
             });
@@ -242,13 +239,15 @@ pub(crate) trait CachingConditionResolver {
             extra_conditions,
             cache,
         )?;
-        // See if this resolution is eligible to be inserted into the cache.
-        cache.insert(
-            edge,
-            resolution.clone(),
-            excluded_destinations.clone(),
-            excluded_conditions.clone(),
-        );
+        if extra_conditions.is_none() {
+            cache.insert(
+                edge,
+                resolution.clone(),
+                context.clone(),
+                excluded_destinations.clone(),
+                excluded_conditions.clone(),
+            );
+        }
         Ok(resolution)
     }
 }
@@ -328,6 +327,7 @@ mod tests {
         cache.insert(
             edge,
             ConditionResolution::unsatisfied_conditions(),
+            ctx(),
             d.clone(),
             c.clone(),
         );
@@ -342,6 +342,7 @@ mod tests {
         cache.insert(
             EdgeIndex::new(1),
             ConditionResolution::unsatisfied_conditions(),
+            ctx(),
             d.clone(),
             c.clone(),
         );
@@ -360,12 +361,14 @@ mod tests {
         cache.insert(
             edge,
             ConditionResolution::unsatisfied_conditions(),
+            ctx(),
             dest(&["subA"]),
             c.clone(),
         );
         cache.insert(
             edge,
             ConditionResolution::no_conditions(),
+            ctx(),
             dest(&["subB"]),
             c.clone(),
         );
@@ -390,12 +393,14 @@ mod tests {
         cache.insert(
             edge,
             ConditionResolution::unsatisfied_conditions(),
+            ctx(),
             d.clone(),
             c.clone(),
         );
         cache.insert(
             edge,
             ConditionResolution::unsatisfied_conditions(),
+            ctx(),
             d.clone(),
             c.clone(),
         );
