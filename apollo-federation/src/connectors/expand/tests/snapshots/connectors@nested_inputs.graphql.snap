@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_inputs.graphql
 ---
@@ -324,6 +323,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/nested_
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_is_list: false,
         label: Label(
             "connectors.example http: GET /{$args.bar}/{$args.doubleBaz.buzz}/{$args.baz.quux.quaz}",
         ),
