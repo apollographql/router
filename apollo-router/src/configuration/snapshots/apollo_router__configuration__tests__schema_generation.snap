@@ -1982,57 +1982,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config6": {
-      "additionalProperties": false,
-      "description": "Configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the entity caching feature",
-          "type": "boolean"
-        },
-        "expose_keys_in_context": {
-          "default": false,
-          "description": "Expose cache keys in context",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InvalidationEndpointConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Global invalidation configuration"
-        },
-        "metrics": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Metrics"
-            }
-          ],
-          "description": "Entity caching evaluation metrics"
-        },
-        "subgraph": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
-            }
-          ],
-          "description": "Configure invalidation per subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
-      ],
-      "type": "object"
-    },
-    "Config7": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config8": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -2054,7 +2007,7 @@ expression: "&schema"
         "invalidation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/InvalidationEndpointConfig2"
+              "$ref": "#/definitions/InvalidationEndpointConfig"
             },
             {
               "type": "null"
@@ -2072,7 +2025,7 @@ expression: "&schema"
         "subgraph": {
           "allOf": [
             {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
+              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
             }
           ],
           "description": "Configure invalidation per subgraph"
@@ -2083,7 +2036,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config9": {
+    "Config8": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2952,7 +2905,8 @@ expression: "&schema"
         },
         "preview_connect_v0_4": {
           "default": null,
-          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.4. Previously required to opt into the\nv0.4 spec during its preview phase; now a no-op, since `@link`-ing\nconnect/v0.4 in a subgraph is itself a sufficient opt-in.",
           "type": [
             "boolean",
             "null"
@@ -3013,11 +2967,6 @@ expression: "&schema"
         {
           "const": "all",
           "description": "Send all context keys to coprocessor",
-          "type": "string"
-        },
-        {
-          "const": "deprecated",
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
           "type": "string"
         },
         {
@@ -4082,7 +4031,7 @@ expression: "&schema"
         "metrics": {
           "allOf": [
             {
-              "$ref": "#/definitions/Metrics2"
+              "$ref": "#/definitions/Metrics"
             }
           ],
           "description": "Metrics configuration"
@@ -4152,14 +4101,6 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument6"
       },
       "properties": {
-        "apollo.router.operations.entity.cache": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
-            }
-          ],
-          "description": "A counter of times we have a cache hit or cache miss (deprecated)"
-        },
         "apollo.router.response.cache": {
           "allOf": [
             {
@@ -6850,13 +6791,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "concurrent_requests": {
-          "default": 10,
-          "description": "Number of concurrent invalidation requests",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "listen": {
           "allOf": [
             {
@@ -6868,13 +6802,6 @@ expression: "&schema"
         "path": {
           "description": "Specify on which path you want to listen for invalidation endpoint.",
           "type": "string"
-        },
-        "scan_count": {
-          "default": 1000,
-          "description": "Number of keys to return at once from a redis SCAN command",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
@@ -6883,26 +6810,26 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "InvalidationEndpointConfig2": {
+    "InvalidationIndexes": {
       "additionalProperties": false,
+      "description": "Which invalidation indexes a subgraph maintains for its cached entries. Each field controls\nwhether the corresponding ZSET is written on cache inserts and whether the corresponding\ninvalidation request kind is honored at the `/invalidation` endpoint.\n\nAll three indexes are enabled by default. Operators with workloads that only ever invalidate\nby a subset of modes can opt out of the unused indexes to reduce per-insert Redis work.\n\nNote: `indexes` is **additive only**. Enabling a previously-disabled index does NOT\nretroactively index existing cache entries. If a deployment changes from\n`{cache_tag: true}` to `{cache_tag: true, subgraph: true}`, the `subgraph-{name}` ZSET will\nbe populated only for entries written after the config change. Pre-change entries are\ninvisible to `By subgraph` invalidation requests until they age out via TTL. To bring the\nnew index online over the full cache set, flush Redis before enabling the additional index.",
       "properties": {
-        "listen": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ListenAddr"
-            }
-          ],
-          "description": "Listen address on which the invalidation endpoint must listen."
+        "cache_tag": {
+          "default": true,
+          "description": "Maintain the per-tag indexes for `apolloCacheTags`, `apolloEntityCacheTags`, and resolved\n`@cacheTag` directive values. Required for `By cache tag` invalidation requests.",
+          "type": "boolean"
         },
-        "path": {
-          "description": "Specify on which path you want to listen for invalidation endpoint.",
-          "type": "string"
+        "subgraph": {
+          "default": true,
+          "description": "Maintain the `subgraph-{name}` index. Required for `By subgraph` invalidation requests.",
+          "type": "boolean"
+        },
+        "type": {
+          "default": true,
+          "description": "Maintain the by-type index. Required for `By type` invalidation requests.",
+          "type": "boolean"
         }
       },
-      "required": [
-        "path",
-        "listen"
-      ],
       "type": "object"
     },
     "JWTConf": {
@@ -7274,34 +7201,6 @@ expression: "&schema"
       "type": "object"
     },
     "Metrics": {
-      "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "enables metrics evaluating the benefits of entity caching",
-          "type": "boolean"
-        },
-        "separate_per_type": {
-          "default": false,
-          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-          "type": "boolean"
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Metrics counter TTL"
-        }
-      },
-      "type": "object"
-    },
-    "Metrics2": {
       "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
@@ -10110,7 +10009,7 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -10143,7 +10042,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RedisCache"
+              "$ref": "#/definitions/Config8"
             },
             {
               "type": "null"
@@ -10156,65 +10055,6 @@ expression: "&schema"
           "anyOf": [
             {
               "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses"
-        }
-      },
-      "type": "object"
-    },
-    "Subgraph2": {
-      "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "activates caching for this subgraph, overrides the global configuration",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubgraphInvalidationConfig2"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Invalidation configuration"
-        },
-        "private_id": {
-          "default": null,
-          "description": "Context key used to separate cache sections per user",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "redis": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Config9"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Redis configuration"
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl2"
             },
             {
               "type": "null"
@@ -10493,21 +10333,18 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
-        "shared_key": {
-          "default": "",
-          "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphInvalidationConfig2": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable the invalidation",
-          "type": "boolean"
+        "indexes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/InvalidationIndexes"
+            }
+          ],
+          "default": {
+            "cache_tag": true,
+            "subgraph": true,
+            "type": true
+          },
+          "description": "Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to\nall three (`subgraph`, `type`, `cache_tag`) enabled, matching the original\n`response_cache` behavior. Operators with workloads that only invalidate by a subset of\nmodes can opt out of the unused indexes to reduce per-insert Redis work.\n\nSetting all three to `false` disables invalidation indexing entirely; the `/invalidation`\nendpoint then returns HTTP 400 for any request against this subgraph. This shape is\nuseful for pure TTL-based caching without an invalidation API."
         },
         "shared_key": {
           "default": "",
@@ -11230,34 +11067,6 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
-            "cache": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/CacheKind"
-                }
-              ],
-              "description": "Select if you want to get cache hit or cache miss"
-            },
-            "entity_type": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/EntityType"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Specify the entity type on which you want the cache data. (default: all)"
-            }
-          },
-          "required": [
-            "cache"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
             "entity_type": {
               "anyOf": [
                 {
@@ -11559,35 +11368,6 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph"
-          },
-          "default": {},
-          "description": "per subgraph options",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphSubgraphConfiguration2": {
-      "description": "Configuration options pertaining to the subgraph server component.",
-      "properties": {
-        "all": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Subgraph2"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "invalidation": null,
-            "private_id": null,
-            "redis": null,
-            "ttl": null
-          },
-          "description": "options applying to all subgraphs"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph2"
           },
           "default": {},
           "description": "per subgraph options",
@@ -12874,10 +12654,6 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
-      "description": "Per subgraph configuration for entity caching",
-      "type": "string"
-    },
-    "Ttl2": {
       "description": "Per subgraph configuration for response caching",
       "type": "string"
     },
@@ -13209,7 +12985,7 @@ expression: "&schema"
       "type": "object"
     },
     "^response_cache$": {
-      "$ref": "#/definitions/Config8"
+      "$ref": "#/definitions/Config7"
     }
   },
   "properties": {
@@ -13412,14 +13188,11 @@ expression: "&schema"
       "default": null,
       "description": "Plugin configuration"
     },
-    "preview_entity_cache": {
-      "$ref": "#/definitions/Config6"
-    },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config6"
     },
     "reload": {
       "allOf": [

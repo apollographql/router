@@ -691,6 +691,38 @@ fn upgrade_old_configuration() {
     }
 }
 
+// Regression: old flat-list headers config must be accepted at startup (Mode::Upgrade)
+// without requiring the operator to manually add the `operations:` wrapper key.
+#[test]
+fn headers_operations_migration_applied_at_startup() {
+    let old_config = r#"
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-request-id
+      - propagate:
+          named: authorization
+"#;
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect("old headers config should be accepted at startup via automatic migration");
+}
+
+#[test]
+fn headers_operations_rejected_without_migration() {
+    let old_config = r#"
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-request-id
+      - propagate:
+          named: authorization
+"#;
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect_err("old headers config should be rejected when migration is not applied");
+}
+
 #[derive(RustEmbed)]
 #[folder = "src/configuration/testdata/migrations/minor"]
 struct AssetMinor;
@@ -1352,46 +1384,6 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
-}
-
-#[test]
-fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
-    let make_config = |response_cache_enabled, entity_cache_enabled| {
-        let mut config = json!({});
-        if let Some(enabled) = response_cache_enabled {
-            config
-                .as_object_mut()
-                .unwrap()
-                .insert("response_cache".to_string(), json!({"enabled": enabled}));
-        }
-
-        if let Some(enabled) = entity_cache_enabled {
-            config.as_object_mut().unwrap().insert(
-                "preview_entity_cache".to_string(),
-                json!({"enabled": enabled}),
-            );
-        }
-        config
-    };
-
-    let _: Configuration =
-        serde_json::from_value(make_config(None, None)).expect("neither plugin configured");
-
-    let _: Configuration = serde_json::from_value(make_config(Some(true), None))
-        .expect("response cache plugin configured");
-
-    let _: Configuration = serde_json::from_value(make_config(Some(true), Some(false)))
-        .expect("response cache plugin configured");
-
-    let _: Configuration = serde_json::from_value(make_config(None, Some(true)))
-        .expect("entity cache plugin configured");
-
-    let _: Configuration = serde_json::from_value(make_config(Some(false), Some(true)))
-        .expect("entity cache plugin configured");
-
-    let config_result: Result<Configuration, _> =
-        serde_json::from_value(make_config(Some(true), Some(true)));
-    config_result.expect_err("both plugins configured");
 }
 
 #[rstest::rstest]

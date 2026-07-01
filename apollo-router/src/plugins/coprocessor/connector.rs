@@ -27,7 +27,6 @@ use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
 use crate::Context;
-use crate::context::context_key_from_deprecated;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
@@ -378,10 +377,7 @@ where
         };
 
         if let Some(context) = co_processor_output.context {
-            for (mut key, value) in context.try_into_iter()? {
-                if request_config.context.is_deprecated() {
-                    key = context_key_from_deprecated(key);
-                }
+            for (key, value) in context.try_into_iter()? {
                 request
                     .context
                     .upsert_json_value(key, move |_current| value);
@@ -409,10 +405,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if request_config.context.is_deprecated() {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -562,12 +555,7 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &context,
-            returned_context,
-            &response_config.context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&context, returned_context, &keys_sent)?;
     }
 
     if let Some(body) = co_processor_output.body {

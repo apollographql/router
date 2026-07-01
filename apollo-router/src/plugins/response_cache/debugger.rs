@@ -6,6 +6,7 @@ use crate::Context;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 
 pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
@@ -15,6 +16,11 @@ pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 pub(super) struct CacheKeyContext {
     pub(super) key: String,
     pub(super) invalidation_keys: Vec<String>,
+    /// Invalidation indexes resolved for this entry's subgraph at write time. Surfacing this in
+    /// the debugger lets operators see at a glance which indexes are active, which is essential
+    /// when interpreting absent invalidation keys (e.g., the entry was written under
+    /// `indexes.cache_tag: false`, so user-tag keys are intentionally absent rather than missing).
+    pub(super) indexes: InvalidationIndexes,
     pub(super) kind: CacheEntryKind,
     pub(super) subgraph_name: String,
     pub(super) subgraph_request: graphql::Request,
@@ -128,8 +134,10 @@ impl CacheKeyContext {
             }
         }
         if let CacheEntryKind::RootFields { root_fields } = &self.kind {
-            // No cache tags on root fields
-            if self.invalidation_keys.is_empty() {
+            // No cache tags on root fields. Only fire this when the cache_tag index is enabled
+            // for the subgraph; otherwise the operator has intentionally opted out of per-tag
+            // indexing and missing @cacheTag directives are the expected, configured state.
+            if self.invalidation_keys.is_empty() && self.indexes.cache_tag {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],
