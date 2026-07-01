@@ -38,6 +38,15 @@
 //! scopes (a graph's `@join__directive(name: "link")` membership, e.g. connect v0.2 vs v0.3),
 //! since the representative would otherwise link the same feature twice. The grouping key is
 //! therefore the link scope alone.
+//!
+//! One further condition: the participation merge folds two graphs' applications for the same
+//! `(type, field)` into the representative, which is only well-formed when those applications
+//! are byte-identical. If two merge candidates declare the same `(type, field)` with *differing*
+//! `@join__field` metadata (e.g. divergent `type:` overrides on a `@shareable` field), folding
+//! would leave two conflicting `@join__field(graph: REP)` on one field and make subgraph
+//! extraction define that field twice — a spurious composition error. Such graphs are detected
+//! and excluded from merging (each keeps its own representative). Connector synthetic subgraphs
+//! are field-disjoint, so this never costs the win in practice; it guards the shared-field case.
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -105,6 +114,49 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
         _ => return expanded_sdl.to_string(), // not a connector supergraph; nothing to do
     };
 
+    // --- field-compatibility data: per (type, field), each graph's `@join__field` application ---
+    // A participation-merge folds two graphs' applications for the SAME (type, field) into the
+    // representative. That is only sound when those applications are byte-identical (they fold
+    // to one). If two keyless graphs declare the same (type, field) with *differing*
+    // `@join__field` metadata — e.g. divergent `type:` overrides on a `@shareable` field —
+    // folding them would leave two conflicting `@join__field(graph: REP)` on one field, which
+    // makes `extract_subgraphs_from_supergraph` define that field twice and fail (a spurious
+    // composition error). Field-disjoint graphs (all connector synthetic subgraphs) never hit
+    // this. Record each graph's application (its args minus `graph:`) so we can taint colliders.
+    let mut field_apps: HashMap<(Name, Name), Vec<(Name, String)>> = HashMap::new();
+    {
+        let mut collect = |type_name: &Name, field_name: &Name, dl: &ast::DirectiveList| {
+            for d in dl.iter().filter(|d| d.name == name!("join__field")) {
+                if let Some(graph) = arg_enum(d, "graph") {
+                    field_apps
+                        .entry((type_name.clone(), field_name.clone()))
+                        .or_default()
+                        .push((graph.clone(), join_field_app(d)));
+                }
+            }
+        };
+        for (type_name, ty) in &schema.types {
+            match ty {
+                ExtendedType::Object(t) => {
+                    for (fname, f) in &t.fields {
+                        collect(type_name, fname, &f.directives);
+                    }
+                }
+                ExtendedType::Interface(t) => {
+                    for (fname, f) in &t.fields {
+                        collect(type_name, fname, &f.directives);
+                    }
+                }
+                ExtendedType::InputObject(t) => {
+                    for (fname, f) in &t.fields {
+                        collect(type_name, fname, &f.directives);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // --- group root-field (keyless) graphs by link scope; representative = smallest member ---
     // Only keyless graphs are eligible to merge. A keyless graph is reachable only at root
     // operation fields (never via an entity key-jump), so co-locating two keyless graphs adds
@@ -112,16 +164,42 @@ pub(super) fn consolidate_for_satisfiability(expanded_sdl: &str) -> String {
     // sidesteps every `@key`-related hazard (`@key(resolvable: false)`, `@external` key fields,
     // `@override`, differing key-field types), since all of those attach to keyed types we
     // never touch. Keyless graphs still may not merge across spec-link scopes, or the
-    // representative would link the same feature twice; so the grouping key is the link scope
-    // alone. Keyed graphs are omitted here and therefore each remain their own representative.
-    let mut groups: HashMap<BTreeSet<String>, Vec<Name>> = HashMap::new();
+    // representative would link the same feature twice; so the grouping key is the link scope.
+    // Keyed graphs are omitted here and therefore each remain their own representative.
+    let mut graph_scope: HashMap<Name, BTreeSet<String>> = HashMap::new();
     for g in &all_graphs {
-        let keyless = keyed_sig.get(g).map_or(true, |sig| sig.is_empty());
-        if !keyless {
-            continue; // keyed graph: never merged
+        if keyed_sig.get(g).is_none_or(|sig| sig.is_empty()) {
+            graph_scope.insert(g.clone(), link_scope.get(g).cloned().unwrap_or_default());
         }
-        let scopes = link_scope.get(g).cloned().unwrap_or_default();
-        groups.entry(scopes).or_default().push(g.clone());
+    }
+
+    // Taint keyless graphs that would collide: within one scope group, if two members declare
+    // the same (type, field) with different applications, every member declaring that field is
+    // excluded from merging and keeps its own representative.
+    let mut tainted: HashSet<Name> = HashSet::new();
+    for apps in field_apps.values() {
+        let mut by_scope: HashMap<&BTreeSet<String>, Vec<(&Name, &String)>> = HashMap::new();
+        for (g, app) in apps {
+            if let Some(scope) = graph_scope.get(g) {
+                by_scope.entry(scope).or_default().push((g, app));
+            }
+        }
+        for members in by_scope.values() {
+            let distinct: HashSet<&&String> = members.iter().map(|(_, a)| a).collect();
+            if distinct.len() > 1 {
+                for (g, _) in members {
+                    tainted.insert((*g).clone());
+                }
+            }
+        }
+    }
+
+    let mut groups: HashMap<BTreeSet<String>, Vec<Name>> = HashMap::new();
+    for (g, scope) in &graph_scope {
+        if tainted.contains(g) {
+            continue; // field-incompatible: keep its own representative
+        }
+        groups.entry(scope.clone()).or_default().push(g.clone());
     }
     let mut sym2rep: HashMap<Name, Name> = HashMap::new();
     let mut reps: HashSet<Name> = all_graphs.iter().cloned().collect();
@@ -218,6 +296,21 @@ fn arg_str<'a>(d: &'a Directive, name: &str) -> Option<&'a str> {
     arg(d, name).and_then(|v| v.as_str())
 }
 
+/// Serialize a `@join__field` application's arguments *except* `graph:`, so two applications
+/// that differ only by which graph they name compare equal. Used to detect divergent metadata
+/// (e.g. different `type:` overrides) on a shared (type, field) that would make a
+/// participation-merge produce two conflicting `@join__field(graph: REP)` on one field.
+fn join_field_app(d: &Directive) -> String {
+    let mut parts: Vec<String> = d
+        .arguments
+        .iter()
+        .filter(|a| a.name.as_str() != "graph")
+        .map(|a| format!("{}: {}", a.name, a.value))
+        .collect();
+    parts.sort();
+    parts.join(", ")
+}
+
 /// Return a copy of `d` with any `graph:` enum arg and `graphs: [...]` list arg remapped to
 /// representatives (the latter deduped, since the remap can repeat a representative).
 fn remapped_directive(d: &Directive, sym2rep: &HashMap<Name, Name>) -> Directive {
@@ -289,7 +382,8 @@ schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://spec
 }
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @join__type(graph: join__Graph!, key: join__FieldSet, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__field(graph: join__Graph) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, type: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 scalar join__FieldSet
@@ -412,6 +506,36 @@ type T @join__type(graph: A, key: \"id\") @join__type(graph: B, key: \"id\", res
             graph_count(&out),
             2,
             "resolvable:false key graph must not merge into a resolvable one:\n{out}"
+        );
+    }
+
+    /// Two keyless graphs that both declare the same field with *divergent* `@join__field`
+    /// metadata (here, different `type:` overrides on a `@shareable` root field) must NOT be
+    /// merged — folding them would leave two conflicting `@join__field(graph: REP)` on one field
+    /// and make subgraph extraction define it twice (a spurious composition error). Regression
+    /// for the divergent-return-type case.
+    #[test]
+    fn keeps_divergent_shared_field_graphs_separate() {
+        let sdl = format!(
+            "{PREAMBLE}
+enum join__Graph {{
+  A @join__graph(name: \"a\", url: \"\")
+  B @join__graph(name: \"b\", url: \"\")
+}}
+type Query @join__type(graph: A) @join__type(graph: B) {{
+  foo: I @join__field(graph: A, type: \"X\") @join__field(graph: B, type: \"Y\")
+}}
+interface I @join__type(graph: A) @join__type(graph: B) {{ name: String }}
+type X implements I @join__type(graph: A) @join__implements(graph: A, interface: \"I\") {{ name: String @join__field(graph: A) }}
+type Y implements I @join__type(graph: B) @join__implements(graph: B, interface: \"I\") {{ name: String @join__field(graph: B) }}
+"
+        );
+        let out = consolidate_for_satisfiability(&sdl);
+        assert!(reparses(&out), "consolidated output must parse:\n{out}");
+        assert_eq!(
+            graph_count(&out),
+            2,
+            "graphs sharing a field with divergent @join__field metadata must stay separate:\n{out}"
         );
     }
 
