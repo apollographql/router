@@ -1082,6 +1082,7 @@ impl SelectionSet {
             type_position.type_name().clone(),
             source_text,
             false,
+            crate::schema::field_set::FieldSetValidation::Validate,
         )?
         .0;
         let fragments = Default::default();
