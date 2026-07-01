@@ -494,6 +494,17 @@ where
         + 'static,
     <T as Service<QueryPlannerRequest>>::Future: Send,
 {
+    /// Plan a query, first hitting the cache.
+    ///
+    /// Uses context keys:
+    /// - apollo::authentication::jwt_claims
+    /// - apollo::authorization::required_scopes
+    /// - apollo::authorization::required_policies
+    /// - apollo::progressive_override::labels_to_override
+    /// - ParsedDocument
+    ///
+    /// Inserts context:
+    /// - Arc<UsageReporting>
     async fn plan(
         mut self,
         request: query_planner::CachingRequest,
@@ -510,20 +521,18 @@ where
                 .unwrap_or_default(),
         };
 
-        let doc = match request
+        let Some(doc) = request
             .context
             .extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-        {
-            None => {
-                return Err(CacheResolverError::RetrievalError(Arc::new(
-                    // TODO: dedicated error variant?
-                    QueryPlannerError::SpecError(SpecError::TransformError(
-                        "missing parsed document".to_string(),
-                    )),
-                )));
-            }
-            Some(d) => d.clone(),
+        else {
+            return Err(CacheResolverError::RetrievalError(Arc::new(
+                // FIXME(@goto-bus-stop): we should make it impossible to call the query planning
+                // service without having a ParsedDocument available.
+                QueryPlannerError::SpecError(SpecError::TransformError(
+                    "missing parsed document".to_string(),
+                )),
+            )));
         };
 
         let metadata = request
