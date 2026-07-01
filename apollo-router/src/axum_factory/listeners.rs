@@ -211,12 +211,12 @@ async fn handle_connection<C, E: AsRef<dyn std::error::Error + Send + Sync>>(
     connection_shutdown: CancellationToken,
     connection_shutdown_timeout: Duration,
     received_first_request: Arc<AtomicBool>,
-    connection_start: Instant,
     span_mode: SpanMode,
 ) where
     C: Future<Output = Result<(), E>>,
     C: GracefulConnection<Error = E>,
 {
+    let connection_start = Instant::now();
     tokio::pin!(connection);
     tokio::select! {
         // the connection finished first
@@ -414,9 +414,8 @@ pub(super) fn serve_router_on_listen_addr(
 
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection_start = Instant::now();
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
@@ -428,9 +427,8 @@ pub(super) fn serve_router_on_listen_addr(
                                         });
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection_start = Instant::now();
                                         let connection = config.serve_connection_with_upgrades(tokio_stream, hyper_service);
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
                                     },
                                     NetworkStream::Tls { stream, acceptor } => {
                                         // Perform TLS handshake with a timeout to prevent DoS attacks.
@@ -471,11 +469,10 @@ pub(super) fn serve_router_on_listen_addr(
 
                                         let mut builder = Builder::new(TokioExecutor::new());
                                         let config = configure_connection(&mut builder, header_read_timeout, opt_max_http1_headers, opt_max_http1_buf_size, opt_max_http2_headers_list_bytes);
-                                        let connection_start = Instant::now();
                                         let connection = config
                                             .serve_connection_with_upgrades(tokio_stream, hyper_service);
 
-                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, connection_start, span_mode).await;
+                                        handle_connection(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request, span_mode).await;
                                     }
                                 }
                             }.with_current_meter_provider());
