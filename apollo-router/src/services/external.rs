@@ -399,9 +399,15 @@ pub(crate) fn externalize_header_map(
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use http::Response;
+    use parking_lot::Mutex;
     use tower::service_fn;
     use tracing_futures::WithSubscriber;
+    use tracing_subscriber::Registry;
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::layer::SubscriberExt as _;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
@@ -538,4 +544,70 @@ mod test {
         .await;
     }
 
+    /// Regression test for ROUTER-1948: `client.call()` in `Externalizable::call` must execute
+    /// inside the `http_req_span` scope, not inside the surrounding `external_plugin` span.
+    ///
+    /// `HttpClientService::call` synchronously captures `Span::current()` to inject the
+    /// W3C `traceparent` header.  The `in_scope` call ensures the right span is active at that
+    /// moment, so the injected parent-id belongs to the HTTP client span rather than the outer
+    /// coprocessor span.
+    #[tokio::test]
+    async fn coprocessor_client_call_executes_in_http_req_span_scope() {
+        // Minimal subscriber: Registry tracks span IDs; LevelFilter enables INFO spans.
+        let subscriber = Registry::default().with(LevelFilter::INFO);
+
+        let captured_span_id: Arc<Mutex<Option<tracing::Id>>> = Arc::new(Mutex::new(None));
+        let captured_clone = captured_span_id.clone();
+
+        async {
+            // Simulate the enclosing span that wraps the entire coprocessor call.
+            let external_plugin = tracing::info_span!("external_plugin");
+            let external_plugin_id = external_plugin.id();
+            let _enter = external_plugin.enter();
+
+            let service = service_fn(move |req: HttpRequest| {
+                // Capture which span is *current* when client.call() runs synchronously.
+                // The fix (in_scope) means this should be http_req_span, not external_plugin.
+                *captured_clone.lock() = tracing::Span::current().id();
+                async move {
+                    Ok::<_, BoxError>(HttpResponse {
+                        http_response: Response::builder()
+                            .status(200)
+                            .body(router::body::from_bytes(
+                                serde_json::to_vec(&serde_json::json!({
+                                    "version": EXTERNALIZABLE_VERSION,
+                                    "stage": "RouterRequest",
+                                    "control": "continue",
+                                    "id": "test-id",
+                                }))
+                                .unwrap(),
+                            ))
+                            .unwrap(),
+                        context: req.context,
+                    })
+                }
+            });
+
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            let _ = externalizable
+                .call(service, "http://example.com/test", Context::new())
+                .await;
+
+            let captured = captured_span_id.lock().take();
+            assert!(
+                captured.is_some(),
+                "client.call() must execute within a span"
+            );
+            assert_ne!(
+                captured, external_plugin_id,
+                "client.call() must run in http_req_span scope, not external_plugin scope"
+            );
+        }
+        .with_subscriber(subscriber)
+        .await;
+    }
 }
