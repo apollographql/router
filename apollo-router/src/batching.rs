@@ -25,33 +25,32 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-use opentelemetry::Context as otelContext;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::Context as otelContext;
 use parking_lot::Mutex as PMutex;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
-use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
-use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 use crate::spec::QueryHash;
+use crate::Context;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
@@ -104,7 +103,8 @@ impl BatchQuery {
                 index: self.index,
                 query_hashes,
             })
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
         Ok(())
     }
 
@@ -113,7 +113,7 @@ impl BatchQuery {
     /// The returned channel can be awaited to receive the GraphQL response, when ready.
     pub(crate) async fn signal_progress(
         &self,
-        client_factory: HttpClientServiceFactory,
+        http_client: crate::services::http::BoxCloneService,
         request: SubgraphRequest,
     ) -> Result<oneshot::Receiver<Result<SubgraphResponse, BoxError>>, BoxError> {
         // Create a receiver for this query so that it can eventually get the request meant for it
@@ -132,13 +132,14 @@ impl BatchQuery {
             .send(BatchHandlerMessage::Progress(Box::new(
                 BatchHandlerMessageProgress {
                     index: self.index,
-                    client_factory,
+                    http_client,
                     request,
                     response_sender: tx,
                     span_context: Span::current().context(),
                 },
             )))
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
 
         if !self.finished() {
             self.remaining.fetch_sub(1, Ordering::AcqRel);
@@ -164,7 +165,8 @@ impl BatchQuery {
                 index: self.index,
                 reason,
             })
-            .await?;
+            .await
+            .map_err(|e| SubgraphBatchingError::ProcessingFailed(e.to_string()))?;
 
         if !self.finished() {
             self.remaining.fetch_sub(1, Ordering::AcqRel);
@@ -201,7 +203,7 @@ enum BatchHandlerMessage {
 /// A query has reached the subgraph service and we should update its state
 struct BatchHandlerMessageProgress {
     index: usize,
-    client_factory: HttpClientServiceFactory,
+    http_client: crate::services::http::BoxCloneService,
     request: SubgraphRequest,
     response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
     span_context: otelContext,
@@ -211,7 +213,7 @@ struct BatchHandlerMessageProgress {
 pub(crate) struct BatchQueryInfo {
     /// The owning subgraph request
     request: SubgraphRequest,
-
+    http_client: crate::services::http::BoxCloneService,
     /// Notifier for the subgraph service handler
     ///
     /// Note: This must be used or else the subgraph request will time out
@@ -278,7 +280,6 @@ impl Batch {
             let mut requests: Vec<Vec<BatchQueryInfo>> =
                 Vec::from_iter((0..size).map(|_| Vec::new()));
 
-            let mut master_client_factory = None;
             tracing::debug!("Batch about to await messages...");
             // Start handling messages from various portions of the request lifecycle
             // When recv() returns None, we want to stop processing messages
@@ -331,7 +332,7 @@ impl Batch {
                         // Progress the index
                         let BatchHandlerMessageProgress {
                             index,
-                            client_factory,
+                            http_client,
                             request,
                             response_sender,
                             span_context,
@@ -343,11 +344,9 @@ impl Batch {
                             state.committed.insert(request.query_hash.clone());
                         }
 
-                        if master_client_factory.is_none() {
-                            master_client_factory = Some(client_factory);
-                        }
                         Span::current().add_link(span_context.span().span_context().clone());
                         requests[index].push(BatchQueryInfo {
+                            http_client,
                             request,
                             sender: response_sender,
                         })
@@ -372,6 +371,7 @@ impl Batch {
             // Now build up a Service oriented view to use in constructing our batches
             let mut svc_map: HashMap<String, Vec<BatchQueryInfo>> = HashMap::new();
             for BatchQueryInfo {
+                http_client,
                 request: sg_request,
                 sender: tx,
             } in all_in_one
@@ -383,15 +383,13 @@ impl Batch {
                     )
                     .or_default();
                 value.push(BatchQueryInfo {
+                    http_client,
                     request: sg_request,
                     sender: tx,
                 });
             }
 
-            // If we don't have a master_client_factory, we can't do anything.
-            if let Some(client_factory) = master_client_factory {
-                process_batches(client_factory, svc_map).await?;
-            }
+            process_batches(svc_map).await?;
             Ok(())
         }.instrument(tracing::info_span!("batch_request", size)));
 
@@ -441,6 +439,7 @@ impl Drop for Batch {
 
 /// A batch of requests that we'll send to a subgraph (...as a single batch request).
 pub(crate) struct SubgraphBatchRequest {
+    pub(crate) http_client: crate::services::http::BoxCloneService,
     pub(crate) contexts: Vec<(Context, SubgraphRequestId)>,
     pub(crate) request: http::Request<RouterBody>,
     pub(crate) txs: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
@@ -450,6 +449,11 @@ pub(crate) struct SubgraphBatchRequest {
 pub(crate) async fn assemble_batch(
     requests: Vec<BatchQueryInfo>,
 ) -> Result<SubgraphBatchRequest, BoxError> {
+    let http_client = requests
+        .first()
+        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
+        .http_client
+        .clone();
     let (txs, requests): (Vec<_>, Vec<_>) =
         requests.into_iter().map(|r| (r.sender, r.request)).unzip();
 
@@ -481,6 +485,7 @@ pub(crate) async fn assemble_batch(
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok(SubgraphBatchRequest {
+        http_client,
         contexts,
         request,
         txs,
@@ -496,28 +501,28 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use tokio::sync::oneshot;
     use tower::ServiceExt;
+    use wiremock::matchers;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
-    use wiremock::matchers;
 
+    use super::assemble_batch;
     use super::Batch;
     use super::BatchQueryInfo;
     use super::SubgraphBatchRequest;
-    use super::assemble_batch;
-    use crate::Configuration;
-    use crate::Context;
-    use crate::TestHarness;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::services::SubgraphRequest;
-    use crate::services::SubgraphResponse;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::spec::QueryHash;
+    use crate::Configuration;
+    use crate::Context;
+    use crate::TestHarness;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
@@ -533,6 +538,12 @@ mod tests {
                 (
                     rx,
                     BatchQueryInfo {
+                        http_client: HttpClientServiceFactory::from_config(
+                            "test",
+                            &Configuration::default(),
+                            crate::configuration::shared::Client::default(),
+                        )
+                        .create("test"),
                         request: SubgraphRequest::fake_builder()
                             .subgraph_request(http::Request::builder().body(gql_request).unwrap())
                             .subgraph_name(format!("slot{index}"))
@@ -550,6 +561,7 @@ mod tests {
             .collect::<Vec<String>>();
         // Assemble them
         let SubgraphBatchRequest {
+            http_client: _,
             contexts,
             request,
             txs,
@@ -654,11 +666,13 @@ mod tests {
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let factory = HttpClientServiceFactory::from_config(
+        let http_client = HttpClientServiceFactory::from_config(
             "testbatch",
             &Configuration::default(),
             crate::configuration::shared::Client::default(),
-        );
+        )
+        .create("whatever");
+
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -674,12 +688,12 @@ mod tests {
         );
         assert!(!bq.finished());
         assert!(
-            bq.signal_progress(factory.clone(), request.clone())
+            bq.signal_progress(http_client.clone(), request.clone())
                 .await
                 .is_ok()
         );
         assert!(bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_err());
+        assert!(bq.signal_progress(http_client, request).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -707,7 +721,11 @@ mod tests {
                 .is_ok()
         );
         assert!(!bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_ok());
+        assert!(
+            bq.signal_progress(factory.create("whatever"), request)
+                .await
+                .is_ok()
+        );
         assert!(bq.finished());
         assert!(
             bq.signal_cancelled("only once though".to_string())
@@ -738,7 +756,11 @@ mod tests {
         let qh = Arc::new(QueryHash::default());
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
-        assert!(bq.signal_progress(factory, request).await.is_ok());
+        assert!(
+            bq.signal_progress(factory.create("whatever"), request)
+                .await
+                .is_ok()
+        );
         assert!(!bq.finished());
         assert!(
             bq.signal_cancelled("only twice though".to_string())

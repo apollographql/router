@@ -106,9 +106,6 @@ pub(crate) struct SubgraphService {
     /// Pre-built HTTP client service with all plugin layers already folded in.
     /// Used on the hot (non-batching) path to avoid re-folding plugins per request.
     http_client: crate::services::http::BoxCloneService,
-    /// Kept only for the batching path, where a single factory may be used to
-    /// `.create()` clients for different subgraph names.
-    pub(crate) client_factory: HttpClientServiceFactory,
     service: Arc<String>,
 
     /// Whether apq is enabled in the router for subgraph calls
@@ -122,33 +119,29 @@ pub(crate) struct SubgraphService {
 
 impl SubgraphService {
     pub(crate) fn from_config(
-        service: impl Into<String>,
+        name: &str,
         configuration: &Configuration,
         client_factory: HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
-        let name: String = service.into();
-
         let enable_apq = configuration
             .apq
             .subgraph
             .subgraphs
-            .get(&name)
+            .get(name)
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
 
-        SubgraphService::new(name, enable_apq, client_factory)
+        SubgraphService::new(name, enable_apq, client_factory.create(name))
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        client_factory: crate::services::http::HttpClientServiceFactory,
+        http_client: crate::services::http::BoxCloneService,
     ) -> Result<Self, BoxError> {
         let name = service.into();
-        let http_client = client_factory.create(&name);
         Ok(Self {
             http_client,
-            client_factory,
             service: Arc::new(name),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
         })
@@ -185,15 +178,15 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.http_client.poll_ready(cx)
     }
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
-        let service_name = (*self.service).to_owned();
+        let service_name = self.service.clone();
 
-        let client_factory = self.client_factory.clone();
-        let http_client = self.http_client.clone();
+        let fresh_client = self.http_client.clone();
+        let http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         let arc_apq_enabled = self.apq.clone();
 
@@ -202,13 +195,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             // with the same request body.
             let apq_enabled = arc_apq_enabled.as_ref();
             if !apq_enabled.load(Relaxed) {
-                return call_http(
-                    request,
-                    client_factory.clone(),
-                    http_client.clone(),
-                    &service_name,
-                )
-                .await;
+                return call_http(request, http_client, &service_name).await;
             }
 
             // APQ works by sending the query hash via extensions with an empty query body.
@@ -226,13 +213,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 }),
             );
 
-            let response = call_http(
-                request.clone(),
-                client_factory.clone(),
-                http_client.clone(),
-                &service_name,
-            )
-            .await?;
+            let response = call_http(request.clone(), http_client.clone(), &service_name).await?;
 
             // Check the error for the request with only persistedQuery.
             // If PersistedQueryNotSupported, disable APQ for this subgraph
@@ -246,11 +227,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     body.query = original_query;
                     // Remove the persistedQuery extension we added for the APQ attempt.
                     body.extensions.remove(PERSISTED_QUERY_KEY);
-                    call_http(request, client_factory.clone(), http_client, &service_name).await
+                    call_http(request, http_client, &service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
                     request.subgraph_request.body_mut().query = original_query;
-                    call_http(request, client_factory.clone(), http_client, &service_name).await
+                    call_http(request, http_client, &service_name).await
                 }
                 _ => Ok(response),
             }
@@ -365,10 +346,10 @@ fn http_response_to_graphql_response(
 }
 
 /// Process a single subgraph batch request
-#[instrument(skip(client_factory, contexts, request))]
+#[instrument(skip(http_client, contexts, request))]
 async fn process_batch(
-    client_factory: HttpClientServiceFactory,
-    service: String,
+    http_client: crate::services::http::BoxCloneService,
+    service: &str,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
     mut request: http::Request<RouterBody>,
     listener_count: usize,
@@ -419,7 +400,6 @@ async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
-    let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
     u64_histogram!(
@@ -427,7 +407,7 @@ async fn process_batch(
         "Number of queries contained within each query batch",
         listener_count as u64,
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.clone()
+        subgraph = service.to_string()
     );
 
     u64_counter!(
@@ -437,12 +417,12 @@ async fn process_batch(
         // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
         // Also, other metrics use a different convention to report the subgraph name
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.clone()
+        subgraph = service.to_string()
     );
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) = match do_fetch(client, &batch_context, &service, request)
+    let (parts, content_type, body) = match do_fetch(http_client, &batch_context, &service, request)
         .instrument(subgraph_req_span)
         .await
     {
@@ -453,14 +433,14 @@ async fn process_batch(
                 .body(err.to_graphql_error(None))
                 .map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.clone(),
+                    service: service.to_string(),
                     reason: format!("cannot create the http response from error: {err:?}"),
                 })?;
             let (parts, body) = resp.into_parts();
             let body =
                 serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.clone(),
+                    service: service.to_string(),
                     reason: format!("cannot serialize the error: {err:?}"),
                 })?;
             (
@@ -506,7 +486,7 @@ async fn process_batch(
         }
         attrs.push(KeyValue::new(
             Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service.clone().into()),
+            opentelemetry::Value::String(service.to_string().into()),
         ));
         log_event(
             event.level,
@@ -566,7 +546,7 @@ async fn process_batch(
     // response
     if graphql_responses.len() != contexts.len() {
         return Err(FetchError::SubrequestBatchingError {
-            service,
+            service: service.to_string(),
             reason: format!(
                 "number of contexts ({}) is not equal to number of graphql responses ({})",
                 contexts.len(),
@@ -577,12 +557,10 @@ async fn process_batch(
 
     // We are going to pop contexts from the back, so let's reverse our contexts
     contexts.reverse();
-    let subgraph_name = service.clone();
     // Build an http Response for each graphql response
     let subgraph_responses: Result<Vec<_>, _> = graphql_responses
         .into_iter()
         .map(|res| {
-            let subgraph_name = subgraph_name.clone();
             http::Response::builder()
                 .status(parts.status)
                 .version(parts.version)
@@ -592,8 +570,12 @@ async fn process_batch(
                     // Use the original context for the request to create the response
                     let (context, id) =
                         contexts.pop().expect("we have a context for each response");
-                    let resp =
-                        SubgraphResponse::new_from_response(http_res, context, subgraph_name, id);
+                    let resp = SubgraphResponse::new_from_response(
+                        http_res,
+                        context,
+                        service.to_string(),
+                        id,
+                    );
 
                     // Avoid `{resp:?}`: SubgraphResponse's derived Debug prints
                     // the response HeaderMap unmasked. Log the non-header parts.
@@ -698,6 +680,7 @@ async fn notify_batch_query(
 type BatchInfo = (
     (
         String,
+        crate::services::http::BoxCloneService,
         http::Request<RouterBody>,
         Vec<(Context, SubgraphRequestId)>,
     ),
@@ -707,7 +690,6 @@ type BatchInfo = (
 /// Collect all batch requests and process them concurrently
 #[instrument(skip_all)]
 pub(crate) async fn process_batches(
-    client_factory: HttpClientServiceFactory,
     svc_map: HashMap<String, Vec<BatchQueryInfo>>,
 ) -> Result<(), BoxError> {
     // We need to strip out the senders so that we can work with them separately.
@@ -715,12 +697,13 @@ pub(crate) async fn process_batches(
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
             let SubgraphBatchRequest {
+                http_client: client,
                 contexts,
                 request,
                 txs,
             } = assemble_batch(requests).await?;
 
-            Ok(((service, request, contexts), txs))
+            Ok(((service, client, request, contexts), txs))
         }))
         .await
         .into_iter()
@@ -738,8 +721,6 @@ pub(crate) async fn process_batches(
         )
         .into());
     }
-    // Collect all of the processing logic and run them concurrently, collecting all errors
-    let cf = &client_factory;
     // It is not ok to panic if the length of the txs and info do not match. Let's make sure they
     // do
     if txs.len() != info.len() {
@@ -751,16 +732,10 @@ pub(crate) async fn process_batches(
     let batch_futures =
         info.into_iter()
             .zip_eq(txs)
-            .map(|((service, request, contexts), senders)| async move {
+            .map(|((service, http_client, request, contexts), senders)| async move {
                 let listener_count = senders.len();
-                let batch_result = process_batch(
-                    cf.clone(),
-                    service.clone(),
-                    contexts,
-                    request,
-                    listener_count,
-                )
-                .await;
+                let batch_result =
+                    process_batch(http_client, &service, contexts, request, listener_count).await;
 
                 notify_batch_query(service, senders, batch_result).await
             });
@@ -772,7 +747,6 @@ pub(crate) async fn process_batches(
 
 async fn call_http(
     request: SubgraphRequest,
-    client_factory: HttpClientServiceFactory,
     http_client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -792,9 +766,9 @@ async fn call_http(
 
     // If we have a batch query, then it's time for batching
     if let Some(query) = opt_batch_query {
-        // The batch path needs the factory because a single batch handler may
-        // create clients for different subgraph names.
-        let response_rx = query.signal_progress(client_factory, request).await?;
+        // Hand off our http_client so the batch handler can use it once all
+        // requests in the batch have signalled progress.
+        let response_rx = query.signal_progress(http_client, request).await?;
 
         // Park this query until we have our response and pass it back up
         response_rx
@@ -2069,7 +2043,8 @@ mod tests {
                     "testbis",
                     &Configuration::default(),
                     crate::configuration::shared::Client::default(),
-                ),
+                )
+                .create("testbis"),
             )
             .expect("can create a SubgraphService"),
         );
@@ -2112,7 +2087,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2144,7 +2120,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2177,7 +2154,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2213,7 +2191,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2248,7 +2227,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2296,7 +2276,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2340,7 +2321,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2381,7 +2363,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2421,7 +2404,8 @@ mod tests {
                     "test",
                     &Configuration::default(),
                     crate::configuration::shared::Client::default(),
-                ),
+                )
+                .create("test"),
             )
             .expect("can create a SubgraphService"),
         );
@@ -2475,7 +2459,7 @@ mod tests {
                         "test",
                         &Configuration::default(),
                         crate::configuration::shared::Client::default(),
-                    ),
+                    ).create("test"),
                 )
                 .expect("can create a SubgraphService"),
             );
@@ -2530,7 +2514,8 @@ mod tests {
                         "test",
                         &Configuration::default(),
                         crate::configuration::shared::Client::default(),
-                    ),
+                    )
+                    .create("test"),
                 )
                 .expect("can create a SubgraphService"),
             );
@@ -2599,7 +2584,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2639,7 +2625,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2675,7 +2662,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2711,7 +2699,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2746,7 +2735,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2781,7 +2771,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2825,7 +2816,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2867,7 +2859,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2906,7 +2899,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2945,7 +2939,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -2984,7 +2979,8 @@ mod tests {
                 "test",
                 &Configuration::default(),
                 crate::configuration::shared::Client::default(),
-            ),
+            )
+            .create("test"),
         )
         .expect("can create a SubgraphService");
 
@@ -3041,7 +3037,8 @@ mod tests {
                     "test",
                     &Configuration::default(),
                     ClientConfiguration::default(),
-                ),
+                )
+                .create("test"),
             )
             .expect("can create a SubgraphService");
 
