@@ -191,7 +191,9 @@ async fn subscription_task(
     let mut receiver = sub_params.stream_rx;
     let sender = sub_params.client_sender;
 
-    // Get the rest of the query_plan to execute for subscription events
+    // Get the rest of the query_plan to execute for subscription events. If `rest` is `None`, we
+    // bubble that up to the whole query plan instead of having an empty node: this lets us avoid
+    // doing excessive calls into the execution service when no fetches are required.
     let query_plan = match query_plan.root.as_deref() {
         Some(crate::query_planner::PlanNode::Subscription { rest, .. }) => rest.clone().map(|r| {
             Arc::new(QueryPlan {
