@@ -16,7 +16,7 @@
 # Defaults to **dry-run**: prepares, diffs, logs auto-tag would-do — does
 # not commit, push, or open a PR unless explicitly opted in.
 
-name: Test release prep
+name: Release: prep
 
 on:
   workflow_dispatch:
