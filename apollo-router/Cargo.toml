@@ -55,6 +55,16 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = []
 
+# Experimental: host WebAssembly components as GraphQL data sources.
+# Pulls in wasmtime (heavy: Cranelift compile + large binary) so it is OFF by default.
+wasm-components = [
+    "dep:wit-gql",
+    "dep:wasmtime",
+    "dep:wasmtime-wasi",
+    "dep:wasmtime-wasi-http",
+    "dep:wasmtime-wasi-config",
+]
+
 [dependencies]
 addr2line = "0.26.0"
 anyhow = "1.0.86"
@@ -156,6 +166,16 @@ nu-ansi-term = "0.50"
 num-traits = "0.2.19"
 oci-client = { version = "0.15.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns"] }
 once_cell = "1.19.0"
+
+# --- wasm-components feature (optional; enabled by the `wasm-components` feature) ---
+# Shared WIT->GraphQL decode/naming/mapping crate.
+wit-gql = { path = "../wit-gql", optional = true }
+# wasmtime 46.x host: component model + wasi (io/clocks/cli), wasi:http, and wasi:config
+# (wasmtime-wasi-config@46 targets wasi:config@0.2.0-rc.1, the version components import).
+wasmtime = { version = "46.0.1", optional = true }
+wasmtime-wasi = { version = "46.0.1", optional = true }
+wasmtime-wasi-http = { version = "46.0.1", optional = true }
+wasmtime-wasi-config = { version = "46.0.1", optional = true }
 
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of

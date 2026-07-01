@@ -1,0 +1,335 @@
+//! Runtime for hosting WebAssembly **components** as GraphQL data sources.
+//!
+//! A component (built with the toolchain in `router-wasm-plugins`/`wit-gql`) exports WIT functions
+//! that each map to a GraphQL field. This module owns the embedded wasmtime host: it compiles a
+//! component once, and per fetch it instantiates the component, invokes the WIT export that backs
+//! the requested GraphQL field, and returns the export's `result<string, string>` (the raw
+//! REST-style JSON, or an error string).
+//!
+//! The dispatch registry ([`WasmComponentServiceFactory`]) is the wasm analog of
+//! [`ConnectorServiceFactory`](crate::services::connector_service::ConnectorServiceFactory): it maps
+//! a supergraph subgraph name to the [`WasmComponent`] that backs it. It is built by the
+//! `experimental_wasm_data_sources` plugin and threaded into the `FetchService` so a fetch to a
+//! wasm-backed subgraph is dispatched here instead of over HTTP.
+//!
+//! The whole module is gated behind the `wasm-components` cargo feature (wasmtime is a heavy dep).
+
+// TODO(wasm-components WS3): remove once `FetchService` dispatches to `invoke`/the factory.
+#![allow(dead_code)]
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use anyhow::{Result, anyhow};
+use indexmap::IndexMap;
+use serde_json_bytes::Value as JsonValue;
+use wasmtime::component::types::Type;
+use wasmtime::component::{Component, Linker, ResourceTable, Val};
+use wasmtime::{Config, Engine, Store};
+use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
+use wasmtime_wasi_config::{WasiConfig, WasiConfigVariables};
+use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
+use wit_gql::naming::to_camel_case;
+use wit_gql::{ExportLocation, FieldMapping, OperationMap};
+
+/// Per-`Store` host state. Each invocation gets a fresh one so instances never share mutable state.
+struct WasmHostCtx {
+    table: ResourceTable,
+    wasi: WasiCtx,
+    http: WasiHttpCtx,
+    config: WasiConfigVariables,
+}
+
+impl WasiView for WasmHostCtx {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+
+impl WasiHttpView for WasmHostCtx {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: Default::default(),
+        }
+    }
+}
+
+/// The shared wasmtime engine + linker, built once and reused for every component.
+///
+/// The `Engine` is cheap to clone (internally reference-counted); the `Linker` is shared by
+/// reference. Both are immutable after construction.
+pub(crate) struct WasmRuntime {
+    engine: Engine,
+    linker: Linker<WasmHostCtx>,
+}
+
+impl WasmRuntime {
+    /// Build the engine and register the WASI hosts the components import:
+    /// `wasi:io`/`wasi:clocks`/… , `wasi:http/outgoing-handler`, and `wasi:config/store`.
+    pub(crate) fn new() -> Result<Self> {
+        let mut config = Config::new();
+        // Component model is on by default; `async_support` is a deprecated no-op in wasmtime 46.
+        config.wasm_component_model(true);
+        let engine = Engine::new(&config).map_err(|e| anyhow!("building wasm engine: {e}"))?;
+
+        let mut linker: Linker<WasmHostCtx> = Linker::new(&engine);
+        wasmtime_wasi::p2::add_to_linker_async(&mut linker)
+            .map_err(|e| anyhow!("linking wasi: {e}"))?;
+        wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)
+            .map_err(|e| anyhow!("linking wasi:http: {e}"))?;
+        wasmtime_wasi_config::add_to_linker(&mut linker, |c: &mut WasmHostCtx| {
+            WasiConfig::from(&c.config)
+        })
+        .map_err(|e| anyhow!("linking wasi:config: {e}"))?;
+
+        Ok(Self { engine, linker })
+    }
+}
+
+/// A single compiled component plus the GraphQL-field → WIT-export mapping derived from its WIT.
+pub(crate) struct WasmComponent {
+    runtime: Arc<WasmRuntime>,
+    component: Component,
+    /// Config values (e.g. API keys) exposed to this component via `wasi:config/store`.
+    config: BTreeMap<String, String>,
+    operation_map: OperationMap,
+}
+
+impl WasmComponent {
+    /// Decode the component's WIT (via `wit-gql`, the same code the SDL generator uses) to build the
+    /// dispatch [`OperationMap`], and compile the component with wasmtime (the expensive step, done
+    /// once at load).
+    pub(crate) fn compile(
+        runtime: Arc<WasmRuntime>,
+        bytes: &[u8],
+        config: BTreeMap<String, String>,
+    ) -> Result<Self> {
+        let (resolve, world) =
+            wit_gql::decode_component(bytes).map_err(|e| anyhow!("decoding component WIT: {e}"))?;
+        let operation_map = wit_gql::operation_map(&resolve, world);
+        let component = Component::from_binary(&runtime.engine, bytes)
+            .map_err(|e| anyhow!("compiling component: {e}"))?;
+        Ok(Self {
+            runtime,
+            component,
+            config,
+            operation_map,
+        })
+    }
+
+    /// The GraphQL-field → WIT-export mapping (used by the fetch path to route root fields).
+    pub(crate) fn operation_map(&self) -> &OperationMap {
+        &self.operation_map
+    }
+
+    /// Invoke the WIT export backing `field`, passing `args` (a JSON object keyed by GraphQL
+    /// argument name). Returns the export's `result<string, string>`: `Ok(json)` is the raw
+    /// response body, `Err(msg)` a guest-side error. The outer `Result` is a host/runtime failure
+    /// (instantiation, missing export, trap).
+    pub(crate) async fn invoke(
+        &self,
+        field: &FieldMapping,
+        args: &JsonValue,
+    ) -> Result<std::result::Result<String, String>> {
+        let ctx = WasmHostCtx {
+            table: ResourceTable::new(),
+            wasi: WasiCtx::builder().build(),
+            http: WasiHttpCtx::new(),
+            config: WasiConfigVariables::from_iter(self.config.clone()),
+        };
+        let mut store = Store::new(&self.runtime.engine, ctx);
+
+        let instance = self
+            .runtime
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await
+            .map_err(|e| anyhow!("instantiating component: {e}"))?;
+
+        // Navigate to the exported function: either on the component root or within an interface
+        // instance identified by its fully-qualified name (e.g. `incidentio:api/incidents-v2@0.1.0`).
+        let func = match &field.export {
+            ExportLocation::Root => {
+                let idx = instance
+                    .get_export_index(&mut store, None, &field.func)
+                    .ok_or_else(|| anyhow!("export `{}` not found", field.func))?;
+                instance.get_func(&mut store, &idx)
+            }
+            ExportLocation::Interface { instance_name } => {
+                let iface = instance
+                    .get_export_index(&mut store, None, instance_name)
+                    .ok_or_else(|| anyhow!("interface export `{instance_name}` not found"))?;
+                let idx = instance
+                    .get_export_index(&mut store, Some(&iface), &field.func)
+                    .ok_or_else(|| {
+                        anyhow!("function `{}` not found in `{instance_name}`", field.func)
+                    })?;
+                instance.get_func(&mut store, &idx)
+            }
+        }
+        .ok_or_else(|| anyhow!("could not resolve export for field `{}`", field.graphql_field))?;
+
+        // Build the argument list, type-guided by the function's declared parameter types.
+        let param_types: Vec<(String, Type)> = func
+            .ty(&store)
+            .params()
+            .map(|(name, ty)| (name.to_string(), ty))
+            .collect();
+        let mut call_args = Vec::with_capacity(param_types.len());
+        for (wit_param, ty) in &param_types {
+            // Map the WIT parameter name back to the GraphQL argument name it was emitted as.
+            let gql_arg = field
+                .params
+                .iter()
+                .find(|p| &p.wit_param == wit_param)
+                .map(|p| p.graphql_arg.as_str())
+                .unwrap_or(wit_param.as_str());
+            let value = get_field(args, gql_arg).unwrap_or(JsonValue::Null);
+            call_args.push(json_to_val(ty, &value)?);
+        }
+
+        let mut results = vec![Val::Bool(false)];
+        func.call_async(&mut store, &call_args, &mut results)
+            .await
+            .map_err(|e| anyhow!("invoking `{}`: {e}", field.graphql_field))?;
+        // NB: `post_return_async` is a deprecated no-op in wasmtime 46; not called.
+
+        decode_result_string(results.into_iter().next().unwrap_or(Val::Bool(false)))
+    }
+}
+
+/// Registry mapping a supergraph subgraph name to the wasm component that backs it.
+///
+/// The wasm analog of `ConnectorServiceFactory { connectors_by_service_name }`. Built from router
+/// config by the `experimental_wasm_data_sources` plugin, and threaded into the `FetchService`.
+#[derive(Clone)]
+pub(crate) struct WasmComponentServiceFactory {
+    pub(crate) wasm_components_by_service_name: Arc<IndexMap<Arc<str>, Arc<WasmComponent>>>,
+}
+
+impl WasmComponentServiceFactory {
+    /// An empty registry (used where no wasm data sources are configured).
+    pub(crate) fn empty() -> Self {
+        Self {
+            wasm_components_by_service_name: Arc::new(IndexMap::new()),
+        }
+    }
+
+    /// Build a registry from a name→component map.
+    pub(crate) fn new(components: IndexMap<Arc<str>, Arc<WasmComponent>>) -> Self {
+        Self {
+            wasm_components_by_service_name: Arc::new(components),
+        }
+    }
+
+    /// The component backing `service_name`, if any.
+    pub(crate) fn get(&self, service_name: &str) -> Option<Arc<WasmComponent>> {
+        self.wasm_components_by_service_name
+            .get(service_name)
+            .cloned()
+    }
+}
+
+/// Convert a JSON value into a wasmtime `Val`, guided by the WIT parameter `Type`.
+///
+/// Record field names are matched by their camelCase GraphQL spelling (falling back to the raw WIT
+/// name), mirroring how `wit-gql` emits the input types.
+fn json_to_val(ty: &Type, v: &JsonValue) -> Result<Val> {
+    Ok(match ty {
+        Type::Bool => Val::Bool(v.as_bool().unwrap_or(false)),
+        Type::S8 => Val::S8(as_i64(v) as i8),
+        Type::U8 => Val::U8(as_i64(v) as u8),
+        Type::S16 => Val::S16(as_i64(v) as i16),
+        Type::U16 => Val::U16(as_i64(v) as u16),
+        Type::S32 => Val::S32(as_i64(v) as i32),
+        Type::U32 => Val::U32(as_i64(v) as u32),
+        Type::S64 => Val::S64(as_i64(v)),
+        Type::U64 => Val::U64(as_i64(v) as u64),
+        Type::Float32 => Val::Float32(as_f64(v) as f32),
+        Type::Float64 => Val::Float64(as_f64(v)),
+        Type::Char => Val::Char(v.as_str().and_then(|s| s.chars().next()).unwrap_or('\0')),
+        Type::String => Val::String(v.as_str().unwrap_or_default().to_string()),
+        Type::Option(o) => {
+            if v.is_null() {
+                Val::Option(None)
+            } else {
+                Val::Option(Some(Box::new(json_to_val(&o.ty(), v)?)))
+            }
+        }
+        Type::List(l) => {
+            let inner = l.ty();
+            let items = match v.as_array() {
+                Some(a) => a
+                    .iter()
+                    .map(|e| json_to_val(&inner, e))
+                    .collect::<Result<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            Val::List(items)
+        }
+        Type::Record(r) => {
+            let mut fields = Vec::new();
+            for f in r.fields() {
+                let camel = to_camel_case(f.name);
+                let value = get_field(v, &camel)
+                    .or_else(|| get_field(v, f.name))
+                    .unwrap_or(JsonValue::Null);
+                fields.push((f.name.to_string(), json_to_val(&f.ty, &value)?));
+            }
+            Val::Record(fields)
+        }
+        Type::Enum(_) => {
+            // GraphQL enum values are emitted SCREAMING_SNAKE; WIT cases are kebab-case.
+            let case = v.as_str().unwrap_or_default().to_lowercase().replace('_', "-");
+            Val::Enum(case)
+        }
+        other => {
+            return Err(anyhow!(
+                "unsupported WIT parameter type for a wasm data source: {other:?}"
+            ));
+        }
+    })
+}
+
+/// Decode a `result<string, string>` return value.
+fn decode_result_string(v: Val) -> Result<std::result::Result<String, String>> {
+    match v {
+        Val::Result(Ok(payload)) => Ok(Ok(payload_string(payload.as_deref()))),
+        Val::Result(Err(payload)) => Ok(Err(payload_string(payload.as_deref()))),
+        // A bare string (result was degraded to its ok payload during SDL generation).
+        Val::String(s) => Ok(Ok(s)),
+        other => Err(anyhow!(
+            "wasm export returned an unexpected value (expected result<string,string>): {other:?}"
+        )),
+    }
+}
+
+fn payload_string(p: Option<&Val>) -> String {
+    match p {
+        Some(Val::String(s)) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+fn as_i64(v: &JsonValue) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_u64().map(|u| u as i64))
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0)
+}
+
+fn as_f64(v: &JsonValue) -> f64 {
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0.0)
+}
+
+fn get_field(v: &JsonValue, key: &str) -> Option<JsonValue> {
+    v.as_object().and_then(|m| m.get(key)).cloned()
+}

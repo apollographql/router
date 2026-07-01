@@ -50,6 +50,8 @@ pub mod router;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
+#[cfg(feature = "wasm-components")]
+pub(crate) mod wasm_service;
 
 /// Represents the steps of the pipeline that can support user-extensibility.
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]

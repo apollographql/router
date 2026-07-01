@@ -48,3 +48,5 @@ pub(crate) mod telemetry;
 #[cfg(test)]
 pub(crate) mod test;
 pub(crate) mod traffic_shaping;
+#[cfg(feature = "wasm-components")]
+pub(crate) mod wasm;
