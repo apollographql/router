@@ -161,7 +161,6 @@ mod tests {
 
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::BoxError;
     use tower::ServiceExt;
 
     use super::*;
@@ -236,7 +235,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_apq_disabled_passes_query_through_unchanged() {
-        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
             assert!(
                 req.subgraph_request.body().query.is_some(),
                 "query should be present when APQ is disabled"
@@ -248,11 +249,12 @@ mod tests {
                     .contains_key(PERSISTED_QUERY_KEY),
                 "no persistedQuery extension expected when APQ is disabled"
             );
-            Ok::<_, BoxError>(success_response(req.context))
+            responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(false).layer(inner);
+        let svc = SubgraphApqLayer::new(false).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -261,7 +263,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_apq_enabled_sends_hash_only_on_first_attempt() {
-        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
             assert!(
                 req.subgraph_request.body().query.is_none(),
                 "query should be absent on first APQ attempt"
@@ -273,11 +277,12 @@ mod tests {
                     .contains_key(PERSISTED_QUERY_KEY),
                 "persistedQuery hash should be present"
             );
-            Ok::<_, BoxError>(success_response(req.context))
+            responder.send_response(success_response(req.context));
         });
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert_eq!(
             resp.response.body().data,
             Some(Value::String(ByteString::from("test")))
@@ -409,7 +414,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_apq_body_preserves_all_fields() {
-        let inner = tower::service_fn(|req: SubgraphRequest| async move {
+        let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
             let body = req.subgraph_request.body();
             assert!(
                 body.query.is_none(),
@@ -425,7 +432,7 @@ mod tests {
                 body.extensions.contains_key("myExt"),
                 "custom extensions should be preserved alongside persistedQuery"
             );
-            Ok::<_, BoxError>(success_response(req.context))
+            responder.send_response(success_response(req.context));
         });
 
         let gql_body = crate::graphql::Request {
@@ -446,8 +453,9 @@ mod tests {
             .context(Context::new())
             .build();
 
-        let svc = SubgraphApqLayer::new(true).layer(inner);
+        let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(request).await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
         assert!(resp.response.body().errors.is_empty());
     }
 
