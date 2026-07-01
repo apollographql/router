@@ -664,7 +664,10 @@ mod tests {
             insta::with_settings!({sort_maps => true}, {
                 insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
             });
-            insta::assert_debug_snapshot!("plan_root", plan.root);
+            insta::assert_debug_snapshot!(
+                "plan_root",
+                plan.root.as_deref().expect("non-empty plan")
+            );
         } else {
             panic!()
         }
@@ -703,41 +706,46 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn empty_query_plan_should_be_a_planner_error() {
-        let config = Default::default();
+    async fn noop_query_should_produce_empty_plan() {
+        let mut config = Configuration::default();
+        config.supergraph.introspection = true;
+        let config = Arc::new(config);
+
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-        let query = include_str!("testdata/unknown_introspection_query.graphql");
+        let query = include_str!("testdata/noop_query.graphql");
 
-        let planner = QueryPlannerService::new(schema.clone(), Default::default())
+        let mut service = QueryPlannerService::new(schema.clone(), config)
             .await
             .unwrap();
 
-        let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
+        let document =
+            Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
-        let mut query_metrics = Default::default();
-        let selections = planner
-            .parse_selections(query.to_string(), None, &doc, &mut query_metrics)
+        let response = service
+            .ready()
             .await
-            .unwrap();
-        let _err =
-            // test the planning part separately because it is a valid introspection query
-            // it should be caught by the introspection part, but just in case, we check
-            // that the query planner would return an empty plan error if it received an
-            // introspection query
-            planner.plan(
-                include_str!("testdata/unknown_introspection_query.graphql").to_string(),
-                include_str!("testdata/unknown_introspection_query.graphql").to_string(),
-                None,
-                CacheKeyMetadata::default(),
-                selections,
-                PlanOptions::default(),
-                &doc,
-                ComputeJobType::QueryPlanning,
-                query_metrics
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
             )
-                .await
-                .unwrap_err();
-        // TODO(@goto-bus-stop): This should actually succeed
+            .await
+            .unwrap();
+
+        let content = response.content.expect("expected a successful response");
+
+        let plan = match content {
+            QueryPlannerContent::Plan { plan, .. } => plan,
+            _ => panic!("expected a Plan response, received {content:?}"),
+        };
+
+        assert_eq!(plan.root, None, "expected an empty plan");
     }
 
     #[test(tokio::test)]
