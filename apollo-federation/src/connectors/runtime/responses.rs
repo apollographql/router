@@ -145,6 +145,18 @@ fn check_list_mismatch(connector: &Connector, response: MappedResponse) -> Mappe
         return response;
     };
 
+    // BatchEntity connectors (type-level @connect with $batch) always return
+    // an array by design; they have their own validation in add_to_data.
+    // Type-level connectors also have no field definition, so output_is_list
+    // is always false and the reverse check below would be a false positive.
+    if matches!(key, ResponseKey::BatchEntity { .. }) {
+        return MappedResponse::Data {
+            data,
+            key,
+            problems,
+        };
+    }
+
     let is_array = matches!(data, Value::Array(_));
     let is_null = matches!(data, Value::Null);
 
