@@ -24,6 +24,8 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    tmpfs:
+      - /data
     ports:
       - 6379:6379
 
