@@ -586,7 +586,6 @@ mod tests {
         use tower::ServiceExt;
 
         use super::*;
-        use crate::Configuration;
         use crate::graphql::Response;
         use crate::query_planner::fetch::OperationKind;
         use crate::services::SubgraphService;
@@ -670,16 +669,8 @@ mod tests {
             enable_apq: bool,
         ) -> SubgraphApqService<SubgraphService> {
             SubgraphApqLayer::new(enable_apq).layer(
-                SubgraphService::new(
-                    name,
-                    HttpClientServiceFactory::from_config(
-                        name,
-                        &Configuration::default(),
-                        crate::configuration::shared::Client::default(),
-                    )
-                    .create(name),
-                )
-                .expect("can create a SubgraphService"),
+                SubgraphService::new(name, HttpClientServiceFactory::for_test(name))
+                    .expect("can create a SubgraphService"),
             )
         }
 

@@ -509,7 +509,6 @@ mod tests {
     use super::BatchQueryInfo;
     use super::SubgraphBatchRequest;
     use super::assemble_batch;
-    use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
     use crate::graphql;
@@ -538,12 +537,7 @@ mod tests {
                 (
                     rx,
                     BatchQueryInfo {
-                        http_client: HttpClientServiceFactory::from_config(
-                            "test",
-                            &Configuration::default(),
-                            crate::configuration::shared::Client::default(),
-                        )
-                        .create("test"),
+                        http_client: HttpClientServiceFactory::for_test("test"),
                         request: SubgraphRequest::fake_builder()
                             .subgraph_request(http::Request::builder().body(gql_request).unwrap())
                             .subgraph_name(format!("slot{index}"))
@@ -666,12 +660,7 @@ mod tests {
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let http_client = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        )
-        .create("whatever");
+        let http_client = HttpClientServiceFactory::for_test("whatever");
 
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
@@ -702,12 +691,7 @@ mod tests {
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let http_client = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        )
-        .create("whatever");
+        let http_client = HttpClientServiceFactory::for_test("whatever");
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()
@@ -737,12 +721,7 @@ mod tests {
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        let http_client = HttpClientServiceFactory::from_config(
-            "testbatch",
-            &Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        )
-        .create("whatever");
+        let http_client = HttpClientServiceFactory::for_test("whatever");
         let request = SubgraphRequest::fake_builder()
             .subgraph_request(
                 http::Request::builder()

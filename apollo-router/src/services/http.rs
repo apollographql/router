@@ -72,6 +72,16 @@ impl HttpClientServiceFactory {
                 e.http_client_service(name, acc)
             })
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(name: &str) -> BoxCloneService {
+        Self::from_config(
+            name,
+            &crate::Configuration::default(),
+            crate::configuration::shared::Client::default(),
+        )
+        .create(name)
+    }
 }
 
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.

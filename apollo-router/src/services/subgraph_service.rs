@@ -309,8 +309,6 @@ async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
-    // `service` is a shared `&str`, but the various error/telemetry sinks below need an
-    // owned copy; compute it once here instead of re-converting at each call site.
     let service_name = service.to_string();
 
     // Update our batching metrics (just before we fetch)
@@ -1148,7 +1146,6 @@ mod tests {
     use url::Url;
 
     use super::*;
-    use crate::Configuration;
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::configuration::subgraph::SubgraphConfiguration;
@@ -1624,16 +1621,8 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
         let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "testbis",
-                HttpClientServiceFactory::from_config(
-                    "testbis",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                )
-                .create("testbis"),
-            )
-            .expect("can create a SubgraphService"),
+            SubgraphService::new("testbis", HttpClientServiceFactory::for_test("testbis"))
+                .expect("can create a SubgraphService"),
         );
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
@@ -1667,16 +1656,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1699,16 +1681,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1732,16 +1707,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_panic(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1768,16 +1736,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1803,16 +1764,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_large_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let context = Context::new();
         context
@@ -1851,16 +1805,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let context = Context::new();
         // Limit of 1000 bytes — well above {"data": null} (14 bytes)
@@ -1895,16 +1842,9 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
         );
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1936,16 +1876,9 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
         );
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1976,16 +1909,8 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
         let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "test",
-                HttpClientServiceFactory::from_config(
-                    "test",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                )
-                .create("test"),
-            )
-            .expect("can create a SubgraphService"),
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService"),
         );
         let (tx, rx) = mpsc::channel(2);
         let mut rx_stream = ReceiverStream::new(rx);
@@ -2030,15 +1955,8 @@ mod tests {
             let socket_addr = listener.local_addr().unwrap();
             tokio::task::spawn(emulate_incorrect_websocket_server(listener));
             let subgraph_service = with_subscription_layer(
-                SubgraphService::new(
-                    "test",
-                    HttpClientServiceFactory::from_config(
-                        "test",
-                        &Configuration::default(),
-                        crate::configuration::shared::Client::default(),
-                    ).create("test"),
-                )
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                    .expect("can create a SubgraphService"),
             );
             let (tx, _rx) = mpsc::channel(2);
 
@@ -2084,16 +2002,8 @@ mod tests {
             let spawned_task =
                 tokio::task::spawn(emulate_websocket_server_that_completes(listener));
             let subgraph_service = with_subscription_layer(
-                SubgraphService::new(
-                    "test",
-                    HttpClientServiceFactory::from_config(
-                        "test",
-                        &Configuration::default(),
-                        crate::configuration::shared::Client::default(),
-                    )
-                    .create("test"),
-                )
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                    .expect("can create a SubgraphService"),
             );
             let (tx, rx) = mpsc::channel(2);
             let mut rx_stream = ReceiverStream::new(rx);
@@ -2153,16 +2063,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2193,16 +2096,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2229,16 +2125,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2265,16 +2154,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2300,16 +2182,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            )
-            .create("test"),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
