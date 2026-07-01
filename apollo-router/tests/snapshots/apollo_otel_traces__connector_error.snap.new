@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/apollo_otel_traces.rs
+assertion_line: 949
 expression: report
 ---
 resourceSpans:
@@ -56,7 +57,7 @@ resourceSpans:
                   boolValue: true
               - key: client.name
                 value:
-                  stringValue: my client
+                  stringValue: ""
               - key: client.version
                 value:
                   stringValue: ""
@@ -161,16 +162,16 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
-                  stringValue: "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}"
+                  stringValue: "# -\n{posts{body forceError id title}}"
               - key: apollo_private.query.aliases
                 value:
                   intValue: "0"
               - key: apollo_private.query.depth
                 value:
-                  intValue: "4"
+                  intValue: "2"
               - key: apollo_private.query.height
                 value:
-                  intValue: "7"
+                  intValue: "5"
               - key: apollo_private.query.root_fields
                 value:
                   intValue: "1"
@@ -323,7 +324,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: products
+                  stringValue: posts
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -340,12 +341,27 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 257
-            name: subgraph
+            name: connect
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo_private.ftv1
+              - key: apollo.connector.detail
+                value:
+                  stringValue: "{\"GET\":\"/posts\"}"
+              - key: apollo.connector.selection
+                value:
+                  stringValue: "id\ntitle\nbody"
+              - key: apollo.connector.source.detail
+                value:
+                  stringValue: "[redacted]"
+              - key: apollo.connector.source.name
+                value:
+                  stringValue: jsonPlaceholder
+              - key: apollo.connector.type
+                value:
+                  stringValue: http
+              - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -355,13 +371,13 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 257
-            name: rhai_plugin
+            name: connect_request
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
@@ -373,31 +389,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: subgraph_request
-            kind: 3
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: products
-              - key: graphql.operation.name
-                value:
-                  stringValue: ""
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
+              code: 1
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
@@ -431,7 +423,7 @@ resourceSpans:
             attributes:
               - key: graphql.path
                 value:
-                  stringValue: /topProducts/@
+                  stringValue: /posts/@
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -452,7 +444,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: reviews
+                  stringValue: posts
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -469,119 +461,26 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 257
-            name: subgraph
+            name: connect
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo_private.ftv1
+              - key: apollo.connector.detail
+                value:
+                  stringValue: "{\"GET\":\"/missing?_={$args.id}\"}"
+              - key: apollo.connector.selection
+                value:
+                  stringValue: forceError
+              - key: apollo.connector.source.detail
                 value:
                   stringValue: "[redacted]"
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: rhai_plugin
-            kind: 1
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes: []
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: subgraph_request
-            kind: 3
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo.subgraph.name
+              - key: apollo.connector.source.name
                 value:
-                  stringValue: reviews
-              - key: graphql.operation.name
+                  stringValue: jsonPlaceholder
+              - key: apollo.connector.type
                 value:
-                  stringValue: ""
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: http_request
-            kind: 3
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: http.response.status_code
-                value:
-                  intValue: "200"
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: flatten
-            kind: 1
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: graphql.path
-                value:
-                  stringValue: /topProducts/@/reviews/@/author
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: fetch
-            kind: 1
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
+                  stringValue: http
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -592,70 +491,38 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 2
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 257
-            name: subgraph
-            kind: 1
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: rhai_plugin
+            name: connect_request
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
-            events: []
+            events:
+              - timeUnixNano: "[time]"
+                name: ""
+                attributes:
+                  - key: exception.message
+                    value:
+                      stringValue: Request failed
+                  - key: graphql.error.extensions.code
+                    value:
+                      stringValue: CONNECTOR_FETCH
+                  - key: graphql.error.path
+                    value:
+                      stringValue: "[redacted]"
+                droppedAttributesCount: 0
             droppedEventsCount: 0
             links: []
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 257
-            name: subgraph_request
-            kind: 3
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
-              - key: graphql.operation.name
-                value:
-                  stringValue: ""
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
+              code: 2
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
@@ -668,7 +535,59 @@ resourceSpans:
             attributes:
               - key: http.response.status_code
                 value:
-                  intValue: "200"
+                  intValue: "404"
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 257
+            name: connect_request
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events:
+              - timeUnixNano: "[time]"
+                name: ""
+                attributes:
+                  - key: exception.message
+                    value:
+                      stringValue: Request failed
+                  - key: graphql.error.extensions.code
+                    value:
+                      stringValue: CONNECTOR_FETCH
+                  - key: graphql.error.path
+                    value:
+                      stringValue: "[redacted]"
+                droppedAttributesCount: 0
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 2
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 257
+            name: http_request
+            kind: 3
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes:
+              - key: http.response.status_code
+                value:
+                  intValue: "404"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
