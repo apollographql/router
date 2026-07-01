@@ -79,8 +79,6 @@ pub(crate) struct WasmDataSources {
 
 impl WasmDataSources {
     /// The dispatch registry, for the supergraph creator to thread into the `FetchService`.
-    // TODO(wasm-components WS3): remove `allow` once the supergraph creator calls this.
-    #[allow(dead_code)]
     pub(crate) fn service_factory(&self) -> Arc<WasmComponentServiceFactory> {
         self.service_factory.clone()
     }

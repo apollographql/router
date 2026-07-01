@@ -551,13 +551,31 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
 
+        // Pull the wasm data-source registry out of the plugin (if configured), the same way the
+        // subscription config is sourced above. Threaded into the FetchServiceFactory below.
+        #[cfg(feature = "wasm-components")]
+        let wasm_component_service_factory = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == "apollo.experimental_wasm_data_sources")
+            .and_then(|plugin| {
+                (*plugin.1)
+                    .as_any()
+                    .downcast_ref::<crate::plugins::wasm::WasmDataSources>()
+            })
+            .map(|p| p.service_factory())
+            .unwrap_or_else(|| {
+                Arc::new(crate::services::wasm_service::WasmComponentServiceFactory::empty())
+            });
+
         let connector_sources = schema
             .connectors
             .as_ref()
             .map(|c| c.source_config_keys.clone())
             .unwrap_or_default();
 
-        let fetch_service_factory = Arc::new(FetchServiceFactory::new(
+        #[allow(unused_mut)]
+        let mut fetch_service_factory = FetchServiceFactory::new(
             schema.clone(),
             subgraph_schemas.clone(),
             Arc::new(SubgraphServiceFactory::new(
@@ -586,7 +604,12 @@ impl PluggableSupergraphServiceBuilder {
                 )),
             )),
             Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
-        ));
+        );
+        #[cfg(feature = "wasm-components")]
+        {
+            fetch_service_factory.wasm_component_service_factory = wasm_component_service_factory;
+        }
+        let fetch_service_factory = Arc::new(fetch_service_factory);
 
         let execution_service_factory = ExecutionServiceFactory {
             schema: schema.clone(),

@@ -43,6 +43,9 @@ pub(crate) struct FetchService {
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+    #[cfg(feature = "wasm-components")]
+    pub(crate) wasm_component_service_factory:
+        Arc<crate::services::wasm_service::WasmComponentServiceFactory>,
 }
 
 impl tower::Service<Request> for FetchService {
@@ -81,6 +84,40 @@ impl FetchService {
         let service_name = service_name.clone();
         let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
         let hoist_orphan_errors = self.hoist_orphan_errors.get(&service_name).enabled;
+
+        // A wasm-backed subgraph is resolved by invoking its component, not over HTTP. Checked
+        // before connectors/subgraphs and never touches `schema.subgraph_url`, so these subgraphs
+        // need no routing URL.
+        #[cfg(feature = "wasm-components")]
+        if let Some(component) = self
+            .wasm_component_service_factory
+            .get(service_name.as_ref())
+        {
+            let FetchRequest {
+                fetch_node,
+                variables,
+                current_dir,
+                ..
+            } = request;
+            let schema = self.schema.clone();
+            let fut: BoxFuture<'static, Result<FetchResponse, BoxError>> = Box::pin(async move {
+                Ok(crate::services::wasm_service::fetch_with_wasm_service(
+                    schema,
+                    component,
+                    fetch_node,
+                    variables,
+                    current_dir,
+                    hoist_orphan_errors,
+                )
+                .await)
+            });
+            return fut.instrument(tracing::info_span!(
+                FETCH_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.subgraph.name" = service_name.as_ref(),
+                "apollo_private.sent_time_offset" = fetch_time_offset
+            ));
+        }
 
         if let Some(connector) = self
             .connector_service_factory
@@ -289,6 +326,12 @@ pub(crate) struct FetchServiceFactory {
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+    /// Registry of wasm-backed data sources. Empty unless the `experimental_wasm_data_sources`
+    /// plugin populated it (see `services/supergraph/service.rs`). Wasm-backed subgraph fetches are
+    /// dispatched to `wasm_service::fetch_with_wasm_service` instead of over HTTP.
+    #[cfg(feature = "wasm-components")]
+    pub(crate) wasm_component_service_factory:
+        Arc<crate::services::wasm_service::WasmComponentServiceFactory>,
 }
 
 impl FetchServiceFactory {
@@ -307,6 +350,12 @@ impl FetchServiceFactory {
             subscription_config,
             connector_service_factory,
             hoist_orphan_errors,
+            // Defaults to empty; the supergraph creator overwrites it with the plugin's registry
+            // when the `experimental_wasm_data_sources` plugin is configured.
+            #[cfg(feature = "wasm-components")]
+            wasm_component_service_factory: Arc::new(
+                crate::services::wasm_service::WasmComponentServiceFactory::empty(),
+            ),
         }
     }
 }
@@ -322,6 +371,8 @@ impl ServiceFactory<Request> for FetchServiceFactory {
             _subscription_config: self.subscription_config.clone(),
             connector_service_factory: self.connector_service_factory.clone(),
             hoist_orphan_errors: self.hoist_orphan_errors.clone(),
+            #[cfg(feature = "wasm-components")]
+            wasm_component_service_factory: self.wasm_component_service_factory.clone(),
         }
         .boxed()
     }

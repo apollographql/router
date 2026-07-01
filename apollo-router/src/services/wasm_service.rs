@@ -14,15 +14,15 @@
 //!
 //! The whole module is gated behind the `wasm-components` cargo feature (wasmtime is a heavy dep).
 
-// TODO(wasm-components WS3): remove once `FetchService` dispatches to `invoke`/the factory.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use indexmap::IndexMap;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value as JsonValue;
+use tower::BoxError;
 use wasmtime::component::types::Type;
 use wasmtime::component::{Component, Linker, ResourceTable, Val};
 use wasmtime::{Config, Engine, Store};
@@ -32,6 +32,12 @@ use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
 use wit_gql::naming::to_camel_case;
 use wit_gql::{ExportLocation, FieldMapping, OperationMap};
+
+use crate::error::Error;
+use crate::graphql;
+use crate::json_ext::Path;
+use crate::query_planner::fetch::{FetchNode, Variables};
+use crate::spec::Schema;
 
 /// Per-`Store` host state. Each invocation gets a fresh one so instances never share mutable state.
 struct WasmHostCtx {
@@ -332,4 +338,194 @@ fn as_f64(v: &JsonValue) -> f64 {
 
 fn get_field(v: &JsonValue, key: &str) -> Option<JsonValue> {
     v.as_object().and_then(|m| m.get(key)).cloned()
+}
+
+/// Resolve a query-plan fetch by invoking the wasm component that backs the target subgraph.
+///
+/// Called from `FetchService::handle_fetch` when `service_name` maps to a wasm data source. Walks
+/// the planned subgraph operation's root fields, invokes the WIT export backing each, shapes the
+/// `result<string,string>` into the union response the generated SDL expects
+/// (`<Field>Ok { value } | <Field>Err { error }`), and merges via `FetchNode::response_at_path` —
+/// the same final step the connector path uses. Returns the fetch `(data, errors)`.
+pub(crate) async fn fetch_with_wasm_service(
+    schema: Arc<Schema>,
+    component: Arc<WasmComponent>,
+    fetch_node: FetchNode,
+    variables: Variables,
+    current_dir: Path,
+    hoist_orphan_errors: bool,
+) -> (JsonValue, Vec<Error>) {
+    let inverted_paths = variables.inverted_paths.clone();
+
+    let document = match fetch_node.operation.as_parsed() {
+        Ok(doc) => doc.clone(),
+        Err(e) => {
+            let err = wasm_error(format!("invalid wasm subgraph operation: {e}"), &current_dir);
+            return (JsonValue::Null, vec![err]);
+        }
+    };
+    let operation = match document.operations.get(fetch_node.operation_name.as_deref()) {
+        Ok(op) => op,
+        Err(_) => {
+            let err = wasm_error("wasm subgraph operation not found".to_string(), &current_dir);
+            return (JsonValue::Null, vec![err]);
+        }
+    };
+
+    let mut data = JsonMap::new();
+    let mut errors: Vec<Error> = Vec::new();
+
+    for selection in &operation.selection_set.selections {
+        let apollo_compiler::executable::Selection::Field(field) = selection else {
+            continue;
+        };
+        let field_name = field.name.as_str();
+        let response_key = field.alias.as_ref().unwrap_or(&field.name).as_str();
+
+        // `__typename` on the root is answered from the schema by execution — nothing to invoke.
+        if field_name == "__typename" {
+            continue;
+        }
+
+        let Some(mapping) = component.operation_map().get(field_name) else {
+            errors.push(wasm_error(
+                format!("field `{field_name}` has no matching export in the wasm component"),
+                &current_dir,
+            ));
+            data.insert(ByteString::from(response_key), JsonValue::Null);
+            continue;
+        };
+
+        let args = match field_arguments(field, &variables.variables) {
+            Ok(args) => JsonValue::Object(args),
+            Err(e) => {
+                errors.push(wasm_error(
+                    format!("building arguments for `{field_name}`: {e}"),
+                    &current_dir,
+                ));
+                data.insert(ByteString::from(response_key), JsonValue::Null);
+                continue;
+            }
+        };
+
+        match component.invoke(mapping, &args).await {
+            Ok(Ok(json_text)) => {
+                data.insert(
+                    ByteString::from(response_key),
+                    result_member(field_name, "Ok", "value", json_text),
+                );
+            }
+            Ok(Err(message)) => {
+                data.insert(
+                    ByteString::from(response_key),
+                    result_member(field_name, "Err", "error", message),
+                );
+            }
+            Err(host_err) => {
+                errors.push(wasm_error(
+                    format!("invoking `{field_name}` in the wasm component failed: {host_err}"),
+                    &current_dir,
+                ));
+                data.insert(ByteString::from(response_key), JsonValue::Null);
+            }
+        }
+    }
+
+    let response = graphql::Response::builder()
+        .data(JsonValue::Object(data))
+        .errors(errors)
+        .build();
+
+    fetch_node.response_at_path(
+        &schema,
+        &current_dir,
+        inverted_paths,
+        response,
+        hoist_orphan_errors,
+    )
+}
+
+/// Build a `result<string,string>` union member matching the generated SDL:
+/// `type <Field>Ok { value: String! }` / `type <Field>Err { error: String! }`.
+fn result_member(field_name: &str, suffix: &str, payload_key: &str, payload: String) -> JsonValue {
+    let mut member = JsonMap::new();
+    member.insert(
+        ByteString::from("__typename"),
+        JsonValue::String(format!("{}{}", pascalize(field_name), suffix).into()),
+    );
+    member.insert(ByteString::from(payload_key), JsonValue::String(payload.into()));
+    JsonValue::Object(member)
+}
+
+/// GraphQL result-wrapper type names are PascalCase; our field names are camelCase, so PascalCase is
+/// just the field name with an upper-cased first character.
+fn pascalize(camel: &str) -> String {
+    let mut chars = camel.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn wasm_error(message: String, path: &Path) -> Error {
+    graphql::Error::builder()
+        .message(message)
+        .extension_code("WASM_DATA_SOURCE_ERROR")
+        .path(path.clone())
+        .build()
+}
+
+/// Resolve a planned field's arguments into a JSON object keyed by GraphQL argument name, resolving
+/// variable references against `variables`. Mirrors
+/// `plugins::connectors::make_requests::graphql_utils::field_arguments_map`.
+fn field_arguments(
+    field: &apollo_compiler::Node<apollo_compiler::executable::Field>,
+    variables: &JsonMap<ByteString, JsonValue>,
+) -> Result<JsonMap<ByteString, JsonValue>, BoxError> {
+    let mut arguments = JsonMap::new();
+    for argument in field.arguments.iter() {
+        arguments.insert(
+            argument.name.as_str(),
+            arg_value_to_json(&argument.value, variables)?,
+        );
+    }
+    for argument_def in field.definition.arguments.iter() {
+        if let Some(value) = argument_def.default_value.as_ref() {
+            if !arguments.contains_key(argument_def.name.as_str()) {
+                arguments.insert(argument_def.name.as_str(), arg_value_to_json(value, variables)?);
+            }
+        }
+    }
+    Ok(arguments)
+}
+
+fn arg_value_to_json(
+    value: &apollo_compiler::ast::Value,
+    variables: &JsonMap<ByteString, JsonValue>,
+) -> Result<JsonValue, BoxError> {
+    use apollo_compiler::ast::Value as V;
+    Ok(match value {
+        V::Null => JsonValue::Null,
+        V::Enum(e) => JsonValue::String(e.as_str().into()),
+        V::Variable(name) => variables.get(name.as_str()).cloned().unwrap_or(JsonValue::Null),
+        V::String(s) => JsonValue::String(s.as_str().into()),
+        V::Float(f) => JsonValue::Number(
+            serde_json::Number::from_f64(f.try_to_f64().map_err(|_| "invalid float argument")?)
+                .ok_or("invalid float argument")?,
+        ),
+        V::Int(i) => JsonValue::Number(serde_json::Number::from(
+            i.try_to_i32().map_err(|_| "invalid int argument")?,
+        )),
+        V::Boolean(b) => JsonValue::Bool(*b),
+        V::List(l) => JsonValue::Array(
+            l.iter()
+                .map(|v| arg_value_to_json(v, variables))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        V::Object(o) => JsonValue::Object(
+            o.iter()
+                .map(|(k, v)| arg_value_to_json(v, variables).map(|v| (k.as_str().into(), v)))
+                .collect::<Result<JsonMap<_, _>, _>>()?,
+        ),
+    })
 }
