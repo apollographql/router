@@ -32,7 +32,6 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
@@ -139,7 +138,6 @@ pub(crate) struct CachingQueryPlanner<T> {
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
     cooperative_cancellation: CooperativeCancellation,
-    config_limits: limits::RouterLimitsConfig,
 }
 
 fn init_query_plan_from_redis(
@@ -210,7 +208,6 @@ impl<T> CachingQueryPlanner<T> {
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
-            config_limits: configuration.limits.router.clone(),
         })
     }
 }
@@ -627,14 +624,6 @@ where
                         context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
-
-                        crate::spec::operation_limits::check_measured(
-                            &plan.query_metrics,
-                            &self.config_limits,
-                            &query,
-                            operation_name.as_deref(),
-                        )
-                        .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
                     }
 
                     Ok(QueryPlannerResponse::builder().content(content).build())
@@ -1827,7 +1816,6 @@ mod tests {
                     usage_reporting: UsageReporting::Error("this is a test report key".to_string())
                         .into(),
                     query: Arc::new(Query::empty_for_tests()),
-                    query_metrics: Default::default(),
                     estimated_size: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
