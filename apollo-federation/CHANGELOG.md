@@ -26,73 +26,60 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 Adds support for Apollo Federation v2.15.
 
-This is the first Rust-native Apollo composition release. It introduces no new directives or composition behavior.
-Rust composition generates semantically equivalent supergraphs to the previous JavaScript binaries. However, the rewrite
-does surface a number of validation and error-reporting improvements, detailed below, that were previously inconsistent
-or missing.
+Composition is now written in Rust. No new directives or composition behavior were introduced. Your supergraphs are semantically equivalent to those built with the previous version. The main benefits are faster builds and significantly improved error messages.
 
-## Additional validations
+Because the Rust implementation is more rigorous, composition now catches several categories of schema problems that were previously inconsistent or missing. If you upgrade and encounter new errors, the following sections explain what to fix.
 
-### Disallow interfaces implementing `@interfaceObject`
+#### New validations
 
-Federation currently doesn't support this pattern and will emit `INTERFACE_OBJECT_USAGE_ERROR` error when it detects such a scenario.
+##### Interfaces implementing `@interfaceObject` now fail explicitly
 
-### Override label validation
+Federation doesn't support interfaces implementing `@interfaceObject` interfaces. If your schema uses this pattern, composition now reports `INTERFACE_OBJECT_USAGE_ERROR`.
 
-Composition now drops the `@override` labels if they don't reference a valid subgraph.
+##### Invalid `@override` labels are dropped
 
-### External field validation
+If an `@override` directive's `label` references a subgraph name that doesn't exist in your graph, composition now drops that label. Review your `@override` usage to ensure all labels are valid subgraph names.
 
-Composition now correctly validates merged directive usage on `@external` fields  and emits `MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL`
-error on failures.
+##### Merged directives on `@external` fields are rejected
 
-### Custom spec URL validation
+Applying a merged directive to an `@external` field now produces a `MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL` error. Review your `@external` field definitions.
 
-Composition now rejects custom spec imports that specify the Apollo spec domain `https://specs.apollo.dev`. Custom spec
-URLs are now checked against Apollo spec domain to prevent future collisions with new Apollo specs.
+##### Custom spec URLs can't use the Apollo domain
 
-### Input object validation
+Custom specifications can no longer import from `https://specs.apollo.dev`. This prevents future conflicts with new Apollo specifications.
 
-Composition now validates user-provided default object values to ensure they're valid (i.e. all fields are optional
-or have default values). Invalid values are removed from the supergraph.
+##### Invalid input object defaults are removed
 
-### `@tag` validations
+Default values for input objects are now validated at composition time. If a default object value is missing required fields, composition removes it from the supergraph.
 
-Composition now runs `@tag` validations as part of the main process (previously they were checked during contract variant
-generation only).
+##### `@tag` validation runs during composition
 
-### Root type inference fix
+`@tag` errors now surface during the main composition process so you can catch tag problems at build time.
+
+##### Root type inference fix
 
 Composition ensures that it only infers default root operation types (e.g. `Mutation`) if they aren't referenced by
 other schema elements.
 
-### Stricter `FieldSet` coercion rules
+##### `FieldSet` arguments must be strings
 
-`_FieldSet/FieldSet` is a custom scalar that represents a GraphQL selection set (minus brackets). While Apollo expects this
-value to be a `String`, the system accepted additional values due to auto-coercion logic.
+The `_FieldSet` scalar no longer accepts non-string values through automatic coercion. Make sure all `fields` arguments on `@key`, `@requires`, and `@provides` directives use quoted strings.
 
-## Cosmetic changes
+#### Improved error messages
 
-### Additional hints
+##### Hints are emitted on composition failure
 
-The merge process now correctly emits hints on composition failure.
+The composition process now emits hints even when composition fails, giving you more context to diagnose what went wrong.
 
-### Empty object vs expanded object
+##### Input object defaults are fully expanded
 
-Composition now auto expands input objects explicitly specifying all the default values for the fields (e.g. `input: SortAndFilter = {}`
-becomes `input: SortAndFilter = { limit: 100, sort: DESC }`).
+When an input object has a default value of `{}`, composition now expands it to list all field defaults explicitly — for example, `{}` becomes `{ limit: 100, sort: DESC }`.
 
-### Value coercion
+##### Default values are normalized to their correct types
 
-Whenever your subgraph defines a default value with a coercible value (e.g., a default value of `Int` for a field that accepts `Float`),
-this value now coerces to the appropriate target type (e.g. `weight: Float = 1` becomes `weight: Float = 1.0`).
+If a field's default value is a coercible type (for example, an integer default on a `Float` field), composition normalizes it — for example, `weight: Float = 1` becomes `weight: Float = 1.0`.
 
-### Example queries
+##### Errors include line numbers and schema references
 
-Due to differences in underlying data structures and libraries, this new composition version might include different
-example operations in the hint messages.
-
-### Rich error diagnostics
-
-`apollo-compiler` provides rich error diagnostics (with line numbers and references to the schema) for GraphQL errors.
+Error messages now include line numbers and point to the relevant parts of your schema, making it faster to locate and fix problems.
 
