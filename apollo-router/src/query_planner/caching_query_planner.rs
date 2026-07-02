@@ -34,6 +34,7 @@ use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
+use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -320,7 +321,7 @@ where
             metadata,
             plan_options,
             config_mode_hash: _,
-            source: _,
+            source,
         } in all_cache_keys
         {
             // NB: warmup tasks have a low priority so that real requests are prioritized
@@ -335,6 +336,8 @@ where
                 {
                     Ok(doc) => break doc,
                     Err(MaybeBackPressureError::PermanentError(_)) => {
+                        // Couldn't even parse the operation — a terminal failure for warm-up.
+                        record_warmup_outcome(source, WarmUpOutcome::PlannerError);
                         continue 'all_cache_keys_loop;
                     }
                     Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
@@ -394,6 +397,7 @@ where
 
                     match res {
                         Ok(QueryPlannerResponse { content, .. }) => {
+                            record_warmup_outcome(source, WarmUpOutcome::Success);
                             if let Some(content) = content.clone() {
                                 count += 1;
                                 tokio::spawn(async move {
@@ -405,6 +409,7 @@ where
                         Err(MaybeBackPressureError::PermanentError(error)) => {
                             count += 1;
                             let e = Arc::new(error);
+                            record_warmup_outcome(source, WarmUpOutcome::from(e.as_ref()));
                             tokio::spawn(async move {
                                 entry.insert(Err(e)).await;
                             });
@@ -900,6 +905,21 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
+/// Implements `From<$ty> for opentelemetry::Value` for enums deriving `strum::IntoStaticStr`,
+/// so they can be passed directly as metric-attribute values.
+macro_rules! impl_otel_value_from_static_str {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl From<$ty> for opentelemetry::Value {
+                fn from(value: $ty) -> Self {
+                    let s: &'static str = value.into();
+                    s.into()
+                }
+            }
+        )+
+    };
+}
+
 /// Where an operation being warmed up came from. Used to attribute warm-up metrics.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
@@ -910,11 +930,45 @@ pub(crate) enum WarmUpSource {
     Cache,
 }
 
-impl From<WarmUpSource> for opentelemetry::Value {
-    fn from(source: WarmUpSource) -> Self {
-        let s: &'static str = source.into();
-        s.into()
+/// The terminal outcome of warming up a single operation. Used to attribute warm-up metrics.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum WarmUpOutcome {
+    Success,
+    PlannerError,
+    Timeout,
+}
+
+impl From<&QueryPlannerError> for WarmUpOutcome {
+    fn from(err: &QueryPlannerError) -> Self {
+        match err {
+            // Defensive: the cooperative-cancellation wrapper that produces `Timeout` and
+            // `MemoryLimitExceeded` lives in `CachingQueryPlanner::call`, which warm-up bypasses,
+            // so those variants are not reachable on the warm-up path today (see ROUTER-1969).
+            // Classified anyway so the label stays correct if that changes.
+            QueryPlannerError::Timeout(_) => WarmUpOutcome::Timeout,
+            QueryPlannerError::FederationError(FederationErrorBridge::Cancellation(msg))
+                if msg.contains("timeout") =>
+            {
+                WarmUpOutcome::Timeout
+            }
+            _ => WarmUpOutcome::PlannerError,
+        }
     }
+}
+
+impl_otel_value_from_static_str!(WarmUpSource, WarmUpOutcome);
+
+/// Record the terminal outcome of warming up a single operation, attributed by source.
+fn record_warmup_outcome(source: WarmUpSource, outcome: WarmUpOutcome) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations",
+        "Number of operations processed during query planner warm-up, by outcome and source",
+        "{operation}",
+        1,
+        outcome = outcome,
+        source = source
+    );
 }
 
 /// Record how many operations warm-up intends to plan for a given source. Emitted even when
@@ -2486,7 +2540,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_cache_warmup_records_expected_metric() {
+    async fn test_cache_warmup_records_success_and_expected_metrics() {
         async {
             let create_delegate = |call_count| {
                 let mut delegate = MockMyQueryPlanner::new();
@@ -2555,9 +2609,108 @@ mod tests {
                 )
                 .await;
 
+            // One cache-sourced operation expected, and it was planned successfully.
             assert_counter!(
                 "apollo.router.query_planning.warmup.operations.expected",
                 1,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "success",
+                "source" = "cache"
+            );
+            // The persisted-query series is recorded even though nothing was expected from it.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_planner_error_outcome() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = Arc::new(
+                Schema::parse(
+                    include_str!("../testdata/starstuff@current.graphql"),
+                    &configuration,
+                )
+                .unwrap(),
+            );
+
+            let create_planner = async |delegate| {
+                CachingQueryPlanner::new(
+                    delegate,
+                    schema.clone(),
+                    Default::default(),
+                    &configuration,
+                    IndexMap::default(),
+                )
+                .await
+                .unwrap()
+            };
+
+            let create_request = || {
+                let query_str = "query ExampleQuery { me { name } }".to_string();
+                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+                let context = Context::new();
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+                query_planner::CachingRequest::new(query_str, None, context, Default::default())
+            };
+
+            // Populate a source cache with one operation using a delegate that succeeds.
+            let mut ok_delegate = MockMyQueryPlanner::new();
+            ok_delegate.expect_clone().times(1).returning(|| {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(1).returning(|_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+            let mut planner = create_planner(ok_delegate).await;
+            planner.call(create_request()).await.unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner whose delegate returns a permanent planner error.
+            let mut err_delegate = MockMyQueryPlanner::new();
+            err_delegate.expect_clone().times(1).returning(|| {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(1).returning(|_| {
+                    Err(MaybeBackPressureError::PermanentError(
+                        QueryPlannerError::EmptyPlan("boom".to_string()),
+                    ))
+                });
+                planner
+            });
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+            let mut new_planner = create_planner(err_delegate).await;
+            new_planner
+                .warm_up(
+                    &query_analysis_layer,
+                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                    Some(planner.previous_cache()),
+                    Some(1),
+                    Default::default(),
+                    &Default::default(),
+                )
+                .await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "planner_error",
                 "source" = "cache"
             );
         }
