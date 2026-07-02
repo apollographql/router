@@ -1,7 +1,6 @@
 //! Calls out to the apollo-federation crate
 
 use std::fmt::Debug;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
@@ -32,7 +31,10 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::introspection::IntrospectionCache;
+use crate::introspection::IntrospectionRequest;
+use crate::introspection::IntrospectionService;
+use crate::introspection::introspection_service;
+use crate::introspection::is_introspection_query;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
@@ -93,7 +95,7 @@ pub(crate) struct QueryPlannerService {
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
-    introspection: Arc<IntrospectionCache>,
+    introspection: IntrospectionService,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -220,6 +222,7 @@ impl QueryPlannerService {
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
+        let introspection = introspection_service(&configuration);
         let planner = Self::create_planner(&schema, &configuration)?;
         let introspection = Arc::new(IntrospectionCache::new(&configuration));
 
@@ -230,7 +233,7 @@ impl QueryPlannerService {
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
-        introspection: Arc<IntrospectionCache>,
+        introspection: IntrospectionService,
     ) -> Result<Self, ServiceBuildError> {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -485,17 +488,23 @@ impl QueryPlannerService {
             )
             .await?;
 
-        match self
-            .introspection
-            .maybe_execute(&self.schema, &key, &doc, variables)
-            .await
-        {
-            ControlFlow::Continue(()) => (),
-            ControlFlow::Break(result) => {
-                return Ok(QueryPlannerContent::CachedIntrospectionResponse {
-                    response: Box::new(result.map_err(MaybeBackPressureError::TemporaryError)?),
-                });
-            }
+        // TODO(@goto-bus-stop): this is not a query planning concern
+        if is_introspection_query(&doc) {
+            let request = IntrospectionRequest {
+                schema: self.schema.clone(),
+                document: doc,
+                variables,
+            };
+
+            let response = self.introspection
+                .ready()
+                .await?
+                .call(request)
+                .await?;
+
+            return Ok(QueryPlannerContent::CachedIntrospectionResponse {
+                response: Box::new(response),
+            });
         }
 
         // TODO(@goto-bus-stop): this is not a query planning concern
