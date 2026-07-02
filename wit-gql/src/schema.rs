@@ -54,7 +54,10 @@ struct Gen<'a> {
     resolve: &'a Resolve,
     queries: Vec<FieldSdl>,
     mutations: Vec<FieldSdl>,
+    /// Named types reachable from output (return) positions — emitted as `type`/`enum`/…
     needed_types: BTreeSet<usize>,
+    /// Named record/flags types reachable from argument positions — emitted as `input <Name>Input`.
+    needed_input_types: BTreeSet<usize>,
     result_wrappers: Vec<ResultWrapper>,
 }
 
@@ -65,6 +68,7 @@ impl<'a> Gen<'a> {
             queries: Vec::new(),
             mutations: Vec::new(),
             needed_types: BTreeSet::new(),
+            needed_input_types: BTreeSet::new(),
             result_wrappers: Vec::new(),
         }
     }
@@ -132,10 +136,11 @@ impl<'a> Gen<'a> {
         let pascal = to_pascal_case(&qualified);
         let kind = classify(func_kebab);
 
+        // Arguments must use GraphQL `input` types, so format them in input position.
         let args: Vec<(String, String)> = func
             .params
             .iter()
-            .map(|p| (to_camel_case(&p.name), self.format_type(p.ty)))
+            .map(|p| (to_camel_case(&p.name), self.format_type_input(p.ty)))
             .collect();
 
         let return_ty = match func.result {
@@ -287,9 +292,69 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// The GraphQL `input` type name for a record/flags type: its output PascalCase name plus an
+    /// `Input` suffix, so an input and output view of the same WIT type never collide.
+    fn input_type_name(&self, id: TypeId) -> String {
+        format!("{}Input", self.qualified_type_name(id))
+    }
+
+    /// Format a type used in **argument** position. Records/flags become `input` types; enums are
+    /// shared with the output side; scalars/options/lists behave as in output position.
+    fn format_type_input(&mut self, ty: Type) -> String {
+        match ty {
+            Type::Id(id) => self.format_type_id_input(id),
+            other => self.format_type(other),
+        }
+    }
+
+    fn format_type_id_input(&mut self, id: TypeId) -> String {
+        let def = &self.resolve.types[id];
+        if def.name.is_some() {
+            match def.kind {
+                TypeDefKind::Record(_) | TypeDefKind::Flags(_) => {
+                    self.needed_input_types.insert(id.index());
+                    return format!("{}!", self.input_type_name(id));
+                }
+                TypeDefKind::Enum(_) => {
+                    // Enums are valid in input position; reuse the shared enum emission.
+                    self.needed_types.insert(id.index());
+                    return format!("{}!", self.qualified_type_name(id));
+                }
+                TypeDefKind::Variant(_) | TypeDefKind::Resource => {
+                    // Not representable as a GraphQL input type — degrade to an opaque string.
+                    return "String!".into();
+                }
+                _ => {
+                    // Named alias/option/list — fall through and format the kind directly.
+                }
+            }
+        }
+        self.format_type_kind_input(&def.kind)
+    }
+
+    fn format_type_kind_input(&mut self, kind: &TypeDefKind) -> String {
+        match kind {
+            TypeDefKind::Option(inner) => {
+                let mut s = self.format_type_input(*inner);
+                if s.ends_with('!') {
+                    s.pop();
+                }
+                s
+            }
+            TypeDefKind::List(inner) => {
+                let inner = self.format_type_input(*inner);
+                format!("[{}]!", inner)
+            }
+            TypeDefKind::Type(inner) => self.format_type_input(*inner),
+            // Scalars, tuples, and anonymous fallbacks are identical to output position.
+            other => self.format_type_kind(other),
+        }
+    }
+
     fn render(&mut self, source_label: &str) -> anyhow::Result<String> {
-        // Resolve transitively-referenced named types (e.g. record fields referencing other records).
-        self.close_named_types();
+        // Resolve transitively-referenced named types (e.g. record fields referencing other records),
+        // for both output and input (argument) positions.
+        self.close_types();
 
         let mut out = String::new();
         writeln!(out, "# Generated from {} by wit-to-gql", source_label)?;
@@ -327,7 +392,20 @@ impl<'a> Gen<'a> {
             writeln!(out)?;
         }
 
-        // 3. Root types.
+        // 3. Input types (records/flags reached from argument positions). GraphQL requires
+        // arguments to use `input` types, so these are emitted separately from output `type`s.
+        let input_named: Vec<TypeId> = self
+            .resolve
+            .types
+            .iter()
+            .filter(|(id, _)| self.needed_input_types.contains(&id.index()))
+            .map(|(id, _)| id)
+            .collect();
+        for id in input_named {
+            self.emit_input_type(&mut out, id)?;
+        }
+
+        // 4. Root types.
         if !self.queries.is_empty() {
             writeln!(out, "type Query {{")?;
             for f in &self.queries {
@@ -354,32 +432,78 @@ impl<'a> Gen<'a> {
         Ok(out)
     }
 
-    fn close_named_types(&mut self) {
-        // Repeatedly walk known named types and pull in their referenced named types
-        // until the set is fixed.
+    fn close_types(&mut self) {
+        // Repeatedly walk known named types and pull in their referenced named types until both the
+        // output and input sets reach a fixed point.
         loop {
-            let snapshot = self.needed_types.clone();
-            for idx in &snapshot {
+            let out_snapshot = self.needed_types.clone();
+            let in_snapshot = self.needed_input_types.clone();
+
+            // Output position: every reachable named structural type is an output type.
+            for idx in &out_snapshot {
                 let id = type_id_at(self.resolve, *idx);
-                let def = &self.resolve.types[id];
-                let mut refs = Vec::new();
-                collect_type_refs(&def.kind, &mut refs);
-                for ref_id in refs {
-                    if matches!(
-                        self.resolve.types[ref_id].kind,
-                        TypeDefKind::Record(_)
-                            | TypeDefKind::Enum(_)
-                            | TypeDefKind::Variant(_)
-                            | TypeDefKind::Flags(_)
-                            | TypeDefKind::Resource
-                    ) && self.resolve.types[ref_id].name.is_some()
-                    {
-                        self.needed_types.insert(ref_id.index());
+                let mut acc = Vec::new();
+                let mut seen = BTreeSet::new();
+                self.reachable_named(&self.resolve.types[id].kind, &mut acc, &mut seen);
+                for ref_id in acc {
+                    self.needed_types.insert(ref_id.index());
+                }
+            }
+
+            // Input position: reachable records/flags are input types; enums (valid in input) and
+            // any other named types are emitted as shared output types.
+            for idx in &in_snapshot {
+                let id = type_id_at(self.resolve, *idx);
+                let mut acc = Vec::new();
+                let mut seen = BTreeSet::new();
+                self.reachable_named(&self.resolve.types[id].kind, &mut acc, &mut seen);
+                for ref_id in acc {
+                    match self.resolve.types[ref_id].kind {
+                        TypeDefKind::Record(_) | TypeDefKind::Flags(_) => {
+                            self.needed_input_types.insert(ref_id.index());
+                        }
+                        _ => {
+                            self.needed_types.insert(ref_id.index());
+                        }
                     }
                 }
             }
-            if snapshot == self.needed_types {
+
+            if out_snapshot == self.needed_types && in_snapshot == self.needed_input_types {
                 break;
+            }
+        }
+    }
+
+    /// Collect all *named structural* types (record/enum/variant/flags/resource) reachable from
+    /// `kind`, traversing through anonymous wrappers (`option`, `list`, `tuple`, `result`, type
+    /// aliases, …). Without this, e.g. an enum reached only via `option<enum>` inside a record would
+    /// be referenced but never emitted. `seen` guards against reference cycles.
+    fn reachable_named(
+        &self,
+        kind: &TypeDefKind,
+        acc: &mut Vec<TypeId>,
+        seen: &mut BTreeSet<usize>,
+    ) {
+        let mut refs = Vec::new();
+        collect_type_refs(kind, &mut refs);
+        for id in refs {
+            if !seen.insert(id.index()) {
+                continue;
+            }
+            let def = &self.resolve.types[id];
+            let structural = matches!(
+                def.kind,
+                TypeDefKind::Record(_)
+                    | TypeDefKind::Enum(_)
+                    | TypeDefKind::Variant(_)
+                    | TypeDefKind::Flags(_)
+                    | TypeDefKind::Resource
+            );
+            if def.name.is_some() && structural {
+                acc.push(id);
+            } else {
+                self.reachable_named(&def.kind, acc, seen);
             }
         }
     }
@@ -441,6 +565,36 @@ impl<'a> Gen<'a> {
             TypeDefKind::Resource => {
                 writeln!(out, "# resource {} (opaque handle)", name)?;
                 writeln!(out, "scalar {}", name)?;
+                writeln!(out)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Emit a record/flags type as a GraphQL `input` (used in argument position).
+    fn emit_input_type(&mut self, out: &mut String, id: TypeId) -> anyhow::Result<()> {
+        let def: TypeDef = self.resolve.types[id].clone();
+        if def.name.is_none() {
+            return Ok(());
+        }
+        let name = self.input_type_name(id);
+        match &def.kind {
+            TypeDefKind::Record(r) => {
+                writeln!(out, "input {} {{", name)?;
+                for f in &r.fields {
+                    let ty = self.format_type_input(f.ty);
+                    writeln!(out, "  {}: {}", to_camel_case(&f.name), ty)?;
+                }
+                writeln!(out, "}}")?;
+                writeln!(out)?;
+            }
+            TypeDefKind::Flags(flags) => {
+                writeln!(out, "input {} {{", name)?;
+                for flag in &flags.flags {
+                    writeln!(out, "  {}: Boolean!", to_camel_case(&flag.name))?;
+                }
+                writeln!(out, "}}")?;
                 writeln!(out)?;
             }
             _ => {}
@@ -644,5 +798,57 @@ mod tests {
         assert!(sdl.contains(
             "createRepository(name: String!, description: String, private: Boolean!): CreateRepositoryResult!"
         ), "field signature wrong:\n{}", sdl);
+    }
+
+    #[test]
+    fn record_param_emits_input_type() {
+        let (mut resolve, world_id) = empty_resolve_with_world();
+        // record show-params { id: string }
+        let rec = resolve.types.alloc(wit_parser::TypeDef {
+            name: Some("show-params".into()),
+            kind: TypeDefKind::Record(wit_parser::Record {
+                fields: vec![wit_parser::Field {
+                    name: "id".into(),
+                    ty: Type::String,
+                    docs: Default::default(),
+                    span: Default::default(),
+                }],
+            }),
+            owner: wit_parser::TypeOwner::None,
+            docs: Default::default(),
+            stability: Stability::Unknown,
+            span: Default::default(),
+        });
+        let result_ty = add_result_string_string(&mut resolve);
+        let func = Function {
+            name: "show".into(),
+            kind: FunctionKind::Freestanding,
+            params: vec![Param {
+                name: "params".into(),
+                ty: Type::Id(rec),
+                span: Default::default(),
+            }],
+            result: Some(result_ty),
+            docs: Default::default(),
+            stability: Stability::Unknown,
+            span: Default::default(),
+        };
+        resolve.worlds[world_id]
+            .exports
+            .insert(WorldKey::Name("show".into()), WorldItem::Function(func));
+
+        let sdl = generate(&resolve, world_id, "test.wasm").unwrap();
+        // The argument record is emitted as a GraphQL `input`, referenced from the field argument,
+        // and must NOT leak as an output `type` (which would be invalid in argument position).
+        assert!(sdl.contains("input ShowParamsInput {"), "missing input type:\n{sdl}");
+        assert!(sdl.contains("id: String!"), "{sdl}");
+        assert!(
+            sdl.contains("show(params: ShowParamsInput!): ShowResult!"),
+            "field signature wrong:\n{sdl}"
+        );
+        assert!(
+            !sdl.contains("type ShowParams "),
+            "record leaked as an output type:\n{sdl}"
+        );
     }
 }
