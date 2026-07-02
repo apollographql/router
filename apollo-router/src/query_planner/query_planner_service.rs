@@ -187,14 +187,28 @@ impl QueryPlannerService {
 
             let elapsed = start.elapsed().as_secs_f64();
             match &result {
-                Ok(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success"),
+                Ok(_) => metric_query_planning_plan_duration(
+                    RUST_QP_MODE,
+                    elapsed,
+                    QueryPlanningOutcome::Success,
+                ),
                 Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "timeout")
+                    metric_query_planning_plan_duration(
+                        RUST_QP_MODE,
+                        elapsed,
+                        QueryPlanningOutcome::Timeout,
+                    )
                 }
-                Err(FederationErrorBridge::Cancellation(_)) => {
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "cancelled")
-                }
-                Err(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "error"),
+                Err(FederationErrorBridge::Cancellation(_)) => metric_query_planning_plan_duration(
+                    RUST_QP_MODE,
+                    elapsed,
+                    QueryPlanningOutcome::Cancelled,
+                ),
+                Err(_) => metric_query_planning_plan_duration(
+                    RUST_QP_MODE,
+                    elapsed,
+                    QueryPlanningOutcome::Error,
+                ),
             }
 
             let plan = result?;
@@ -615,10 +629,25 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
 }
 
+/// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
+/// `apollo.router.query_planning.plan.duration` and `apollo.router.query_planning.warmup.*`) so
+/// they use a single vocabulary. Not every value is produced by every code path.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum QueryPlanningOutcome {
+    Success,
+    Timeout,
+    Cancelled,
+    Error,
+    MemoryLimit,
+}
+
+impl_otel_value_from_static_str!(QueryPlanningOutcome);
+
 pub(crate) fn metric_query_planning_plan_duration(
     planner: &'static str,
     elapsed: f64,
-    outcome: &'static str,
+    outcome: QueryPlanningOutcome,
 ) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
@@ -1223,7 +1252,7 @@ mod tests {
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
         let elapsed = start.elapsed().as_secs_f64();
-        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success");
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, QueryPlanningOutcome::Success);
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,

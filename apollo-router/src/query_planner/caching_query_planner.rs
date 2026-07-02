@@ -42,6 +42,7 @@ use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::QueryPlanningOutcome;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -336,7 +337,7 @@ where
                     Ok(doc) => break doc,
                     Err(MaybeBackPressureError::PermanentError(_)) => {
                         // Couldn't even parse the operation — a terminal failure for warm-up.
-                        record_warmup_outcome(source, WarmUpOutcome::PlannerError);
+                        record_warmup_outcome(source, QueryPlanningOutcome::Error);
                         continue 'all_cache_keys_loop;
                     }
                     Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
@@ -397,7 +398,7 @@ where
 
                     match res {
                         Ok(QueryPlannerResponse { content, .. }) => {
-                            record_warmup_outcome(source, WarmUpOutcome::Success);
+                            record_warmup_outcome(source, QueryPlanningOutcome::Success);
                             if let Some(content) = content.clone() {
                                 count += 1;
                                 tokio::spawn(async move {
@@ -409,7 +410,7 @@ where
                         Err(MaybeBackPressureError::PermanentError(error)) => {
                             count += 1;
                             let e = Arc::new(error);
-                            record_warmup_outcome(source, WarmUpOutcome::from(e.as_ref()));
+                            record_warmup_outcome(source, QueryPlanningOutcome::from(e.as_ref()));
                             tokio::spawn(async move {
                                 entry.insert(Err(e)).await;
                             });
@@ -916,29 +917,27 @@ pub(crate) enum WarmUpSource {
     Cache,
 }
 
-/// The terminal outcome of warming up a single operation. Used to attribute warm-up metrics.
-#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
-#[strum(serialize_all = "snake_case")]
-enum WarmUpOutcome {
-    Success,
-    PlannerError,
-    Timeout,
-}
-
-impl From<&QueryPlannerError> for WarmUpOutcome {
+/// Classify a query-planning error into the shared [`QueryPlanningOutcome`] vocabulary for the
+/// warm-up outcome metric.
+///
+/// `Timeout` and `MemoryLimit` are classified defensively: the cooperative-cancellation wrapper
+/// that produces `QueryPlannerError::Timeout` / `MemoryLimitExceeded` lives in
+/// `CachingQueryPlanner::call`, which warm-up bypasses, so those variants are not reachable on the
+/// warm-up path today (see ROUTER-1969). Federation-level planning timeouts do reach warm-up via
+/// `FederationErrorBridge::Cancellation`.
+impl From<&QueryPlannerError> for QueryPlanningOutcome {
     fn from(err: &QueryPlannerError) -> Self {
         match err {
-            // Defensive: the cooperative-cancellation wrapper that produces `Timeout` and
-            // `MemoryLimitExceeded` lives in `CachingQueryPlanner::call`, which warm-up bypasses,
-            // so those variants are not reachable on the warm-up path today (see ROUTER-1969).
-            // Classified anyway so the label stays correct if that changes.
-            QueryPlannerError::Timeout(_) => WarmUpOutcome::Timeout,
-            QueryPlannerError::FederationError(FederationErrorBridge::Cancellation(msg))
-                if msg.contains("timeout") =>
-            {
-                WarmUpOutcome::Timeout
+            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
+            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
+            QueryPlannerError::FederationError(FederationErrorBridge::Cancellation(msg)) => {
+                if msg.contains("timeout") {
+                    QueryPlanningOutcome::Timeout
+                } else {
+                    QueryPlanningOutcome::Cancelled
+                }
             }
-            _ => WarmUpOutcome::PlannerError,
+            _ => QueryPlanningOutcome::Error,
         }
     }
 }
@@ -952,10 +951,10 @@ enum WarmUpPhase {
     Plan,
 }
 
-impl_otel_value_from_static_str!(WarmUpSource, WarmUpOutcome, WarmUpPhase);
+impl_otel_value_from_static_str!(WarmUpSource, WarmUpPhase);
 
 /// Record the terminal outcome of warming up a single operation, attributed by source.
-fn record_warmup_outcome(source: WarmUpSource, outcome: WarmUpOutcome) {
+fn record_warmup_outcome(source: WarmUpSource, outcome: QueryPlanningOutcome) {
     u64_counter_with_unit!(
         "apollo.router.query_planning.warmup.operations",
         "Number of operations processed during query planner warm-up, by outcome and source",
@@ -2641,7 +2640,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_cache_warmup_records_planner_error_outcome() {
+    async fn test_cache_warmup_records_error_outcome() {
         async {
             let configuration: Configuration = Default::default();
             let schema = Arc::new(
@@ -2718,7 +2717,7 @@ mod tests {
             assert_counter!(
                 "apollo.router.query_planning.warmup.operations",
                 1,
-                "outcome" = "planner_error",
+                "outcome" = "error",
                 "source" = "cache"
             );
         }
