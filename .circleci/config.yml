@@ -1051,6 +1051,17 @@ jobs:
                   helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
                   # Push chart to repository
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+            - run:
+                # Runs AFTER all artifacts (binaries, Docker, Helm) are up so
+                # the release page is fully populated before notes appear.
+                # Dry-run for now — prints what would be posted.  Flip to
+                # `--publish` once we've watched a real release land.
+                # `|| true` so a bad extract doesn't fail the pipeline.
+                name: Publish release notes (dry-run)
+                command: |
+                  case "$VERSION" in *-*) echo "Prerelease — skipping notes"; exit 0 ;; esac
+                  VERSION_WITHOUT_LEADING_V="${VERSION#v}"
+                  cargo xtask release notes "$VERSION_WITHOUT_LEADING_V" || true
 
 workflows:
   test_updated_cargo_deps:

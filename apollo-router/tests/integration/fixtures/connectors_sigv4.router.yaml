@@ -10,3 +10,11 @@ authentication:
             assume_role:
               role_arn: ${env.AWS_ROLE_ARN}
               session_name: "connector"
+traffic_shaping:
+  connector:
+    sources:
+      subgraph.ec2:
+        # This connector signs and sends a real request to live AWS EC2 (STS AssumeRole +
+        # SigV4-signed DescribeInstances) -- the router's default 30s connector timeout has
+        # been observed to be too tight for that round trip from CI under load (#9728).
+        timeout: 60s
