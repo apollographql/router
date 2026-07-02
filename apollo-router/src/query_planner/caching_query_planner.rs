@@ -2465,83 +2465,161 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_cache_warmup() {
-        let create_delegate = |call_count| {
-            let mut delegate = MockMyQueryPlanner::new();
-            delegate.expect_clone().times(1).returning(move || {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(call_count).returning(|_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-            delegate
-        };
-
-        let configuration: Configuration = Default::default();
-        let schema = Arc::new(
+    /// The starstuff test schema used by the warm-up tests.
+    fn warmup_test_schema(configuration: &Configuration) -> Arc<Schema> {
+        Arc::new(
             Schema::parse(
                 include_str!("../testdata/starstuff@current.graphql"),
-                &configuration,
+                configuration,
             )
             .unwrap(),
-        );
+        )
+    }
 
-        let create_planner = async |delegate| {
-            CachingQueryPlanner::new(
-                delegate,
-                schema.clone(),
-                Default::default(),
-                &configuration,
-                IndexMap::default(),
-            )
-            .await
-            .unwrap()
-        };
+    async fn new_caching_planner(
+        delegate: MockMyQueryPlanner,
+        schema: Arc<Schema>,
+        configuration: &Configuration,
+    ) -> CachingQueryPlanner<MockMyQueryPlanner> {
+        CachingQueryPlanner::new(
+            delegate,
+            schema,
+            Default::default(),
+            configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap()
+    }
 
-        let create_request = || {
-            let query_str = "query ExampleQuery { me { name } }".to_string();
-            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-            let context = Context::new();
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-            query_planner::CachingRequest::new(query_str, None, context, Default::default())
-        };
+    fn example_request(
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> query_planner::CachingRequest {
+        let query_str = "query ExampleQuery { me { name } }".to_string();
+        let doc = Query::parse_document(&query_str, None, schema, configuration).unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        query_planner::CachingRequest::new(query_str, None, context, Default::default())
+    }
 
-        // send query to caching planner. it should save this query plan in its cache
-        let mut planner = create_planner(create_delegate(1)).await;
-        let response = planner.call(create_request()).await.unwrap();
-        assert!(response.content.is_some());
-        assert_eq!(planner.cache.len().await, 1);
+    fn ok_plan_response() -> Result<QueryPlannerResponse, MaybeBackPressureError<QueryPlannerError>>
+    {
+        let plan = Arc::new(QueryPlan::fake_new(None, None));
+        Ok(QueryPlannerResponse::builder()
+            .content(QueryPlannerContent::Plan { plan })
+            .build())
+    }
 
-        // create and warm up a new planner. new planner's delegate should be called once during
-        // the warm-up phase to populate the cache
+    /// A delegate whose planner successfully plans `times` operations.
+    fn delegate_planning_ok(times: usize) -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(move || {
+            let mut planner = MockMyQueryPlanner::new();
+            planner
+                .expect_sync_call()
+                .times(times)
+                .returning(|_| ok_plan_response());
+            planner
+        });
+        delegate
+    }
+
+    /// A delegate whose planner returns a permanent planner error on its single call.
+    fn delegate_planning_error() -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            planner.expect_sync_call().times(1).returning(|_| {
+                Err(MaybeBackPressureError::PermanentError(
+                    QueryPlannerError::EmptyPlan("boom".to_string()),
+                ))
+            });
+            planner
+        });
+        delegate
+    }
+
+    /// A delegate whose planner signals backpressure once and then succeeds.
+    fn delegate_backpressure_then_ok() -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            let first_call = AtomicBool::new(true);
+            planner.expect_sync_call().times(2).returning(move |_| {
+                if first_call.swap(false, Ordering::Relaxed) {
+                    Err(MaybeBackPressureError::TemporaryError(
+                        ComputeBackPressureError,
+                    ))
+                } else {
+                    ok_plan_response()
+                }
+            });
+            planner
+        });
+        delegate
+    }
+
+    /// Warm a fresh planner from `previous_cache`, taking the top operation.
+    async fn warm_up_from_cache(
+        planner: &mut CachingQueryPlanner<MockMyQueryPlanner>,
+        previous_cache: InMemoryCachePlanner,
+        schema: Arc<Schema>,
+        configuration: &Configuration,
+    ) {
         let query_analysis_layer =
-            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-        let mut new_planner = create_planner(create_delegate(1)).await;
-        new_planner
+            QueryAnalysisLayer::new(schema, Arc::new(configuration.clone())).await;
+        planner
             .warm_up(
                 &query_analysis_layer,
-                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                Some(planner.previous_cache()),
+                &Arc::new(PersistedQueryLayer::new(configuration).await.unwrap()),
+                Some(previous_cache),
                 Some(1),
                 Default::default(),
                 &Default::default(),
             )
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_cache_warmup() {
+        let configuration: Configuration = Default::default();
+        let schema = warmup_test_schema(&configuration);
+
+        // send query to caching planner. it should save this query plan in its cache
+        let mut planner =
+            new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+        let response = planner
+            .call(example_request(&schema, &configuration))
+            .await
+            .unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(planner.cache.len().await, 1);
+
+        // create and warm up a new planner. new planner's delegate should be called once during
+        // the warm-up phase to populate the cache
+        let mut new_planner =
+            new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+        warm_up_from_cache(
+            &mut new_planner,
+            planner.previous_cache(),
+            schema.clone(),
+            &configuration,
+        )
+        .await;
         // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(new_planner.cache.len().await, 1);
 
         // create a new delegate that _shouldn't_ be called since the new planner already has the
         // result in its cache
-        new_planner.delegate = create_delegate(0);
-        let response = new_planner.call(create_request()).await.unwrap();
+        new_planner.delegate = delegate_planning_ok(0);
+        let response = new_planner
+            .call(example_request(&schema, &configuration))
+            .await
+            .unwrap();
         assert!(response.content.is_some());
         assert_eq!(new_planner.cache.len().await, 1);
     }
@@ -2549,72 +2627,29 @@ mod tests {
     #[test(tokio::test)]
     async fn test_cache_warmup_records_success_and_expected_metrics() {
         async {
-            let create_delegate = |call_count| {
-                let mut delegate = MockMyQueryPlanner::new();
-                delegate.expect_clone().times(1).returning(move || {
-                    let mut planner = MockMyQueryPlanner::new();
-                    planner.expect_sync_call().times(call_count).returning(|_| {
-                        let plan = Arc::new(QueryPlan::fake_new(None, None));
-                        Ok(QueryPlannerResponse::builder()
-                            .content(QueryPlannerContent::Plan { plan })
-                            .build())
-                    });
-                    planner
-                });
-                delegate
-            };
-
             let configuration: Configuration = Default::default();
-            let schema = Arc::new(
-                Schema::parse(
-                    include_str!("../testdata/starstuff@current.graphql"),
-                    &configuration,
-                )
-                .unwrap(),
-            );
-
-            let create_planner = async |delegate| {
-                CachingQueryPlanner::new(
-                    delegate,
-                    schema.clone(),
-                    Default::default(),
-                    &configuration,
-                    IndexMap::default(),
-                )
-                .await
-                .unwrap()
-            };
-
-            let create_request = || {
-                let query_str = "query ExampleQuery { me { name } }".to_string();
-                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-                let context = Context::new();
-                context
-                    .extensions()
-                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-                query_planner::CachingRequest::new(query_str, None, context, Default::default())
-            };
+            let schema = warmup_test_schema(&configuration);
 
             // Populate a planner's cache with one operation, to be carried over on warm-up.
-            let mut planner = create_planner(create_delegate(1)).await;
-            planner.call(create_request()).await.unwrap();
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
             assert_eq!(planner.cache.len().await, 1);
 
             // Warm up a fresh planner from the previous cache: exactly one cache-sourced operation
             // is expected.
-            let query_analysis_layer =
-                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-            let mut new_planner = create_planner(create_delegate(1)).await;
-            new_planner
-                .warm_up(
-                    &query_analysis_layer,
-                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                    Some(planner.previous_cache()),
-                    Some(1),
-                    Default::default(),
-                    &Default::default(),
-                )
-                .await;
+            let mut new_planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
 
             // One cache-sourced operation expected, and it was planned successfully.
             assert_counter!(
@@ -2643,76 +2678,28 @@ mod tests {
     async fn test_cache_warmup_records_error_outcome() {
         async {
             let configuration: Configuration = Default::default();
-            let schema = Arc::new(
-                Schema::parse(
-                    include_str!("../testdata/starstuff@current.graphql"),
-                    &configuration,
-                )
-                .unwrap(),
-            );
-
-            let create_planner = async |delegate| {
-                CachingQueryPlanner::new(
-                    delegate,
-                    schema.clone(),
-                    Default::default(),
-                    &configuration,
-                    IndexMap::default(),
-                )
-                .await
-                .unwrap()
-            };
-
-            let create_request = || {
-                let query_str = "query ExampleQuery { me { name } }".to_string();
-                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-                let context = Context::new();
-                context
-                    .extensions()
-                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-                query_planner::CachingRequest::new(query_str, None, context, Default::default())
-            };
+            let schema = warmup_test_schema(&configuration);
 
             // Populate a source cache with one operation using a delegate that succeeds.
-            let mut ok_delegate = MockMyQueryPlanner::new();
-            ok_delegate.expect_clone().times(1).returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-            let mut planner = create_planner(ok_delegate).await;
-            planner.call(create_request()).await.unwrap();
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
             assert_eq!(planner.cache.len().await, 1);
 
             // Warm up a fresh planner whose delegate returns a permanent planner error.
-            let mut err_delegate = MockMyQueryPlanner::new();
-            err_delegate.expect_clone().times(1).returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    Err(MaybeBackPressureError::PermanentError(
-                        QueryPlannerError::EmptyPlan("boom".to_string()),
-                    ))
-                });
-                planner
-            });
-            let query_analysis_layer =
-                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-            let mut new_planner = create_planner(err_delegate).await;
-            new_planner
-                .warm_up(
-                    &query_analysis_layer,
-                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                    Some(planner.previous_cache()),
-                    Some(1),
-                    Default::default(),
-                    &Default::default(),
-                )
-                .await;
+            let mut new_planner =
+                new_caching_planner(delegate_planning_error(), schema.clone(), &configuration)
+                    .await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
 
             assert_counter!(
                 "apollo.router.query_planning.warmup.operations",
@@ -2729,84 +2716,31 @@ mod tests {
     async fn test_cache_warmup_records_backpressure() {
         async {
             let configuration: Configuration = Default::default();
-            let schema = Arc::new(
-                Schema::parse(
-                    include_str!("../testdata/starstuff@current.graphql"),
-                    &configuration,
-                )
-                .unwrap(),
-            );
-
-            let create_planner = async |delegate| {
-                CachingQueryPlanner::new(
-                    delegate,
-                    schema.clone(),
-                    Default::default(),
-                    &configuration,
-                    IndexMap::default(),
-                )
-                .await
-                .unwrap()
-            };
-
-            let create_request = || {
-                let query_str = "query ExampleQuery { me { name } }".to_string();
-                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-                let context = Context::new();
-                context
-                    .extensions()
-                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-                query_planner::CachingRequest::new(query_str, None, context, Default::default())
-            };
+            let schema = warmup_test_schema(&configuration);
 
             // Populate a source cache with one operation using a delegate that succeeds.
-            let mut ok_delegate = MockMyQueryPlanner::new();
-            ok_delegate.expect_clone().times(1).returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(1).returning(|_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-            let mut planner = create_planner(ok_delegate).await;
-            planner.call(create_request()).await.unwrap();
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
             assert_eq!(planner.cache.len().await, 1);
 
             // Warm up a fresh planner whose delegate signals backpressure once, then succeeds.
-            let mut flaky_delegate = MockMyQueryPlanner::new();
-            flaky_delegate.expect_clone().times(1).returning(|| {
-                let mut planner = MockMyQueryPlanner::new();
-                let first_call = AtomicBool::new(true);
-                planner.expect_sync_call().times(2).returning(move |_| {
-                    if first_call.swap(false, Ordering::Relaxed) {
-                        Err(MaybeBackPressureError::TemporaryError(
-                            ComputeBackPressureError,
-                        ))
-                    } else {
-                        let plan = Arc::new(QueryPlan::fake_new(None, None));
-                        Ok(QueryPlannerResponse::builder()
-                            .content(QueryPlannerContent::Plan { plan })
-                            .build())
-                    }
-                });
-                planner
-            });
-            let query_analysis_layer =
-                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-            let mut new_planner = create_planner(flaky_delegate).await;
-            new_planner
-                .warm_up(
-                    &query_analysis_layer,
-                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                    Some(planner.previous_cache()),
-                    Some(1),
-                    Default::default(),
-                    &Default::default(),
-                )
-                .await;
+            let mut new_planner = new_caching_planner(
+                delegate_backpressure_then_ok(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
 
             // One retry at the planning phase, and the operation ultimately succeeded.
             assert_counter!(
