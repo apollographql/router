@@ -6,6 +6,6 @@ Query planner warm-up previously emitted only `apollo.router.query_planning.warm
 - `apollo.router.query_planning.warmup.operations.expected` - operations warm-up intended to plan, attributed by `source`. Together with `warmup.operations`, this lets you compute warm-up coverage (planned / expected).
 - `apollo.router.query_planning.warmup.backpressure` - times warm-up retried after a temporary compute-backpressure error, attributed by `source` and `phase` (`parse`, `plan`).
 
-The `outcome` attribute uses a shared query-planning vocabulary (`success`, `timeout`, `cancelled`, `error`, `memory_limit`) — the same values as `apollo.router.query_planning.plan.duration`, which now reports `outcome` from that shared set as well.
+The `outcome` attribute shares its vocabulary with `apollo.router.query_planning.plan.duration` (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for query-planning memory-limit cancellations.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/XXXX
