@@ -64,8 +64,6 @@ mod rhai_imports {
     pub(super) use rhai::plugin::export_module;
     pub(super) use rhai::serde::from_dynamic;
     pub(super) use rhai::serde::to_dynamic;
-    // and use a glob import because `rhai::export_module` relies on it.
-    pub(super) use rhai::plugin::*;
 }
 
 use rhai_imports::*;
