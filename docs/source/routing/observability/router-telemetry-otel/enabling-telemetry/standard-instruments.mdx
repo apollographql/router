@@ -181,7 +181,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 
 - `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
 - `apollo.router.query_planning.warmup.operations` - Counter of operations processed during query planner warm-up. Together with `apollo.router.query_planning.warmup.operations.expected`, this lets you compute warm-up coverage (planned / expected). Attributes:
-  - `outcome`: The result of planning the operation. Shares the `apollo.router.query_planning.plan.duration` values (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for query-planning memory-limit cancellations.
+  - `outcome`: The result of warming up the operation. Shares the `apollo.router.query_planning.plan.duration` values (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for memory-limit cancellations and `reused` for operations whose plan was carried over from the previous cache (or already present) rather than planned fresh.
   - `source`: Where the operation came from (`persisted_query` for the persisted-query manifest, `cache` for operations carried over from the previous in-memory cache)
 - `apollo.router.query_planning.warmup.operations.expected` - Counter of operations that warm-up intended to plan. Attributes:
   - `source`: Where the operation came from (`persisted_query`, `cache`)

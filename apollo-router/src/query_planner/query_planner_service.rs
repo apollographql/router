@@ -621,6 +621,9 @@ pub(crate) enum QueryPlanningOutcome {
     Cancelled,
     Error,
     MemoryLimit,
+    /// The operation was already warm — its plan was carried over from the previous cache or was
+    /// already present — so it was not planned fresh. Only emitted by query-planner warm-up.
+    Reused,
 }
 
 impl_otel_value_from_static_str!(QueryPlanningOutcome);

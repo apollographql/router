@@ -367,6 +367,7 @@ where
                             { previous_cache.lock().await.get(&caching_key).cloned() }
                     {
                         self.cache.insert_in_memory(caching_key, entry).await;
+                        record_warmup_outcome(source, QueryPlanningOutcome::Reused);
                         reused += 1;
                         continue;
                     }
@@ -422,6 +423,10 @@ where
                         }
                     }
                 }
+            } else {
+                // Another warm-up operation (a duplicate key, or one from another source) is
+                // already populating this plan, so we don't plan it again — but it's still covered.
+                record_warmup_outcome(source, QueryPlanningOutcome::Reused);
             }
         }
 
@@ -2727,6 +2732,56 @@ mod tests {
                 "apollo.router.query_planning.warmup.operations",
                 1,
                 "outcome" = "success",
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_reused_outcome() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = warmup_test_schema(&configuration);
+
+            // Populate a source cache with one operation.
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner with plan reuse enabled. The operation's hash is unchanged,
+            // so its plan is carried over from the previous cache and the delegate is never asked
+            // to plan it (`delegate_planning_ok(0)`).
+            let mut new_planner =
+                new_caching_planner(delegate_planning_ok(0), schema.clone(), &configuration).await;
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+            new_planner
+                .warm_up(
+                    &query_analysis_layer,
+                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                    Some(planner.previous_cache()),
+                    Some(1),
+                    true, // experimental_reuse_query_plans
+                    &Default::default(),
+                )
+                .await;
+
+            // The reused operation is counted so coverage (planned / expected) stays at 1.0.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "reused",
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                1,
                 "source" = "cache"
             );
         }
