@@ -307,21 +307,6 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.entity_cache,
-            "$.preview_entity_cache",
-            opt.enabled,
-            "$[?(@.enabled)]",
-            opt.subgraph.enabled,
-            "$[?(@.subgraph.all.enabled)]",
-            opt.subgraph.enabled,
-            "$[?(@.subgraph.subgraphs..enabled)]",
-            opt.subgraph.ttl,
-            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
-            opt.subgraph.invalidation.enabled,
-            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
-        );
-
-        populate_config_instrument!(
             apollo.router.config.response_cache,
             "$.response_cache",
             opt.enabled,
@@ -378,8 +363,6 @@ impl InstrumentData {
             "$..instruments.default_attribute_requirement_level",
             opt.spans,
             "$..spans",
-            opt.spans.mode,
-            "$..spans.mode",
             opt.spans.default_attribute_requirement_level,
             "$..spans.default_attribute_requirement_level",
             opt.spans.router,

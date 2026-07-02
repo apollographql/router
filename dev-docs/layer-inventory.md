@@ -48,8 +48,7 @@ Front (`RouterCreator`):
 
 Plugins:
 - Telemetry: InstrumentLayer
-  - Only used with `SpanMode::Deprecated`
-  - Maybe a candidate for removal in 3.0?
+  - Creates or reuses the router span for each request
 - Telemetry: other work
   - A lot of stuff is happening inside a `map_future` layer. I haven't checked this out but I think it's fine from a backpressure/pipeline perspective.
   - This would be easier to understand in a named layer, potentially.

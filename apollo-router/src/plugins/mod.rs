@@ -19,7 +19,6 @@ macro_rules! schemar_fn {
 
 pub(crate) mod authentication;
 pub(crate) mod authorization;
-pub(crate) mod cache;
 pub(crate) mod chaos;
 pub(crate) mod connectors;
 mod coprocessor;

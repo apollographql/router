@@ -8,13 +8,6 @@ apq:
     all:
       enabled: true
 
-# Disable entity cache
-preview_entity_cache:
-  enabled: false
-  subgraph:
-    all:
-      enabled: false
-
 # Remaining Configuration
 include_subgraph_errors:
   all: true
@@ -29,9 +22,6 @@ demand_control:
       max: 1500
       list_size: 10
 telemetry:
-  instrumentation:
-    spans:
-      mode: deprecated
   exporters:
     tracing:
       experimental_response_trace_id:
