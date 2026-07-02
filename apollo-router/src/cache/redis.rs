@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -30,8 +29,6 @@ use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
-use fred::types::scan::ScanResult;
-use futures::Stream;
 use futures::future::join_all;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
@@ -579,10 +576,6 @@ impl RedisCacheStorage {
         Ok(())
     }
 
-    pub(crate) fn ttl(&self) -> Option<Duration> {
-        self.ttl
-    }
-
     /// Signal that the meter provider is ready and metrics gauges can be created.
     ///
     /// This MUST be called after `Telemetry.activate()` to ensure gauges are
@@ -677,11 +670,6 @@ impl RedisCacheStorage {
                 Ok(result)
             }
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
-        self.ttl = ttl;
     }
 
     // NOTE: we return a RedisError here because it's easier to integrate into the rest of the
@@ -813,14 +801,6 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
-        &self,
-        keys: Vec<RedisKey<K>>,
-    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
-        self.get_multiple_with_options(keys, Options::default())
-            .await
-    }
-
     /// `Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError>` is a horrible return type but
     /// is needed to capture the multiple levels of errors that can occur.
     ///
@@ -902,48 +882,6 @@ impl RedisCacheStorage {
         }
     }
 
-    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
-    /// inserts, and otherwise an error and error traces and error-level log
-    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
-        &self,
-        data: &[(RedisKey<K>, RedisValue<V>)],
-        ttl: Option<Duration>,
-    ) -> Result<(), RedisError> {
-        tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = self.expiration(ttl);
-
-        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
-        // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.pipeline().await?;
-        for (key, value) in data {
-            let key = self.make_key(key.clone());
-            let _: Result<(), _> = pipeline
-                .set(key, value.clone(), expiration.clone(), None, false)
-                .await;
-        }
-
-        let result: Result<Vec<()>, _> = pipeline.all().await;
-        match result {
-            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
-            Err(err) => {
-                tracing::trace!("caught error during insert: {err:?}");
-                self.record_query_error(&err);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
-    /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
-    where
-        I: Iterator<Item = fred::types::Key>,
-    {
-        self.delete_from_scan_result_with_options(keys, Options::default())
-            .await
-    }
-
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
     pub(crate) async fn delete_from_scan_result_with_options<I>(
@@ -975,25 +913,6 @@ impl RedisCacheStorage {
         }
 
         Ok(total)
-    }
-
-    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
-    pub(crate) async fn scan_with_namespaced_results(
-        &self,
-        pattern: String,
-        count: Option<u32>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>>, RedisError>
-    {
-        let pattern = self.make_key(RedisKey(pattern));
-        if self.is_cluster {
-            // NOTE: scans might be better send to only the read replicas, but the read-only client
-            // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Ok(Box::pin(
-                self.client().await?.scan_cluster(pattern, count, None),
-            ))
-        } else {
-            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
-        }
     }
 }
 
@@ -1063,7 +982,10 @@ fn setup_event_listeners(caller: &'static str, client: &Client) {
 ))]
 impl RedisCacheStorage {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use std::pin::Pin;
+
         use fred::prelude::Key;
+        use futures::Stream;
         use futures::StreamExt;
 
         if self.namespace.is_none() {
@@ -1096,6 +1018,82 @@ impl RedisCacheStorage {
                 .map(ToString::to_string)
                 .unwrap_or(key),
             None => key,
+        }
+    }
+
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
+        &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Result<Vec<Result<RedisValue<V>, RedisError>>, RedisError> {
+        self.get_multiple_with_options(keys, Options::default())
+            .await
+    }
+
+    /// Inserts multiple records. Returns Ok(()) on success, emitting traces for successful
+    /// inserts, and otherwise an error and error traces and error-level log
+    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+        &self,
+        data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
+    ) -> Result<(), RedisError> {
+        tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = self.expiration(ttl);
+
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.pipeline().await?;
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
+
+        let result: Result<Vec<()>, _> = pipeline.all().await;
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_query_error(&err);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
+        self.delete_from_scan_result_with_options(keys, Options::default())
+            .await
+    }
+
+    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    pub(crate) async fn scan_with_namespaced_results(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Result<
+        std::pin::Pin<
+            Box<
+                dyn futures::Stream<Item = Result<fred::types::scan::ScanResult, RedisError>>
+                    + Send,
+            >,
+        >,
+        RedisError,
+    > {
+        let pattern = self.make_key(RedisKey(pattern));
+        if self.is_cluster {
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Ok(Box::pin(
+                self.client().await?.scan_cluster(pattern, count, None),
+            ))
+        } else {
+            Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
 }
