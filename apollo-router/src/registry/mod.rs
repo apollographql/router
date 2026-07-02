@@ -446,6 +446,58 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
     }
 }
 
+/// Media types a WebAssembly component layer is commonly published under.
+#[cfg(feature = "wasm-components")]
+const WASM_MEDIA_TYPES: &[&str] = &[
+    "application/wasm",
+    "application/vnd.wasm.content.layer.v1+wasm",
+    "application/vnd.oci.image.layer.v1.wasm",
+    "application/vnd.bytecodealliance.component.v1+wasm",
+];
+
+#[cfg(feature = "wasm-components")]
+fn is_wasm_layer(media_type: &str) -> bool {
+    WASM_MEDIA_TYPES.contains(&media_type) || media_type.contains("wasm")
+}
+
+/// Pull a WebAssembly component from an OCI registry, returning its raw bytes.
+///
+/// Reuses the same manifest/blob machinery (and telemetry) as the schema fetch, but selects the
+/// wasm component layer: by a known wasm media type, or — if none matches — the sole layer in the
+/// manifest. Auth follows the same rules as schema pulls (docker credentials, else anonymous); no
+/// Apollo key is passed since components are expected on third-party registries.
+#[cfg(feature = "wasm-components")]
+pub(crate) async fn fetch_oci_component(reference: &str) -> Result<Vec<u8>, OciError> {
+    let parsed: Reference = reference.parse()?;
+    let auth = build_auth(&parsed, "");
+    let protocol = if should_use_ssl(reference) {
+        ClientProtocol::Https
+    } else {
+        ClientProtocol::Http
+    };
+    let mut client = Client::new(ClientConfig {
+        protocol,
+        ..Default::default()
+    });
+
+    let (manifest, _) = fetch_oci_manifest(&mut client, &auth, &parsed, None).await?;
+
+    let layer = manifest
+        .layers
+        .iter()
+        .find(|layer| is_wasm_layer(&layer.media_type))
+        .or_else(|| {
+            // Fallback: a component artifact often has a single layer.
+            (manifest.layers.len() == 1)
+                .then(|| manifest.layers.first())
+                .flatten()
+        })
+        .ok_or(OciError::LayerMissingTitle)?
+        .clone();
+
+    fetch_oci_blob(&mut client, &parsed, &layer).await
+}
+
 /// Type alias for OCI schema stream
 type OciSchemaStream = Pin<Box<dyn Stream<Item = Result<SchemaState, OciError>> + Send>>;
 

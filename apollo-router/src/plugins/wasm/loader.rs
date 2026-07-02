@@ -20,16 +20,13 @@ pub(super) async fn load(source: &Source) -> Result<Vec<u8>, BoxError> {
     }
 }
 
-/// Pull a component from an OCI registry.
-///
-/// TODO(wasm-components): wire this to `crate::registry` (the same machinery the router uses to pull
-/// supergraph artifacts from OCI). The registry's current entry points are schema-oriented, so
-/// pulling an arbitrary wasm layer needs a small dedicated path; tracked as a follow-up. Until then
-/// operators use `path:` with an artifact they have fetched.
+/// Pull a component from an OCI registry, reusing the router's OCI machinery
+/// (`crate::registry`) — the same client, auth, and telemetry used for supergraph artifacts.
 async fn load_from_oci(reference: &str) -> Result<Vec<u8>, BoxError> {
-    Err(format!(
-        "loading wasm components from OCI (`{reference}`) is not yet implemented; \
-         use `source.path` with a locally-fetched artifact for now"
-    )
-    .into())
+    // Validate up front for a clear error on a malformed reference.
+    crate::registry::validate_oci_reference(reference)
+        .map_err(|e| format!("invalid OCI reference `{reference}`: {e}"))?;
+    crate::registry::fetch_oci_component(reference)
+        .await
+        .map_err(|e| format!("pulling wasm component from `{reference}`: {e}").into())
 }
