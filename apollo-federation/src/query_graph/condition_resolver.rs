@@ -86,6 +86,10 @@ pub(crate) enum UnsatisfiedConditionReason {
 }
 
 impl ConditionResolution {
+    pub(crate) fn is_satisfied(&self) -> bool {
+        matches!(self, ConditionResolution::Satisfied { .. })
+    }
+
     pub(crate) fn no_conditions() -> Self {
         Self::Satisfied {
             cost: 0.0,
@@ -142,10 +146,11 @@ impl ConditionResolverCache {
 
         if let Some(entries) = self.edge_states.get(&edge) {
             for cached in entries {
+                let context_match = &cached.context == context;
                 let destinations_match = &cached.excluded_destinations == excluded_destinations;
                 let conditions_match = &cached.excluded_conditions == excluded_conditions;
 
-                if &cached.context == context && destinations_match && conditions_match {
+                if context_match && destinations_match && conditions_match {
                     return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
                 }
 
@@ -154,19 +159,15 @@ impl ConditionResolverCache {
                 // available and the cached result is valid. We require exact match on
                 // excluded conditions because fewer condition exclusions could open up
                 // better paths that weren't explored when the cached result was computed.
-                if &cached.context == context
+                if context_match
                     && conditions_match
-                    && matches!(&cached.resolution, ConditionResolution::Satisfied { .. })
+                    && cached.resolution.is_satisfied()
+                    && excluded_destinations.is_superset_of(&cached.excluded_destinations)
                 {
-                    let destinations_ok = destinations_match
-                        || (!cached.used_subgraphs.is_empty() && {
-                            let any_conflict = excluded_destinations
-                                .newly_excluded_in(&cached.excluded_destinations)
-                                .any(|dest| cached.used_subgraphs.contains(dest));
-                            !any_conflict
-                        });
-
-                    if destinations_ok {
+                    let path_does_not_traverse_excluded = cached.used_subgraphs.is_empty()
+                        || !excluded_destinations
+                            .any_excluded(|dest| cached.used_subgraphs.contains(dest));
+                    if path_does_not_traverse_excluded {
                         return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
                     }
                 }

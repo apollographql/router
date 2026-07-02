@@ -175,6 +175,9 @@ impl OpPathTree {
             out.insert(w.source.clone());
         }
         for child in &self.childs {
+            if let Some(conditions) = &child.conditions {
+                conditions.collect_subgraphs(out);
+            }
             child.tree.collect_subgraphs(out);
         }
     }

@@ -243,14 +243,12 @@ impl ExcludedDestinations {
             .any(|excluded| excluded.as_ref() == destination)
     }
 
-    pub(crate) fn newly_excluded_in<'a>(
-        &'a self,
-        other: &'a ExcludedDestinations,
-    ) -> impl Iterator<Item = &'a str> + 'a {
-        self.0
-            .iter()
-            .filter(move |d| !other.is_excluded(d))
-            .map(|d| d.as_ref())
+    pub(crate) fn is_superset_of(&self, other: &ExcludedDestinations) -> bool {
+        other.0.iter().all(|d| self.is_excluded(d))
+    }
+
+    pub(crate) fn any_excluded(&self, mut f: impl FnMut(&str) -> bool) -> bool {
+        self.0.iter().any(|d| f(d.as_ref()))
     }
 
     fn add_excluded(&self, destination: &Arc<str>) -> Self {
