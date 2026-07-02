@@ -11,6 +11,7 @@ pub(super) use error::Error;
 use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
@@ -20,14 +21,19 @@ use crate::plugins::response_cache::metrics::record_invalidation_duration;
 
 type StorageResult<T> = Result<T, Error>;
 
-/// A `Document` is a unit of data to be stored in the cache, including any invalidation keys, its
-/// TTL, cache control information, etc.
+/// A `Document` is a unit of data to be stored in the cache, including any cache-tag entries
+/// it indexes under, its TTL, cache-control information, etc.
+///
+/// The cache-tag entries on a Document are pre-filtered by the plugin layer based on the
+/// subgraph's configured invalidation indexes; the storage layer's job is purely to render
+/// each entry into its Redis ZSET key via [`CacheTag::to_redis_key`] and persist the document
+/// data and tag memberships. No invalidation policy lives here.
 #[derive(Debug, Clone)]
 pub(super) struct Document {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
-    pub(super) invalidation_keys: Vec<String>,
+    pub(super) cache_tags: Vec<CacheTag>,
     pub(super) expire: Duration,
 }
 

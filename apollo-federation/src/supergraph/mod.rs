@@ -62,6 +62,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::schema::field_set::FieldSetValidation;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -357,7 +358,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
 
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
     for (_, mut subgraph) in subgraphs {
-        crate::compat::coerce_schema_default_values(subgraph.schema.schema_mut());
+        crate::compat::coerce_schema_values(subgraph.schema.schema_mut());
         let valid_subgraph_schema = if validate_extracted_subgraphs {
             match subgraph.schema.validate_or_return_self() {
                 Ok(schema) => schema,
@@ -583,6 +584,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         remove_inactive_requires_and_provides_from_subgraph(
             supergraph_schema,
             &mut subgraph.schema,
+            FieldSetValidation::Validate,
         )?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
@@ -1996,6 +1998,7 @@ fn add_federation_operations(
 pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
     supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
+    field_set_validation: FieldSetValidation,
 ) -> Result<(), FederationError> {
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
     let requires_directive_definition_name = federation_spec_definition
@@ -2051,6 +2054,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
             FieldSetDirectiveKind::Requires,
             &requires_directive_definition_name,
             pos.clone(),
+            &field_set_validation,
         )?;
         remove_inactive_applications(
             supergraph_schema,
@@ -2059,6 +2063,7 @@ pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
             FieldSetDirectiveKind::Provides,
             &provides_directive_definition_name,
             pos,
+            &field_set_validation,
         )?;
     }
 
@@ -2077,6 +2082,7 @@ fn remove_inactive_applications(
     directive_kind: FieldSetDirectiveKind,
     name_in_schema: &Name,
     object_or_interface_field_definition_position: ObjectOrInterfaceFieldDefinitionPosition,
+    field_set_validation: &FieldSetValidation,
 ) -> Result<(), FederationError> {
     let mut replacement_directives = Vec::new();
     let field = object_or_interface_field_definition_position.get(schema.schema())?;
@@ -2126,6 +2132,7 @@ fn remove_inactive_applications(
             parent_type_pos.type_name().clone(),
             fields,
             true,
+            *field_set_validation,
         )?;
 
         if remove_non_external_leaf_fields(schema, &mut fields)? {
@@ -3042,7 +3049,7 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.14", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.15", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);

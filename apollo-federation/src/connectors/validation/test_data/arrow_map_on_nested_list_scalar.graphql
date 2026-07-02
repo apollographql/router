@@ -1,0 +1,34 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+# A renamed arrow-method projection over a nested-list scalar field
+# (`data: data->map(...)` where `ReportData.data: [[String]]`). This is a
+# scalar projection, NOT a group selection (`data { ... }`), so it must
+# validate cleanly.
+#
+# Regression test: this previously emitted a false-positive
+# `GROUP_SELECTION_IS_NOT_OBJECT` ("selects a group `data {}` … is of type
+# `String`") because the validator treated every `Array`-shaped selection as
+# a group. It now only treats a list whose *element* shape is an object as a
+# group. Surfaced while force-upgrading apollo-constellation connector
+# subgraphs (ashby `generateReport`) from connect/v0.3 to v0.4.
+type Query {
+    report: ReportData
+      @connect(
+        source: "api"
+        http: { GET: "/report" }
+        selection: """
+        data: data->map(@->map(@->toString))
+        """
+      )
+}
+
+type ReportData {
+    "List of rows; each row is a list of stringified cells."
+    data: [[String]]
+}

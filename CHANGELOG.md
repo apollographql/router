@@ -2,9 +2,96 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.15.1] - 2026-06-10
+
+## 🐛 Fixes
+
+### Fix Redis replica routing failure caused by lazy connections with even replica counts ([Issue/PR #9589](https://github.com/apollographql/router/pull/9589))
+
+When a Redis cluster had an even number of replicas, the router's use of `lazy_connections = true` could trigger a bug in fred's round-robin replica selection logic. Fred increments its round-robin counter when searching for a routable replica, and increments it again when it can't find one before requeuing the command. With an even replica count this causes fred to consistently target replicas that have no established connection, leading to GET failures falling through to backends and Redis CPU spikes.
+
+Switched to `lazy_connections = false` (eager connections) so all replica connections are established upfront. The `RouteableReplicaFilter` that was the original motivation for lazy connections — preventing unroutable replicas from entering the routing table — continues to handle that responsibility, making the blast-radius isolation that lazy connections provided redundant.
+
+By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9589
+
+
+
 # [2.15.0] - 2026-05-26
 
 ## 🚀 Features
+
+### Unify object-selection and object-literal syntax in `connect/v0.4`, with a behavior change for primitive literals ([PR #9261](https://github.com/apollographql/router/pull/9261))
+
+In schemas that `@link` `connect/v0.4`, the `JSONSelection` mapping grammar collapses the previously distinct `SubSelection` (`{ id name }`, whitespace-separated field selection) and `LitObject` (`{ id: 1, name: "x" }`, comma-separated object literal) productions into a single rule. The guiding principle, now pinned in the [mapping-language reference](https://github.com/apollographql/router/blob/dev/apollo-federation/src/connectors/json_selection/README.md):
+
+> **Copy-and-paste any JSON value and it is already a valid `JSONSelection`.**
+
+**What gets easier:**
+
+- Commas between fields are now accepted at every nesting level, so a mapping written the way you'd write JSON just parses:
+  ```graphql
+  { id, title, address { street, city } }
+  ```
+  Previously a comma inside a nested subselection (`address { street, city }`) was a parse error that surfaced only as a bare end-of-input diagnostic.
+- Object-property shorthand is accepted (`id` expands to `id: id`).
+- Top-level object literals no longer require a `$(...)` wrapper.
+
+**⚠️ Behavior change — primitive tokens in value position are now literals.** Because `{ … }` is now read as JSON, a bare primitive after `name:` is a *literal value* in v0.4, where v0.3 read it as a *property access* on the input data `$`:
+
+| Selection string        | v0.3 meaning                       | v0.4 meaning              |
+|-------------------------|------------------------------------|---------------------------|
+| `currencyCode: "USD"`   | `$."USD"` (look up property `USD`) | literal string `"USD"`    |
+| `flag: true`            | `$.true` (look up property `true`) | literal boolean `true`    |
+| `x: null`               | `$.null`                           | literal `null`            |
+
+An unchanged selection string can therefore produce different output once you bump its `@link` to v0.4. In practice this is overwhelmingly safe or beneficial — across a corpus of 25,703 selections from 7,375 supergraphs, **97.4% parse and evaluate identically**, and most of the rest are cases where the v0.3 property lookup silently resolved to `null` and v0.4 now emits the literal the developer intended. The pattern that needs attention is selecting a REST field whose name GraphQL won't accept, e.g. `gqlSafeAlias: "@odata.nextLink"` — in v0.4 that becomes the constant string instead of the data, so restore the lookup by fortifying with `$.`:
+
+```graphql
+gqlSafeAlias: $."@odata.nextLink"
+```
+
+This is gated to `connect/v0.4` — the `v0.2` and `v0.3` parse paths are unchanged, and verbose v0.3 forms still parse under v0.4, so schemas that have not upgraded their `@link` are unaffected.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9261
+
+### Add `->split` arrow method to the connectors mapping language ([PR #9199](https://github.com/apollographql/router/pull/9199))
+
+Connector `@connect(selection:)` mappings gain a `->split` arrow method, analogous to JavaScript's `String.prototype.split`. It splits a string into an array of substrings on a separator:
+
+```
+$('a,b,c')->split(',')      → ["a", "b", "c"]
+$('hello')->split('')       → ["h", "e", "l", "l", "o"]   # empty separator splits into characters (UTF-8 aware)
+$('a,b,c')->split(',', 2)   → ["a", "b"]                  # optional non-negative limit caps the element count
+text->split($.sep)          → separator taken dynamically from the data
+```
+
+It is the inverse of `->joinNotNull` (`$->split(',')->joinNotNull(',')` round-trips to the original), is string-only, and errors on non-string input.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9199
+
+### Add `->trim`, `->trimStart`, and `->trimEnd` arrow methods to the connectors mapping language ([PR #9211](https://github.com/apollographql/router/pull/9211))
+
+Three zero-argument string-trimming arrow methods are now available in `@connect(selection:)` mappings:
+
+- `->trim` — strip leading and trailing whitespace
+- `->trimStart` — strip leading whitespace only
+- `->trimEnd` — strip trailing whitespace only
+
+```
+$('  hello  ')->trim        → "hello"
+$('  hello  ')->trimStart   → "hello  "
+$('  hello  ')->trimEnd     → "  hello"
+```
+
+Semantics match Rust's `str::trim` / `str::trim_start` / `str::trim_end`: locale-independent and Unicode `White_Space`–aware (NBSP, EM SPACE, etc.). All three are `String -> String` and error on non-string input.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9211
+
+### Support `@connect` directives without an `http` block ([PR #9124](https://github.com/apollographql/router/pull/9124))
+
+A `@connect` directive can now omit its `http` property, producing a *mapping-only* (requestless) connector that resolves a field by applying its `selection` to data already available — such as field arguments and the enclosing object — without issuing an outbound HTTP request. Because no transport runs, the selection cannot reference transport-derived data (the response body, `$status`, or `$response`); doing so is rejected at composition. Requestless connectors are also supported in nested mutations.
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/9124
 
 ### Add `ignore_auth_context` option to subscription deduplication config ([PR #9078](https://github.com/apollographql/router/pull/9078))
 
@@ -139,6 +226,24 @@ When the timeout fires, the router returns a `504 Gateway Timeout` response with
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9243
 
 ## 🐛 Fixes
+
+### Fix spurious `CONNECTORS_CANNOT_RESOLVE_KEY` for `@connect` bodies that use an arrow method before a subselection ([PR #9375](https://github.com/apollographql/router/pull/9375))
+
+Composition rejected an otherwise-valid `@connect` mapping with `CONNECTORS_CANNOT_RESOLVE_KEY` when an arrow method such as `->filter(...)` was followed by a `{ … }` subselection on a field used to resolve an entity `@key` (or `@requires`). For example:
+
+```graphql
+type Cart @key(fields: "id") {
+  result: String
+    @connect(
+      http: { POST: "/p", body: "{ items: $this.items->filter(@.product) { id name } }" }
+      …
+    )
+}
+```
+
+The selection parsed correctly — the key-resolution validator was the failure point, because its trie walker treated arrow methods as opaque leaves and never recursed into the post-method subselection. The fix routes key-resolution analysis through the shape system (a new `SelectionAnalysis`), which consults each method's shape relation to its input: shape-preserving methods like `->filter` / `->slice` correctly attribute consumption to the input array, while shape-transforming methods like `->size` / `->jsonStringify` terminate at the method boundary. The fix applies across `connect/v0.2`–`v0.4`.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9375
 
 ### Resolve `@connect` field values when a root query alias is combined with field-level aliases ([Issue #9347](https://github.com/apollographql/router/issues/9347))
 
@@ -455,6 +560,21 @@ By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router
 
 ## 🚀 Features
 
+### Add `->jsonParse` arrow method to the connectors mapping language ([PR #9108](https://github.com/apollographql/router/pull/9108))
+
+`->jsonParse` is the inverse of `->jsonStringify`: given a string containing valid JSON, it deserializes the string into a structured value that can be traversed with subselections.
+
+```
+$('{"key":"value"}')->jsonParse            → { "key": "value" }
+$("[1,2,3]")->jsonParse                    → [1, 2, 3]
+payload->jsonParse { users { name } }      → selects into the parsed result
+$->jsonStringify->jsonParse                → round-trips losslessly
+```
+
+It returns an error if the input is not a string or the string is not valid JSON. (Because the parsed structure cannot be known statically, its inferred shape is currently `unknown`.)
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/9108
+
 ### Add `expand_json_string_values` option to JSON log formatter ([PR #9156](https://github.com/apollographql/router/pull/9156))
 
 When `expand_json_string_values: true` is set on a stdout or file JSON log formatter, string attribute values that contain valid JSON objects or arrays are emitted as native JSON instead of quoted strings. This enables log aggregators like Splunk to index sub-fields such as `errors{}.extensions.code`.
@@ -684,6 +804,12 @@ The GraphQL specification requires that a non-null violation propagates `null` u
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/9032
 
 ## 🛠 Maintenance
+
+### Default the connectors spec to `connect/v0.3` ([PR #8932](https://github.com/apollographql/router/pull/8932))
+
+`ConnectSpec::latest()` and the internal connectors defaults (`DEFAULT_CONNECT_SPEC`, `JSONSelection::default_connect_spec()`, and `StringTemplate` parsing) now resolve to `v0.3` instead of `v0.2`. Schemas that explicitly `@link` a specific connectors spec version are unaffected — only the "latest / default" resolution changes — and the `v0.1 → v0.2` auto-upgrade path is intentionally left in place, so schemas that explicitly declare `connect/v0.2` are never silently upgraded.
+
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/8932
 
 ### Reduce flaky CI in federation validation and Redis cache metrics tests ([PR #9102](https://github.com/apollographql/router/pull/9102))
 

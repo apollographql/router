@@ -212,7 +212,26 @@ fn list_tags() -> Result<Vec<Version>> {
     Ok(tags)
 }
 
-/// List all open PRs in the target repo via `gh pr list --json ...`.
+/// List open release-related PRs in the target repo via `gh pr list --search ...`.
+///
+/// Scoped to `label:release` rather than every open PR.  Two reasons:
+///
+///   1. `mergeStateStatus` is an expensive GraphQL field — GitHub's backend
+///      times out (HTTP 502) when asked to compute it for ~80+ PRs at once,
+///      which is the steady state on apollographql/router.
+///   2. The detector only cares about release-cycle PRs.  Release PRs get
+///      `--label release` at create time (see `test-release-new.yml`), so
+///      this filter is sufficient for line attribution.
+///
+/// Prep PRs (head `prep-<X.Y.Z>`) and reconcile PRs (head `reconcile-v<X.Y.Z>`)
+/// are not currently labeled and so won't appear here.  That's a known gap:
+/// `release status` still surfaces them when the release PR is open (the
+/// attribution code in `build_line_state` matches by head ref name on the
+/// returned PR set), but a reconcile PR with no release PR open on the same
+/// version line won't be detected by `check_no_existing_reconcile`.  Worst
+/// case the local branch-create fails when re-running reconcile against the
+/// same version.  TODO: add `--label reconcile` / `--label prep` at PR-open
+/// time and combine results from multiple label-filtered queries.
 fn list_open_prs(repo: &str) -> Result<Vec<PrSummary>> {
     if !xtask::gh::available() {
         return Err(anyhow!(
@@ -224,10 +243,10 @@ fn list_open_prs(repo: &str) -> Result<Vec<PrSummary>> {
         repo,
         "pr",
         "list",
-        "--state",
-        "open",
+        "--search",
+        "is:pr is:open label:release",
         "--limit",
-        "200",
+        "30",
         "--json",
         "number,title,headRefName,isDraft,mergeStateStatus,url",
     ];

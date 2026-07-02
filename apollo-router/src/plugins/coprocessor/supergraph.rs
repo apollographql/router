@@ -17,6 +17,7 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
+use crate::services::header_masking::MaskingRulesMap;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -98,6 +99,10 @@ impl SupergraphStage {
                 let sdl = sdl.clone();
 
                 async move {
+                    let header_masking_rules = request
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
                     let mut succeeded = true;
                     let mut executed = false;
                     let result = process_supergraph_request_stage(
@@ -108,6 +113,7 @@ impl SupergraphStage {
                         request_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -135,6 +141,10 @@ impl SupergraphStage {
 
                 async move {
                     let response: supergraph::Response = fut.await?;
+                    let header_masking_rules = response
+                        .context
+                        .extensions()
+                        .with_lock(|lock| lock.get::<Arc<MaskingRulesMap>>().cloned());
 
                     let mut succeeded = true;
                     let mut executed = false;
@@ -146,6 +156,7 @@ impl SupergraphStage {
                         response_config,
                         response_validation,
                         &mut executed,
+                        header_masking_rules,
                     )
                     .await
                     .map_err(|error| {
@@ -188,6 +199,7 @@ impl SupergraphStage {
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_request_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -196,6 +208,7 @@ async fn process_supergraph_request_stage<C>(
     mut request_config: SupergraphRequestConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -218,11 +231,24 @@ where
         .headers
         .then(|| externalize_header_map(&parts.headers));
 
+    // Log headers with masking for security
+    if request_config.headers
+        && let Some(rules) = header_masking_rules.as_deref()
+    {
+        tracing::debug!(
+            headers = %rules.get_request(None).mask_headers_debug(&parts.headers),
+            "Supergraph request headers (masked)"
+        );
+    }
+
     let body_to_send = request_config
         .body
         .then(|| serde_json::from_slice::<Value>(&bytes))
         .transpose()?;
-    let context_to_send = request_config.context.get_context(&request.context);
+    let context_to_send = request_config
+        .context
+        .get_context(&request.context)
+        .map(|(ctx, _keys)| ctx);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
 
@@ -237,7 +263,11 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    let payload_for_log =
+        super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+            r.get_request(None)
+        });
+    tracing::debug!(payload = ?payload_for_log, "externalized output");
 
     // We use a new context here to avoid any risk of carrying extensions to coprocessor calls that
     // we don't intend for coprocessor calls; if in the future we change it, make sure to
@@ -254,7 +284,14 @@ where
     // Indicate the stage was executed to raise execution metric on parent
     *executed = true;
 
-    tracing::debug!(?co_processor_result, "co-processor returned");
+    {
+        let co_processor_result_for_log = super::scrub_result_for_log(
+            &co_processor_result,
+            header_masking_rules.as_deref(),
+            |r| r.get_request(None),
+        );
+        tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+    }
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -343,6 +380,7 @@ where
 /// Using `&mut` here is not the most idiomatic Rust pattern, but it was the
 /// least intrusive way to expose this information without refactoring all
 /// router stage processing functions.
+#[allow(clippy::too_many_arguments)]
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
@@ -351,6 +389,7 @@ async fn process_supergraph_response_stage<C>(
     response_config: SupergraphResponseConf,
     response_validation: bool,
     executed: &mut bool,
+    header_masking_rules: Option<Arc<MaskingRulesMap>>,
 ) -> Result<supergraph::Response, BoxError>
 where
     C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
@@ -390,9 +429,24 @@ where
         let headers_to_send = response_config
             .headers
             .then(|| externalize_header_map(&parts.headers));
+
+        // Log headers with masking for security
+        if response_config.headers
+            && let Some(rules) = header_masking_rules.as_deref()
+        {
+            tracing::debug!(
+                headers = %rules.get_response(None).mask_headers_debug(&parts.headers),
+                "Supergraph response headers (masked)"
+            );
+        }
+
         let body_to_send = filter_graphql_response_body(&first, &response_config.body);
         let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-        let context_to_send = response_config.context.get_context(&response.context);
+        let (context_to_send, keys_sent) =
+            match response_config.context.get_context(&response.context) {
+                Some((ctx, keys)) => (Some(ctx), keys),
+                None => (None, HashSet::new()),
+            };
 
         let payload = Externalizable::supergraph_builder()
             .stage(PipelineStep::SupergraphResponse)
@@ -406,7 +460,11 @@ where
             .build();
 
         // Second, call our co-processor and get a reply.
-        tracing::debug!(?payload, "externalized output");
+        let payload_for_log =
+            super::scrub_payload_for_log(&payload, header_masking_rules.as_deref(), |r| {
+                r.get_response(None)
+            });
+        tracing::debug!(payload = ?payload_for_log, "externalized output");
         // We use a new context here to avoid any risk of carrying extensions to coprocessor calls
         // that we don't intend for coprocessor calls; if in the future we change it, make sure to
         // understand what could be sent to coprocessors and how that might affect their behavior
@@ -419,7 +477,14 @@ where
         // Indicate the stage was executed to raise execution metric on parent
         *executed = true;
 
-        tracing::debug!(?co_processor_result, "co-processor returned");
+        {
+            let co_processor_result_for_log = super::scrub_result_for_log(
+                &co_processor_result,
+                header_masking_rules.as_deref(),
+                |r| r.get_response(None),
+            );
+            tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+        }
         let co_processor_output = co_processor_result?;
 
         validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
@@ -445,7 +510,12 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            update_context_from_coprocessor(&response.context, context, &response_config.context)?;
+            update_context_from_coprocessor(
+                &response.context,
+                context,
+                &response_config.context,
+                &keys_sent,
+            )?;
         }
 
         if let Some(headers) = co_processor_output.headers {
@@ -473,13 +543,18 @@ where
                 .condition
                 .evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
+            let header_masking_rules = header_masking_rules.clone();
             async move {
                 if !should_be_executed {
                     return Ok(deferred_response);
                 }
                 let body_to_send =
                     filter_graphql_response_body(&deferred_response, &response_config.body);
-                let context_to_send = response_config_context.get_context(&generator_map_context);
+                let (context_to_send, keys_sent) =
+                    match response_config_context.get_context(&generator_map_context) {
+                        Some((ctx, keys)) => (Some(ctx), keys),
+                        None => (None, HashSet::new()),
+                    };
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -494,7 +569,14 @@ where
                     .build();
 
                 // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
+                // Deferred-response payloads omit headers entirely, but go through
+                // the same scrub for consistency.
+                let payload_for_log = super::scrub_payload_for_log(
+                    &payload,
+                    header_masking_rules.as_deref(),
+                    |r| r.get_response(None),
+                );
+                tracing::debug!(payload = ?payload_for_log, "externalized output");
                 // Use a new context to avoid carrying request extensions into the coprocessor
                 // HTTP call, consistent with how the initial chunk is handled.
                 let co_processor_result = {
@@ -503,7 +585,14 @@ where
                         .call(generator_client, &generator_coprocessor_url, Context::new())
                         .await
                 };
-                tracing::debug!(?co_processor_result, "co-processor returned");
+                {
+                    let co_processor_result_for_log = super::scrub_result_for_log(
+                        &co_processor_result,
+                        header_masking_rules.as_deref(),
+                        |r| r.get_response(None),
+                    );
+                    tracing::debug!(co_processor_result = ?co_processor_result_for_log, "co-processor returned");
+                }
                 let result: Result<graphql::Response, BoxError> = async {
                     let co_processor_output = co_processor_result?;
 
@@ -536,6 +625,7 @@ where
                             &generator_map_context,
                             context,
                             &response_config_context,
+                            &keys_sent,
                         )?;
                     }
 
@@ -586,10 +676,10 @@ mod tests {
     use super::*;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockInternalHttpClientService;
-    use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::router;
     use crate::services::supergraph;
 
@@ -598,68 +688,20 @@ mod tests {
         callback: fn(
             http::Request<RouterBody>,
         ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_call().returning(
-                    move |req: crate::services::http::HttpRequest| {
-                        let context = req.context.clone();
-                        let fut = callback(req.http_request);
-                        Box::pin(async move {
-                            let response = fut.await?;
-                            Ok(crate::services::http::HttpResponse {
-                                http_response: response,
-                                context,
-                            })
-                        })
-                    },
-                );
-                mock_http_client
-            });
-            mock_http_client
+    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                let context = req.context.clone();
+                if let Ok(response) = callback(req.http_request).await {
+                    responder.send_response(HttpResponse {
+                        http_response: response,
+                        context,
+                    });
+                }
+            }
         });
-
-        mock_http_client
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn mock_with_deferred_callback(
-        callback: fn(
-            http::Request<RouterBody>,
-        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
-    ) -> MockInternalHttpClientService {
-        let mut mock_http_client = MockInternalHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockInternalHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockInternalHttpClientService::new();
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockInternalHttpClientService::new();
-                    mock_http_client.expect_call().returning(
-                        move |req: crate::services::http::HttpRequest| {
-                            let context = req.context.clone();
-                            let fut = callback(req.http_request);
-                            Box::pin(async move {
-                                let response = fut.await?;
-                                Ok(crate::services::http::HttpResponse {
-                                    http_response: response,
-                                    context,
-                                })
-                            })
-                        },
-                    );
-                    mock_http_client
-                });
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
+        mock
     }
 
     #[tokio::test]
@@ -677,46 +719,47 @@ mod tests {
             response: Default::default(),
         };
 
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                // Let's assert that the subgraph request has been transformed as it should have.
-                assert_eq!(
-                    req.supergraph_request.headers().get("cookie").unwrap(),
-                    "tasty_cookie=strawberry"
-                );
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            // Let's assert that the subgraph request has been transformed as it should have.
+            assert_eq!(
+                req.supergraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
 
-                assert_eq!(
-                    req.context
-                        .get::<&str, u8>("this-is-a-test-context")
-                        .unwrap()
-                        .unwrap(),
-                    42
-                );
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
 
-                // The subgraph uri should have changed
-                assert_eq!(
-                    Some("MyQuery"),
-                    req.supergraph_request.body().operation_name.as_deref()
-                );
+            // The subgraph uri should have changed
+            assert_eq!(
+                Some("MyQuery"),
+                req.supergraph_request.body().operation_name.as_deref()
+            );
 
-                // The query should have changed
-                assert_eq!(
-                    "query Long {\n  me {\n  name\n}\n}",
-                    req.supergraph_request.body().query.as_ref().unwrap()
-                );
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.body().query.as_ref().unwrap()
+            );
 
-                Ok(supergraph::Response::builder()
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -796,6 +839,7 @@ mod tests {
                 .data
                 .unwrap()
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -821,7 +865,8 @@ mod tests {
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service_1, handle_1) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -853,7 +898,7 @@ mod tests {
 
         let service = supergraph_stage.clone().as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service_1.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -884,23 +929,24 @@ mod tests {
             "my error message"
         );
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
+        let (mock_supergraph_service_2, mut handle_2) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let driver_2 = tokio::spawn(async move {
+            let (req, responder) = handle_2.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         // This should not trigger the supergraph response stage because of the condition
         let request = supergraph::Request::fake_builder().build().unwrap();
-        // let mut mock_http_client = MockInternalHttpClientService::new();
-        // mock_http_client.expect_clone().;
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
@@ -931,7 +977,7 @@ mod tests {
 
         let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_supergraph_service.boxed(),
+            mock_supergraph_service_2.boxed(),
             "http://test".to_string(),
             Arc::new("".to_string()),
             true,
@@ -941,6 +987,8 @@ mod tests {
             service.oneshot(request).await.unwrap();
 
         assert!(context.get::<_, bool>("testKey").ok().flatten().is_none());
+        crate::plugin::test::assert_no_mock_calls(handle_1).await;
+        crate::plugin::test::await_mock_driver(driver_2).await;
     }
 
     #[tokio::test]
@@ -958,92 +1006,93 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(Object::new())
                     .context(req.context)
                     .build()
+                    .unwrap(),
+            );
+        });
+
+        let mock_http_client = mock_with_callback(move |mut res: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let deserialized_response: Externalizable<Value> =
+                    serde_json::from_slice(&router::body::into_bytes(&mut res).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::SupergraphResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                assert_eq!(
+                    json! {{"data":{ "test": 1234_u32 }}},
+                    deserialized_response.body.unwrap()
+                );
+
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "SupergraphResponse",
+                  "control": {
+                      "break": 400
+                  },
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": {
+                    "data": { "test": 42 }
+                  },
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldn't change"
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
-            });
-
-        let mock_http_client =
-            mock_with_deferred_callback(move |mut res: http::Request<RouterBody>| {
-                Box::pin(async move {
-                    let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(&mut res).await.unwrap())
-                            .unwrap();
-
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::SupergraphResponse.to_string(),
-                        deserialized_response.stage
-                    );
-
-                    assert_eq!(
-                        json! {{"data":{ "test": 1234_u32 }}},
-                        deserialized_response.body.unwrap()
-                    );
-
-                    let input = json!(
-                          {
-                      "version": 1,
-                      "stage": "SupergraphResponse",
-                      "control": {
-                          "break": 400
-                      },
-                      "id": "1b19c05fdafc521016df33148ad63c1b",
-                      "headers": {
-                        "cookie": [
-                          "tasty_cookie=strawberry"
-                        ],
-                        "content-type": [
-                          "application/json"
-                        ],
-                        "host": [
-                          "127.0.0.1:4000"
-                        ],
-                        "apollo-federation-include-trace": [
-                          "ftv1"
-                        ],
-                        "apollographql-client-name": [
-                          "manual"
-                        ],
-                        "accept": [
-                          "*/*"
-                        ],
-                        "user-agent": [
-                          "curl/7.79.1"
-                        ],
-                        "content-length": [
-                          "46"
-                        ]
-                      },
-                      "body": {
-                        "data": { "test": 42 }
-                      },
-                      "context": {
-                        "entries": {
-                          "accepts-json": false,
-                          "accepts-wildcard": true,
-                          "accepts-multipart": false,
-                          "this-is-a-test-context": 42
-                        }
-                      },
-                      "sdl": "the sdl shouldn't change"
-                    });
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&input).unwrap(),
-                        ))
-                        .unwrap())
-                })
-            });
+            })
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -1078,6 +1127,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 42_u32 } }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1095,12 +1145,13 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::fake_stream_builder()
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_stream_builder()
                     .response(
                         graphql::Response::builder()
                             .data(json!({ "test": 1 }))
@@ -1121,45 +1172,45 @@ mod tests {
                     )
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::SupergraphResponse.to_string(),
-                        deserialized_response.stage
+        let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
+            Box::pin(async {
+                let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(res.into_body()).await.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::SupergraphResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                // Copy the has_next from the body into the data for checking later
+                deserialized_response
+                    .body
+                    .as_mut()
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .get_mut("data")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "has_next".to_string(),
+                        Value::from(deserialized_response.has_next.unwrap_or_default()),
                     );
 
-                    // Copy the has_next from the body into the data for checking later
-                    deserialized_response
-                        .body
-                        .as_mut()
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .get_mut("data")
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .insert(
-                            "has_next".to_string(),
-                            Value::from(deserialized_response.has_next.unwrap_or_default()),
-                        );
-
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
-                        ))
-                        .unwrap())
-                })
-            });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -1191,6 +1242,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1213,12 +1265,13 @@ mod tests {
             request: Default::default(),
         };
 
-        let mut mock_supergraph_service = MockSupergraphService::new();
+        let (mock_supergraph_service, mut supergraph_handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::fake_stream_builder()
+        let supergraph_driver = tokio::spawn(async move {
+            let (req, responder) = supergraph_handle.next_request().await.unwrap();
+            responder.send_response(
+                supergraph::Response::fake_stream_builder()
                     .response(
                         graphql::Response::builder()
                             .data(json!({ "test": 1 }))
@@ -1239,45 +1292,45 @@ mod tests {
                     )
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
-        let mock_http_client =
-            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
-                Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
-                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                    assert_eq!(
-                        PipelineStep::SupergraphResponse.to_string(),
-                        deserialized_response.stage
+        let mock_http_client = mock_with_callback(move |res: http::Request<RouterBody>| {
+            Box::pin(async {
+                let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                    &router::body::into_bytes(res.into_body()).await.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::SupergraphResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                // Copy the has_next from the body into the data for checking later
+                deserialized_response
+                    .body
+                    .as_mut()
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .get_mut("data")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "has_next".to_string(),
+                        Value::from(deserialized_response.has_next.unwrap_or_default()),
                     );
 
-                    // Copy the has_next from the body into the data for checking later
-                    deserialized_response
-                        .body
-                        .as_mut()
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .get_mut("data")
-                        .unwrap()
-                        .as_object_mut()
-                        .unwrap()
-                        .insert(
-                            "has_next".to_string(),
-                            Value::from(deserialized_response.has_next.unwrap_or_default()),
-                        );
-
-                    Ok(http::Response::builder()
-                        .body(router::body::from_bytes(
-                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
-                        ))
-                        .unwrap())
-                })
-            });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                    ))
+                    .unwrap())
+            })
+        });
 
         let service = supergraph_stage.as_service(
             mock_http_client,
@@ -1309,6 +1362,7 @@ mod tests {
             serde_json_bytes::to_value(&body).unwrap(),
             json!({ "data": { "test": 3 }, "hasNext": false }),
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
@@ -1334,11 +1388,13 @@ mod tests {
                 },
             };
 
-            let mut mock_supergraph_service = MockSupergraphService::new();
-            mock_supergraph_service
-                .expect_call()
-                .returning(|req: supergraph::Request| {
-                    Ok(supergraph::Response::fake_stream_builder()
+            let (mock_supergraph_service, mut supergraph_handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+            let supergraph_driver = tokio::spawn(async move {
+                let (req, responder) = supergraph_handle.next_request().await.unwrap();
+                responder.send_response(
+                    supergraph::Response::fake_stream_builder()
                         // Chunk 1: no errors — on_graphql_error condition is false → not called
                         .response(
                             graphql::Response::builder()
@@ -1359,10 +1415,11 @@ mod tests {
                         )
                         .context(req.context)
                         .build()
-                        .unwrap())
-                });
+                        .unwrap(),
+                );
+            });
 
-            let mock_http_client = mock_with_deferred_callback(|_: http::Request<RouterBody>| {
+            let mock_http_client = mock_with_callback(|_: http::Request<RouterBody>| {
                 Box::pin(async {
                     let response = serde_json_bytes::json!({
                         "version": 1,
@@ -1402,6 +1459,7 @@ mod tests {
                 1,
                 Some(true),
             )]);
+            crate::plugin::test::await_mock_driver(supergraph_driver).await;
         }
         .with_metrics()
         .await;
@@ -1423,19 +1481,27 @@ mod tests {
         }
     }
 
-    // Helper function to create mock supergraph service
-    fn create_mock_supergraph_service() -> MockSupergraphService {
-        let mut mock_supergraph_service = MockSupergraphService::new();
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-        mock_supergraph_service
+    // Helper function to create mock supergraph service.
+    // Returns (Mock, JoinHandle) — the driver is a loop that exits when the service is dropped.
+    // All call sites should await the driver after calling oneshot to propagate panics.
+    fn create_mock_supergraph_service() -> (
+        tower_test::mock::Mock<supergraph::Request, supergraph::Response>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                responder.send_response(
+                    supergraph::Response::builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                );
+            }
+        });
+        (mock, driver)
     }
 
     // Helper functions for supergraph request validation tests
@@ -1455,8 +1521,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
-    fn create_mock_http_client_supergraph_request_valid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_valid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1480,8 +1546,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty GraphQL break response
-    fn create_mock_http_client_supergraph_request_empty_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_empty_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1503,8 +1569,8 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL break response
-    fn create_mock_http_client_supergraph_request_invalid_response() -> MockInternalHttpClientService
-    {
+    fn create_mock_http_client_supergraph_request_invalid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let response = json!({
@@ -1528,9 +1594,9 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns valid GraphQL response
-    fn create_mock_http_client_supergraph_response_valid_response() -> MockInternalHttpClientService
-    {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    fn create_mock_http_client_supergraph_response_valid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,
@@ -1550,8 +1616,9 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns invalid GraphQL response
-    fn create_mock_http_client_invalid_response() -> MockInternalHttpClientService {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    fn create_mock_http_client_invalid_response()
+    -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,
@@ -1571,8 +1638,9 @@ mod tests {
     }
 
     // Helper function to create mock http client that returns empty response
-    fn create_mock_http_client_empty_response() -> MockInternalHttpClientService {
-        mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+    fn create_mock_http_client_empty_response() -> tower_test::mock::Mock<HttpRequest, HttpResponse>
+    {
+        mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 let input = json!({
                     "version": 1,
@@ -1591,9 +1659,10 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1606,13 +1675,15 @@ mod tests {
         // Falls back to original response when serde deserialization fails (string can't deserialize to Vec<Error>)
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(json!({ "test": 1234_u32 }), body.data.unwrap());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1626,15 +1697,21 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     // ===== SUPERGRAPH REQUEST VALIDATION TESTS =====
+    // For validation tests the supergraph mock is a one-shot driver: it handles at most one
+    // request and then exits. await_mock_driver works for both the accept path (request
+    // forwarded to supergraph) and the reject path (request blocked before reaching
+    // supergraph, driver exits when its handle is dropped).
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1647,13 +1724,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1671,13 +1750,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_enabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1695,13 +1776,15 @@ mod tests {
                 .message
                 .contains("couldn't deserialize coprocessor output body")
         );
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1714,13 +1797,15 @@ mod tests {
         assert_eq!(res.response.status(), 400);
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1735,13 +1820,15 @@ mod tests {
         // Empty object deserializes to GraphQL response with no data/errors
         assert_eq!(body.data, None);
         assert_eq!(body.errors.len(), 0);
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request_validation_disabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_request_validation_test().as_service(
             create_mock_http_client_supergraph_request_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1755,15 +1842,17 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // Falls back to original response since permissive deserialization fails too
         assert!(body.data.is_some() || !body.errors.is_empty());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     // ===== SUPERGRAPH RESPONSE VALIDATION TESTS =====
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1775,13 +1864,15 @@ mod tests {
         // With validation enabled, valid GraphQL response should be processed normally
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_empty() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_empty_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1792,13 +1883,15 @@ mod tests {
         // With validation enabled, empty response should cause service call to fail due to GraphQL validation
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_enabled_invalid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_invalid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             true, // Validation enabled
@@ -1809,13 +1902,15 @@ mod tests {
         // With validation enabled, invalid GraphQL response should cause service call to fail
         let result = service.oneshot(request).await;
         assert!(result.is_err());
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 
     #[tokio::test]
     async fn external_plugin_supergraph_response_validation_disabled_valid() {
+        let (supergraph_mock, supergraph_driver) = create_mock_supergraph_service();
         let service = create_supergraph_stage_for_response_validation_test().as_service(
             create_mock_http_client_supergraph_response_valid_response(),
-            create_mock_supergraph_service().boxed(),
+            supergraph_mock.boxed(),
             "http://test".to_string(),
             Arc::default(),
             false, // Validation disabled
@@ -1827,5 +1922,6 @@ mod tests {
         // With validation disabled, valid response processed via permissive deserialization
         let body = res.response.body_mut().next().await.unwrap();
         assert_eq!(body.data.unwrap()["test"], "valid_response");
+        crate::plugin::test::await_mock_driver(supergraph_driver).await;
     }
 }

@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
@@ -323,7 +324,8 @@ pub(crate) fn validate(
 
     let shape = expression.expression.shape();
 
-    let actual_shape = resolve_shape(&shape, context, expression)?;
+    let mut resolving = HashSet::default();
+    let actual_shape = resolve_shape(&shape, context, expression, &mut resolving)?;
     if let Some(mismatch) = expected_shape
         .validate(&actual_shape)
         .into_iter()
@@ -347,10 +349,15 @@ pub(crate) fn validate(
 }
 
 /// Validate that the shape is an acceptable output shape for an Expression.
+///
+/// `resolving` tracks schema-defined named shapes currently on the resolution
+/// stack; when a name is re-entered we short-circuit to [`Shape::unknown`] to
+/// prevent infinite recursion through self-referential input types.
 fn resolve_shape(
     shape: &Shape,
     context: &Context,
     expression: &Expression,
+    resolving: &mut HashSet<String>,
 ) -> Result<Shape, Message> {
     match shape.case() {
         ShapeCase::One(shapes) => {
@@ -360,6 +367,7 @@ fn resolve_shape(
                     &inner.clone().with_locations(shape.locations()),
                     context,
                     expression,
+                    resolving,
                 )?);
             }
             Ok(Shape::one(inners, []))
@@ -371,6 +379,7 @@ fn resolve_shape(
                     &inner.clone().with_locations(shape.locations()),
                     context,
                     expression,
+                    resolving,
                 )?);
             }
             Ok(Shape::all(inners, []))
@@ -463,6 +472,13 @@ fn resolve_shape(
                     })?
                     .clone()
             } else {
+                // Break recursion on self-referential schema-defined types
+                // (e.g. `input AnInput { child: AnInput }`). When we're already
+                // expanding this name elsewhere on the stack, treat further
+                // expansion as Unknown rather than walking it again.
+                if resolving.contains(base_shape_name) {
+                    return Ok(Shape::unknown(shape.locations().cloned()));
+                }
                 context
                     .schema
                     .shape_lookup
@@ -518,7 +534,17 @@ fn resolve_shape(
                 }
                 resolved = child;
             }
-            resolve_shape(&resolved, context, expression)
+            // Track this schema-defined name while we expand it, so any
+            // re-entry through it (directly or transitively) short-circuits.
+            // Variables ($args, $this, $root, ...) aren't tracked because
+            // they can't self-recurse the same way.
+            let is_schema_name = !base_shape_name.starts_with('$');
+            let added = is_schema_name && resolving.insert(base_shape_name.to_string());
+            let result = resolve_shape(&resolved, context, expression, resolving);
+            if added {
+                resolving.remove(base_shape_name);
+            }
+            result
         }
         ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
             code: context.code,
@@ -528,17 +554,20 @@ fn resolve_shape(
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
                 .iter()
-                .map(|shape| resolve_shape(shape, context, expression))
+                .map(|shape| resolve_shape(shape, context, expression, resolving))
                 .collect::<Result<Vec<_>, _>>()?;
-            let tail = resolve_shape(tail, context, expression)?;
+            let tail = resolve_shape(tail, context, expression, resolving)?;
             Ok(Shape::array(prefix, tail, shape.locations().cloned()))
         }
         ShapeCase::Object { fields, rest } => {
             let mut resolved_fields = Shape::empty_map();
             for (key, value) in fields {
-                resolved_fields.insert(key.clone(), resolve_shape(value, context, expression)?);
+                resolved_fields.insert(
+                    key.clone(),
+                    resolve_shape(value, context, expression, resolving)?,
+                );
             }
-            let resolved_rest = resolve_shape(rest, context, expression)?;
+            let resolved_rest = resolve_shape(rest, context, expression, resolving)?;
             Ok(Shape::object(
                 resolved_fields,
                 resolved_rest,
@@ -705,6 +734,8 @@ mod tests {
             object: InputObject
             array: [InputObject]
             multiLevel: MultiLevelInput
+            recursive: RecursiveInput
+            mutualA: MutualA
           ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
           something: String
         }
@@ -725,6 +756,21 @@ mod tests {
 
         type MultiLevel {
             nested: String
+        }
+
+        input RecursiveInput {
+            name: String
+            child: RecursiveInput
+        }
+
+        input MutualA {
+            name: String
+            b: MutualB
+        }
+
+        input MutualB {
+            name: String
+            a: MutualA
         }
     "#;
 
@@ -826,6 +872,9 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
+    #[case::recursive_input_field("$args.recursive.name")]
+    #[case::recursive_input_traversal("$args.recursive.child.child.name")]
+    #[case::mutual_recursive_input("$args.mutualA.b.a.b.name")]
     #[case::entries_when_type_unknown("$config.something->entries->first.value")]
     #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
@@ -855,6 +904,7 @@ mod tests {
     #[case::unknown_field_on_object("$args.object.unknown")]
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
+    #[case::recursive_input_whole("$args.recursive")]
     fn common_invalid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.

@@ -42,7 +42,6 @@ use itertools::Itertools;
 use crate::ValidFederationSubgraph;
 use crate::ValidFederationSubgraphs;
 use crate::error::FederationError;
-use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
@@ -56,6 +55,7 @@ use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SP
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
+use crate::link::metadata::LinksMetadata;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
@@ -264,7 +264,7 @@ impl Merger {
         }
 
         if self.errors.is_empty() {
-            crate::compat::coerce_schema_default_values(&mut supergraph);
+            crate::compat::coerce_schema_values(&mut supergraph);
 
             // TODO: validate here and extend `MergeFailure` to propagate validation errors
             let supergraph = Valid::assume_valid(supergraph);
@@ -927,7 +927,8 @@ struct DirectiveNames {
 impl DirectiveNames {
     fn for_metadata(metadata: &Option<&LinksMetadata>) -> Self {
         let federation_identity =
-            metadata.and_then(|m| m.by_identity.get(&Identity::federation_identity()));
+            metadata.and_then(|m| m.for_identity(&Identity::federation_identity()));
+        let federation_identity = federation_identity.as_ref();
 
         let key = federation_identity
             .map(|link| link.directive_name_in_schema(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC))

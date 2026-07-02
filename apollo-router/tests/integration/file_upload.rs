@@ -1215,7 +1215,24 @@ mod body_limits {
         };
 
         let url = format!("http://{}", router.bind_address());
-        let response = reqwest::Client::new()
+        // Disable HTTP keep-alive so the test's inbound connection closes as soon as the
+        // response is consumed. With pooling enabled (reqwest's default), the connection
+        // sits idle in the client's pool past `graceful_shutdown()`; the router then has
+        // to wait out `connection_shutdown_timeout` (5 s default in this harness) before
+        // its per-connection task exits. That delay plus CI scheduling slack can push
+        // total shutdown past `assert_shutdown`'s 10 s budget and panic the test as
+        // "unable to shutdown router". The race only fires for the `chunk_size_1_None`
+        // variants because they finish uploading the body before the router responds
+        // 413 (so the connection is fully drained and pool-eligible), unlike the
+        // 100-byte-chunked variants which abort mid-upload and force the connection
+        // closed. See `no_keepalive_reqwest_client` in
+        // `tests/integration/subgraph_response.rs` and `tests/integration/coprocessor.rs`
+        // for the same pattern applied elsewhere.
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("reqwest client build");
+        let response = client
             .post(url)
             .header(
                 CONTENT_TYPE,
@@ -1373,6 +1390,35 @@ mod operation_body_timeout {
         reqwest::Body::wrap_stream(stream)
     }
 
+    /// Like [`slow_body`] but the stream is racing an external cancellation
+    /// signal. When the caller drops or signals on the returned sender, the
+    /// body errors out instead of producing bytes, which prompts hyper to
+    /// tear down the underlying TCP connection client-side.
+    ///
+    /// This lets the test deterministically close the request body once it
+    /// has observed the server's 504 response. Without it, the body stream
+    /// remained in its 5s sleep at the moment `graceful_shutdown()` was
+    /// invoked, leaving the router with an open connection it could only
+    /// reap after the harness-injected `connection_shutdown_timeout` (also
+    /// 5s) elapsed — a wall-clock race that tripped the 10s shutdown
+    /// deadline on macOS CI runners under scheduler pressure.
+    fn slow_body_with_cancel() -> (reqwest::Body, tokio::sync::oneshot::Sender<()>) {
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let stream = once(async move {
+            tokio::select! {
+                _ = sleep(Duration::from_secs(5)) => {
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"--test\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{\"query\":\"{ __typename }\"}\r\n--test--\r\n"))
+                }
+                _ = cancel_rx => {
+                    Err(std::io::Error::other(
+                        "slow_body cancelled by test after response received",
+                    ))
+                }
+            }
+        });
+        (reqwest::Body::wrap_stream(stream), cancel_tx)
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn succeeds_when_body_arrives_quickly() -> Result<(), BoxError> {
         if !graph_os_enabled() {
@@ -1408,7 +1454,46 @@ mod operation_body_timeout {
         if !graph_os_enabled() {
             return Ok(());
         }
-        let (status, body) = run(STRICT_CONFIG, slow_body()).await;
+        // Hand-rolled equivalent of `run()` so we can tear down the request
+        // body deterministically before shutting the router down. The
+        // canonical `run()` helper assumes the body stream completes before
+        // `graceful_shutdown()` is called; the timeout path violates that
+        // assumption — the server responds with 504 while the client's body
+        // stream is still mid-sleep, leaving the TCP connection open with a
+        // pending request body. The fix is to cancel that body once the
+        // response is in hand, drop the reqwest client to close the pooled
+        // connection, then signal shutdown to the router.
+        let mut router = IntegrationTest::builder()
+            .config(STRICT_CONFIG)
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+        let url = format!("http://{}", router.bind_address());
+
+        let (body, cancel_tx) = slow_body_with_cancel();
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=test")
+            .header("apollo-require-preflight", "true")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap_or_default();
+
+        // Signal the still-sleeping body stream to error out, then drop the
+        // reqwest client so its connection pool tears down the TCP socket.
+        // Without this, the router's per-connection task in `handle_connection!`
+        // would race the harness's 5s `connection_shutdown_timeout` against
+        // the body stream's 5s sleep — a coin flip on macOS under load.
+        let _ = cancel_tx.send(());
+        drop(client);
+
+        router.graceful_shutdown().await;
+
         assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(
             body["errors"][0]["message"],
@@ -1866,17 +1951,7 @@ mod helper {
             count += chunk.len();
 
             // Make sure that the bytes match what is expected
-            let unexpected = match chunk.into_iter().all_equal_value() {
-                Ok(value) => (value != byte_value).then_some(value),
-                Err(Some((lhs, rhs))) => {
-                    if lhs != byte_value {
-                        Some(lhs)
-                    } else {
-                        Some(rhs)
-                    }
-                }
-                Err(None) => None,
-            };
+            let unexpected = chunk.into_iter().find(|&b| b != byte_value);
             if let Some(unexpected_byte) = unexpected {
                 return Err(FileUploadError::UnexpectedData(byte_value, unexpected_byte));
             }

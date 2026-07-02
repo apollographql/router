@@ -92,7 +92,18 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
             .original_schema
             .get_type(field_type.ty.inner_named_type())?;
         match inner_type {
-            TypeDefinitionPosition::InputObject(input) => Ok(Some(input)),
+            TypeDefinitionPosition::InputObject(input) => {
+                // Break recursion on self-referential input types: once we've
+                // entered an input group during this walk, refuse to descend
+                // into it again. `enter_group` has already pre-inserted and
+                // populated this type's fields, so re-descending would just
+                // loop forever.
+                if self.visited_input_types.contains(&input.type_name) {
+                    Ok(None)
+                } else {
+                    Ok(Some(input))
+                }
+            }
             TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => Ok(None),
 
             other => Err(FederationError::internal(format!(
@@ -107,6 +118,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
         group: &InputObjectTypeDefinitionPosition,
     ) -> Result<Vec<InputObjectFieldDefinitionPosition>, FederationError> {
         try_pre_insert!(self.to_schema, group)?;
+        self.visited_input_types.insert(group.type_name.clone());
 
         let group_def = group.get(self.original_schema.schema())?;
         let output_type = InputObjectType {

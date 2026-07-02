@@ -621,6 +621,124 @@ async fn test_coprocessor_context_key_deletion() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_context_keys_survive_parallel_fanout() -> Result<(), BoxError> {
+    // Regression test: when subgraph requests fan out in parallel, each SubgraphRequest
+    // writes service-scoped keys into the shared context. Previously, a sibling's
+    // SubgraphResponse merge would delete those keys via a broad `retain` call.
+    // This test verifies that keys written by one subgraph's request survive another
+    // subgraph's response processing.
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_server = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_server.uri();
+
+    // Track whether SubgraphResponse stages see the keys from sibling SubgraphRequests
+    let subgraph_response_errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let errors_clone = subgraph_response_errors.clone();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = body.get("stage").and_then(|s| s.as_str()).unwrap_or("");
+
+            let mut response = body.clone();
+
+            // Ensure Request stages have a control field
+            if stage.ends_with("Request")
+                && !response.as_object().unwrap().contains_key("control")
+                && let Some(obj) = response.as_object_mut()
+            {
+                obj.insert("control".to_string(), serde_json::json!("continue"));
+            }
+
+            if stage == "SubgraphRequest" {
+                // Write a service-scoped key into context (simulating timestamp writes)
+                let service_name = body
+                    .get("serviceName")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown");
+                let key = format!("{service_name}_request_start");
+                if let Some(ctx) = response
+                    .as_object_mut()
+                    .and_then(|o| o.get_mut("context"))
+                    .and_then(|c| c.as_object_mut())
+                    .and_then(|c| c.get_mut("entries"))
+                    .and_then(|e| e.as_object_mut())
+                {
+                    ctx.insert(key, serde_json::json!(12345));
+                }
+            } else if stage == "SubgraphResponse" {
+                // Verify service-scoped keys from ALL subgraphs are present in context
+                let service_name = body
+                    .get("serviceName")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown");
+                let expected_key = format!("{service_name}_request_start");
+                let has_own_key = body
+                    .get("context")
+                    .and_then(|c| c.get("entries"))
+                    .and_then(|e| e.as_object())
+                    .is_some_and(|entries| entries.contains_key(&expected_key));
+
+                if !has_own_key {
+                    errors_clone.lock().unwrap().push(format!(
+                        "SubgraphResponse for {service_name} missing key {expected_key}"
+                    ));
+                }
+            }
+
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(&mock_server)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor_context.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute a query that fans out to multiple subgraphs in parallel.
+    // The default query hits "accounts" subgraph; use topProducts to fan out to
+    // products + reviews/inventory in parallel.
+    let query = Query::builder()
+        .body(json!({"query": "{ topProducts { name reviews { id author { name } } } }"}))
+        .build();
+    let (_trace_id, response) = router.execute_query(query).await;
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    // The response should not contain errors from missing context keys
+    let errors = body.get("errors").and_then(|e| e.as_array());
+    assert!(
+        errors.is_none() || errors.unwrap().is_empty(),
+        "Expected no GraphQL errors but got: {:?}",
+        errors
+    );
+
+    // Verify our coprocessor didn't detect any missing keys
+    {
+        let missing_key_errors = subgraph_response_errors.lock().unwrap();
+        assert!(
+            missing_key_errors.is_empty(),
+            "Context keys were lost during parallel fanout: {:?}",
+            *missing_key_errors
+        );
+    }
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError> {
     // GIVEN:
     //   - graphos
@@ -735,12 +853,15 @@ async fn test_coprocessor_receives_response_cache_keys() -> Result<(), BoxError>
             .get_mut("cacheControl")
             .and_then(|v| v.as_object_mut())
         {
+            // NOTE: we're removing `created` here because it'll change every test and we can't
+            // easily set it dynamically; easier to just remove it and let the static bits of data
+            // be matched on
             cache_control.remove("created");
         }
     }
 
     // NOTE: `created` removed from this block
-    let expected = json!([{"key":"version:1.2:subgraph:products:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
+    let expected = json!([{"key":"version:1.2:subgraph:products:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6","invalidationKeys":[],"indexes":{"subgraph":true,"type":true,"cache_tag":true},"kind":{"rootFields":["topProducts"]},"subgraphName":"products","subgraphRequest":{"query":"query ExampleQuery__products__0 { topProducts { name } }","operationName":"ExampleQuery__products__0"},"source":"subgraph","cacheControl":{"maxAge":60,"public":true},"shouldStore":true,"data":{"data":{"topProducts":[{"name":"Table","__typename":"Product","reviews":[{"id":"1","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}],"reviewsForAuthor":[{"id":"2","product":{"__typename":"Product"},"author":{"__typename":"User","id":"u1"}}]}]}},"warnings":[{"code":"NO_CACHE_TAG_ON_ROOT_FIELD","links":[{"url":"https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods","title":"Add '@cacheTag' in your schema"}],"message":"No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."}]}]);
 
     assert_eq!(cache_keys, expected);
 
