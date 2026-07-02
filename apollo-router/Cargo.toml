@@ -247,7 +247,7 @@ tonic = { version = "0.14.5", features = [
     "gzip",
 ] }
 tower.workspace = true
-tower-http = { version = "0.6.2", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["full"] }
 tower-service = "0.3.2"
 tracing = "0.1.40"
 tracing-core = "0.1.32"
