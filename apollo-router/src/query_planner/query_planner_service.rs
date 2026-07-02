@@ -186,30 +186,11 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
-            match &result {
-                Ok(_) => metric_query_planning_plan_duration(
-                    RUST_QP_MODE,
-                    elapsed,
-                    QueryPlanningOutcome::Success,
-                ),
-                Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
-                    metric_query_planning_plan_duration(
-                        RUST_QP_MODE,
-                        elapsed,
-                        QueryPlanningOutcome::Timeout,
-                    )
-                }
-                Err(FederationErrorBridge::Cancellation(_)) => metric_query_planning_plan_duration(
-                    RUST_QP_MODE,
-                    elapsed,
-                    QueryPlanningOutcome::Cancelled,
-                ),
-                Err(_) => metric_query_planning_plan_duration(
-                    RUST_QP_MODE,
-                    elapsed,
-                    QueryPlanningOutcome::Error,
-                ),
-            }
+            let outcome = match &result {
+                Ok(_) => QueryPlanningOutcome::Success,
+                Err(e) => QueryPlanningOutcome::from(e),
+            };
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome);
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
@@ -643,6 +624,33 @@ pub(crate) enum QueryPlanningOutcome {
 }
 
 impl_otel_value_from_static_str!(QueryPlanningOutcome);
+
+impl From<&FederationErrorBridge> for QueryPlanningOutcome {
+    fn from(err: &FederationErrorBridge) -> Self {
+        match err {
+            FederationErrorBridge::Cancellation(msg) if msg.contains("timeout") => {
+                QueryPlanningOutcome::Timeout
+            }
+            FederationErrorBridge::Cancellation(_) => QueryPlanningOutcome::Cancelled,
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
+
+impl From<&QueryPlannerError> for QueryPlanningOutcome {
+    fn from(err: &QueryPlannerError) -> Self {
+        match err {
+            // The cooperative-cancellation wrapper that produces `Timeout` / `MemoryLimitExceeded`
+            // lives in `CachingQueryPlanner::call`, which query-planner warm-up bypasses, so those
+            // variants are not reachable on the warm-up path today (see ROUTER-1969). Classified
+            // regardless so the outcome stays correct wherever this conversion is used.
+            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
+            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
+            QueryPlannerError::FederationError(bridge) => QueryPlanningOutcome::from(bridge),
+            _ => QueryPlanningOutcome::Error,
+        }
+    }
+}
 
 pub(crate) fn metric_query_planning_plan_duration(
     planner: &'static str,

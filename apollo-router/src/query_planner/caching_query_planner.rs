@@ -34,7 +34,6 @@ use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
-use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -915,31 +914,6 @@ pub(crate) enum WarmUpSource {
     PersistedQuery,
     /// A "hot" operation carried over from the previous in-memory cache.
     Cache,
-}
-
-/// Classify a query-planning error into the shared [`QueryPlanningOutcome`] vocabulary for the
-/// warm-up outcome metric.
-///
-/// `Timeout` and `MemoryLimit` are classified defensively: the cooperative-cancellation wrapper
-/// that produces `QueryPlannerError::Timeout` / `MemoryLimitExceeded` lives in
-/// `CachingQueryPlanner::call`, which warm-up bypasses, so those variants are not reachable on the
-/// warm-up path today (see ROUTER-1969). Federation-level planning timeouts do reach warm-up via
-/// `FederationErrorBridge::Cancellation`.
-impl From<&QueryPlannerError> for QueryPlanningOutcome {
-    fn from(err: &QueryPlannerError) -> Self {
-        match err {
-            QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
-            QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
-            QueryPlannerError::FederationError(FederationErrorBridge::Cancellation(msg)) => {
-                if msg.contains("timeout") {
-                    QueryPlanningOutcome::Timeout
-                } else {
-                    QueryPlanningOutcome::Cancelled
-                }
-            }
-            _ => QueryPlanningOutcome::Error,
-        }
-    }
 }
 
 /// The phase of warm-up at which a temporary/backpressure error occurred. Used to attribute the
