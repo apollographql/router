@@ -266,15 +266,16 @@ where
             || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
-        let capacity = if should_warm_with_pqs {
-            cache_keys.len()
-                + persisted_queries_operations
-                    .as_ref()
-                    .map(|ops| ops.len())
-                    .unwrap_or(0)
+        let top_n_expected = cache_keys.len();
+        let pq_expected = if should_warm_with_pqs {
+            persisted_queries_operations
+                .as_ref()
+                .map(|ops| ops.len())
+                .unwrap_or(0)
         } else {
-            cache_keys.len()
+            0
         };
+        let capacity = top_n_expected + pq_expected;
 
         if capacity > 0 {
             tracing::info!(
@@ -282,6 +283,12 @@ where
                 capacity
             );
         }
+
+        // Record how many operations warm-up intends to plan, per source, so coverage
+        // (planned / expected) can be computed from the warm-up outcome metric. Emitted even
+        // when zero: "nothing expected from this source" is itself a meaningful signal.
+        record_warmup_expected(top_n_expected, WarmUpSource::Cache);
+        record_warmup_expected(pq_expected, WarmUpSource::PersistedQuery);
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
@@ -910,6 +917,18 @@ impl From<WarmUpSource> for opentelemetry::Value {
     }
 }
 
+/// Record how many operations warm-up intends to plan for a given source. Emitted even when
+/// `expected` is zero so the series always exists and coverage can be computed per source.
+fn record_warmup_expected(expected: usize, source: WarmUpSource) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations.expected",
+        "Number of operations the query planner warm-up intended to plan",
+        "{operation}",
+        expected as u64,
+        source = source
+    );
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
@@ -987,6 +1006,7 @@ mod tests {
     use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -2463,5 +2483,85 @@ mod tests {
         let response = new_planner.call(create_request()).await.unwrap();
         assert!(response.content.is_some());
         assert_eq!(new_planner.cache.len().await, 1);
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_expected_metric() {
+        async {
+            let create_delegate = |call_count| {
+                let mut delegate = MockMyQueryPlanner::new();
+                delegate.expect_clone().times(1).returning(move || {
+                    let mut planner = MockMyQueryPlanner::new();
+                    planner.expect_sync_call().times(call_count).returning(|_| {
+                        let plan = Arc::new(QueryPlan::fake_new(None, None));
+                        Ok(QueryPlannerResponse::builder()
+                            .content(QueryPlannerContent::Plan { plan })
+                            .build())
+                    });
+                    planner
+                });
+                delegate
+            };
+
+            let configuration: Configuration = Default::default();
+            let schema = Arc::new(
+                Schema::parse(
+                    include_str!("../testdata/starstuff@current.graphql"),
+                    &configuration,
+                )
+                .unwrap(),
+            );
+
+            let create_planner = async |delegate| {
+                CachingQueryPlanner::new(
+                    delegate,
+                    schema.clone(),
+                    Default::default(),
+                    &configuration,
+                    IndexMap::default(),
+                )
+                .await
+                .unwrap()
+            };
+
+            let create_request = || {
+                let query_str = "query ExampleQuery { me { name } }".to_string();
+                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+                let context = Context::new();
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+                query_planner::CachingRequest::new(query_str, None, context, Default::default())
+            };
+
+            // Populate a planner's cache with one operation, to be carried over on warm-up.
+            let mut planner = create_planner(create_delegate(1)).await;
+            planner.call(create_request()).await.unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner from the previous cache: exactly one cache-sourced operation
+            // is expected.
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+            let mut new_planner = create_planner(create_delegate(1)).await;
+            new_planner
+                .warm_up(
+                    &query_analysis_layer,
+                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                    Some(planner.previous_cache()),
+                    Some(1),
+                    Default::default(),
+                    &Default::default(),
+                )
+                .await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                1,
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
