@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.15.1"
+version = "2.16.0"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.15.1"
+version = "2.16.0"
 dependencies = [
  "addr2line 0.27.0",
  "ahash",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.15.1"
+version = "2.16.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -2893,6 +2893,15 @@ dependencies = [
  "typenum",
  "version_check",
  "zeroize",
+]
+
+[[package]]
+name = "getopts"
+version = "0.2.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -5475,9 +5484,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83c41efbf8f90ac44de7f3a868f0867851d261b56291732d0cbf7cceaaeb55a6"
 dependencies = [
  "bitflags 2.11.0",
+ "getopts",
  "memchr",
+ "pulldown-cmark-escape",
  "unicase",
 ]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "pulldown-cmark-to-cmark"
@@ -8763,6 +8780,7 @@ dependencies = [
  "memorable-wordlist",
  "nu-ansi-term",
  "once_cell",
+ "pulldown-cmark",
  "regex",
  "reqwest",
  "semver",
