@@ -480,7 +480,7 @@ pub(crate) async fn assemble_batch(
     }
 
     // Construct the actual byte body of the batched request
-    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = serde_json::to_vec(&gql_requests)?;
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
