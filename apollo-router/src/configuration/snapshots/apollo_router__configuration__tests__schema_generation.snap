@@ -9490,21 +9490,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "SpanMode": {
-      "description": "Span mode to create new or deprecated spans",
-      "oneOf": [
-        {
-          "const": "deprecated",
-          "description": "Keep the request span as root span and deprecated attributes. This option will eventually removed.",
-          "type": "string"
-        },
-        {
-          "const": "spec_compliant",
-          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.",
-          "type": "string"
-        }
-      ]
-    },
     "Spans": {
       "additionalProperties": false,
       "properties": {
@@ -9531,14 +9516,6 @@ expression: "&schema"
             }
           ],
           "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
-        },
-        "mode": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SpanMode"
-            }
-          ],
-          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future."
         },
         "router": {
           "allOf": [
