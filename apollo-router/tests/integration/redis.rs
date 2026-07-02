@@ -543,7 +543,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
-                            "ttl": "2s",
+                            "ttl": "60s",
                             "required_to_start": true,
                             "pool_size": 3
                         },
@@ -555,7 +555,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         },
                         "reviews": {
                             "enabled": true,
-                            "ttl": "10s"
+                            "ttl": "60s"
                         }
                     }
                 }
@@ -685,7 +685,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                             "urls": [redis_url],
                             "namespace": namespace,
                             "required_to_start": true,
-                            "ttl": "2s"
+                            "ttl": "60s"
                         },
                     },
                     "subgraphs": {
@@ -695,7 +695,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         },
                         "reviews": {
                             "enabled": true,
-                            "ttl": "10s"
+                            "ttl": "60s"
                         }
                     }
                 }
@@ -761,7 +761,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                             "urls": [redis_url],
                             "namespace": namespace,
                             "required_to_start": true,
-                            "ttl": "2s"
+                            "ttl": "60s"
                         },
                         "invalidation": {
                             "enabled": true,
@@ -779,7 +779,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         },
                         "reviews": {
                             "enabled": true,
-                            "ttl": "10s",
+                            "ttl": "60s",
                             "invalidation": {
                                 "enabled": true,
                                 "shared_key": SECRET_SHARED_KEY
