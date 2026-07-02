@@ -341,6 +341,7 @@ where
                         continue 'all_cache_keys_loop;
                     }
                     Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                        record_warmup_backpressure(source, WarmUpPhase::Parse);
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         // try again
                     }
@@ -416,6 +417,7 @@ where
                             break;
                         }
                         Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                            record_warmup_backpressure(source, WarmUpPhase::Plan);
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             // try again
                         }
@@ -957,7 +959,16 @@ impl From<&QueryPlannerError> for WarmUpOutcome {
     }
 }
 
-impl_otel_value_from_static_str!(WarmUpSource, WarmUpOutcome);
+/// The phase of warm-up at which a temporary/backpressure error occurred. Used to attribute the
+/// warm-up backpressure metric.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum WarmUpPhase {
+    Parse,
+    Plan,
+}
+
+impl_otel_value_from_static_str!(WarmUpSource, WarmUpOutcome, WarmUpPhase);
 
 /// Record the terminal outcome of warming up a single operation, attributed by source.
 fn record_warmup_outcome(source: WarmUpSource, outcome: WarmUpOutcome) {
@@ -968,6 +979,19 @@ fn record_warmup_outcome(source: WarmUpSource, outcome: WarmUpOutcome) {
         1,
         outcome = outcome,
         source = source
+    );
+}
+
+/// Record that warm-up hit a temporary/backpressure error and retried, attributed by source and
+/// the phase (parse vs. plan) at which it occurred.
+fn record_warmup_backpressure(source: WarmUpSource, phase: WarmUpPhase) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.backpressure",
+        "Number of times query planner warm-up retried after a temporary/backpressure error",
+        "{event}",
+        1,
+        source = source,
+        phase = phase
     );
 }
 
@@ -2711,6 +2735,107 @@ mod tests {
                 "apollo.router.query_planning.warmup.operations",
                 1,
                 "outcome" = "planner_error",
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_backpressure() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = Arc::new(
+                Schema::parse(
+                    include_str!("../testdata/starstuff@current.graphql"),
+                    &configuration,
+                )
+                .unwrap(),
+            );
+
+            let create_planner = async |delegate| {
+                CachingQueryPlanner::new(
+                    delegate,
+                    schema.clone(),
+                    Default::default(),
+                    &configuration,
+                    IndexMap::default(),
+                )
+                .await
+                .unwrap()
+            };
+
+            let create_request = || {
+                let query_str = "query ExampleQuery { me { name } }".to_string();
+                let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+                let context = Context::new();
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+                query_planner::CachingRequest::new(query_str, None, context, Default::default())
+            };
+
+            // Populate a source cache with one operation using a delegate that succeeds.
+            let mut ok_delegate = MockMyQueryPlanner::new();
+            ok_delegate.expect_clone().times(1).returning(|| {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(1).returning(|_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+            let mut planner = create_planner(ok_delegate).await;
+            planner.call(create_request()).await.unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner whose delegate signals backpressure once, then succeeds.
+            let mut flaky_delegate = MockMyQueryPlanner::new();
+            flaky_delegate.expect_clone().times(1).returning(|| {
+                let mut planner = MockMyQueryPlanner::new();
+                let first_call = AtomicBool::new(true);
+                planner.expect_sync_call().times(2).returning(move |_| {
+                    if first_call.swap(false, Ordering::Relaxed) {
+                        Err(MaybeBackPressureError::TemporaryError(
+                            ComputeBackPressureError,
+                        ))
+                    } else {
+                        let plan = Arc::new(QueryPlan::fake_new(None, None));
+                        Ok(QueryPlannerResponse::builder()
+                            .content(QueryPlannerContent::Plan { plan })
+                            .build())
+                    }
+                });
+                planner
+            });
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+            let mut new_planner = create_planner(flaky_delegate).await;
+            new_planner
+                .warm_up(
+                    &query_analysis_layer,
+                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                    Some(planner.previous_cache()),
+                    Some(1),
+                    Default::default(),
+                    &Default::default(),
+                )
+                .await;
+
+            // One retry at the planning phase, and the operation ultimately succeeded.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.backpressure",
+                1,
+                "source" = "cache",
+                "phase" = "plan"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "success",
                 "source" = "cache"
             );
         }
