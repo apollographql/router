@@ -918,15 +918,9 @@ mod tests {
 
         // We have to provide pre-readied HTTP clients.
         let client1 = http_client.clone().ready_oneshot().await.unwrap();
-        let response1 = query1
-            .signal_progress(client1, request1)
-            .await
-            .unwrap();
+        let response1 = query1.signal_progress(client1, request1).await.unwrap();
         let client2 = http_client.clone().ready_oneshot().await.unwrap();
-        let response2 = query2
-            .signal_progress(client2, request2)
-            .await
-            .unwrap();
+        let response2 = query2.signal_progress(client2, request2).await.unwrap();
 
         let (request, responder) =
             tokio::time::timeout(Duration::from_secs(5), handle.next_request())
