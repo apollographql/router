@@ -250,6 +250,7 @@ where
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
                             config_mode_hash: self.config_mode_hash.clone(),
+                            source: WarmUpSource::Cache,
                         },
                     )
                     .take(count)
@@ -294,6 +295,7 @@ where
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
                     config_mode_hash: self.config_mode_hash.clone(),
+                    source: WarmUpSource::PersistedQuery,
                 });
             }
         }
@@ -311,6 +313,7 @@ where
             metadata,
             plan_options,
             config_mode_hash: _,
+            source: _,
         } in all_cache_keys
         {
             // NB: warmup tasks have a low priority so that real requests are prioritized
@@ -890,6 +893,23 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
+/// Where an operation being warmed up came from. Used to attribute warm-up metrics.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum WarmUpSource {
+    /// An operation from the persisted-query manifest.
+    PersistedQuery,
+    /// A "hot" operation carried over from the previous in-memory cache.
+    Cache,
+}
+
+impl From<WarmUpSource> for opentelemetry::Value {
+    fn from(source: WarmUpSource) -> Self {
+        let s: &'static str = source.into();
+        s.into()
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
@@ -898,6 +918,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode_hash: Arc<ConfigModeHash>,
+    pub(crate) source: WarmUpSource,
 }
 
 struct StructHasher {
