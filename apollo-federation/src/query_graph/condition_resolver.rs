@@ -170,6 +170,16 @@ impl ConditionResolverCache {
                         return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
                     }
                 }
+
+                // Unsatisfied monotonicity: if a condition was unsatisfied with fewer
+                // exclusions, it remains unsatisfied with a superset of exclusions.
+                if &cached.context == context
+                    && matches!(&cached.resolution, ConditionResolution::Unsatisfied { .. })
+                    && excluded_destinations.is_superset_of(&cached.excluded_destinations)
+                    && excluded_conditions.is_superset_of(&cached.excluded_conditions)
+                {
+                    return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
+                }
             }
             ConditionResolutionCacheResult::Miss
         } else {

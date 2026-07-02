@@ -253,6 +253,10 @@ impl ExcludedDestinations {
             .map(|d| d.as_ref())
     }
 
+    pub(crate) fn is_superset_of(&self, other: &ExcludedDestinations) -> bool {
+        self.0.len() >= other.0.len() && other.0.iter().all(|d| self.is_excluded(d))
+    }
+
     fn add_excluded(&self, destination: &Arc<str>) -> Self {
         if !self.is_excluded(destination) {
             let mut new = self.0.as_ref().clone();
@@ -287,6 +291,10 @@ impl ExcludedConditions {
             return false;
         };
         self.0.contains(condition)
+    }
+
+    pub(crate) fn is_superset_of(&self, other: &ExcludedConditions) -> bool {
+        self.0.len() >= other.0.len() && other.0.iter().all(|c| self.0.contains(c))
     }
 
     /// Immutable version of `push`.
