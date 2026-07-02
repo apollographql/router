@@ -15,6 +15,7 @@
 //! The whole module is gated behind the `wasm-components` cargo feature (wasmtime is a heavy dep).
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -24,10 +25,9 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value as JsonValue;
 use tower::BoxError;
 use wasmtime::component::types::Type;
-use wasmtime::component::{Component, Linker, ResourceTable, Val};
+use wasmtime::component::{Component, HasData, Linker, Resource, ResourceTable, Val};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
-use wasmtime_wasi_config::{WasiConfig, WasiConfigVariables};
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
 use wit_gql::naming::to_camel_case;
@@ -39,12 +39,99 @@ use crate::json_ext::Path;
 use crate::query_planner::fetch::{FetchNode, Variables};
 use crate::spec::Schema;
 
+/// Host bindings for `wasmcloud:secrets@1.0.0` — the single keystore interface the router provides
+/// to components. Resource-based: `store.get(key) -> secret` (an opaque handle), then
+/// `reveal.reveal(borrow<secret>) -> secret-value`. Components read their API keys through this.
+mod secrets_bindings {
+    wasmtime::component::bindgen!({
+        inline: r#"
+            package wasmcloud:secrets@1.0.0;
+            interface store {
+              variant secrets-error { upstream(string), io(string), not-found }
+              variant secret-value { %string(string), bytes(list<u8>) }
+              resource secret;
+              get: func(key: string) -> result<secret, secrets-error>;
+            }
+            interface reveal {
+              use store.{secret, secret-value};
+              reveal: func(s: borrow<secret>) -> secret-value;
+            }
+            world imports { import store; import reveal; }
+        "#,
+        world: "imports",
+        imports: { default: trappable },
+        with: {
+            "wasmcloud:secrets/store.secret": crate::services::wasm_service::HostSecret,
+        },
+    });
+}
+use secrets_bindings::wasmcloud::secrets::reveal as secrets_reveal;
+use secrets_bindings::wasmcloud::secrets::store as secrets_store;
+
+/// Host representation of a `wasmcloud:secrets` `secret` resource: the stored value.
+/// `pub` (not `pub(crate)`) so the `bindgen!` `with`-mapping can re-export it; the enclosing module
+/// is `pub(crate)`, so it is not actually exposed outside the crate.
+#[allow(unreachable_pub)]
+pub struct HostSecret {
+    value: String,
+}
+
+/// View over the host state passed to the generated secrets host: the resource table plus the
+/// per-component keystore.
+struct SecretsView<'a> {
+    table: &'a mut ResourceTable,
+    secrets: &'a HashMap<String, String>,
+}
+
+/// Project a [`SecretsView`] out of the host state. A free `fn` (not a closure) so it has the
+/// higher-ranked `for<'a> fn(&'a mut WasmHostCtx) -> SecretsView<'a>` signature `add_to_linker` wants.
+fn secrets_view(c: &mut WasmHostCtx) -> SecretsView<'_> {
+    SecretsView {
+        table: &mut c.table,
+        secrets: &c.secrets,
+    }
+}
+
+impl secrets_store::Host for SecretsView<'_> {
+    fn get(
+        &mut self,
+        key: String,
+    ) -> wasmtime::Result<std::result::Result<Resource<HostSecret>, secrets_store::SecretsError>> {
+        match self.secrets.get(&key) {
+            Some(value) => Ok(Ok(self.table.push(HostSecret {
+                value: value.clone(),
+            })?)),
+            None => Ok(Err(secrets_store::SecretsError::NotFound)),
+        }
+    }
+}
+
+impl secrets_store::HostSecret for SecretsView<'_> {
+    fn drop(&mut self, rep: Resource<HostSecret>) -> wasmtime::Result<()> {
+        self.table.delete(rep)?;
+        Ok(())
+    }
+}
+
+impl secrets_reveal::Host for SecretsView<'_> {
+    fn reveal(&mut self, s: Resource<HostSecret>) -> wasmtime::Result<secrets_store::SecretValue> {
+        let secret = self.table.get(&s)?;
+        Ok(secrets_store::SecretValue::String(secret.value.clone()))
+    }
+}
+
+struct HasSecrets;
+impl HasData for HasSecrets {
+    type Data<'a> = SecretsView<'a>;
+}
+
 /// Per-`Store` host state. Each invocation gets a fresh one so instances never share mutable state.
 struct WasmHostCtx {
     table: ResourceTable,
     wasi: WasiCtx,
     http: WasiHttpCtx,
-    config: WasiConfigVariables,
+    /// The component's keystore, exposed via `wasmcloud:secrets`.
+    secrets: HashMap<String, String>,
 }
 
 impl WasiView for WasmHostCtx {
@@ -76,8 +163,9 @@ pub(crate) struct WasmRuntime {
 }
 
 impl WasmRuntime {
-    /// Build the engine and register the WASI hosts the components import:
-    /// `wasi:io`/`wasi:clocks`/… , `wasi:http/outgoing-handler`, and `wasi:config/store`.
+    /// Build the engine and register the host interfaces components import:
+    /// `wasi:io`/`wasi:clocks`/… , `wasi:http/outgoing-handler`, and `wasmcloud:secrets`
+    /// (the single keystore the router provides).
     pub(crate) fn new() -> Result<Self> {
         let mut config = Config::new();
         // Component model is on by default; `async_support` is a deprecated no-op in wasmtime 46.
@@ -89,10 +177,10 @@ impl WasmRuntime {
             .map_err(|e| anyhow!("linking wasi: {e}"))?;
         wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)
             .map_err(|e| anyhow!("linking wasi:http: {e}"))?;
-        wasmtime_wasi_config::add_to_linker(&mut linker, |c: &mut WasmHostCtx| {
-            WasiConfig::from(&c.config)
-        })
-        .map_err(|e| anyhow!("linking wasi:config: {e}"))?;
+        secrets_store::add_to_linker::<_, HasSecrets>(&mut linker, secrets_view)
+            .map_err(|e| anyhow!("linking wasmcloud:secrets/store: {e}"))?;
+        secrets_reveal::add_to_linker::<_, HasSecrets>(&mut linker, secrets_view)
+            .map_err(|e| anyhow!("linking wasmcloud:secrets/reveal: {e}"))?;
 
         Ok(Self { engine, linker })
     }
@@ -102,7 +190,7 @@ impl WasmRuntime {
 pub(crate) struct WasmComponent {
     runtime: Arc<WasmRuntime>,
     component: Component,
-    /// Config values (e.g. API keys) exposed to this component via `wasi:config/store`.
+    /// Keystore values (e.g. API keys) exposed to this component via `wasmcloud:secrets`.
     config: BTreeMap<String, String>,
     operation_map: OperationMap,
 }
@@ -147,7 +235,7 @@ impl WasmComponent {
             table: ResourceTable::new(),
             wasi: WasiCtx::builder().build(),
             http: WasiHttpCtx::new(),
-            config: WasiConfigVariables::from_iter(self.config.clone()),
+            secrets: self.config.clone().into_iter().collect(),
         };
         let mut store = Store::new(&self.runtime.engine, ctx);
 

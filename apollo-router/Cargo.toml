@@ -62,7 +62,6 @@ wasm-components = [
     "dep:wasmtime",
     "dep:wasmtime-wasi",
     "dep:wasmtime-wasi-http",
-    "dep:wasmtime-wasi-config",
 ]
 
 [dependencies]
@@ -170,12 +169,11 @@ once_cell = "1.19.0"
 # --- wasm-components feature (optional; enabled by the `wasm-components` feature) ---
 # Shared WIT->GraphQL decode/naming/mapping crate.
 wit-gql = { path = "../wit-gql", optional = true }
-# wasmtime 46.x host: component model + wasi (io/clocks/cli), wasi:http, and wasi:config
-# (wasmtime-wasi-config@46 targets wasi:config@0.2.0-rc.1, the version components import).
+# wasmtime 46.x host: component model + wasi (io/clocks/cli) + wasi:http. The keystore interface
+# (wasmcloud:secrets@1.0.0) is hosted via an inline `bindgen!` in services/wasm_service.rs.
 wasmtime = { version = "46.0.1", optional = true }
 wasmtime-wasi = { version = "46.0.1", optional = true }
 wasmtime-wasi-http = { version = "46.0.1", optional = true }
-wasmtime-wasi-config = { version = "46.0.1", optional = true }
 
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of
