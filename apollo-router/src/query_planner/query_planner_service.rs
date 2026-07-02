@@ -640,10 +640,6 @@ impl From<&FederationErrorBridge> for QueryPlanningOutcome {
 impl From<&QueryPlannerError> for QueryPlanningOutcome {
     fn from(err: &QueryPlannerError) -> Self {
         match err {
-            // The cooperative-cancellation wrapper that produces `Timeout` / `MemoryLimitExceeded`
-            // lives in `CachingQueryPlanner::call`, which query-planner warm-up bypasses, so those
-            // variants are not reachable on the warm-up path today (see ROUTER-1969). Classified
-            // regardless so the outcome stays correct wherever this conversion is used.
             QueryPlannerError::Timeout(_) => QueryPlanningOutcome::Timeout,
             QueryPlannerError::MemoryLimitExceeded(_) => QueryPlanningOutcome::MemoryLimit,
             QueryPlannerError::FederationError(bridge) => QueryPlanningOutcome::from(bridge),
