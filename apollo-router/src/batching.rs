@@ -449,40 +449,32 @@ pub(crate) struct SubgraphBatchRequest {
 
 // Assemble a single batch request to a subgraph
 pub(crate) async fn assemble_batch(
-    requests: Vec<BatchQueryInfo>,
+    batch_queries: Vec<BatchQueryInfo>,
 ) -> Result<SubgraphBatchRequest, BoxError> {
-    let http_client = requests
-        .first()
-        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
-        .http_client
-        .clone();
-    let (txs, requests): (Vec<_>, Vec<_>) =
-        requests.into_iter().map(|r| (r.sender, r.request)).unzip();
+    let mut txs = Vec::with_capacity(batch_queries.len());
+    let mut contexts = Vec::with_capacity(batch_queries.len());
+    let mut graphql_bodies = Vec::with_capacity(batch_queries.len());
 
-    // Retain the various contexts for later use
-    let contexts = requests
-        .iter()
-        .map(|request| (request.context.clone(), request.id.clone()))
-        .collect::<Vec<(Context, SubgraphRequestId)>>();
+    let mut iter = batch_queries.into_iter();
 
-    // Extract the GraphQL body from each request. The first request also provides the HTTP
-    // parts (URI, headers, etc.) used as the transport envelope for the whole batch.
-    let mut requests_iter = requests.into_iter();
-    let first_request = requests_iter
-        .next()
-        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
-        .subgraph_request;
-    let (parts, first_body) = first_request.into_parts();
+    let first = iter.next().ok_or(SubgraphBatchingError::RequestsIsEmpty)?;
+    let http_client = first.http_client;
+    txs.push(first.sender);
+    contexts.push((first.request.context, first.request.id));
+    // We'll use the HTTP parts (headers, URI etc) from the first request for the whole batch
+    let (parts, first_body) = first.request.subgraph_request.into_parts();
+    graphql_bodies.push(first_body);
 
-    let mut gql_requests = Vec::with_capacity(txs.len());
-    gql_requests.push(first_body);
-    for r in requests_iter {
-        let (_, body) = r.subgraph_request.into_parts();
-        gql_requests.push(body);
+    for batch_query in iter {
+        txs.push(batch_query.sender);
+        contexts.push((batch_query.request.context, batch_query.request.id));
+        graphql_bodies.push(batch_query.request.subgraph_request.into_body());
     }
+    debug_assert_eq!(txs.len(), contexts.len());
+    debug_assert_eq!(txs.len(), graphql_bodies.len());
 
     // Construct the actual byte body of the batched request
-    let bytes = serde_json::to_vec(&gql_requests)?;
+    let bytes = serde_json::to_vec(&graphql_bodies)?;
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
