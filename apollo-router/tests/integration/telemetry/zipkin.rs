@@ -29,7 +29,6 @@ async fn test_basic() -> Result<(), BoxError> {
     for _ in 0..2 {
         TraceSpec::builder()
             .services(["client", "router", "subgraph"].into())
-            .operation_name("ExampleQuery")
             .build()
             .validate_zipkin_trace(&mut router, Query::default())
             .await?;

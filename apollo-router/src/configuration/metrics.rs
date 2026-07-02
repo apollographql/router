@@ -363,8 +363,6 @@ impl InstrumentData {
             "$..instruments.default_attribute_requirement_level",
             opt.spans,
             "$..spans",
-            opt.spans.mode,
-            "$..spans.mode",
             opt.spans.default_attribute_requirement_level,
             "$..spans.default_attribute_requirement_level",
             opt.spans.router,
