@@ -906,21 +906,6 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
-/// Implements `From<$ty> for opentelemetry::Value` for enums deriving `strum::IntoStaticStr`,
-/// so they can be passed directly as metric-attribute values.
-macro_rules! impl_otel_value_from_static_str {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl From<$ty> for opentelemetry::Value {
-                fn from(value: $ty) -> Self {
-                    let s: &'static str = value.into();
-                    s.into()
-                }
-            }
-        )+
-    };
-}
-
 /// Where an operation being warmed up came from. Used to attribute warm-up metrics.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
