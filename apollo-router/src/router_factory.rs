@@ -894,6 +894,10 @@ pub(crate) async fn create_plugins(
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_oss_apollo_plugin!("connectors");
+    // Builds the wasm data-source dispatch registry consumed by the FetchService. It wraps no
+    // pipeline service, so its position in this ordering is not significant.
+    #[cfg(feature = "wasm-components")]
+    add_optional_apollo_plugin!("experimental_wasm_data_sources");
     add_oss_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_optional_apollo_plugin!("response_cache");
