@@ -271,8 +271,7 @@ where
         let pq_expected = if should_warm_with_pqs {
             persisted_queries_operations
                 .as_ref()
-                .map(|ops| ops.len())
-                .unwrap_or(0)
+                .map_or(0, |ops| ops.len())
         } else {
             0
         };
