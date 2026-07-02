@@ -254,7 +254,10 @@ fn http_response_to_graphql_response(
     graphql_response
 }
 
-/// Process a single subgraph batch request
+/// Process a single subgraph batch request.
+///
+/// # Panics
+/// The HTTP client service must already be readied: otherwise, it may panic.
 #[instrument(skip(http_client, contexts, request))]
 async fn process_batch(
     http_client: crate::services::http::BoxCloneService,
@@ -589,6 +592,7 @@ async fn notify_batch_query(
 
 struct BatchInfo {
     service: String,
+    /// A pre-readied HTTP client service for this subgraph.
     http_client: crate::services::http::BoxCloneService,
     request: http::Request<RouterBody>,
     contexts: Vec<(Context, SubgraphRequestId)>,
@@ -600,6 +604,9 @@ type BatchResult = (
 );
 
 /// Collect all batch requests and process them concurrently
+///
+/// # Panics
+/// The HTTP client services inside the svc_map must already be readied: otherwise, it may panic.
 #[instrument(skip_all)]
 pub(crate) async fn process_batches(
     svc_map: HashMap<String, Vec<BatchQueryInfo>>,
