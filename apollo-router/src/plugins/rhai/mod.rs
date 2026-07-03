@@ -240,27 +240,30 @@ macro_rules! gen_map_request {
             }
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
-                .checkpoint(move |request: $base::Request| {
-                    let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result: Result<Dynamic, Box<EvalAltResult>> = execute(
-                        &$rhai_service,
-                        $stage,
-                        &$callback,
-                        (shared_request.clone(),),
-                    );
-                    if let Err(error) = result {
-                        let error_details = process_error(error);
-                        if error_details.body.is_none() {
-                            tracing::error!("map_request callback failed: {error_details:#?}");
-                        }
+                .checkpoint_async(move |request: $base::Request| {
+                    let rhai_service = $rhai_service.clone();
+                    let callback = $callback.clone();
+                    async move {
+                        let shared_request = Shared::new(Mutex::new(Some(request)));
+                        let result: Result<Dynamic, Box<EvalAltResult>> =
+                            execute(&rhai_service, $stage, &callback, (shared_request.clone(),));
+                        if let Err(error) = result {
+                            let error_details = process_error(error);
+                            if error_details.body.is_none() {
+                                tracing::error!("map_request callback failed: {error_details:#?}");
+                            }
 
+                            let mut guard = shared_request.lock();
+                            let request_opt = guard.take();
+                            return $base::request_failure(
+                                request_opt.unwrap().context,
+                                error_details,
+                            );
+                        }
                         let mut guard = shared_request.lock();
                         let request_opt = guard.take();
-                        return $base::request_failure(request_opt.unwrap().context, error_details);
+                        Ok(ControlFlow::Continue(request_opt.unwrap()))
                     }
-                    let mut guard = shared_request.lock();
-                    let request_opt = guard.take();
-                    Ok(ControlFlow::Continue(request_opt.unwrap()))
                 })
                 .service(service)
                 .boxed_clone()
@@ -283,43 +286,46 @@ macro_rules! gen_map_router_deferred_request {
             }
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
-                .checkpoint(move |chunked_request: $base::Request|  {
-                    // we split the request stream into headers+first body chunk, then a stream of chunks
-                    // for which we will implement mapping later
-                    let $base::Request { router_request, context } = chunked_request;
-                    let (parts, stream) = router_request.into_parts();
+                .checkpoint_async(move |chunked_request: $base::Request| {
+                    let rhai_service = $rhai_service.clone();
+                    let callback = $callback.clone();
+                    async move {
+                        // we split the request stream into headers+first body chunk, then a stream of chunks
+                        // for which we will implement mapping later
+                        let $base::Request { router_request, context } = chunked_request;
+                        let (parts, stream) = router_request.into_parts();
 
-                    let request = $base::FirstRequest {
-                        context,
-                        request: http::Request::from_parts(
-                            parts,
-                           (),
-                        ),
-                    };
-                    let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result = execute(&$rhai_service, $stage, &$callback, (shared_request.clone(),));
+                        let request = $base::FirstRequest {
+                            context,
+                            request: http::Request::from_parts(
+                                parts,
+                               (),
+                            ),
+                        };
+                        let shared_request = Shared::new(Mutex::new(Some(request)));
+                        let result = execute(&rhai_service, $stage, &callback, (shared_request.clone(),));
 
-                    if let Err(error) = result {
-                        let error_details = process_error(error);
-                        if error_details.body.is_none() {
-                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        if let Err(error) = result {
+                            let error_details = process_error(error);
+                            if error_details.body.is_none() {
+                                tracing::error!("map_request callback failed: {error_details:#?}");
+                            }
+                            let mut guard = shared_request.lock();
+                            let request_opt = guard.take();
+                            return $base::request_failure(request_opt.unwrap().context, error_details);
                         }
-                        let mut guard = shared_request.lock();
-                        let request_opt = guard.take();
-                        return $base::request_failure(request_opt.unwrap().context, error_details);
-                    }
 
-                    let request_opt = shared_request.lock().take();
+                        let request_opt = shared_request.lock().take();
 
-                    let $base::FirstRequest { context, request } =
-                    request_opt.unwrap();
-                    let (parts, _body) = http::Request::from(request).into_parts();
+                        let $base::FirstRequest { context, request } =
+                        request_opt.unwrap();
+                        let (parts, _body) = http::Request::from(request).into_parts();
 
-                    // Finally, return a response which has a Body that wraps our stream of response chunks.
-                    Ok(ControlFlow::Continue($base::Request {
-                        context,
-                        router_request: http::Request::from_parts(parts, stream),
-                    }))
+                        // Finally, return a response which has a Body that wraps our stream of response chunks.
+                        Ok(ControlFlow::Continue($base::Request {
+                            context,
+                            router_request: http::Request::from_parts(parts, stream),
+                        }))
 
                     /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
                     let ctx = context.clone();
@@ -373,6 +379,7 @@ macro_rules! gen_map_router_deferred_request {
                         router_request: http::Request::from_parts(parts, hyper::Body::wrap_stream(mapped_stream)),
                     }))
                     */
+                    }
                 })
                 .service(service)
                 .boxed_clone()

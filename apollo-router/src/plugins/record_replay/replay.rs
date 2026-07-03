@@ -199,50 +199,54 @@ impl Plugin for Replay {
         let subgraph_name = String::from(subgraph_name);
 
         let report = self.report.clone();
-        let fetches = self.recording.subgraph_fetches.clone().unwrap_or_default();
+        let fetches = Arc::new(self.recording.subgraph_fetches.clone().unwrap_or_default());
 
         ServiceBuilder::new()
-            .checkpoint(move |req: subgraph::Request| {
+            .checkpoint_async(move |req: subgraph::Request| {
                 let report = report.clone();
-                let operation_name = req
-                    .subgraph_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or("UnnamedOperation".to_string());
+                let fetches = fetches.clone();
+                let subgraph_name = subgraph_name.clone();
+                async move {
+                    let operation_name = req
+                        .subgraph_request
+                        .body()
+                        .operation_name
+                        .clone()
+                        .unwrap_or("UnnamedOperation".to_string());
 
-                // Note - not doing an equality check (yet) here because the query plan
-                // would mismatch if the request is wrong
-                if let Some(fetch) = fetches.get(&operation_name) {
-                    let subgraph_response = subgraph::Response::new_from_response(
-                        http::Response::new(fetch.response.chunks[0].clone()),
-                        req.context.clone(),
-                        subgraph_name.clone(),
-                        req.id.clone(),
-                    );
+                    // Note - not doing an equality check (yet) here because the query plan
+                    // would mismatch if the request is wrong
+                    if let Some(fetch) = fetches.get(&operation_name) {
+                        let subgraph_response = subgraph::Response::new_from_response(
+                            http::Response::new(fetch.response.chunks[0].clone()),
+                            req.context.clone(),
+                            subgraph_name.clone(),
+                            req.id.clone(),
+                        );
 
-                    let runtime_variables = req.subgraph_request.body().variables.clone();
-                    let recorded_variables = fetch.request.variables.clone();
+                        let runtime_variables = req.subgraph_request.body().variables.clone();
+                        let recorded_variables = fetch.request.variables.clone();
 
-                    if runtime_variables != recorded_variables {
-                        report.lock().push(ReplayReport::VariablesDifference {
-                            name: operation_name.clone(),
-                            runtime: runtime_variables,
-                            recorded: recorded_variables,
-                        });
+                        if runtime_variables != recorded_variables {
+                            report.lock().push(ReplayReport::VariablesDifference {
+                                name: operation_name.clone(),
+                                runtime: runtime_variables,
+                                recorded: recorded_variables,
+                            });
+                        }
+
+                        Ok(ControlFlow::Break(subgraph_response))
+                    } else {
+                        report.lock().push(ReplayReport::SubgraphRequestMissed(
+                            subgraph_name.clone(),
+                            operation_name.clone(),
+                        ));
+
+                        // TODO: break with an empty response or error instead? If
+                        // the subgraph routing url is accessible this will hit the
+                        // network
+                        Ok(ControlFlow::Continue(req))
                     }
-
-                    Ok(ControlFlow::Break(subgraph_response))
-                } else {
-                    report.lock().push(ReplayReport::SubgraphRequestMissed(
-                        subgraph_name.clone(),
-                        operation_name.clone(),
-                    ));
-
-                    // TODO: break with an empty response or error instead? If
-                    // the subgraph routing url is accessible this will hit the
-                    // network
-                    Ok(ControlFlow::Continue(req))
                 }
             })
             .service(service)

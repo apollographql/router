@@ -427,38 +427,41 @@ impl PluginPrivate for Telemetry {
                     span_factory::create_router(&request.router_request)
                 }
             }))
-            .checkpoint(move |req: router::Request| {
-                let library_name_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_name_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                let library_version_valid = req
-                    .router_request
-                    .headers()
-                    .get(&config_checkpoint.apollo.library_version_header)
-                    .and_then(|v| v.to_str().ok())
-                    .is_none_or(is_valid_client_library_value);
-                if !library_name_valid || !library_version_valid {
-                    if !library_name_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library name header value"
-                        );
+            .checkpoint_async(move |req: router::Request| {
+                let config_checkpoint = config_checkpoint.clone();
+                async move {
+                    let library_name_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_name_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    let library_version_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_version_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    if !library_name_valid || !library_version_valid {
+                        if !library_name_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library name header value"
+                            );
+                        }
+                        if !library_version_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library version header value"
+                            );
+                        }
+                        Ok(ControlFlow::Break(
+                            router::Response::error_builder()
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build()?,
+                        ))
+                    } else {
+                        Ok(ControlFlow::Continue(req))
                     }
-                    if !library_version_valid {
-                        ::tracing::warn!(
-                            "Rejecting request: invalid client library version header value"
-                        );
-                    }
-                    Ok(ControlFlow::Break(
-                        router::Response::error_builder()
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build()?,
-                    ))
-                } else {
-                    Ok(ControlFlow::Continue(req))
                 }
             })
             .map_future_with_request_data(

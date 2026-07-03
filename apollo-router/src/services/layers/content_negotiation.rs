@@ -4,6 +4,8 @@
 
 use std::ops::ControlFlow;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
@@ -20,11 +22,13 @@ use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
-use crate::layers::sync_checkpoint::CheckpointService;
+use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
@@ -53,18 +57,26 @@ pub(crate) struct RouterLayer {}
 
 impl<S> Layer<S> for RouterLayer
 where
-    S: Service<router::Request, Response = router::Response, Error = BoxError> + Send + 'static,
+    S: Service<router::Request, Response = router::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     <S as Service<router::Request>>::Future: Send + 'static,
 {
-    type Service = CheckpointService<S, router::Request>;
+    type Service = AsyncCheckpointService<
+        S,
+        BoxFuture<'static, Result<ControlFlow<router::Response, router::Request>, BoxError>>,
+        router::Request,
+    >;
 
     fn layer(&self, service: S) -> Self::Service {
-        CheckpointService::new(
-            move |req| {
-                if req.router_request.method() != Method::GET
-                    && !content_type_is_json(req.router_request.headers())
-                {
-                    let response = http::Response::builder()
+        ServiceBuilder::new()
+            .checkpoint_async(move |req: router::Request| {
+                async move {
+                    if req.router_request.method() != Method::GET
+                        && !content_type_is_json(req.router_request.headers())
+                    {
+                        let response = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .body(router::body::from_bytes(
@@ -84,13 +96,13 @@ where
                         ))
                         .expect("cannot fail");
 
-                    return Ok(ControlFlow::Break(response.into()));
-                }
+                        return Ok(ControlFlow::Break(response.into()));
+                    }
 
-                if req.router_request.method() == Method::GET
-                    && !content_type_is_strictly_json_or_missing(req.router_request.headers())
-                {
-                    let response = http::Response::builder()
+                    if req.router_request.method() == Method::GET
+                        && !content_type_is_strictly_json_or_missing(req.router_request.headers())
+                    {
+                        let response = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .body(router::body::from_bytes(
@@ -106,23 +118,23 @@ where
                         ))
                         .expect("cannot fail");
 
-                    return Ok(ControlFlow::Break(response.into()));
-                }
+                        return Ok(ControlFlow::Break(response.into()));
+                    }
 
-                let accepts = parse_accept(req.router_request.headers());
+                    let accepts = parse_accept(req.router_request.headers());
 
-                if accepts.wildcard
-                    || accepts.multipart_defer
-                    || accepts.multipart_subscription
-                    || accepts.json
-                {
-                    req.context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(accepts));
+                    if accepts.wildcard
+                        || accepts.multipart_defer
+                        || accepts.multipart_subscription
+                        || accepts.json
+                    {
+                        req.context
+                            .extensions()
+                            .with_lock(|lock| lock.insert(accepts));
 
-                    Ok(ControlFlow::Continue(req))
-                } else {
-                    let response = http::Response::builder()
+                        Ok(ControlFlow::Continue(req))
+                    } else {
+                        let response = http::Response::builder()
                         .status(StatusCode::NOT_ACCEPTABLE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .body(router::body::from_bytes(
@@ -143,11 +155,12 @@ where
                             .to_string()
                         )).expect("cannot fail");
 
-                    Ok(ControlFlow::Break(response.into()))
+                        Ok(ControlFlow::Break(response.into()))
+                    }
                 }
-            },
-            service,
-        )
+                .boxed()
+            })
+            .service(service)
     }
 }
 

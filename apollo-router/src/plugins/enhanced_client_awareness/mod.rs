@@ -40,7 +40,7 @@ impl Plugin for EnhancedClientAwareness {
         service: supergraph::BoxCloneService,
     ) -> supergraph::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|request: supergraph::Request| {
+            .checkpoint_async(|request: supergraph::Request| async move {
                 if let Some(client_library_metadata) = request
                     .supergraph_request
                     .body()

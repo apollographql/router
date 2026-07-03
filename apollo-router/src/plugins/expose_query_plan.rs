@@ -61,7 +61,7 @@ impl Plugin for ExposeQueryPlan {
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let setting = req
                     .context
                     .get::<_, Setting>(ENABLED_CONTEXT_KEY)

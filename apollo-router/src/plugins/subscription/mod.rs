@@ -302,7 +302,7 @@ impl Plugin for Subscription {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: SubgraphRequest| {
+            .checkpoint_async(move |req: SubgraphRequest| async move {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
                         SubgraphResponse::builder()

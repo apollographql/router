@@ -18,7 +18,7 @@ cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
         service: router::BoxCloneService,
     ) -> router::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(...) // Validation happens here
+            .checkpoint_async(...) // Validation happens here
             .service(service)
             .boxed_clone()
     }

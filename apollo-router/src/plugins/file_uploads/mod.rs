@@ -134,7 +134,7 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let context = req.context.clone();
                 Ok(match execution_layer(req) {
                     Ok(req) => ControlFlow::Continue(req),
