@@ -553,8 +553,12 @@ impl PluggableSupergraphServiceBuilder {
 
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
         // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
-        query_planner_service.activate();
         query_plan_cache.activate();
+
+        // We'll create the compute job gauge now, together with the other telemetry activations,
+        // and then move it into a closure on a layer to keep it around as long as the supergraph
+        // service exists.
+        let compute_jobs_queue_size_gauge = crate::compute_job::create_queue_size_gauge();
 
         let subscription_plugin_conf = self
             .plugins
@@ -641,6 +645,11 @@ impl PluggableSupergraphServiceBuilder {
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .layer(content_negotiation::SupergraphLayer::default())
+                .map_response(move |res| {
+                    // Just to keep the gauge alive as long as the service is!
+                    let _ = &compute_jobs_queue_size_gauge;
+                    res
+                })
                 .service(
                     self.plugins
                         .iter()

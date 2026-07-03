@@ -40,7 +40,6 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
-use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -450,12 +449,6 @@ where
         tracing::debug!(
             "warmed up the query planner cache with {count} queries planned and {reused} queries reused"
         );
-    }
-}
-
-impl CachingQueryPlanner<QueryPlannerService> {
-    pub(crate) fn activate(&self) {
-        self.delegate.activate();
     }
 }
 

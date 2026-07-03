@@ -19,7 +19,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -127,7 +126,6 @@ pub(crate) struct QueryPlannerService {
     enable_authorization_directives: bool,
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
-    compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
     introspection: Arc<IntrospectionCache>,
 }
@@ -283,7 +281,6 @@ impl QueryPlannerService {
             authorization_config: Arc::new(AuthorizationPlugin::configuration(&configuration)),
             configuration,
             _federation_instrument: federation_instrument,
-            compute_jobs_queue_size_gauge: Default::default(),
             signature_normalization_algorithm,
             introspection,
         })
@@ -605,14 +602,6 @@ impl QueryPlannerService {
             query_metrics,
         )
         .await
-    }
-
-    pub(super) fn activate(&self) {
-        // Gauges MUST be initialized after a meter provider is created.
-        // When a hot reload happens this means that the gauges must be re-initialized.
-        *self.compute_jobs_queue_size_gauge.lock() =
-            Some(crate::compute_job::create_queue_size_gauge());
-        self.introspection.activate();
     }
 }
 

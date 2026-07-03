@@ -59,13 +59,6 @@ impl IntrospectionCache {
         }
     }
 
-    pub(crate) fn activate(&self) {
-        match &self.0 {
-            Mode::Disabled => {}
-            Mode::Enabled { storage, .. } => storage.activate(),
-        }
-    }
-
     /// If `request` is a query with only introspection fields,
     /// execute it and return a (cached) response
     pub(crate) async fn maybe_execute(
