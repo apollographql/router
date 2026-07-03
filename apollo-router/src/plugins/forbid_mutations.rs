@@ -42,7 +42,7 @@ impl Plugin for ForbidMutations {
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         if self.forbid {
             ServiceBuilder::new()
-                .checkpoint(|req: ExecutionRequest| {
+                .checkpoint_async(|req: ExecutionRequest| async move {
                     if req.query_plan.contains_mutations() {
                         let error = Error::builder()
                             .message("Mutations are forbidden".to_string())
@@ -100,9 +100,14 @@ mod forbid_http_get_mutations_tests {
             .await
             .unwrap()
             .call(create_request(Method::GET, OperationKind::Query));
-        let (_req, responder) = handle.next_request().await.unwrap();
-        responder.send_response(ExecutionResponse::fake_builder().build().unwrap());
+
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(ExecutionResponse::fake_builder().build().unwrap());
+        });
+
         call.await.unwrap().next_response().await.unwrap();
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
