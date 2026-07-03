@@ -53,7 +53,7 @@ use crate::plugins::telemetry::config_new::router::events::DisplayRouterRequest;
 use crate::plugins::telemetry::config_new::router::events::DisplayRouterResponse;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::InMemoryQueryPlanCache;
 use crate::router_factory::RouterFactory;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
@@ -744,7 +744,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
         self.supergraph_creator.previous_cache()
     }
 }

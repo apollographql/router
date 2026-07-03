@@ -42,7 +42,7 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventResponse;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
-use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::ExecutionRequest;
@@ -533,14 +533,17 @@ impl PluggableSupergraphServiceBuilder {
         let schema = self.schema;
         let subgraph_schemas = self.subgraph_schemas;
 
+        let query_plan_cache =
+            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+                .await?;
         let query_planner_service = CachingQueryPlanner::new(
             self.query_planner_service,
             schema.clone(),
             subgraph_schemas.clone(),
             &configuration,
             IndexMap::default(),
-        )
-        .await?;
+            query_plan_cache.clone(),
+        )?;
 
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
@@ -551,6 +554,7 @@ impl PluggableSupergraphServiceBuilder {
         // We need a non-fallible hook so that once we know we are going live with a pipeline we do final initialization.
         // For now just shoe-horn something in, but if we ever reintroduce the query planner hook in plugins and activate then this can be made clean.
         query_planner_service.activate();
+        query_plan_cache.activate();
 
         let subscription_plugin_conf = self
             .plugins
@@ -692,7 +696,7 @@ impl SupergraphCreator {
         self.sb.clone().boxed_clone()
     }
 
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
         self.query_planner_service.previous_cache()
     }
 
@@ -700,7 +704,7 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: Option<InMemoryCachePlanner>,
+        previous_cache: Option<InMemoryQueryPlanCache>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,

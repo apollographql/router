@@ -83,8 +83,18 @@ impl std::fmt::Display for Outcome {
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
-pub(crate) type InMemoryCachePlanner =
+
+pub(crate) type QueryPlanCache = Arc<
+    DeduplicatingCache<
+        CachingQueryKey,
+        Result<QueryPlannerContent, Arc<QueryPlannerError>>,
+        ComputeBackPressureError,
+    >,
+>;
+
+pub(crate) type InMemoryQueryPlanCache =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
+
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 
 /// Hashed value of query planner configuration for use in cache keys.
@@ -111,17 +121,12 @@ impl std::fmt::Debug for ConfigModeHash {
 ///
 /// The query planner performs LRU caching.
 #[derive(Clone)]
-pub(crate) struct CachingQueryPlanner<T: Clone> {
-    cache: Arc<
-        DeduplicatingCache<
-            CachingQueryKey,
-            Result<QueryPlannerContent, Arc<QueryPlannerError>>,
-            ComputeBackPressureError,
-        >,
-    >,
+pub(crate) struct CachingQueryPlanner<T> {
+    cache: QueryPlanCache,
     delegate: T,
     schema: Arc<Schema>,
     subgraph_schemas: Arc<SubgraphSchemas>,
+    /// Only used for warmup
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
@@ -145,31 +150,51 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl<T: Clone + 'static> CachingQueryPlanner<T>
-where
-    T: tower::Service<
-            QueryPlannerRequest,
-            Response = QueryPlannerResponse,
-            Error = MaybeBackPressureError<QueryPlannerError>,
-        > + Send,
-    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
-{
-    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub(crate) async fn new(
+impl CachingQueryPlanner<()> {
+    /// Create a cache for query plans. This cache can deduplicate requests and uses both Redis and
+    /// an in-memory backend.
+    pub(crate) async fn create_cache(
+        config: &crate::configuration::QueryPlanCache,
+    ) -> Result<QueryPlanCache, BoxError> {
+        let cache =
+            DeduplicatingCache::from_configuration(&config.clone().into(), "query planner").await?;
+        Ok(Arc::new(cache))
+    }
+}
+
+impl<T> CachingQueryPlanner<T> {
+    #[cfg(test)]
+    pub(crate) async fn for_test(
         delegate: T,
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
+        // We only use plugins for warmup
         plugins: Plugins,
-    ) -> Result<CachingQueryPlanner<T>, BoxError> {
-        let cache = Arc::new(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.query_planning.cache.clone().into(),
-                "query planner",
-            )
-            .await?,
-        );
+    ) -> Result<Self, BoxError> {
+        let cache =
+            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+                .await?;
+        Self::new(
+            delegate,
+            schema,
+            subgraph_schemas,
+            configuration,
+            plugins,
+            cache,
+        )
+    }
 
+    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
+    pub(crate) fn new(
+        delegate: T,
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        configuration: &Configuration,
+        // We only use plugins for warmup
+        plugins: Plugins,
+        cache: QueryPlanCache,
+    ) -> Result<Self, BoxError> {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
@@ -195,15 +220,25 @@ where
         })
     }
 
-    pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
+    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
         self.cache.in_memory_cache()
     }
+}
 
+impl<T: Clone + 'static> CachingQueryPlanner<T>
+where
+    T: tower::Service<
+            QueryPlannerRequest,
+            Response = QueryPlannerResponse,
+            Error = MaybeBackPressureError<QueryPlannerError>,
+        > + Send,
+    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
+{
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: Option<InMemoryCachePlanner>,
+        previous_cache: Option<InMemoryQueryPlanCache>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
@@ -420,7 +455,6 @@ where
 
 impl CachingQueryPlanner<QueryPlannerService> {
     pub(crate) fn activate(&self) {
-        self.cache.activate();
         self.delegate.activate();
     }
 }
@@ -1153,7 +1187,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             delegate,
             schema.clone(),
             Default::default(),
@@ -1240,7 +1274,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
@@ -1316,7 +1350,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
@@ -1428,7 +1462,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner {
                 barrier: barrier_clone,
             },
@@ -1515,7 +1549,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
@@ -1592,7 +1626,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
@@ -1671,7 +1705,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
@@ -1749,7 +1783,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: true },
             schema.clone(),
             Default::default(),
@@ -1828,7 +1862,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             SlowQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
@@ -1908,7 +1942,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             ExcessiveMemoryQueryPlanner { enforce: false },
             schema.clone(),
             Default::default(),
@@ -1993,7 +2027,7 @@ mod tests {
                 planner
             });
 
-            let mut planner = CachingQueryPlanner::new(
+            let mut planner = CachingQueryPlanner::for_test(
                 delegate,
                 schema.clone(),
                 Default::default(),
@@ -2079,7 +2113,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             delegate,
             Arc::new(schema),
             Default::default(),
@@ -2140,7 +2174,7 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             delegate,
             schema.clone(),
             Default::default(),
@@ -2238,7 +2272,7 @@ mod tests {
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             delegate,
             schema.clone(),
             Default::default(),
@@ -2313,7 +2347,7 @@ mod tests {
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::new(
+        let mut planner = CachingQueryPlanner::for_test(
             delegate,
             schema.clone(),
             Default::default(),
@@ -2398,7 +2432,7 @@ mod tests {
         );
 
         let create_planner = async |delegate| {
-            CachingQueryPlanner::new(
+            CachingQueryPlanner::for_test(
                 delegate,
                 schema.clone(),
                 Default::default(),
