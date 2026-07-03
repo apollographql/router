@@ -3,6 +3,7 @@
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -65,7 +66,7 @@ where
             AsyncCheckpointService::new(
                 move |req| {
                     let page = page.clone();
-                    Box::pin(async move {
+                    async move {
                         let res = if req.router_request.method() == Method::GET
                             && accepts_html(req.router_request.headers())
                         {
@@ -91,23 +92,14 @@ where
                         };
 
                         Ok(res)
-                    })
-                        as BoxFuture<
-                            'static,
-                            Result<ControlFlow<router::Response, router::Request>, BoxError>,
-                        >
+                    }
+                    .boxed()
                 },
                 service,
             )
         } else {
             AsyncCheckpointService::new(
-                move |req| {
-                    Box::pin(async move { Ok(ControlFlow::Continue(req)) })
-                        as BoxFuture<
-                            'static,
-                            Result<ControlFlow<router::Response, router::Request>, BoxError>,
-                        >
-                },
+                move |req| async move { Ok(ControlFlow::Continue(req)) }.boxed(),
                 service,
             )
         }
