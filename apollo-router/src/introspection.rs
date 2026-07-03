@@ -108,11 +108,11 @@ pub(crate) fn introspection_service(
 ///
 /// That is:
 /// - The operation is a query operation, AND:
-///   - The operation has schema introspection fields (__schema or __type), OR:
-///   - The operation does not have explicit root fields (...which implies __typename).
+/// - The operation has schema introspection fields (__schema or __type)
+///
+/// Notably, { __typename } is not considered an introspection query.
 pub(crate) fn is_introspection_query(document: &ParsedDocument) -> bool {
-    document.operation.is_query()
-        && (document.has_schema_introspection || !document.has_explicit_root_fields)
+    document.operation.is_query() && document.has_schema_introspection
 }
 
 /// Terminal service for GraphQL introspection queries that always returns an error saying
