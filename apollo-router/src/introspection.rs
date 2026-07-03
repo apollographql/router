@@ -24,11 +24,28 @@ use crate::spec::QueryHash;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 
+/// Request type for [IntrospectionService].
+pub(crate) struct IntrospectionRequest {
+    /// The GraphQL schema to introspect.
+    pub(crate) schema: Arc<spec::Schema>,
+    /// Document representing the introspection operation to execute.
+    pub(crate) document: ParsedDocument,
+    /// JSON variable values used to execute the query.
+    pub(crate) variables: Object,
+}
+
+/// In-memory cache storage for introspection.
+pub(crate) type IntrospectionCache = Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>;
+
+/// A terminal service that handles (partial) execution of introspection.
+pub(crate) type IntrospectionService =
+    BoxCloneService<IntrospectionRequest, graphql::Response, ComputeBackPressureError>;
+
 #[derive(Clone)]
 enum Mode {
     Disabled,
     Enabled {
-        storage: Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>,
+        storage: IntrospectionCache,
         max_depth: MaxDepth,
     },
 }
@@ -58,23 +75,6 @@ fn introspection_mode(configuration: &Configuration) -> Mode {
         Mode::Disabled
     }
 }
-
-/// Request type for [IntrospectionService].
-pub(crate) struct IntrospectionRequest {
-    /// The GraphQL schema to introspect.
-    pub(crate) schema: Arc<spec::Schema>,
-    /// Document representing the introspection operation to execute.
-    pub(crate) document: ParsedDocument,
-    /// JSON variable values used to execute the query.
-    pub(crate) variables: Object,
-}
-
-/// In-memory cache storage for introspection.
-pub(crate) type IntrospectionCache = Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>;
-
-/// A terminal service that handles (partial) execution of introspection.
-pub(crate) type IntrospectionService =
-    BoxCloneService<IntrospectionRequest, graphql::Response, ComputeBackPressureError>;
 
 /// Returns a terminal service that does cached, partial execution of introspection.
 ///
@@ -246,12 +246,12 @@ impl std::fmt::Display for IntrospectionCacheKey {
 #[derive(Clone)]
 struct IntrospectionCacheService<S> {
     inner: S,
-    cache: Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>,
+    cache: IntrospectionCache,
 }
 
 /// In-memory caching layer for introspection requests. It uses a fixed cache size.
 impl<S> IntrospectionCacheService<S> {
-    fn new(inner: S, cache: Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>) -> Self {
+    fn new(inner: S, cache: IntrospectionCache) -> Self {
         Self { inner, cache }
     }
 }
@@ -259,11 +259,11 @@ impl<S> IntrospectionCacheService<S> {
 ///
 /// A stopgap solution until Apollo Platform provides apollo-cache-memory!
 struct IntrospectionCacheLayer {
-    cache: Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>,
+    cache: IntrospectionCache,
 }
 
 impl IntrospectionCacheLayer {
-    fn new(cache: Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>) -> Self {
+    fn new(cache: IntrospectionCache) -> Self {
         Self { cache }
     }
 }
