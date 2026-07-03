@@ -156,3 +156,236 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
+
+    use super::*;
+    use crate::Context;
+    use crate::services::supergraph;
+    use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::test_harness::tracing_test;
+
+    /// Build a supergraph request for a query.
+    fn make_request(schema: &Schema, query: &str) -> supergraph::Request {
+        // In the future, we can hopefully just use a query parsing tower layer here...
+        let doc = Query::parse_document(query, None, schema, &Default::default()).unwrap();
+        let ctx = Context::new();
+        ctx.extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        supergraph::Request::fake_builder()
+            .query(query)
+            .context(ctx)
+            .build()
+            .unwrap()
+    }
+
+    fn error_codes(response: &graphql::Response) -> Vec<&str> {
+        response
+            .errors
+            .iter()
+            .filter_map(|e| e.extensions.get("code")?.as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_under_limits() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_root_fields: Some(1),
+            max_aliases: Some(2),
+            max_depth: Some(3),
+            max_height: Some(4),
+            ..Default::default()
+        };
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::fake_builder().build().unwrap());
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let mut response = service
+            .oneshot(make_request(&schema, "{ me { id } }"))
+            .await
+            .unwrap();
+
+        let body = response.next_response().await.unwrap();
+        assert!(body.errors.is_empty());
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn test_max_root_fields() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_root_fields: Some(1),
+            ..Default::default()
+        };
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let query = "{ me { id } topProducts { name } }";
+        let mut response = service.oneshot(make_request(&schema, query)).await.unwrap();
+        let body = response.next_response().await.unwrap();
+        assert_eq!(error_codes(&body), &["MAX_ROOT_FIELDS_LIMIT"]);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_max_aliases() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_aliases: Some(2),
+            ..Default::default()
+        };
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let query =
+            "{ topProducts { productName: name productReviews: reviews { reviewBody: body } } }";
+        let mut response = service.oneshot(make_request(&schema, query)).await.unwrap();
+        let body = response.next_response().await.unwrap();
+        assert_eq!(error_codes(&body), &["MAX_ALIASES_LIMIT"]);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_max_depth() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_depth: Some(3),
+            ..Default::default()
+        };
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let query = "{ topProducts { reviews { author { name } } } }";
+        let mut response = service.oneshot(make_request(&schema, query)).await.unwrap();
+        let body = response.next_response().await.unwrap();
+        assert_eq!(error_codes(&body), &["MAX_DEPTH_LIMIT"]);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_multiple_violations() {
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_root_fields: Some(1),
+            max_aliases: Some(2),
+            max_depth: Some(3),
+            max_height: Some(4),
+            ..Default::default()
+        };
+
+        let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let query = "{
+            topProducts {
+                productName: name
+                productReviews: reviews {
+                    reviewAuthor: author {
+                        name
+                    }
+                }
+            }
+        }";
+        let mut response = service.oneshot(make_request(&schema, query)).await.unwrap();
+        let body = response.next_response().await.unwrap();
+        let mut codes = error_codes(&body);
+        codes.sort();
+        assert_eq!(
+            codes,
+            ["MAX_ALIASES_LIMIT", "MAX_DEPTH_LIMIT", "MAX_HEIGHT_LIMIT"]
+        );
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_warn_only() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        let schema = Schema::parse(
+            include_str!("../../testdata/supergraph.graphql"),
+            &Default::default(),
+        )
+        .unwrap();
+        let config = RouterLimitsConfig {
+            max_root_fields: Some(1),
+            max_depth: Some(2),
+            warn_only: true,
+            ..Default::default()
+        };
+
+        let (mock, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(supergraph::Response::fake_builder().build().unwrap());
+        });
+
+        let service = ServiceBuilder::new()
+            .layer(EnforceOperationLimitsLayer::new(&config))
+            .service(mock);
+
+        let query = "{ me { id } topProducts { reviews { body } } }";
+        let mut response = service.oneshot(make_request(&schema, query)).await.unwrap();
+        let body = response.next_response().await.unwrap();
+        assert!(body.errors.is_empty());
+        assert!(
+            tracing_test::logs_contain("request exceeded complexity limits"),
+            "expected a warning to be logged"
+        );
+
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
+}
