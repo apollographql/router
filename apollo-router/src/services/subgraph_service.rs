@@ -34,7 +34,6 @@ use super::layers::content_negotiation::ContentType;
 use super::layers::content_negotiation::SubgraphLayer;
 use super::layers::content_negotiation::get_graphql_content_type;
 use super::layers::content_negotiation::http_response_to_graphql_response;
-use super::layers::content_negotiation::inject_subgraph_request_headers;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
@@ -163,14 +162,13 @@ pub(crate) async fn process_batch(
     http_client: crate::services::http::BoxCloneService,
     service: String,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
-    mut request: http::Request<RouterBody>,
+    request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
-    // Now we need to "batch up" our data and send it to our subgraphs.
-    // This bypasses SubgraphLayer (batched requests are sent directly to the HTTP client), so we
-    // inject the same headers here via the shared helper.
-    inject_subgraph_request_headers(request.headers_mut());
-
+    // Each request making up the batch has already gone through SubgraphLayer (which sits
+    // innermost in the per-subgraph service stack, closest to SubgraphService::call), so the
+    // Accept/Content-Type headers assembled onto this batched request in `assemble_batch` are
+    // already present. Injecting them again here would duplicate the (appended) Accept header.
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 

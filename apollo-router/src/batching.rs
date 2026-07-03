@@ -515,6 +515,7 @@ mod tests {
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::http::HttpRequest;
     use crate::services::http::HttpResponse;
+    use crate::services::layers::content_negotiation::inject_subgraph_request_headers;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -975,6 +976,91 @@ mod tests {
         );
 
         // Only 1 call is expected
+        drop(http_client);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_does_not_duplicate_headers_injected_by_subgraph_layer() {
+        // Regression test: every request making up a batch has already passed through
+        // `SubgraphLayer` (which injects Accept/Content-Type headers) before `call_http` diverts
+        // it into batching via `signal_progress`. `process_batch` must not inject those headers a
+        // second time, since `inject_subgraph_request_headers` appends (rather than replaces) the
+        // Accept header.
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        let batch = Arc::new(Batch::spawn_handler(2));
+
+        let http_client = mock.boxed_clone();
+
+        let query1 = Batch::query_for_index(batch.clone(), 0).unwrap();
+        let query2 = Batch::query_for_index(batch.clone(), 1).unwrap();
+
+        let mut request1 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field1 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+        inject_subgraph_request_headers(request1.subgraph_request.headers_mut());
+
+        let mut request2 = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(graphql::Request::builder().query("{ field2 }").build())
+                    .unwrap(),
+            )
+            .subgraph_name("a")
+            .build();
+        inject_subgraph_request_headers(request2.subgraph_request.headers_mut());
+
+        // We have to provide pre-readied HTTP clients.
+        let client1 = http_client.clone().ready_oneshot().await.unwrap();
+        let response1 = query1.signal_progress(client1, request1).await.unwrap();
+        let client2 = http_client.clone().ready_oneshot().await.unwrap();
+        let response2 = query2.signal_progress(client2, request2).await.unwrap();
+
+        let (request, responder) =
+            tokio::time::timeout(Duration::from_secs(5), handle.next_request())
+                .await
+                .expect("should get a request")
+                .expect("service closed without request?");
+
+        let headers = request.http_request.headers();
+        let accept_values: Vec<_> = headers.get_all(ACCEPT).iter().collect();
+        assert_eq!(
+            accept_values.len(),
+            1,
+            "Accept header should not be duplicated, got: {accept_values:?}"
+        );
+        assert_eq!(
+            headers.get(CONTENT_TYPE).unwrap(),
+            &APPLICATION_JSON_HEADER_VALUE
+        );
+
+        responder.send_response(HttpResponse {
+            http_response: http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
+                .body(router::body::from_bytes(
+                    r#"[
+                    { "data": { "field1": "value1" } },
+                    { "data": { "field2": "value2" } }
+                ]"#,
+                ))
+                .unwrap(),
+            context: request.context,
+        });
+
+        response1
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+        response2
+            .await
+            .expect("channel should be open")
+            .expect("successful response");
+
         drop(http_client);
         crate::plugin::test::assert_no_mock_calls(handle).await;
     }

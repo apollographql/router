@@ -193,8 +193,8 @@ pub(crate) fn http_response_to_graphql_response(
 /// Sets the outbound `Content-Type` to `application/json` and appends an `Accept` header
 /// advertising support for both GraphQL-over-HTTP response media types.
 ///
-/// Shared by [`SubgraphLayer`] and subgraph batching (`process_batch` in `subgraph_service.rs`),
-/// which talks to the HTTP client directly and so bypasses the Tower layer stack.
+/// Used by [`SubgraphLayer`]. Batched subgraph requests get these headers too, since each request
+/// making up a batch passes through `SubgraphLayer` before being diverted into batching.
 pub(crate) fn inject_subgraph_request_headers(headers: &mut HeaderMap) {
     headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     headers.append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
