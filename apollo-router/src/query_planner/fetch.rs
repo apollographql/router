@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
-use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
@@ -17,6 +16,7 @@ use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::instrument;
 
+use super::query_planner_service::SubgraphSchemas;
 use super::rewrites;
 use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
@@ -38,7 +38,6 @@ use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxCloneService;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
-use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -93,24 +92,6 @@ impl From<ast::OperationType> for OperationKind {
             ast::OperationType::Query => OperationKind::Query,
             ast::OperationType::Mutation => OperationKind::Mutation,
             ast::OperationType::Subscription => OperationKind::Subscription,
-        }
-    }
-}
-
-pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
-
-pub(crate) struct SubgraphSchema {
-    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
-    // TODO: Ideally should have separate nominal type for subgraph's schema hash
-    pub(crate) hash: SchemaHash,
-}
-
-impl SubgraphSchema {
-    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
-        let sdl = schema.serialize().no_indent().to_string();
-        Self {
-            schema: Arc::new(schema),
-            hash: SchemaHash::new(&sdl),
         }
     }
 }

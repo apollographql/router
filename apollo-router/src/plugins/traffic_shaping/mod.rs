@@ -792,25 +792,31 @@ mod test {
 
         let config = Arc::new(config);
         let schema = Arc::new(Schema::parse(schema, &config).unwrap());
-        let planner = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
+        let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+        let plugin_subgraph_schemas = Arc::new(
+            subgraph_schemas
                 .iter()
                 .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
+                .collect::<std::collections::HashMap<_, _>>(),
         );
+        let planner = QueryPlannerService::new(
+            schema.clone(),
+            subgraph_schemas.clone(),
+            config.clone(),
+            qp_arc,
+        )
+        .unwrap();
 
         let mut builder =
-            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
+            PluggableSupergraphServiceBuilder::new(planner, schema.clone(), subgraph_schemas)
+                .with_configuration(config.clone());
 
         let plugins = Arc::new(
             create_plugins(
                 &config,
                 &schema,
-                subgraph_schemas,
+                plugin_subgraph_schemas,
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),

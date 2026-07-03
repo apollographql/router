@@ -1888,7 +1888,7 @@ fn broken_plan_does_not_panic() {
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
+        query_planner::SubgraphSchema::new(subgraph_schema),
     );
     // Run the plan initialization code to make sure it doesn't panic.
     let root_node = plan.root.as_mut().expect("non-empty query plan");

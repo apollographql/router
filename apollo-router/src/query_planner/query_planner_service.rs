@@ -9,6 +9,8 @@ use std::time::Instant;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::validation::Valid;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
@@ -44,8 +46,6 @@ use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
-use crate::query_planner::fetch::SubgraphSchema;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -55,6 +55,7 @@ use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 use crate::spec::operation_limits::OperationLimits;
 
@@ -79,6 +80,39 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
 
         !disabled
     })
+}
+
+pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
+
+pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSchemas> {
+    Arc::new(
+        planner
+            .subgraph_schemas()
+            .iter()
+            .map(|(name, schema)| {
+                (
+                    name.to_string(),
+                    SubgraphSchema::new(schema.schema().clone()),
+                )
+            })
+            .collect::<SubgraphSchemas>(),
+    )
+}
+
+pub(crate) struct SubgraphSchema {
+    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
+    // TODO: Ideally should have separate nominal type for subgraph's schema hash
+    pub(crate) hash: SchemaHash,
+}
+
+impl SubgraphSchema {
+    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
+        let sdl = schema.serialize().no_indent().to_string();
+        Self {
+            schema: Arc::new(schema),
+            hash: SchemaHash::new(&sdl),
+        }
+    }
 }
 
 /// A query planner that calls out to the apollo-federation crate.
@@ -115,7 +149,7 @@ fn federation_version_instrument(federation_version: Option<i64>) -> ObservableG
 }
 
 impl QueryPlannerService {
-    fn create_planner(
+    pub(crate) fn create_planner(
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
@@ -216,26 +250,25 @@ impl QueryPlannerService {
         })
     }
 
-    pub(crate) async fn new(
+    /// Simplified constructor for tests.
+    #[cfg(test)]
+    pub(crate) fn for_test(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
-        let introspection = Arc::new(IntrospectionCache::new(&configuration));
         let planner = Self::create_planner(&schema, &configuration)?;
+        let subgraph_schemas = build_subgraph_schemas(&planner);
 
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(name, schema)| {
-                    (
-                        name.to_string(),
-                        SubgraphSchema::new(schema.schema().clone()),
-                    )
-                })
-                .collect(),
-        );
+        Self::new(schema, subgraph_schemas, configuration, planner)
+    }
 
+    pub(crate) fn new(
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        configuration: Arc<Configuration>,
+        planner: Arc<QueryPlanner>,
+    ) -> Result<Self, ServiceBuildError> {
+        let introspection = Arc::new(IntrospectionCache::new(&configuration));
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
         let federation_instrument = federation_version_instrument(schema.federation_version());
@@ -254,14 +287,6 @@ impl QueryPlannerService {
             signature_normalization_algorithm,
             introspection,
         })
-    }
-
-    pub(crate) fn schema(&self) -> Arc<Schema> {
-        self.schema.clone()
-    }
-
-    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
-        self.subgraph_schemas.clone()
     }
 
     async fn parse_selections(
@@ -654,9 +679,7 @@ mod tests {
         let config = Arc::new(Configuration::default());
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
 
-        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
         let query = include_str!("testdata/query.graphql");
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
@@ -698,8 +721,7 @@ mod tests {
         let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
         let config = Arc::default();
         let schema = Schema::parse(sdl, &config).unwrap();
-        let error = QueryPlannerService::new(schema.into(), config)
-            .await
+        let error = QueryPlannerService::for_test(schema.into(), config)
             .err()
             .expect("expected error for fed1 supergraph");
         assert_eq!(
@@ -711,9 +733,7 @@ mod tests {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();
-            let _planner = QueryPlannerService::new(schema.into(), config)
-                .await
-                .unwrap();
+            let _planner = QueryPlannerService::for_test(schema.into(), config).unwrap();
 
             assert_gauge!(
                 "apollo.router.supergraph.federation",
@@ -734,12 +754,9 @@ mod tests {
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
         let query = include_str!("testdata/noop_query.graphql");
 
-        let mut service = QueryPlannerService::new(schema.clone(), config)
-            .await
-            .unwrap();
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
-        let document =
-            Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
 
         let response = service
             .ready()
@@ -773,9 +790,7 @@ mod tests {
         let config = Arc::new(Configuration::default());
         let schema = Arc::new(Schema::parse(SUBSCRIPTION_SCHEMA, &config).unwrap());
 
-        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
         // subscription with @defer cannot be query planned
         let query = r#"
@@ -822,9 +837,7 @@ mod tests {
         let config = Arc::new(Configuration::default());
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
 
-        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
         let query = "{ x: __typename }";
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
@@ -863,9 +876,7 @@ mod tests {
         let config = Arc::new(Configuration::default());
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
 
-        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
-            .await
-            .unwrap();
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
         let query = "{ x: __typename __typename }";
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
@@ -906,9 +917,7 @@ mod tests {
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
-        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
-            .await
-            .unwrap();
+        let planner = QueryPlannerService::for_test(schema.into(), configuration.clone()).unwrap();
 
         macro_rules! s {
             ($query: expr) => {
@@ -1167,7 +1176,7 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 
-        let doc = Query::parse_document(query, None, &planner.schema(), &configuration).unwrap();
+        let doc = Query::parse_document(query, None, &planner.schema, &configuration).unwrap();
 
         let result = planner
             .get(
@@ -1300,9 +1309,8 @@ mod tests {
             let config = Arc::new(Configuration::default());
             let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
 
-            let mut service = QueryPlannerService::new(schema.clone(), config.clone())
-                .await
-                .unwrap();
+            let mut service =
+                QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
 
             let query = include_str!("testdata/query.graphql");
             let document = Query::parse_document(query, None, &schema, &config).unwrap();

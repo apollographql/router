@@ -125,10 +125,9 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             let schema = Schema::parse(schema, &config).unwrap();
             let sdl = schema.raw_sdl.clone();
             let supergraph = schema.supergraph_schema().clone();
-            let planner = QueryPlannerService::new(schema.into(), Arc::new(config))
-                .await
-                .unwrap();
-            (sdl, supergraph, planner.subgraph_schemas())
+            let qp_arc = QueryPlannerService::create_planner(&schema, &config).unwrap();
+            let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
+            (sdl, supergraph, subgraph_schemas)
         } else {
             (
                 "".to_string().into(),

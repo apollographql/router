@@ -19,7 +19,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::QueryHash;

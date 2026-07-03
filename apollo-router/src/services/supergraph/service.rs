@@ -44,6 +44,7 @@ use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerContent;
@@ -470,18 +471,26 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, subgraph::BoxCloneService)>,
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    query_planner_service: QueryPlannerService,
     configuration: Option<Arc<Configuration>>,
-    planner: QueryPlannerService,
+    schema: Arc<Schema>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(planner: QueryPlannerService) -> Self {
+    pub(crate) fn new(
+        query_planner_service: QueryPlannerService,
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
+    ) -> Self {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
             http_service_factory: Default::default(),
+            query_planner_service,
             configuration: None,
-            planner,
+            schema,
+            subgraph_schemas,
         }
     }
 
@@ -521,11 +530,11 @@ impl PluggableSupergraphServiceBuilder {
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
-        let schema = self.planner.schema();
-        let subgraph_schemas = self.planner.subgraph_schemas();
+        let schema = self.schema;
+        let subgraph_schemas = self.subgraph_schemas;
 
         let query_planner_service = CachingQueryPlanner::new(
-            self.planner,
+            self.query_planner_service,
             schema.clone(),
             subgraph_schemas.clone(),
             &configuration,
@@ -569,7 +578,7 @@ impl PluggableSupergraphServiceBuilder {
             subscription_plugin_conf.clone(),
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
-                subgraph_schemas,
+                subgraph_schemas.clone(),
                 subscription_plugin_conf.clone(),
                 schema
                     .connectors
@@ -602,7 +611,7 @@ impl PluggableSupergraphServiceBuilder {
                         schema: schema.clone(),
                         fetch_service,
                         subscription_config: subscription_plugin_conf,
-                        subgraph_schemas: query_planner_service.subgraph_schemas(),
+                        subgraph_schemas,
                         apollo_telemetry_config: apollo_telemetry_conf,
                         configuration: Arc::clone(&configuration),
                     }

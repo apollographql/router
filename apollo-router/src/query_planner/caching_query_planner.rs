@@ -41,7 +41,7 @@ use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -419,10 +419,6 @@ where
 }
 
 impl CachingQueryPlanner<QueryPlannerService> {
-    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
-        self.delegate.subgraph_schemas()
-    }
-
     pub(crate) fn activate(&self) {
         self.cache.activate();
         self.delegate.activate();

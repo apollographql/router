@@ -337,27 +337,37 @@ impl YamlRouterFactory {
         previous_router: Option<&crate::services::router::service::RouterCreator>,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let planner = QueryPlannerService::new(schema.clone(), configuration.clone())
-            .instrument(query_planner_span)
-            .await?;
 
-        let span = tracing::info_span!("plugins");
+        let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
+
+        // We have a few different subgraph schema structures in different parts of the router
+        // Should probably consolidate at some point, but it's not the biggest deal in the world!
+        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
+        let plugin_subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> =
+            Arc::new(
+                subgraph_schemas
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.schema.clone()))
+                    .collect(),
+            );
+
+        let query_planner_service = {
+            let _span = query_planner_span.enter();
+            QueryPlannerService::new(
+                schema.clone(),
+                subgraph_schemas.clone(),
+                configuration.clone(),
+                planner.clone(),
+            )?
+        };
 
         // Process the plugins.
-        let subgraph_schemas = Arc::new(
-            planner
-                .subgraph_schemas()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.schema.clone()))
-                .collect(),
-        );
-
+        let span = tracing::info_span!("plugins");
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                subgraph_schemas,
+                plugin_subgraph_schemas,
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -370,7 +380,11 @@ impl YamlRouterFactory {
         );
 
         async {
-            let mut builder = PluggableSupergraphServiceBuilder::new(planner);
+            let mut builder = PluggableSupergraphServiceBuilder::new(
+                query_planner_service,
+                schema.clone(),
+                subgraph_schemas,
+            );
             builder = builder.with_configuration(configuration.clone());
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;
