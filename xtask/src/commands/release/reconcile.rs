@@ -252,7 +252,7 @@ impl Reconcile {
                 origin = self.common.origin
             );
             eprintln!(
-                "  gh pr create --repo {repo} -B {dev} -H {reconcile_branch} --title ... --body ...",
+                "  gh pr create --repo {repo} -B {dev} -H {reconcile_branch} --label release-reconcile --title ... --body ...",
                 repo = self.common.repo
             );
             if !self.no_auto_merge {
@@ -301,6 +301,8 @@ impl Reconcile {
             dev.as_str(),
             "-H",
             reconcile_branch.as_str(),
+            "--label",
+            "release-reconcile",
             "--title",
             pr_title.as_str(),
             "--body",

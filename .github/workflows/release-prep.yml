@@ -357,13 +357,14 @@ jobs:
           >  - Version bumps (see _Files Changed_ for the true reality)
           >  - That it targets the right release branch (\`$VERSION\` in this case!)
           >
-          > Opened automatically by the \`test-release-prep\` workflow.
+          > Opened automatically by the \`release-prep\` workflow.
           EOF
           )
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --base "$VERSION" \
             --head "$PREP_BRANCH" \
+            --label release-prep \
             --title "prep release: v$VERSION" \
             --body "$BODY"
 
