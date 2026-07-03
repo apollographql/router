@@ -5096,6 +5096,14 @@ expression: "&schema"
           ],
           "description": "Histogram of server request duration"
         },
+        "http.server.request.time_to_first_response": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Histogram of the time from request start until the primary response is ready to send\n(status, headers, and the first response chunk). Measured inside the router, so this is\nnot a client-observed time to first byte. Opt-in: disabled by default."
+        },
         "http.server.response.body.size": {
           "allOf": [
             {
