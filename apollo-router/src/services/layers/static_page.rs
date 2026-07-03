@@ -16,9 +16,11 @@ use mediatype::names::TEXT;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceBuilder;
 
 use crate::Configuration;
 use crate::configuration::Homepage;
+use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::router;
 
@@ -63,8 +65,8 @@ where
         if let Some(static_page) = &self.static_page {
             let page = static_page.clone();
 
-            AsyncCheckpointService::new(
-                move |req| {
+            ServiceBuilder::new()
+                .checkpoint_async(move |req: router::Request| {
                     let page = page.clone();
                     async move {
                         let res = if req.router_request.method() == Method::GET
@@ -94,14 +96,14 @@ where
                         Ok(res)
                     }
                     .boxed()
-                },
-                service,
-            )
+                })
+                .service(service)
         } else {
-            AsyncCheckpointService::new(
-                move |req| async move { Ok(ControlFlow::Continue(req)) }.boxed(),
-                service,
-            )
+            ServiceBuilder::new()
+                .checkpoint_async(move |req: router::Request| {
+                    async move { Ok(ControlFlow::Continue(req)) }.boxed()
+                })
+                .service(service)
         }
     }
 }

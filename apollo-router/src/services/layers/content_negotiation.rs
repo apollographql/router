@@ -22,9 +22,11 @@ use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
@@ -68,8 +70,8 @@ where
     >;
 
     fn layer(&self, service: S) -> Self::Service {
-        AsyncCheckpointService::new(
-            move |req| {
+        ServiceBuilder::new()
+            .checkpoint_async(move |req: router::Request| {
                 async move {
                     if req.router_request.method() != Method::GET
                         && !content_type_is_json(req.router_request.headers())
@@ -157,9 +159,8 @@ where
                     }
                 }
                 .boxed()
-            },
-            service,
-        )
+            })
+            .service(service)
     }
 }
 
