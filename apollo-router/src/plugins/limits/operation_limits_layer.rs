@@ -77,9 +77,7 @@ where
             .with_lock(|lock| lock.get::<ParsedDocument>().cloned());
         let operation_name = req.supergraph_request.body().operation_name.as_deref();
 
-        let Some(document) = document else {
-            panic!("No document?");
-        };
+        let document = document.expect("expected a ParsedDocument in limits enforcement");
         let mut query_metrics = OperationLimits::default();
 
         let max = OperationLimits {
