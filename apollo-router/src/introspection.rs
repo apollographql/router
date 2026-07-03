@@ -213,15 +213,6 @@ where
     }
 }
 
-impl IntrospectionRequest {
-    fn is_root_typename_only(&self) -> bool {
-        // `has_schema_introspection` is about __type and __schema,
-        // so if we don't have either of those AND we don't have explicit root fields, we can
-        // assume that we only have `__typename` which is covered by neither.
-        !self.document.has_schema_introspection && !self.document.has_explicit_root_fields
-    }
-}
-
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct IntrospectionCacheKey {
     /// Hash of the GraphQL query against a specific schema.
@@ -361,23 +352,12 @@ impl tower::Service<IntrospectionRequest> for IntrospectionExecutionService {
         let max_depth = self.max_depth;
 
         Box::pin(async move {
-            // Don't go through the heavy-duty compute job pool just to return "Query".
-            let response = if req.is_root_typename_only() {
-                execute_introspection(
-                    // No list field so depth is already known to be zero:
-                    MaxDepth::Ignore,
-                    &req.schema,
-                    &req.document,
-                    req.variables,
-                )
-            } else {
+            Ok(
                 compute_job::execute(ComputeJobType::Introspection, move |_| {
                     execute_introspection(max_depth, &req.schema, &req.document, req.variables)
                 })?
-                .await
-            };
-
-            Ok(response)
+                .await,
+            )
         })
     }
 }
