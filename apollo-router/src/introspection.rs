@@ -104,7 +104,8 @@ pub(crate) fn introspection_service(
     }
 }
 
-/// Returns if the document contains an introspection query.
+/// Returns if the document contains an introspection query. If this function returns true, it is
+/// appropriate to use the introspection service to resolve the query.
 ///
 /// That is:
 /// - The operation is a query operation, AND:
@@ -112,7 +113,12 @@ pub(crate) fn introspection_service(
 ///
 /// Notably, { __typename } is not considered an introspection query.
 pub(crate) fn is_introspection_query(document: &ParsedDocument) -> bool {
-    document.operation.is_query() && document.has_schema_introspection
+    let operation = &document.operation;
+
+    operation.is_query()
+        && operation
+            .root_fields(&document.executable)
+            .any(|field| matches!(field.name.as_str(), "__schema" | "__type"))
 }
 
 /// Terminal service for GraphQL introspection queries that always returns an error saying
@@ -194,7 +200,15 @@ where
     }
 
     fn call(&mut self, req: IntrospectionRequest) -> Self::Future {
-        if req.document.has_schema_introspection && req.document.has_explicit_root_fields {
+        let operation = &req.document.operation;
+
+        // We should only receive an IntrospectionRequest if the operation was already determined to
+        // contain introspection fields. So, we only have to check if it contains any
+        // _non-introspection_ fields to decide if it's a mixed operation.
+        if operation
+            .root_fields(&req.document.executable)
+            .any(|field| !matches!(field.name.as_str(), "__typename" | "__schema" | "__type"))
+        {
             let error = graphql::Error::builder()
                 .message(
                     "\
