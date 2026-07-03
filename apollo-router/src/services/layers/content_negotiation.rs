@@ -4,6 +4,7 @@
 
 use std::ops::ControlFlow;
 
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::Method;
@@ -69,7 +70,7 @@ where
     fn layer(&self, service: S) -> Self::Service {
         AsyncCheckpointService::new(
             move |req| {
-                Box::pin(async move {
+                async move {
                     if req.router_request.method() != Method::GET
                         && !content_type_is_json(req.router_request.headers())
                     {
@@ -154,11 +155,8 @@ where
 
                         Ok(ControlFlow::Break(response.into()))
                     }
-                })
-                    as BoxFuture<
-                        'static,
-                        Result<ControlFlow<router::Response, router::Request>, BoxError>,
-                    >
+                }
+                .boxed()
             },
             service,
         )
