@@ -7,9 +7,10 @@ use tower::Service;
 
 use crate::graphql;
 use crate::plugins::limits::RouterLimitsConfig;
+use crate::plugins::limits::operation_limits;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 /// Layer that enforces operation limits and rejects GraphQL requests that exceed the limits.
 ///
@@ -80,7 +81,7 @@ where
             panic!("No document?");
         };
         let mut query_metrics = OperationLimits::default();
-        let result = crate::spec::operation_limits::check(
+        let result = crate::plugins::limits::operation_limits::check(
             &mut query_metrics,
             &self.config,
             &document.executable,

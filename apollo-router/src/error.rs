@@ -21,8 +21,8 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::limits::operation_limits::OperationLimits;
 use crate::spec::SpecError;
-use crate::spec::operation_limits::OperationLimits;
 
 /// Return up to this many GraphQL parsing or validation errors.
 ///

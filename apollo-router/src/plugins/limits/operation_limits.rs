@@ -7,7 +7,7 @@ use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::plugins::limits;
+use super::RouterLimitsConfig;
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
@@ -58,7 +58,7 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
-    config_limits: &limits::RouterLimitsConfig,
+    config_limits: &RouterLimitsConfig,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
