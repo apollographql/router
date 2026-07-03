@@ -7,8 +7,6 @@ use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::RouterLimitsConfig;
-
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
@@ -58,17 +56,10 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
-    config_limits: &RouterLimitsConfig,
+    max: OperationLimits<Option<u32>>,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
-    let max = OperationLimits {
-        depth: config_limits.max_depth,
-        height: config_limits.max_height,
-        root_fields: config_limits.max_root_fields,
-        aliases: config_limits.max_aliases,
-    };
-
     let Ok(operation) = document.operations.get(operation_name) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
@@ -112,9 +103,8 @@ pub(crate) fn check(
             "request exceeded complexity limits: {message}, \
             query: {query:?}, operation name: {operation_name:?}"
         );
-        if !config_limits.warn_only {
-            return Err(exceeded);
-        }
+
+        return Err(exceeded);
     }
     Ok(())
 }

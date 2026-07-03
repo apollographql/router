@@ -81,9 +81,16 @@ where
             panic!("No document?");
         };
         let mut query_metrics = OperationLimits::default();
-        let result = crate::plugins::limits::operation_limits::check(
+
+        let max = OperationLimits {
+            depth: self.config.max_depth,
+            height: self.config.max_height,
+            root_fields: self.config.max_root_fields,
+            aliases: self.config.max_aliases,
+        };
+        let result = operation_limits::check(
             &mut query_metrics,
-            &self.config,
+            max,
             &document.executable,
             operation_name,
         );
@@ -99,6 +106,7 @@ where
             root_fields,
             aliases,
         }) = result
+            && !self.config.warn_only
         {
             let mut errors = Vec::new();
             let mut build = |exceeded, code, message| {
