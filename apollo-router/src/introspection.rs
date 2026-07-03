@@ -46,7 +46,6 @@ fn introspection_mode(configuration: &Configuration) -> Mode {
             DEFAULT_INTROSPECTION_CACHE_CAPACITY,
             "introspection",
         ));
-        storage.activate();
         Mode::Enabled {
             storage,
             max_depth: if configuration.limits.router.introspection_max_depth {
@@ -70,6 +69,9 @@ pub(crate) struct IntrospectionRequest {
     pub(crate) variables: Object,
 }
 
+/// In-memory cache storage for introspection.
+pub(crate) type IntrospectionCache = Arc<CacheStorage<IntrospectionCacheKey, graphql::Response>>;
+
 /// A terminal service that handles (partial) execution of introspection.
 pub(crate) type IntrospectionService =
     BoxCloneService<IntrospectionRequest, graphql::Response, ComputeBackPressureError>;
@@ -78,17 +80,27 @@ pub(crate) type IntrospectionService =
 ///
 /// If introspection is disabled in config, always returns an error response.
 /// If a query contains both introspection and concrete fields, returns an error response.
-pub(crate) fn introspection_service(configuration: &Configuration) -> IntrospectionService {
+///
+/// Returns the cache object separately for telemetry activation.
+pub(crate) fn introspection_service(
+    configuration: &Configuration,
+) -> (IntrospectionService, Option<IntrospectionCache>) {
+    let builder = ServiceBuilder::new().layer(RejectMixedIntrospectionLayer::new());
+
     match introspection_mode(configuration) {
-        Mode::Enabled { storage, max_depth } => ServiceBuilder::new()
-            .layer(RejectMixedIntrospectionLayer::new())
-            .layer(IntrospectionCacheLayer::new(storage.clone()))
-            .service(IntrospectionExecutionService::new(max_depth.clone()))
-            .boxed_clone(),
-        Mode::Disabled => ServiceBuilder::new()
-            .layer(RejectMixedIntrospectionLayer::new())
-            .service(IntrospectionDisabledService::new())
-            .boxed_clone(),
+        Mode::Enabled { storage, max_depth } => (
+            builder
+                .layer(IntrospectionCacheLayer::new(storage.clone()))
+                .service(IntrospectionExecutionService::new(max_depth))
+                .boxed_clone(),
+            Some(storage),
+        ),
+        Mode::Disabled => (
+            builder
+                .service(IntrospectionDisabledService::new())
+                .boxed_clone(),
+            None,
+        ),
     }
 }
 
@@ -129,7 +141,7 @@ impl tower::Service<IntrospectionRequest> for IntrospectionDisabledService {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: IntrospectionRequest) -> Self::Future {
+    fn call(&mut self, _req: IntrospectionRequest) -> Self::Future {
         let error = graphql::Error::builder()
             .message(String::from("introspection has been disabled"))
             .extension_code("INTROSPECTION_DISABLED")
@@ -346,7 +358,7 @@ impl tower::Service<IntrospectionRequest> for IntrospectionExecutionService {
     }
 
     fn call(&mut self, req: IntrospectionRequest) -> Self::Future {
-        let max_depth = self.max_depth.clone();
+        let max_depth = self.max_depth;
 
         Box::pin(async move {
             // Don't go through the heavy-duty compute job pool just to return "Query".
@@ -417,6 +429,7 @@ mod tests {
 
     use super::IntrospectionCacheLayer;
     use super::IntrospectionRequest;
+    use super::introspection_service;
     use crate::Configuration;
     use crate::cache::storage::CacheStorage;
     use crate::graphql;
@@ -486,5 +499,61 @@ mod tests {
 
         drop(service);
         crate::plugin::test::await_mock_driver(driver).await;
+    }
+
+    #[tokio::test]
+    async fn test_single_aliased_root_typename() {
+        let mut config = Configuration::default();
+        config.supergraph.introspection = true;
+        let schema =
+            Arc::new(Schema::parse(include_str!("testdata/supergraph.graphql"), &config).unwrap());
+        let query = "{ x: __typename }";
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let (service, _cache) = introspection_service(&config);
+        let response = service
+            .oneshot(IntrospectionRequest {
+                schema,
+                document,
+                variables: Default::default(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.data,
+            Some(serde_json_bytes::json!({
+                "x": "Query",
+            })),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_two_root_typenames() {
+        let mut config = Configuration::default();
+        config.supergraph.introspection = true;
+
+        let schema =
+            Arc::new(Schema::parse(include_str!("testdata/supergraph.graphql"), &config).unwrap());
+        let query = "{ x: __typename __typename }";
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let (service, _cache) = introspection_service(&config);
+        let response = service
+            .oneshot(IntrospectionRequest {
+                schema,
+                document,
+                variables: Default::default(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.data,
+            Some(serde_json_bytes::json!({
+                "x": "Query",
+                "__typename": "Query",
+            })),
+        );
     }
 }

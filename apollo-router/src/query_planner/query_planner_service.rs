@@ -31,11 +31,6 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
 use crate::graphql;
-use crate::introspection::IntrospectionRequest;
-use crate::introspection::IntrospectionService;
-use crate::introspection::introspection_service;
-use crate::introspection::is_introspection_query;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::metrics::meter_provider;
 use crate::plugins::authorization;
@@ -95,7 +90,6 @@ pub(crate) struct QueryPlannerService {
     authorization_config: Arc<authorization::Conf>,
     _federation_instrument: ObservableGauge<u64>,
     signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
-    introspection: IntrospectionService,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -222,18 +216,15 @@ impl QueryPlannerService {
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
-        let introspection = introspection_service(&configuration);
         let planner = Self::create_planner(&schema, &configuration)?;
-        let introspection = Arc::new(IntrospectionCache::new(&configuration));
 
-        Self::new(schema, configuration, planner, introspection)
+        Self::new(schema, configuration, planner)
     }
 
     pub(crate) fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
-        introspection: IntrospectionService,
     ) -> Result<Self, ServiceBuildError> {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
@@ -251,7 +242,6 @@ impl QueryPlannerService {
             configuration,
             _federation_instrument: federation_instrument,
             signature_normalization_algorithm,
-            introspection,
         })
     }
 
@@ -397,7 +387,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             metadata,
             plan_options,
             compute_job_type,
-            variables,
         } = req;
 
         let this = self.clone();
@@ -444,7 +433,6 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     },
                     doc,
                     compute_job_type,
-                    variables,
                 )
                 .await;
 
@@ -476,7 +464,6 @@ impl QueryPlannerService {
         mut key: QueryKey,
         mut doc: ParsedDocument,
         compute_job_type: ComputeJobType,
-        variables: Object,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
@@ -487,25 +474,6 @@ impl QueryPlannerService {
                 &mut query_metrics,
             )
             .await?;
-
-        // TODO(@goto-bus-stop): this is not a query planning concern
-        if is_introspection_query(&doc) {
-            let request = IntrospectionRequest {
-                schema: self.schema.clone(),
-                document: doc,
-                variables,
-            };
-
-            let response = self.introspection
-                .ready()
-                .await?
-                .call(request)
-                .await?;
-
-            return Ok(QueryPlannerContent::CachedIntrospectionResponse {
-                response: Box::new(response),
-            });
-        }
 
         // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
@@ -713,8 +681,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn noop_query_should_produce_empty_plan() {
-        let mut config = Configuration::default();
-        config.supergraph.introspection = true;
+        let config = Configuration::default();
         let config = Arc::new(config);
 
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
@@ -799,87 +766,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_single_aliased_root_typename() {
-        let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        let query = "{ x: __typename }";
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
-            response.content.expect("successful response")
-        {
-            assert_eq!(
-                r#"{"data":{"x":"Query"}}"#,
-                serde_json::to_string(&response).unwrap()
-            )
-        } else {
-            panic!();
-        }
-    }
-
-    #[test(tokio::test)]
-    async fn test_two_root_typenames() {
-        let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        let query = "{ x: __typename __typename }";
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let response = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await
-            .unwrap();
-
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
-            response.content.expect("successful response")
-        {
-            assert_eq!(
-                r#"{"data":{"x":"Query","__typename":"Query"}}"#,
-                serde_json::to_string(&response).unwrap()
-            )
-        } else {
-            panic!();
-        }
-    }
-
-    #[test(tokio::test)]
     async fn test_subselections() {
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration: Configuration = Default::default();
         let configuration = Arc::new(configuration);
 
         let schema = Schema::parse(EXAMPLE_SCHEMA, &configuration).unwrap();
@@ -1138,8 +1026,7 @@ mod tests {
             }
         }
 
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
+        let configuration: Configuration = Default::default();
         let configuration = Arc::new(configuration);
 
         let doc = Query::parse_document(query, None, &planner.schema, &configuration).unwrap();
@@ -1155,7 +1042,6 @@ mod tests {
                 },
                 doc,
                 ComputeJobType::QueryPlanning,
-                Default::default(),
             )
             .await
             .unwrap();
