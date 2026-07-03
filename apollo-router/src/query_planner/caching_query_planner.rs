@@ -722,7 +722,6 @@ mod tests {
     use bytesize::ByteSize;
     use mockall::mock;
     use parking_lot::Mutex;
-    use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
     use tracing::Subscriber;
@@ -1854,33 +1853,27 @@ mod tests {
     // Expect that if we call the CQP twice, the second call will return cached data
     #[test(tokio::test)]
     async fn test_cache_works() {
-        let mut delegate = MockMyQueryPlanner::new();
-        delegate.expect_clone().times(2).returning(|| {
-            let mut planner = MockMyQueryPlanner::new();
-            planner
-                .expect_sync_call()
-                // Don't allow the delegate to be called more than once
-                .times(1)
-                .returning(|_| {
-                    let qp_content = QueryPlannerContent::Response {
-                        response: Box::new(
-                            crate::graphql::Response::builder()
-                                .data(json!(r#"{"data":{"me":{"name":"Ada Lovelace"}}}%"#))
-                                .build(),
-                        ),
-                    };
+        let (mock, mut handle) =
+            tower_test::mock::pair::<QueryPlannerRequest, QueryPlannerResponse>();
+        let driver = tokio::task::spawn(async move {
+            let (_request, responder) = handle
+                .next_request()
+                .await
+                .expect("should receive one request");
 
-                    Ok(QueryPlannerResponse::builder().content(qp_content).build())
-                });
-            planner
+            let content = QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan::fake_new(None, None)),
+            };
+
+            responder.send_response(QueryPlannerResponse::builder().content(content).build());
         });
 
         let configuration = Default::default();
         let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
-        let mut planner = CachingQueryPlanner::for_test(
-            delegate,
+        let mut service = CachingQueryPlanner::for_test(
+            mock.map_err(|err| panic!("tower-test errored: {err}")),
             schema.clone(),
             Default::default(),
             &configuration,
@@ -1888,45 +1881,39 @@ mod tests {
         .await
         .unwrap();
 
-        let doc = Query::parse_document(
-            "query ExampleQuery { me { name } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
+        let query = "query ExampleQuery { me { name } }";
+        let doc = Query::parse_document(query, None, &schema, &configuration).unwrap();
         let context = Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
             ))
             .await
             .unwrap();
 
-        let _ = planner
+        let _ = service
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
-                "query ExampleQuery {
-                  me {
-                    name
-                  }
-                }"
-                .to_string(),
+                query.to_string(),
                 None,
                 context.clone(),
             ))
             .await
             .unwrap();
+
+        drop(service);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[test(tokio::test)]
@@ -1974,6 +1961,9 @@ mod tests {
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
         let r = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
@@ -1987,6 +1977,9 @@ mod tests {
             .await;
 
         let r2 = planner
+            .ready()
+            .await
+            .unwrap()
             .call(query_planner::CachingRequest::new(
                 "query ExampleQuery {
                   me {
