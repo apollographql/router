@@ -9,7 +9,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
-use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
 use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -47,7 +46,6 @@ impl TracingConfigurator for Config {
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
             .batch_processor_config(&self.tracing.batch_processor)
             .errors_configuration(&self.errors)
-            .use_legacy_request_span(matches!(builder.spans().mode, SpanMode::Deprecated))
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         let named_exporter = NamedSpanExporter::new(exporter, "apollo");

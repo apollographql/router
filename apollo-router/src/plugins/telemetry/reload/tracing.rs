@@ -31,12 +31,10 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::Propagation;
 use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::config_new::spans::Spans;
 
 /// Builder for constructing OpenTelemetry tracer providers with multiple exporters
 pub(crate) struct TracingBuilder<'a> {
     common: &'a TracingCommon,
-    spans: &'a Spans,
     builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 }
 
@@ -45,7 +43,6 @@ impl<'a> TracingBuilder<'a> {
         let common = &config.exporters.tracing.common;
         Self {
             common,
-            spans: &config.instrumentation.spans,
             builder: common.configure_tracer_provider_builder(
                 opentelemetry_sdk::trace::SdkTracerProvider::builder(),
             ),
@@ -61,10 +58,6 @@ impl<'a> TracingBuilder<'a> {
 
     pub(crate) fn tracing_common(&self) -> &TracingCommon {
         self.common
-    }
-
-    pub(crate) fn spans(&self) -> &Spans {
-        self.spans
     }
 
     pub(crate) fn with_span_processor<T: SpanProcessor + 'static>(&mut self, span_processor: T) {

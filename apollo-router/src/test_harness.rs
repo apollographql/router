@@ -15,7 +15,6 @@ use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
 use crate::AllowedFeature;
-use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
@@ -401,7 +400,6 @@ impl<'a> TestHarness<'a> {
                 .boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
-                span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
