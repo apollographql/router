@@ -127,10 +127,13 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
-    /// `true` when the walker is inside a `DeferredNode` subtree, `false`
-    /// inside `PlanNode::Defer`'s primary branch or anywhere outside a
-    /// `Defer` node. Propagated to each `FetchRequest` so that subgraph
-    /// telemetry can split primary vs deferred fetches.
+    /// `true` when the fetch's results are delivered in a deferred chunk rather
+    /// than the primary response: inside a `DeferredNode` subtree, or inside a
+    /// `PlanNode::Defer` primary branch that is itself nested under an outer
+    /// `DeferredNode` (the primary branch inherits the enclosing status). `false`
+    /// at the top level and in a top-level `Defer`'s primary branch. Propagated
+    /// to each `FetchRequest` so subgraph telemetry can split primary vs deferred
+    /// fetches.
     pub(crate) is_deferred: bool,
 }
 
@@ -410,7 +413,12 @@ impl PlanNode {
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
                                         subgraph_schemas: parameters.subgraph_schemas,
-                                        is_deferred: false,
+                                        // Inherit the enclosing deferred status rather than
+                                        // resetting to false. This Defer's primary branch is only
+                                        // non-deferred when the Defer itself is not already nested
+                                        // under an outer DeferredNode; a doubly-nested defer keeps
+                                        // is_deferred = true for its primary branch.
+                                        is_deferred: parameters.is_deferred,
                                     },
                                     current_dir,
                                     &value,
