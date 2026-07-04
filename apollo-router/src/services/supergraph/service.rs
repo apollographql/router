@@ -663,6 +663,7 @@ impl PluggableSupergraphServiceBuilder {
         );
 
         Ok(SupergraphCreator {
+            in_memory_query_plan_cache: query_plan_cache.in_memory_cache(),
             query_planner_service,
             schema,
             plugins: self.plugins,
@@ -674,6 +675,8 @@ impl PluggableSupergraphServiceBuilder {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
+    /// A reference to the in-memory query plan cache, kept around so we can peek into it for warm-up
+    in_memory_query_plan_cache: InMemoryQueryPlanCache,
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
@@ -706,7 +709,7 @@ impl SupergraphCreator {
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
-        self.query_planner_service.previous_cache()
+        self.in_memory_query_plan_cache.clone()
     }
 
     pub(crate) async fn warm_up_query_planner(

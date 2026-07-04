@@ -218,10 +218,6 @@ impl<T> CachingQueryPlanner<T> {
             config_limits: configuration.limits.router.clone(),
         })
     }
-
-    pub(crate) fn previous_cache(&self) -> InMemoryQueryPlanCache {
-        self.cache.in_memory_cache()
-    }
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -2424,15 +2420,21 @@ mod tests {
             .unwrap(),
         );
 
-        let create_planner = async |delegate| {
-            CachingQueryPlanner::for_test(
-                delegate,
+        let cache =
+            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+                .await
+                .unwrap();
+        let previous_cache = cache.in_memory_cache();
+
+        let create_planner = async |inner, cache| {
+            CachingQueryPlanner::new(
+                inner,
                 schema.clone(),
                 Default::default(),
                 &configuration,
                 IndexMap::default(),
+                cache,
             )
-            .await
             .unwrap()
         };
 
@@ -2447,21 +2449,25 @@ mod tests {
         };
 
         // send query to caching planner. it should save this query plan in its cache
-        let mut planner = create_planner(create_delegate(1)).await;
-        let response = planner.call(create_request()).await.unwrap();
+        let mut service = create_planner(create_delegate(1), cache).await;
+        let response = service.call(create_request()).await.unwrap();
         assert!(response.content.is_some());
-        assert_eq!(planner.cache.len().await, 1);
+        assert_eq!(service.cache.len().await, 1);
 
         // create and warm up a new planner. new planner's delegate should be called once during
         // the warm-up phase to populate the cache
         let query_analysis_layer =
             QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-        let mut new_planner = create_planner(create_delegate(1)).await;
+        let new_cache =
+            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+                .await
+                .unwrap();
+        let mut new_planner = create_planner(create_delegate(1), new_cache).await;
         new_planner
             .warm_up(
                 &query_analysis_layer,
                 &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                Some(planner.previous_cache()),
+                Some(previous_cache),
                 Some(1),
                 Default::default(),
                 &Default::default(),
