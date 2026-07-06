@@ -226,13 +226,21 @@ impl tower::Service<Request> for ConnectorRequestService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match &mut self.http_client {
+            Some(http_client) => http_client.poll_ready(cx),
+            None => Poll::Ready(Ok(())),
+        }
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        let http_client = self.http_client.clone();
+        // Take the readied client for this call and leave a fresh clone behind so the
+        // next `poll_ready` observes the real client's backpressure again, instead of
+        // reusing a handle whose readiness was already consumed.
+        let http_client = self.http_client.take().inspect(|ready_client| {
+            self.http_client = Some(ready_client.clone());
+        });
 
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =

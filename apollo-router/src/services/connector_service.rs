@@ -29,6 +29,7 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
+use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
@@ -48,13 +49,18 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
 
 /// A service for executing connector requests.
+///
+/// Bound to a single connector (and therefore a single connector source) at construction
+/// time via [`ConnectorServiceFactory::create`], so that `poll_ready` can propagate the
+/// readiness of the one [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
+/// it will actually dispatch to.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
+    pub(crate) connector: Option<Connector>,
+    pub(crate) connector_request_service: Option<ConnectorRequestBoxService>,
 }
 
 /// A reference to a unique Connector source.
@@ -122,21 +128,28 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match &mut self.connector_request_service {
+            Some(inner) => inner.poll_ready(cx),
+            None => Poll::Ready(Ok(())),
+        }
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
-        let connector = self
-            .connectors_by_service_name
-            .get(&request.service_name)
-            .cloned();
-
-        let connector_request_service_factory = self.connector_request_service_factory.clone();
+        let connector = self.connector.clone();
+        // Take the readied inner service for this call and leave a fresh clone behind so
+        // the next `poll_ready` observes real backpressure again, rather than reusing a
+        // handle whose readiness was already consumed.
+        let connector_request_service = self.connector_request_service.take().inspect(|ready| {
+            self.connector_request_service = Some(ready.clone());
+        });
 
         Box::pin(async move {
             let Some(connector) = connector else {
                 return Err("no connector found".into());
+            };
+            let Some(connector_request_service) = connector_request_service else {
+                return Err("no connector request service found".into());
             };
 
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
@@ -177,7 +190,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 span.record("apollo.connector.source.name", source_name.as_str());
             }
 
-            execute(&connector_request_service_factory, request, connector)
+            execute(connector_request_service, request, connector)
                 .instrument(span)
                 .await
         })
@@ -185,13 +198,12 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 }
 
 async fn execute(
-    connector_request_service_factory: &ConnectorRequestServiceFactory,
+    connector_request_service: ConnectorRequestBoxService,
     request: ConnectRequest,
     connector: Connector,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
-    let source_name = connector.source_config_key();
     let debug = &context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
@@ -208,13 +220,8 @@ async fn execute(
     .map_err(BoxError::from)?
     .into_iter()
     .map(move |request| {
-        let source_name = source_name.clone();
-        async move {
-            connector_request_service_factory
-                .create(source_name)
-                .oneshot(request)
-                .await
-        }
+        let connector_request_service = connector_request_service.clone();
+        async move { connector_request_service.oneshot(request).await }
     });
 
     aggregate_responses(
@@ -276,13 +283,24 @@ impl ConnectorServiceFactory {
         )
     }
 
-    pub(crate) fn create(&self) -> BoxCloneService {
+    /// Creates a [`ConnectorService`] bound to the connector registered for `service_name`.
+    ///
+    /// The inner per-source [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
+    /// is resolved once here (rather than on every `call`), so the returned service's
+    /// `poll_ready` reflects that single inner service's real readiness.
+    pub(crate) fn create(&self, service_name: &str) -> BoxCloneService {
+        let connector = self.connectors_by_service_name.get(service_name).cloned();
+        let connector_request_service = connector.as_ref().map(|connector| {
+            self.connector_request_service_factory
+                .create(connector.source_config_key())
+        });
+
         ConnectorService {
             _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
-            connectors_by_service_name: self.connectors_by_service_name.clone(),
-            connector_request_service_factory: self.connector_request_service_factory.clone(),
+            connector,
+            connector_request_service,
         }
         .boxed_clone()
     }
