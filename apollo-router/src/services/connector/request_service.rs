@@ -235,13 +235,9 @@ impl tower::Service<Request> for ConnectorRequestService {
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
-        // Take the readied client for this call and leave a fresh clone behind so the
-        // next `poll_ready` observes the real client's backpressure again, instead of
-        // reusing a handle whose readiness was already consumed.
-        let http_client = self.http_client.take().inspect(|ready_client| {
-            self.http_client = Some(ready_client.clone());
-        });
-
+        let fresh_client = self.http_client.clone();
+        let http_client = std::mem::replace(&mut self.http_client, fresh_client);
+        
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
             request.context.extensions().with_lock(|lock| {
