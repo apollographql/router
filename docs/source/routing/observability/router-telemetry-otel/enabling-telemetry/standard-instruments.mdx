@@ -191,6 +191,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only. Attributes:
   - `planner`: The query planner implementation that produced the plan (for example, `rust`)
   - `outcome`: The result of planning the operation (`success`, `timeout`, `cancelled`, `error`)
+  - `job.type`: The compute-job type that produced the plan (`query_planning` for a regular request, `query_planning_warmup` for query planner warm-up), matching the `job.type` attribute on `apollo.router.compute_jobs.duration`
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
 - `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. Tune the limits as described in [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).

@@ -190,7 +190,7 @@ impl QueryPlannerService {
                 Ok(_) => QueryPlanningOutcome::Success,
                 Err(e) => QueryPlanningOutcome::from(e),
             };
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome);
+            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, outcome, compute_job_type);
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
@@ -655,13 +655,15 @@ pub(crate) fn metric_query_planning_plan_duration(
     planner: &'static str,
     elapsed: f64,
     outcome: QueryPlanningOutcome,
+    compute_job_type: ComputeJobType,
 ) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
         elapsed,
         "planner" = planner,
-        "outcome" = outcome
+        "outcome" = outcome,
+        "job.type" = compute_job_type
     );
 }
 
@@ -1259,12 +1261,32 @@ mod tests {
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
         let elapsed = start.elapsed().as_secs_f64();
-        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, QueryPlanningOutcome::Success);
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanning,
+        );
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
             "planner" = "rust",
-            "outcome" = "success"
+            "outcome" = "success",
+            "job.type" = "query_planning"
+        );
+        // Warm-up planning is distinguished by the `job.type` attribute.
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            elapsed,
+            QueryPlanningOutcome::Success,
+            ComputeJobType::QueryPlanningWarmup,
+        );
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust",
+            "outcome" = "success",
+            "job.type" = "query_planning_warmup"
         );
     }
 

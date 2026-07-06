@@ -8,4 +8,6 @@ Query planner warm-up previously emitted only `apollo.router.query_planning.warm
 
 The `outcome` attribute shares its vocabulary with `apollo.router.query_planning.plan.duration` (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for memory-limit cancellations and `reused` for operations whose plan was carried over from the previous cache instead of planned fresh. Reused operations count toward coverage, so `planned / expected` reaches 1.0 when warm-up fully succeeds via plan reuse on reload.
 
+Additionally, `apollo.router.query_planning.plan.duration` gains a `job.type` attribute (`query_planning` or `query_planning_warmup`, matching `apollo.router.compute_jobs.duration`) so its existing outcome and duration breakdown can be filtered to warm-up vs. regular planning.
+
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/9749
