@@ -6,7 +6,6 @@
 use std::ops::ControlFlow;
 use std::task::Poll;
 
-use bytes::Bytes;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderMap;
@@ -24,8 +23,6 @@ use mediatype::names::JSON;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mime::APPLICATION_JSON;
-use serde_json_bytes::Entry;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -106,91 +103,6 @@ pub(crate) fn get_graphql_content_type(
             GRAPHQL_JSON_RESPONSE_HEADER_VALUE
         ),
     })
-}
-
-pub(crate) fn http_response_to_graphql_response(
-    service_name: &str,
-    content_type: Result<ContentType, FetchError>,
-    body: Option<Result<Bytes, FetchError>>,
-    parts: &Parts,
-) -> graphql::Response {
-    let mut graphql_response = match (content_type, body, parts.status.is_success()) {
-        (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
-        | (Ok(ContentType::ApplicationJson), Some(Ok(body)), true) => {
-            // Application graphql json expects valid graphql response
-            // Application json expects valid graphql response if 2xx
-            tracing::debug_span!("parse_subgraph_response").in_scope(|| {
-                graphql::Response::from_bytes(body).unwrap_or_else(|error| {
-                    let error = FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_owned(),
-                        reason: error.reason,
-                    };
-                    graphql::Response::builder()
-                        .error(error.to_graphql_error(None))
-                        .build()
-                })
-            })
-        }
-        (Ok(ContentType::ApplicationJson), Some(Ok(body)), false) => {
-            // Application json does not expect a valid graphql response if not 2xx.
-            // If parse fails then attach the entire payload as an error
-            tracing::debug_span!("parse_subgraph_response").in_scope(|| {
-                let mut original_response = String::from_utf8_lossy(&body).to_string();
-                if original_response.is_empty() {
-                    original_response = "<empty response body>".into()
-                }
-                graphql::Response::from_bytes(body).unwrap_or_else(|_error| {
-                    graphql::Response::builder()
-                        .error(
-                            FetchError::SubrequestMalformedResponse {
-                                service: service_name.to_string(),
-                                reason: original_response,
-                            }
-                            .to_graphql_error(None),
-                        )
-                        .build()
-                })
-            })
-        }
-        (content_type, body, _) => {
-            // Something went wrong, compose a response with errors if they are present
-            let mut graphql_response = graphql::Response::builder().build();
-            if let Err(err) = content_type {
-                graphql_response.errors.push(err.to_graphql_error(None));
-            }
-            if let Some(Err(err)) = body {
-                graphql_response.errors.push(err.to_graphql_error(None));
-            }
-            graphql_response
-        }
-    };
-
-    // Any errors directly parsed from the response likely won't yet have the service name set,
-    // but we need it for telemetry error counting
-    for err in &mut graphql_response.errors {
-        if let Entry::Vacant(v) = err.extensions.entry("service") {
-            v.insert(json!(service_name));
-        }
-    }
-
-    // Add an error for response codes that are not 2xx
-    if !parts.status.is_success() {
-        let status = parts.status;
-        graphql_response.errors.insert(
-            0,
-            FetchError::SubrequestHttpError {
-                service: service_name.to_string(),
-                status_code: Some(status.as_u16()),
-                reason: format!(
-                    "{}: {}",
-                    status.as_str(),
-                    status.canonical_reason().unwrap_or("Unknown")
-                ),
-            }
-            .to_graphql_error(None),
-        )
-    }
-    graphql_response
 }
 
 /// Sets the outbound `Content-Type` to `application/json` and appends an `Accept` header
@@ -537,7 +449,6 @@ mod tests {
     use tower::ServiceExt as _;
 
     use super::*;
-    use crate::graphql;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
@@ -686,60 +597,5 @@ mod tests {
             .unwrap()
             .into_parts();
         assert!(get_graphql_content_type("svc", &parts).is_err());
-    }
-
-    #[test]
-    fn http_response_to_graphql_response_parses_2xx_graphql_json() {
-        let (parts, body) = http::Response::builder()
-            .status(StatusCode::OK)
-            .body(None)
-            .unwrap()
-            .into_parts();
-        let actual = http_response_to_graphql_response(
-            "svc",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
-        assert_eq!(actual, graphql::Response::builder().build());
-    }
-
-    #[test]
-    fn http_response_to_graphql_response_non_2xx_adds_http_error() {
-        let (parts, body) = http::Response::builder()
-            .status(StatusCode::IM_A_TEAPOT)
-            .body(None)
-            .unwrap()
-            .into_parts();
-        let actual = http_response_to_graphql_response(
-            "svc",
-            Ok(ContentType::ApplicationGraphqlResponseJson),
-            body,
-            &parts,
-        );
-        assert!(!actual.errors.is_empty());
-        assert!(
-            actual.errors[0].message.contains("418"),
-            "expected HTTP 418 error, got: {:?}",
-            actual.errors
-        );
-    }
-
-    #[test]
-    fn http_response_to_graphql_response_non_2xx_application_json_uses_body_as_error() {
-        let payload = r#"{"message":"gone"}"#;
-        let (parts, body) = http::Response::builder()
-            .status(StatusCode::GONE)
-            .body(Some(Ok(Bytes::from(payload))))
-            .unwrap()
-            .into_parts();
-        let actual = http_response_to_graphql_response(
-            "svc",
-            Ok(ContentType::ApplicationJson),
-            body,
-            &parts,
-        );
-        // non-2xx + application/json: unparseable body becomes the error message
-        assert!(!actual.errors.is_empty());
     }
 }

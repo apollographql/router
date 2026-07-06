@@ -19,6 +19,8 @@ use itertools::Itertools;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
+use serde_json_bytes::Entry;
+use serde_json_bytes::json;
 use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Service;
@@ -32,7 +34,6 @@ use super::http::HttpRequest;
 use super::layers::content_negotiation::ContentType;
 use super::layers::content_negotiation::SubgraphContentNegotiationLayer;
 use super::layers::content_negotiation::get_graphql_content_type;
-use super::layers::content_negotiation::http_response_to_graphql_response;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
@@ -225,7 +226,7 @@ pub(crate) async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) = match do_fetch(http_client, &batch_context, &service, request)
+    let (parts, content_type, body) = match do_fetch(http_client, &batch_context, service, request)
         .instrument(subgraph_req_span)
         .await
     {
@@ -260,7 +261,7 @@ pub(crate) async fn process_batch(
     let headers_str = crate::services::header_masking::masked_headers_for_log(
         &batch_context,
         crate::services::header_masking::Direction::Response,
-        Some(&service),
+        Some(service),
         &parts.headers,
     );
 
@@ -340,7 +341,7 @@ pub(crate) async fn process_batch(
         );
 
         let graphql_response =
-            http_response_to_graphql_response(&service, content_type.clone(), body, &parts);
+            http_response_to_graphql_response(service, content_type.clone(), body, &parts);
         graphql_responses.push(graphql_response);
     }
 
@@ -557,14 +558,8 @@ pub(crate) async fn process_batches(
             senders,
         )| async move {
             let listener_count = senders.len();
-            let batch_result = process_batch(
-                http_client,
-                &service,
-                contexts,
-                request,
-                listener_count,
-            )
-            .await;
+            let batch_result =
+                process_batch(http_client, &service, contexts, request, listener_count).await;
 
             notify_batch_query(service, senders, batch_result).await
         },
@@ -824,6 +819,91 @@ async fn call_single_http(
     ))
 }
 
+fn http_response_to_graphql_response(
+    service_name: &str,
+    content_type: Result<ContentType, FetchError>,
+    body: Option<Result<Bytes, FetchError>>,
+    parts: &Parts,
+) -> graphql::Response {
+    let mut graphql_response = match (content_type, body, parts.status.is_success()) {
+        (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
+        | (Ok(ContentType::ApplicationJson), Some(Ok(body)), true) => {
+            // Application graphql json expects valid graphql response
+            // Application json expects valid graphql response if 2xx
+            tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|error| {
+                    let error = FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_owned(),
+                        reason: error.reason,
+                    };
+                    graphql::Response::builder()
+                        .error(error.to_graphql_error(None))
+                        .build()
+                })
+            })
+        }
+        (Ok(ContentType::ApplicationJson), Some(Ok(body)), false) => {
+            // Application json does not expect a valid graphql response if not 2xx.
+            // If parse fails then attach the entire payload as an error
+            tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                let mut original_response = String::from_utf8_lossy(&body).to_string();
+                if original_response.is_empty() {
+                    original_response = "<empty response body>".into()
+                }
+                graphql::Response::from_bytes(body).unwrap_or_else(|_error| {
+                    graphql::Response::builder()
+                        .error(
+                            FetchError::SubrequestMalformedResponse {
+                                service: service_name.to_string(),
+                                reason: original_response,
+                            }
+                            .to_graphql_error(None),
+                        )
+                        .build()
+                })
+            })
+        }
+        (content_type, body, _) => {
+            // Something went wrong, compose a response with errors if they are present
+            let mut graphql_response = graphql::Response::builder().build();
+            if let Err(err) = content_type {
+                graphql_response.errors.push(err.to_graphql_error(None));
+            }
+            if let Some(Err(err)) = body {
+                graphql_response.errors.push(err.to_graphql_error(None));
+            }
+            graphql_response
+        }
+    };
+
+    // Any errors directly parsed from the response likely won't yet have the service name set,
+    // but we need it for telemetry error counting
+    for err in &mut graphql_response.errors {
+        if let Entry::Vacant(v) = err.extensions.entry("service") {
+            v.insert(json!(service_name));
+        }
+    }
+
+    // Add an error for response codes that are not 2xx
+    if !parts.status.is_success() {
+        let status = parts.status;
+        graphql_response.errors.insert(
+            0,
+            FetchError::SubrequestHttpError {
+                service: service_name.to_string(),
+                status_code: Some(status.as_u16()),
+                reason: format!(
+                    "{}: {}",
+                    status.as_str(),
+                    status.canonical_reason().unwrap_or("Unknown")
+                ),
+            }
+            .to_graphql_error(None),
+        )
+    }
+    graphql_response
+}
+
 async fn do_fetch(
     mut client: crate::services::http::BoxCloneService,
     context: &Context,
@@ -1023,7 +1103,6 @@ mod tests {
     use crate::services::layers::content_negotiation::ContentType;
     use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
     use crate::services::layers::content_negotiation::SubgraphContentNegotiationService;
-    use crate::services::layers::content_negotiation::http_response_to_graphql_response;
     use crate::services::router;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
