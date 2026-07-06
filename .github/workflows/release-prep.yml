@@ -16,7 +16,7 @@
 # Defaults to **dry-run**: prepares, diffs, logs auto-tag would-do — does
 # not commit, push, or open a PR unless explicitly opted in.
 
-name: Test release prep
+name: Release: prep
 
 on:
   workflow_dispatch:
@@ -340,39 +340,24 @@ jobs:
           fi
           git push "$REMOTE_URL" "$PREP_BRANCH"
 
-      - name: Extract this release's CHANGELOG section
-        if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
-        run: |
-          perl -0777 \
-            -sne 'print "$1\n" if m{
-              (?:\#\s\[v?\Q$version\E\]\s.*?\n$)
-              \s*
-              (.*?)
-              \s*
-              (?=^\#\s\[[^\]]+\]\s)
-            }msx' -- \
-              -version="${{ steps.vars.outputs.version }}" \
-              CHANGELOG.md > this_release.md
-
       - name: Open prep PR (final release)
         if: steps.vars.outputs.dry_run != 'true' && steps.vars.outputs.pre_release != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION='${{ steps.vars.outputs.version }}'
+          CHANGELOG_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${PREP_BRANCH}/CHANGELOG.md"
           BODY=$(cat <<EOF
           > **Note**
           >
           > When approved, this PR will merge into **the \`$VERSION\` branch** which will — upon being approved itself — merge into \`main\`.
           >
           > **Things to review in this PR**:
-          >  - Changelog correctness (preview below; see _Files Changed_ for the true reality)
-          >  - Version bumps
+          >  - **[Rendered \`CHANGELOG.md\` on this branch]($CHANGELOG_URL)** — the new \`v$VERSION\` section is at the top
+          >  - Version bumps (see _Files Changed_ for the true reality)
           >  - That it targets the right release branch (\`$VERSION\` in this case!)
           >
           > Opened automatically by the \`test-release-prep\` workflow.
-          ---
-          $(cat this_release.md)
           EOF
           )
           gh pr create \
