@@ -931,9 +931,6 @@ impl SubgraphServiceFactory {
         for (name, service) in services.into_iter() {
             // We have to do a little dance here to insert the subscription and APQ layers at the
             // right place: *after* all user plugins, but *before* the subgraph service proper.
-            // SubgraphLayer sits closest to the inner SubgraphService so that per-request
-            // Accept/Content-Type headers are injected right before HTTP dispatch, and so that
-            // APQ retries (which re-call the inner service) still go out with those headers set.
             let apq_enabled = apq_config.get(&name).enabled;
 
             let inner_service = ServiceBuilder::new()
