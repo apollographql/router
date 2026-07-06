@@ -196,8 +196,8 @@ pub(crate) fn http_response_to_graphql_response(
 /// Sets the outbound `Content-Type` to `application/json` and appends an `Accept` header
 /// advertising support for both GraphQL-over-HTTP response media types.
 ///
-/// Used by [`SubgraphLayer`]. Batched subgraph requests get these headers too, since each request
-/// making up a batch passes through `SubgraphLayer` before being diverted into batching.
+/// Used by [`SubgraphContentNegotiationLayer`]. Batched subgraph requests get these headers too, since each request
+/// making up a batch passes through `SubgraphContentNegotiationLayer` before being diverted into batching.
 pub(crate) fn inject_subgraph_request_headers(headers: &mut HeaderMap) {
     headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     headers.append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
@@ -207,9 +207,9 @@ pub(crate) fn inject_subgraph_request_headers(headers: &mut HeaderMap) {
 /// requests. Content-type validation and HTTP-to-GraphQL response conversion still happen inline
 /// in the subgraph service, since they operate on the response side rather than the request.
 #[derive(Clone, Default)]
-pub(crate) struct SubgraphLayer {}
+pub(crate) struct SubgraphContentNegotiationLayer {}
 
-impl<S> Layer<S> for SubgraphLayer
+impl<S> Layer<S> for SubgraphContentNegotiationLayer
 where
     S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
         + Clone
@@ -272,9 +272,9 @@ where
 /// # Context
 /// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
 #[derive(Clone, Default)]
-pub(crate) struct RouterLayer {}
+pub(crate) struct RouterContentNegotiationLayer {}
 
-impl<S> Layer<S> for RouterLayer
+impl<S> Layer<S> for RouterContentNegotiationLayer
 where
     S: Service<router::Request, Response = router::Response, Error = BoxError>
         + Send
@@ -386,13 +386,13 @@ where
 /// A layer for the supergraph service that populates the Content-Type response header.
 ///
 /// The content type is decided based on the [`ClientRequestAccepts`] context value, which is
-/// populated by the content negotiation [`RouterLayer`].
+/// populated by the content negotiation [`RouterContentNegotiationLayer`].
 // XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
 // with JSON, but maybe this should be done as close as possible to where we populate the response body..?
 #[derive(Clone, Default)]
-pub(crate) struct SupergraphLayer {}
+pub(crate) struct SupergraphContentNegotiationLayer {}
 
-impl<S> Layer<S> for SupergraphLayer
+impl<S> Layer<S> for SupergraphContentNegotiationLayer
 where
     S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
         + Send
@@ -632,7 +632,7 @@ mod tests {
             async move { Ok::<_, tower::BoxError>(SubgraphResponse::fake_builder().build()) }
         });
 
-        let mut svc = SubgraphLayer::default().layer(inner);
+        let mut svc = SubgraphContentNegotiationLayer::default().layer(inner);
         let req = SubgraphRequest::fake_builder().build();
         svc.ready().await.unwrap().call(req).await.unwrap();
 

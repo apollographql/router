@@ -627,7 +627,7 @@ impl PluggableSupergraphServiceBuilder {
         // by traffic-shaping and other plugins (see ServiceBuilderExt::buffered).
         let sb = UnconstrainedBuffer::new(
             ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphLayer::default())
+                .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
                 .service(
                     self.plugins
                         .iter()

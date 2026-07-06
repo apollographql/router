@@ -30,7 +30,7 @@ use tracing::instrument;
 use super::Plugins;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::ContentType;
-use super::layers::content_negotiation::SubgraphLayer;
+use super::layers::content_negotiation::SubgraphContentNegotiationLayer;
 use super::layers::content_negotiation::get_graphql_content_type;
 use super::layers::content_negotiation::http_response_to_graphql_response;
 use super::router::body::RouterBody;
@@ -943,7 +943,7 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .layer(SubgraphApqLayer::new(apq_enabled))
-                .layer(SubgraphLayer::default())
+                .layer(SubgraphContentNegotiationLayer::default())
                 .service(service)
                 .boxed_clone();
 
@@ -1451,7 +1451,7 @@ mod tests {
     fn with_content_negotiation_layer(
         s: SubgraphService,
     ) -> SubgraphContentNegotiationService<SubgraphService> {
-        SubgraphLayer::default().layer(s)
+        SubgraphContentNegotiationLayer::default().layer(s)
     }
 
     /// Manually rebuilds the production layer stack (Subscription -> APQ -> SubgraphLayer ->
