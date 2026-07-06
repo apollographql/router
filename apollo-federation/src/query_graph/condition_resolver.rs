@@ -146,11 +146,20 @@ impl ConditionResolverCache {
 
         if let Some(entries) = self.edge_states.get(&edge) {
             for cached in entries {
-                let context_match = &cached.context == context;
-                let destinations_match = &cached.excluded_destinations == excluded_destinations;
-                let conditions_match = &cached.excluded_conditions == excluded_conditions;
+                if &cached.context != context {
+                    continue;
+                }
 
-                if context_match && destinations_match && conditions_match {
+                let conditions_match = &cached.excluded_conditions == excluded_conditions;
+                // Both normal equality and the superset check require iterating the elements of
+                // the excluded destinations, so we can combine them into a single check to avoid
+                // iterating twice.
+                let destinations_superset =
+                    excluded_destinations.is_superset_of(&cached.excluded_destinations);
+                let destinations_match = destinations_superset
+                    && excluded_destinations.len() == cached.excluded_destinations.len();
+
+                if destinations_match && conditions_match {
                     return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
                 }
 
@@ -159,14 +168,9 @@ impl ConditionResolverCache {
                 // available and the cached result is valid. We require exact match on
                 // excluded conditions because fewer condition exclusions could open up
                 // better paths that weren't explored when the cached result was computed.
-                if context_match
-                    && conditions_match
-                    && cached.resolution.is_satisfied()
-                    && excluded_destinations.is_superset_of(&cached.excluded_destinations)
-                {
-                    let path_does_not_traverse_excluded = cached.used_subgraphs.is_empty()
-                        || !excluded_destinations
-                            .any_excluded(|dest| cached.used_subgraphs.contains(dest));
+                if conditions_match && destinations_superset && cached.resolution.is_satisfied() {
+                    let path_does_not_traverse_excluded = !excluded_destinations
+                        .any_excluded(|dest| cached.used_subgraphs.contains(dest));
                     if path_does_not_traverse_excluded {
                         return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
                     }

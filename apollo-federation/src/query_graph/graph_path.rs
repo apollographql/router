@@ -243,8 +243,13 @@ impl ExcludedDestinations {
             .any(|excluded| excluded.as_ref() == destination)
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn is_superset_of(&self, other: &ExcludedDestinations) -> bool {
-        other.0.iter().all(|d| self.is_excluded(d))
+        Arc::ptr_eq(&self.0, &other.0)
+            || (self.len() >= other.len() && other.0.iter().all(|d| self.is_excluded(d)))
     }
 
     pub(crate) fn any_excluded(&self, mut f: impl FnMut(&str) -> bool) -> bool {
