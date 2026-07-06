@@ -429,3 +429,121 @@ fn replace_subgraph_name(err: BoxError, connector: &Connector) -> BoxError {
         Err(e) => e,
     }
 }
+
+#[cfg(test)]
+mod backpressure_tests {
+    use std::future::poll_fn;
+    use std::task::Poll;
+
+    use apollo_compiler::name;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectHttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use tower::Service;
+
+    use super::*;
+
+    /// A minimal `Request` whose `TransportRequest::Http` actually drives the http client.
+    fn make_request(ctx: Context) -> Request {
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            label: "test label".into(),
+        };
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let http_request = ConnectHttpRequest {
+            inner: http::Request::builder().body("{}".to_string()).unwrap(),
+            debug: Default::default(),
+        };
+        Request {
+            context: ctx,
+            connector: Arc::new(connector),
+            transport_request: http_request.into(),
+            key,
+            mapping_problems: Default::default(),
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .body(crate::graphql::Request::builder().build())
+                    .expect("valid request"),
+            ),
+            operation: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn poll_ready_is_pending_until_http_client_is_ready() {
+        let (mock, mut handle) = tower_test::mock::pair::<
+            crate::services::http::HttpRequest,
+            crate::services::http::HttpResponse,
+        >();
+        // The mock defaults to unbounded readiness; force it not-ready so we can
+        // observe the pending state propagate.
+        handle.allow(0);
+
+        let mut service = ConnectorRequestService {
+            http_client: Some(mock.boxed_clone()),
+        };
+
+        poll_fn(|cx| {
+            assert!(
+                service.poll_ready(cx).is_pending(),
+                "poll_ready should stay pending while the http client isn't ready"
+            );
+            Poll::Ready(())
+        })
+        .await;
+
+        handle.allow(1);
+
+        poll_fn(|cx| {
+            assert!(
+                matches!(service.poll_ready(cx), Poll::Ready(Ok(()))),
+                "poll_ready should become ready once the http client accepts a permit"
+            );
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn poll_ready_is_always_ready_without_an_http_client() {
+        let mut service = ConnectorRequestService { http_client: None };
+
+        poll_fn(|cx| {
+            assert!(matches!(service.poll_ready(cx), Poll::Ready(Ok(()))));
+            Poll::Ready(())
+        })
+        .await;
+    }
+}
