@@ -1462,14 +1462,15 @@ mod tests {
     ) -> SubscriptionSubgraphService<
         SubgraphApqService<SubgraphContentNegotiationService<SubgraphService>>,
     > {
-        let service_name = Arc::from(s.service.to_string());
-        let apq_service = SubgraphApqLayer::new(false).layer(with_content_negotiation_layer(s));
-        SubscriptionSubgraphLayer::new(
-            Notify::builder().build(),
-            Some(Arc::new(subscription_config())),
-            service_name,
-        )
-        .layer(apq_service)
+        ServiceBuilder::new()
+            .layer(SubscriptionSubgraphLayer::new(
+                Notify::builder().build(),
+                Some(Arc::new(subscription_config())),
+                Arc::from(s.service.to_string()),
+            ))
+            .layer(SubgraphApqLayer::new(false))
+            .layer(SubgraphContentNegotiationLayer::default())
+            .service(s)
     }
 
     fn supergraph_request(query: &str) -> Arc<http::Request<Request>> {
