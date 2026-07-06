@@ -21,7 +21,6 @@ use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use tokio::sync::oneshot;
 use tower::BoxError;
-use tower::Layer as _;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -937,10 +936,6 @@ impl SubgraphServiceFactory {
             // APQ retries (which re-call the inner service) still go out with those headers set.
             let apq_enabled = apq_config.get(&name).enabled;
 
-            let content_negotiation_service = SubgraphLayer::default()
-                .layer(service.clone())
-                .boxed_clone();
-
             let inner_service = ServiceBuilder::new()
                 .layer(SubscriptionSubgraphLayer::new(
                     notify.clone(),
@@ -948,7 +943,8 @@ impl SubgraphServiceFactory {
                     Arc::from(name.clone()),
                 ))
                 .layer(SubgraphApqLayer::new(apq_enabled))
-                .service(content_negotiation_service)
+                .layer(SubgraphLayer::default())
+                .service(service)
                 .boxed_clone();
 
             // One buffer per named subgraph provides per-subgraph backpressure and is
