@@ -187,7 +187,10 @@ impl ConnectorRequestServiceFactory {
             let service = UnconstrainedBuffer::new(
                 plugins.iter().rev().fold(
                     ConnectorRequestService {
-                        http_client: http_clients.get(source).cloned(),
+                        http_client: http_clients
+                            .get(source)
+                            .cloned()
+                            .expect("http client service should exist for every connector source"),
                     }
                     .boxed_clone(),
                     |acc, (_, e)| e.connector_request_service(acc, source.clone()),
@@ -218,7 +221,7 @@ pub(crate) struct ConnectorRequestService {
     /// plugin layers already folded in. Each `ConnectorRequestService`
     /// instance only handles requests for a single source, so we store
     /// just the one client it needs.
-    pub(crate) http_client: Option<crate::services::http::BoxCloneService>,
+    pub(crate) http_client: crate::services::http::BoxCloneService,
 }
 
 impl tower::Service<Request> for ConnectorRequestService {
@@ -227,17 +230,14 @@ impl tower::Service<Request> for ConnectorRequestService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match &mut self.http_client {
-            Some(http_client) => http_client.poll_ready(cx),
-            None => Poll::Ready(Ok(())),
-        }
+        self.http_client.poll_ready(cx)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
         let fresh_client = self.http_client.clone();
         let http_client = std::mem::replace(&mut self.http_client, fresh_client);
-        
+
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
             request.context.extensions().with_lock(|lock| {
@@ -311,26 +311,22 @@ impl tower::Service<Request> for ConnectorRequestService {
                             &original_subgraph_name,
                         );
 
-                        let result = if let Some(http_client) = http_client {
-                            let (parts, body) = http_request.inner.into_parts();
-                            let http_request =
-                                http::Request::from_parts(parts, router::body::from_bytes(body));
+                        let (parts, body) = http_request.inner.into_parts();
+                        let http_request =
+                            http::Request::from_parts(parts, router::body::from_bytes(body));
 
-                            http_client
-                                .oneshot(crate::services::http::HttpRequest {
-                                    http_request,
-                                    context: request.context.clone(),
-                                })
-                                .await
-                                .map(|result| result.http_response)
-                                .map_err(|e|
-                                    // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                    // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                    Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                                )
-                        } else {
-                            Err(Error::TransportFailure("no http client found".into()))
-                        };
+                        let result = http_client
+                            .oneshot(crate::services::http::HttpRequest {
+                                http_request,
+                                context: request.context.clone(),
+                            })
+                            .await
+                            .map(|result| result.http_response)
+                            .map_err(|e|
+                                // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                                // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                                Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
+                            );
 
                         u64_counter!(
                             "apollo.router.operations.connectors",
@@ -431,71 +427,9 @@ mod backpressure_tests {
     use std::future::poll_fn;
     use std::task::Poll;
 
-    use apollo_compiler::name;
-    use apollo_federation::connectors::ConnectId;
-    use apollo_federation::connectors::ConnectSpec;
-    use apollo_federation::connectors::Connector;
-    use apollo_federation::connectors::HttpJsonTransport;
-    use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectHttpRequest;
-    use apollo_federation::connectors::runtime::key::ResponseKey;
     use tower::Service;
 
     use super::*;
-
-    /// A minimal `Request` whose `TransportRequest::Http` actually drives the http client.
-    fn make_request(ctx: Context) -> Request {
-        let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            schema_subtypes_map: Default::default(),
-            id: ConnectId::new(
-                "subgraph_name".into(),
-                None,
-                name!(Query),
-                name!(hello),
-                None,
-                0,
-            ),
-            transport: Some(HttpJsonTransport {
-                source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            }),
-            selection: JSONSelection::parse("$.data").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            batch_settings: None,
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            request_variable_keys: Default::default(),
-            response_variable_keys: Default::default(),
-            error_settings: Default::default(),
-            label: "test label".into(),
-        };
-        let key = ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        };
-        let http_request = ConnectHttpRequest {
-            inner: http::Request::builder().body("{}".to_string()).unwrap(),
-            debug: Default::default(),
-        };
-        Request {
-            context: ctx,
-            connector: Arc::new(connector),
-            transport_request: http_request.into(),
-            key,
-            mapping_problems: Default::default(),
-            supergraph_request: Arc::new(
-                http::Request::builder()
-                    .body(crate::graphql::Request::builder().build())
-                    .expect("valid request"),
-            ),
-            operation: Default::default(),
-        }
-    }
 
     #[tokio::test]
     async fn poll_ready_is_pending_until_http_client_is_ready() {
@@ -508,7 +442,7 @@ mod backpressure_tests {
         handle.allow(0);
 
         let mut service = ConnectorRequestService {
-            http_client: Some(mock.boxed_clone()),
+            http_client: mock.boxed_clone(),
         };
 
         poll_fn(|cx| {
@@ -527,17 +461,6 @@ mod backpressure_tests {
                 matches!(service.poll_ready(cx), Poll::Ready(Ok(()))),
                 "poll_ready should become ready once the http client accepts a permit"
             );
-            Poll::Ready(())
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn poll_ready_is_always_ready_without_an_http_client() {
-        let mut service = ConnectorRequestService { http_client: None };
-
-        poll_fn(|cx| {
-            assert!(matches!(service.poll_ready(cx), Poll::Ready(Ok(()))));
             Poll::Ready(())
         })
         .await;

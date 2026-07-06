@@ -137,12 +137,11 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
         let connector = self.connector.clone();
-        // Take the readied inner service for this call and leave a fresh clone behind so
-        // the next `poll_ready` observes real backpressure again, rather than reusing a
-        // handle whose readiness was already consumed.
-        let connector_request_service = self.connector_request_service.take().inspect(|ready| {
-            self.connector_request_service = Some(ready.clone());
-        });
+        let fresh_connector_request_service = self.connector_request_service.clone();
+        let connector_request_service = std::mem::replace(
+            &mut self.connector_request_service,
+            fresh_connector_request_service,
+        );
 
         Box::pin(async move {
             let Some(connector) = connector else {
