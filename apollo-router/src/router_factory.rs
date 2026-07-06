@@ -32,7 +32,6 @@ use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
-use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
@@ -266,10 +265,10 @@ impl YamlRouterFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
-        let mut supergraph_creator = self
+        let supergraph_creator = self
             .inner_create_supergraph(
                 configuration.clone(),
-                schema,
+                schema.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -278,46 +277,22 @@ impl YamlRouterFactory {
             .await?;
 
         // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+        let query_analysis_layer = QueryAnalysisLayer::new(schema, configuration.clone()).await;
 
         let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
-        if let Some(previous_router) = previous_router {
-            let previous_cache = previous_router.previous_cache();
+        supergraph_creator
+            .warm_up_query_planner(
+                Arc::new(query_analysis_layer.clone()),
+                &persisted_query_layer,
+                previous_router.map(|previous| previous.previous_cache()),
+                configuration.supergraph.query_planning.warmed_up_queries,
+                &configuration
+                    .persisted_queries
+                    .experimental_prewarm_query_plan_cache,
+            )
+            .await;
 
-            supergraph_creator
-                .warm_up_query_planner(
-                    &query_analysis_layer,
-                    &persisted_query_layer,
-                    Some(previous_cache),
-                    configuration.supergraph.query_planning.warmed_up_queries,
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_reuse_query_plans,
-                    &configuration
-                        .persisted_queries
-                        .experimental_prewarm_query_plan_cache,
-                )
-                .await;
-        } else {
-            supergraph_creator
-                .warm_up_query_planner(
-                    &query_analysis_layer,
-                    &persisted_query_layer,
-                    None,
-                    configuration.supergraph.query_planning.warmed_up_queries,
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_reuse_query_plans,
-                    &configuration
-                        .persisted_queries
-                        .experimental_prewarm_query_plan_cache,
-                )
-                .await;
-        };
         RouterCreator::new(
             query_analysis_layer,
             persisted_query_layer,

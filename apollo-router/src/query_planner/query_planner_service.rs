@@ -347,6 +347,8 @@ impl QueryPlannerService {
                 plan_options,
                 compute_job_type,
                 |root_node| {
+                    // XXX(@goto-bus-stop): Maybe we can use the `QueryPlanner::subgraph_schemas`
+                    // type here directly to avoid having this additional subgraph_schemas field
                     root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
                     root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                     Ok(())

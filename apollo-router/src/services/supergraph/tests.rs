@@ -3744,3 +3744,103 @@ async fn invalid_input_enum() {
 
     insta::assert_json_snapshot!(response);
 }
+
+/* TODO(@goto-bus-stop): Finish porting this test!
+#[tokio::test]
+async fn test_cache_warmup() {
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::query_planner::QueryPlan;
+    use crate::query_planner::CachingQueryPlanner;
+    use crate::services::query_planner;
+    use crate::services::QueryPlannerContent;
+    use crate::services::QueryPlannerResponse;
+
+    let (mock, handle) = tower_test::mock::pair();
+    let driver = tokio::spawn(async move {
+        let (request, responder) = handle.next_request().await.expect("should receive one request");
+
+        let plan = Arc::new(QueryPlan::fake_new(None, None));
+        responder.send_response(QueryPlannerResponse::builder()
+            .content(QueryPlannerContent::Plan { plan })
+            .build());
+    });
+
+    let configuration = Configuration::default();
+    let schema = Arc::new(
+        Schema::parse(
+            include_str!("../testdata/starstuff@current.graphql"),
+            &configuration,
+        )
+        .unwrap(),
+    );
+
+    let builder = PluggableSupergraphServiceBuilder::new(
+        mock,
+        schema,
+        subgraph_schemas,
+    );
+
+    let cache =
+        CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+        .await
+        .unwrap();
+    let previous_cache = cache.in_memory_cache();
+
+    let create_planner = async |inner, cache| {
+        CachingQueryPlanner::new(
+            inner,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            cache,
+        )
+            .unwrap()
+    };
+
+    let create_request = || {
+        let query_str = "query ExampleQuery { me { name } }".to_string();
+        let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        query_planner::CachingRequest::new(query_str, None, context)
+    };
+
+    // send query to caching planner. it should save this query plan in its cache
+    let mut service = create_planner(create_delegate(1), cache).await;
+    let response = service.call(create_request()).await.unwrap();
+    assert!(response.content.is_some());
+    assert_eq!(service.cache.len().await, 1);
+
+    // create and warm up a new planner. new planner's delegate should be called once during
+    // the warm-up phase to populate the cache
+    let query_analysis_layer =
+        QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+    let new_cache =
+        CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
+        .await
+        .unwrap();
+    let mut new_planner = create_planner(create_delegate(1), new_cache).await;
+    new_planner
+        .warm_up(
+            &query_analysis_layer,
+            &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+            Some(previous_cache),
+            Some(1),
+            Default::default(),
+            &Default::default(),
+        )
+        .await;
+    // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(new_planner.cache.len().await, 1);
+
+    // create a new delegate that _shouldn't_ be called since the new planner already has the
+    // result in its cache
+    new_planner.delegate = create_delegate(0);
+    let response = new_planner.call(create_request()).await.unwrap();
+    assert!(response.content.is_some());
+    assert_eq!(new_planner.cache.len().await, 1);
+}
+*/

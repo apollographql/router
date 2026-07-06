@@ -45,6 +45,7 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryQueryPlanCache;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::SubgraphSchemas;
+use crate::query_planner::warmup;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerContent;
@@ -541,7 +542,6 @@ impl PluggableSupergraphServiceBuilder {
             schema.clone(),
             subgraph_schemas.clone(),
             &configuration,
-            IndexMap::default(),
             query_plan_cache.clone(),
         )?;
 
@@ -713,23 +713,35 @@ impl SupergraphCreator {
     }
 
     pub(crate) async fn warm_up_query_planner(
-        &mut self,
-        query_parser: &QueryAnalysisLayer,
+        &self,
+        query_analysis_layer: Arc<QueryAnalysisLayer>,
         persisted_query_layer: &PersistedQueryLayer,
         previous_cache: Option<InMemoryQueryPlanCache>,
-        count: Option<usize>,
-        experimental_reuse_query_plans: bool,
+        max_cached_queries: Option<usize>,
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
-        self.query_planner_service
-            .warm_up(
-                query_parser,
-                persisted_query_layer,
-                previous_cache,
-                count,
-                experimental_reuse_query_plans,
-                experimental_pql_prewarm,
-            )
-            .await
+        // Build a service stack for warmup, as we do need to parse the queries beforehand...
+        let warmup_service = ServiceBuilder::new()
+            .layer(warmup::WarmupParseQueryLayer::new(query_analysis_layer))
+            .map_response(drop)
+            .service(self.query_planner_service.clone())
+            .boxed_clone();
+
+        let requests = warmup::queries_to_warm_up(
+            previous_cache,
+            max_cached_queries,
+            persisted_query_layer.all_operations(),
+            experimental_pql_prewarm,
+        )
+        .await;
+
+        if !requests.is_empty() {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                requests.len(),
+            );
+        }
+
+        warmup::warm_up(warmup_service, requests).await;
     }
 }

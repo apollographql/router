@@ -21,6 +21,7 @@ pub(crate) mod rewrites;
 pub(crate) mod selection;
 mod subgraph_context;
 pub(crate) mod subscription;
+pub(crate) mod warmup;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
 pub(crate) const SUBSCRIBE_SPAN_NAME: &str = "subscribe";
