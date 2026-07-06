@@ -246,20 +246,15 @@ where
 {
     type Response = subgraph::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut request: subgraph::Request) -> Self::Future {
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
-
-        Box::pin(async move {
-            inject_subgraph_request_headers(request.subgraph_request.headers_mut());
-            inner.call(request).await
-        })
+        inject_subgraph_request_headers(request.subgraph_request.headers_mut());
+        self.inner.call(request)
     }
 }
 
