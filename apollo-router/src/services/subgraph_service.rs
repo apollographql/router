@@ -165,10 +165,6 @@ pub(crate) async fn process_batch(
     request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
-    // Each request making up the batch has already gone through SubgraphLayer (which sits
-    // innermost in the per-subgraph service stack, closest to SubgraphService::call), so the
-    // Accept/Content-Type headers assembled onto this batched request in `assemble_batch` are
-    // already present. Injecting them again here would duplicate the (appended) Accept header.
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 
