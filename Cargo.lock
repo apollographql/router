@@ -6191,11 +6191,7 @@ dependencies = [
  "bitflags 2.11.0",
  "errno",
  "libc",
-<<<<<<< HEAD
- "linux-raw-sys",
-=======
  "linux-raw-sys 0.12.1",
->>>>>>> origin/dev
  "windows-sys 0.61.0",
 ]
 
@@ -6944,11 +6940,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.2",
  "once_cell",
-<<<<<<< HEAD
- "rustix",
-=======
  "rustix 1.1.4",
->>>>>>> origin/dev
  "windows-sys 0.61.0",
 ]
 

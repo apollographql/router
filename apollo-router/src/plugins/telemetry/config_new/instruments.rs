@@ -1158,11 +1158,6 @@ impl SubscriptionsTerminatedAttributes {
                 .get::<_, String>(CLIENT_NAME)
                 .ok()
                 .flatten()
-                .or_else(|| {
-                    ctx.get::<_, String>(crate::context::deprecated::DEPRECATED_CLIENT_NAME)
-                        .ok()
-                        .flatten()
-                })
                 .unwrap_or_default();
             attrs.push(KeyValue::new("client.name", client_name));
         }
