@@ -159,7 +159,7 @@ fn get_uri_details(uri: &hyper::Uri) -> (&str, u16, &str) {
 #[instrument(skip(http_client, contexts, request))]
 pub(crate) async fn process_batch(
     http_client: crate::services::http::BoxCloneService,
-    service: String,
+    service: &str,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
     request: http::Request<RouterBody>,
     listener_count: usize,
@@ -559,7 +559,7 @@ pub(crate) async fn process_batches(
             let listener_count = senders.len();
             let batch_result = process_batch(
                 http_client,
-                service.clone(),
+                &service,
                 contexts,
                 request,
                 listener_count,
