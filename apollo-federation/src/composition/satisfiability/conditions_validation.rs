@@ -39,6 +39,7 @@ pub(super) fn resolve_condition_plan(
     excluded_destinations: &ExcludedDestinations,
     excluded_conditions: &ExcludedConditions,
     extra_conditions: Option<&SelectionSet>,
+    condition_resolver_cache: &mut ConditionResolverCache,
 ) -> Result<ConditionResolution, FederationError> {
     let edge_weight = query_graph.edge_weight(edge)?;
     let conditions = match (extra_conditions, &edge_weight.conditions) {
@@ -60,30 +61,32 @@ pub(super) fn resolve_condition_plan(
         query_graph.clone(),
         initial_option,
         conditions.iter().cloned(),
+        condition_resolver_cache,
     );
     traversal.find_resolution()
 }
 
-struct ConditionValidationTraversal {
+struct ConditionValidationTraversal<'a> {
     /// The federated query graph for the supergraph schema.
     query_graph: Arc<QueryGraph>,
     /// The cache for condition resolution.
-    condition_resolver_cache: ConditionResolverCache,
+    condition_resolver_cache: &'a mut ConditionResolverCache,
     /// The stack of open branches left to plan, along with state indicating the next selection to
     /// plan for them.
     // PORT_NOTE: This implementation closely follows the way `QueryPlanningTraversal` was ported.
     open_branches: Vec<OpenBranchAndSelections>,
 }
 
-impl ConditionValidationTraversal {
+impl<'a> ConditionValidationTraversal<'a> {
     fn new(
         query_graph: Arc<QueryGraph>,
         initial_option: SimultaneousPathsWithLazyIndirectPaths,
         selections: impl IntoIterator<Item = Selection>,
+        condition_resolver_cache: &'a mut ConditionResolverCache,
     ) -> Self {
         Self {
             query_graph,
-            condition_resolver_cache: ConditionResolverCache::new(),
+            condition_resolver_cache,
             open_branches: vec![OpenBranchAndSelections {
                 selections: selections.into_iter().collect(),
                 open_branch: OpenBranch(vec![initial_option]),
@@ -169,17 +172,17 @@ pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
     Ok(())
 }
 
-impl CachingConditionResolver for ConditionValidationTraversal {
+impl<'a> CachingConditionResolver for ConditionValidationTraversal<'a> {
     fn query_graph(&self) -> &QueryGraph {
         &self.query_graph
     }
 
     fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
-        &mut self.condition_resolver_cache
+        self.condition_resolver_cache
     }
 
     fn resolve_without_cache(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
@@ -193,6 +196,7 @@ impl CachingConditionResolver for ConditionValidationTraversal {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            self.condition_resolver_cache,
         )
     }
 }
@@ -307,6 +311,7 @@ type T
                 &Default::default(),
                 &Default::default(),
                 None,
+                &mut ConditionResolverCache::new(),
             )
             .unwrap();
             // All edges are expected to be satisfiable.
