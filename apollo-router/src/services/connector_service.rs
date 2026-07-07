@@ -60,8 +60,8 @@ pub(crate) struct ConnectorService {
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connector: Option<Connector>,
-    pub(crate) connector_request_service: Option<ConnectorRequestBoxService>,
+    pub(crate) connector: Connector,
+    pub(crate) connector_request_service: ConnectorRequestBoxService,
 }
 
 /// A reference to a unique Connector source.
@@ -130,10 +130,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match &mut self.connector_request_service {
-            Some(inner) => inner.poll_ready(cx),
-            None => Poll::Ready(Ok(())),
-        }
+        self.connector_request_service.poll_ready(cx)
     }
 
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
@@ -145,13 +142,6 @@ impl tower::Service<ConnectRequest> for ConnectorService {
         );
 
         Box::pin(async move {
-            let Some(connector) = connector else {
-                return Err("no connector found".into());
-            };
-            let Some(connector_request_service) = connector_request_service else {
-                return Err("no connector request service found".into());
-            };
-
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
             let span = tracing::info_span!(
                 CONNECT_SPAN_NAME,
@@ -283,25 +273,27 @@ impl ConnectorServiceFactory {
         )
     }
 
-    /// Creates a [`ConnectorService`] bound to the connector registered for `service_name`.
+    /// Creates a [`ConnectorService`] bound to the connector registered for `service_name`,
+    /// or `None` if no connector is registered under that name.
     ///
     /// The inner per-source [`ConnectorRequestService`](super::connector::request_service::ConnectorRequestService)
     /// is resolved once here (rather than on every `call`), so the returned service's
     /// `poll_ready` reflects that single inner service's real readiness.
-    pub(crate) fn create(&self, service_name: &str) -> BoxCloneService {
-        let connector = self.connectors_by_service_name.get(service_name).cloned();
-        let connector_request_service = connector.as_ref().map(|connector| {
-            self.connector_request_service_factory
-                .create(connector.source_config_key())
-        });
+    pub(crate) fn create(&self, service_name: &str) -> Option<BoxCloneService> {
+        let connector = self.connectors_by_service_name.get(service_name)?.clone();
+        let connector_request_service = self
+            .connector_request_service_factory
+            .create(connector.source_config_key());
 
-        ConnectorService {
-            _schema: self.schema.clone(),
-            _subgraph_schemas: self.subgraph_schemas.clone(),
-            _subscription_config: self.subscription_config.clone(),
-            connector,
-            connector_request_service,
-        }
-        .boxed_clone()
+        Some(
+            ConnectorService {
+                _schema: self.schema.clone(),
+                _subgraph_schemas: self.subgraph_schemas.clone(),
+                _subscription_config: self.subscription_config.clone(),
+                connector,
+                connector_request_service,
+            }
+            .boxed_clone(),
+        )
     }
 }

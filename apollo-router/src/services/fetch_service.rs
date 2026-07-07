@@ -165,6 +165,7 @@ impl FetchService {
 
             let (_parts, response) = match connector_service_factory
                 .create(&fetch_node.service_name)
+                .expect("we already checked that the connector exists for this service name; qed")
                 .oneshot(
                     ConnectRequest::builder()
                         .service_name(fetch_node.service_name.clone())
