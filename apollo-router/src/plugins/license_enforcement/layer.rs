@@ -80,50 +80,51 @@ where
     }
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
-        // This will rate limit logs about license to 1 a second.
-        // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
-        // If not successful some other thread will have logged.
-        if matches!(
-            &*self.license,
-            LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
-        ) {
-            let last_elapsed_seconds = self.delta.load(Ordering::SeqCst);
-            let elapsed_seconds = self.start.elapsed().as_secs();
-            if elapsed_seconds > last_elapsed_seconds
-                && self
-                    .delta
-                    .compare_exchange(
-                        last_elapsed_seconds,
-                        elapsed_seconds,
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    )
-                    .is_ok()
-            {
-                ::tracing::error!(
-                    code = APOLLO_ROUTER_LICENSE_EXPIRED,
-                    LICENSE_EXPIRED_SHORT_MESSAGE
-                );
-            }
-        }
+        let license = self.license.clone();
+        let start = self.start;
+        let delta = self.delta.clone();
+        let service = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, service);
 
-        if matches!(&*self.license, LicenseState::LicensedHalt { limits: _ }) {
-            Box::pin(async move {
-                Ok(http::Response::builder()
+        Box::pin(async move {
+            // This will rate limit logs about license to 1 a second.
+            // The way it works is storing the delta in seconds from a starting instant.
+            // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
+            // If not successful some other thread will have logged.
+            if matches!(
+                &*license,
+                LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
+            ) {
+                let last_elapsed_seconds = delta.load(Ordering::SeqCst);
+                let elapsed_seconds = start.elapsed().as_secs();
+                if elapsed_seconds > last_elapsed_seconds
+                    && delta
+                        .compare_exchange(
+                            last_elapsed_seconds,
+                            elapsed_seconds,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        )
+                        .is_ok()
+                {
+                    ::tracing::error!(
+                        code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                        LICENSE_EXPIRED_SHORT_MESSAGE
+                    );
+                }
+            }
+
+            if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
+                return Ok(http::Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Body::default())
                     .expect("canned response must be valid")
-                    .into_response())
-            })
-        } else {
-            let service = self.inner.clone();
-            let mut inner = std::mem::replace(&mut self.inner, service);
-            Box::pin(async move {
-                let response = inner.call(request).await?;
-                Ok(response.map(Body::new))
-            })
-        }
+                    .into_response());
+            }
+
+            let response = inner.call(request).await?;
+            Ok(response.map(Body::new))
+        })
     }
 }
 
