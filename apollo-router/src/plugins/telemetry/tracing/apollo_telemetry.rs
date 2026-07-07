@@ -374,7 +374,6 @@ impl Exporter {
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
         batch_processor_config: &'a BatchProcessorConfig,
-        use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
         let otlp_tracing_ratio = match otlp_tracing_sampler {
@@ -400,7 +399,6 @@ impl Exporter {
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
-            use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
             include_span_names: REPORTS_INCLUDE_SPANS.into(),
             errors_configuration: errors_configuration.clone(),
         };
@@ -600,7 +598,6 @@ enum TreeData {
 struct SpanCache {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     field_execution_weight: f64,
-    use_legacy_request_span: bool,
     include_span_names: HashSet<&'static str>,
     // We have a reference to error configuration here to do last-minute redaction of subgraph
     // errors (yeah...)
@@ -902,35 +899,29 @@ impl SpanCache {
                         .map(|e| e as u64)
                         .unwrap_or_default(),
                 });
-                if self.use_legacy_request_span {
-                    child_nodes
-                } else {
-                    self.extract_root_traces(span, child_nodes)?
-                        .into_iter()
-                        .map(|node| TreeData::Request(Ok(Box::new(node))))
-                        .collect()
-                }
+                self.extract_root_traces(span, child_nodes)?
+                    .into_iter()
+                    .map(|node| TreeData::Request(Ok(Box::new(node))))
+                    .collect()
             }
             _ if span.attributes.contains_key(&APOLLO_PRIVATE_REQUEST) => {
-                if !self.use_legacy_request_span {
-                    child_nodes.push(TreeData::Router {
-                        http: Box::new(extract_http_data(span).0),
-                        client_name: span
-                            .attributes
-                            .get(&CLIENT_NAME_KEY)
-                            .and_then(extract_string),
-                        client_version: span
-                            .attributes
-                            .get(&CLIENT_VERSION_KEY)
-                            .and_then(extract_string),
-                        duration_ns: span
-                            .attributes
-                            .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
-                            .and_then(extract_i64)
-                            .map(|e| e as u64)
-                            .unwrap_or_default(),
-                    });
-                }
+                child_nodes.push(TreeData::Router {
+                    http: Box::new(extract_http_data(span).0),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME_KEY)
+                        .and_then(extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION_KEY)
+                        .and_then(extract_string),
+                    duration_ns: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                        .and_then(extract_i64)
+                        .map(|e| e as u64)
+                        .unwrap_or_default(),
+                });
 
                 self.extract_root_traces(span, child_nodes)?
                     .into_iter()

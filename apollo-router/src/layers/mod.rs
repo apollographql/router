@@ -17,7 +17,6 @@ use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
-use crate::layers::sync_checkpoint::CheckpointLayer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::services::supergraph;
 
@@ -25,7 +24,6 @@ pub mod async_checkpoint;
 pub mod instrument;
 pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
-pub mod sync_checkpoint;
 pub mod unconstrained_buffer;
 
 // Note: We use Buffer in many places throughout the router. 50_000 represents
@@ -42,63 +40,6 @@ pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 /// (e.g.: checkpoints) to a [`Service`].
 #[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L>: Sized {
-    /// Decide if processing should continue or not, and if not allow returning of a response.
-    ///
-    /// This is useful for validation functionality where you want to abort processing but return a
-    /// valid response.
-    ///
-    /// # Arguments
-    ///
-    /// * `checkpoint_fn`: Ths callback to decides if processing should continue or not.
-    ///
-    /// returns: ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use std::ops::ControlFlow;
-    /// # use http::Method;
-    /// # use tower::ServiceBuilder;
-    /// # use tower_service::Service;
-    /// # use tracing::info_span;
-    /// # use apollo_router::services::supergraph;
-    /// # use apollo_router::layers::ServiceBuilderExt;
-    /// # fn test(service: supergraph::BoxCloneService) {
-    /// let _ = ServiceBuilder::new()
-    ///     .checkpoint(|req: supergraph::Request|{
-    ///         if req.supergraph_request.method() == Method::GET {
-    ///             Ok(ControlFlow::Break(supergraph::Response::builder()
-    ///                 .data("Only get requests allowed")
-    ///                 .context(req.context)
-    ///                 .build()?))
-    ///         } else {
-    ///             Ok(ControlFlow::Continue(req))
-    ///         }
-    ///     })
-    ///     .service(service);
-    /// # }
-    /// ```
-    fn checkpoint<S, Request>(
-        self,
-        checkpoint_fn: impl Fn(
-            Request,
-        ) -> Result<
-            ControlFlow<<S as Service<Request>>::Response, Request>,
-            <S as Service<Request>>::Error,
-        > + Send
-        + Sync
-        + 'static,
-    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
-    where
-        S: Service<Request> + Send + 'static,
-        Request: Send + 'static,
-        S::Future: Send,
-        S::Response: Send + 'static,
-        S::Error: Into<BoxError> + Send + 'static,
-    {
-        self.layer(CheckpointLayer::new(checkpoint_fn))
-    }
-
     /// Decide if processing should continue or not, and if not allow returning of a response.
     /// Unlike checkpoint it is possible to perform async operations in the callback. However
     /// the resulting service requires `S: Clone`. Since `BoxCloneService` is already `Clone`,

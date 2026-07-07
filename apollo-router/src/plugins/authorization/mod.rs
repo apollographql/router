@@ -592,7 +592,7 @@ impl Plugin for AuthorizationPlugin {
     ) -> supergraph::BoxCloneService {
         if self.require_authentication {
             ServiceBuilder::new()
-                .checkpoint(move |request: supergraph::Request| {
+                .checkpoint_async(move |request: supergraph::Request| async move {
                     // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
                     // authentication plugin, which manages this context value?
                     if request

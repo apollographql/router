@@ -104,28 +104,31 @@ impl Plugin for Csrf {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
-                .checkpoint(move |req: router::Request| {
-                    if is_preflighted(&req, required_headers.as_slice()) {
-                        tracing::trace!("request is preflighted");
-                        Ok(ControlFlow::Continue(req))
-                    } else {
-                        tracing::trace!("request is not preflighted");
-                        let error = crate::error::Error::builder().message(
-                            format!(
-                                "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-                                Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
-                                or provide one of the following headers: {}", 
-                                NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
-                                required_headers.join(", ")
-                            ))
-                            .extension_code("CSRF_ERROR")
-                            .build();
-                        let res = router::Response::infallible_builder()
-                            .error(error)
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build();
-                        Ok(ControlFlow::Break(res))
+                .checkpoint_async(move |req: router::Request| {
+                    let required_headers = required_headers.clone();
+                    async move {
+                        if is_preflighted(&req, required_headers.as_slice()) {
+                            tracing::trace!("request is preflighted");
+                            Ok(ControlFlow::Continue(req))
+                        } else {
+                            tracing::trace!("request is not preflighted");
+                            let error = crate::error::Error::builder().message(
+                                format!(
+                                    "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+                                    Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
+                                    or provide one of the following headers: {}",
+                                    NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
+                                    required_headers.join(", ")
+                                ))
+                                .extension_code("CSRF_ERROR")
+                                .build();
+                            let res = router::Response::infallible_builder()
+                                .error(error)
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build();
+                            Ok(ControlFlow::Break(res))
+                        }
                     }
                 })
                 .service(service)

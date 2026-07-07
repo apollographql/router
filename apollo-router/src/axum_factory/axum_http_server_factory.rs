@@ -54,7 +54,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::telemetry::SpanMode;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
@@ -326,22 +325,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-// This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
-pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
-    configuration
-        .apollo_plugins
-        .plugins
-        .iter()
-        .find(|(s, _)| s.as_str() == "telemetry")
-        .and_then(|(_, v)| v.get("instrumentation").and_then(|v| v.as_object()))
-        .and_then(|v| v.get("spans").and_then(|v| v.as_object()))
-        .and_then(|v| {
-            v.get("mode")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-        })
-        .unwrap_or_default()
-}
-
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -354,8 +337,6 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let span_mode = span_mode(configuration);
-
     // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
     // to turn errors from decompression into an axum error response. Now,
     // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
@@ -374,7 +355,6 @@ where
             .layer(
                 TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
                     license: license.clone(),
-                    span_mode,
                 }),
             )
             // CORS layer must be before any layer that can short-circuit with an error response, else
@@ -651,42 +631,12 @@ pub(crate) struct CanceledRequest;
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use tower::Service;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
-    #[test]
-    fn test_span_mode_default() {
-        let config =
-            Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
-                .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::SpecCompliant);
-    }
-
-    #[test]
-    fn test_span_mode_spec_compliant() {
-        let config = Configuration::from_str(include_str!(
-            "testdata/span_mode_spec_compliant.router.yaml"
-        ))
-        .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::SpecCompliant);
-    }
-
-    #[test]
-    fn test_span_mode_deprecated() {
-        let config =
-            Configuration::from_str(include_str!("testdata/span_mode_deprecated.router.yaml"))
-                .unwrap();
-        let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
-    }
-
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
     // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an

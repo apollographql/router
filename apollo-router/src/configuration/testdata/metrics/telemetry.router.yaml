@@ -18,7 +18,6 @@ telemetry:
         endpoint: default
   instrumentation:
     spans:
-      mode: spec_compliant
       default_attribute_requirement_level: recommended
       router:
         attributes:

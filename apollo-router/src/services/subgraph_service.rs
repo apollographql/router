@@ -37,7 +37,6 @@ use tracing::Instrument;
 use tracing::instrument;
 
 use super::Plugins;
-use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
@@ -46,6 +45,7 @@ use crate::Context;
 use crate::Notify;
 use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
+use crate::batching::SubgraphBatchRequest;
 use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -59,7 +59,6 @@ use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
-use crate::plugins::file_uploads;
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
@@ -90,22 +89,17 @@ pub(crate) struct SubgraphService {
     /// Pre-built HTTP client service with all plugin layers already folded in.
     /// Used on the hot (non-batching) path to avoid re-folding plugins per request.
     http_client: crate::services::http::BoxCloneService,
-    /// Kept only for the batching path, where a single factory may be used to
-    /// `.create()` clients for different subgraph names.
-    pub(crate) client_factory: HttpClientServiceFactory,
     service: Arc<String>,
 }
 
 impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
-        client_factory: crate::services::http::HttpClientServiceFactory,
+        http_client: crate::services::http::BoxCloneService,
     ) -> Result<Self, BoxError> {
         let name = service.into();
-        let http_client = client_factory.create(&name);
         Ok(Self {
             http_client,
-            client_factory,
             service: Arc::new(name),
         })
     }
@@ -141,18 +135,17 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.http_client.poll_ready(cx)
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let service_name = (*self.service).to_owned();
-        let client_factory = self.client_factory.clone();
-        let http_client = self.http_client.clone();
+        let service_name = self.service.clone();
 
-        Box::pin(
-            async move { call_http(request, client_factory, http_client, &service_name).await },
-        )
+        let fresh_client = self.http_client.clone();
+        let http_client = std::mem::replace(&mut self.http_client, fresh_client);
+
+        Box::pin(async move { call_http(request, http_client, &service_name).await })
     }
 }
 
@@ -260,11 +253,14 @@ fn http_response_to_graphql_response(
     graphql_response
 }
 
-/// Process a single subgraph batch request
-#[instrument(skip(client_factory, contexts, request))]
-pub(crate) async fn process_batch(
-    client_factory: HttpClientServiceFactory,
-    service: String,
+/// Process a single subgraph batch request.
+///
+/// # Panics
+/// The HTTP client service must already be readied: otherwise, it may panic.
+#[instrument(skip(http_client, contexts, request))]
+async fn process_batch(
+    http_client: crate::services::http::BoxCloneService,
+    service: &str,
     mut contexts: Vec<(Context, SubgraphRequestId)>,
     mut request: http::Request<RouterBody>,
     listener_count: usize,
@@ -315,7 +311,7 @@ pub(crate) async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
-    let client = client_factory.create(&service);
+    let service_name = service.to_string();
 
     // Update our batching metrics (just before we fetch)
     u64_histogram!(
@@ -323,7 +319,7 @@ pub(crate) async fn process_batch(
         "Number of queries contained within each query batch",
         listener_count as u64,
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.clone()
+        subgraph = service_name.clone()
     );
 
     u64_counter!(
@@ -333,12 +329,12 @@ pub(crate) async fn process_batch(
         // XXX(@goto-bus-stop): Should these be `batching.mode`, `batching.subgraph`?
         // Also, other metrics use a different convention to report the subgraph name
         mode = BatchingMode::BatchHttpLink.to_string(), // Only supported mode right now
-        subgraph = service.clone()
+        subgraph = service_name.clone()
     );
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) = match do_fetch(client, &batch_context, &service, request)
+    let (parts, content_type, body) = match do_fetch(http_client, &batch_context, service, request)
         .instrument(subgraph_req_span)
         .await
     {
@@ -349,14 +345,14 @@ pub(crate) async fn process_batch(
                 .body(err.to_graphql_error(None))
                 .map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.clone(),
+                    service: service_name.clone(),
                     reason: format!("cannot create the http response from error: {err:?}"),
                 })?;
             let (parts, body) = resp.into_parts();
             let body =
                 serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
                     status_code: None,
-                    service: service.clone(),
+                    service: service_name.clone(),
                     reason: format!("cannot serialize the error: {err:?}"),
                 })?;
             (
@@ -373,7 +369,7 @@ pub(crate) async fn process_batch(
     let headers_str = crate::services::header_masking::masked_headers_for_log(
         &batch_context,
         crate::services::header_masking::Direction::Response,
-        Some(&service),
+        Some(service),
         &parts.headers,
     );
 
@@ -402,7 +398,7 @@ pub(crate) async fn process_batch(
         }
         attrs.push(KeyValue::new(
             Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service.clone().into()),
+            opentelemetry::Value::String(service_name.clone().into()),
         ));
         log_event(
             event.level,
@@ -419,25 +415,25 @@ pub(crate) async fn process_batch(
     );
     let value =
         serde_json::from_slice(&body.ok_or(FetchError::SubrequestMalformedResponse {
-            service: service.to_string(),
+            service: service_name.clone(),
             reason: "no body in response".to_string(),
         })??)
         .map_err(|error| FetchError::SubrequestMalformedResponse {
-            service: service.to_string(),
+            service: service_name.clone(),
             reason: error.to_string(),
         })?;
 
     tracing::debug!("json value from body is: {value:?}");
 
     let array = ensure_array!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-        service: service.to_string(),
+        service: service_name.clone(),
         reason: error.to_string(),
     })?;
     let mut graphql_responses = Vec::with_capacity(array.len());
     for value in array {
         let object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
-                service: service.to_string(),
+                service: service_name.clone(),
                 reason: error.to_string(),
             })?;
 
@@ -447,13 +443,13 @@ pub(crate) async fn process_batch(
             serde_json::to_vec(&object)
                 .map(|v| v.into())
                 .map_err(|error| FetchError::SubrequestMalformedResponse {
-                    service: service.to_string(),
+                    service: service_name.clone(),
                     reason: error.to_string(),
                 }),
         );
 
         let graphql_response =
-            http_response_to_graphql_response(&service, content_type.clone(), body, &parts);
+            http_response_to_graphql_response(service, content_type.clone(), body, &parts);
         graphql_responses.push(graphql_response);
     }
 
@@ -462,7 +458,7 @@ pub(crate) async fn process_batch(
     // response
     if graphql_responses.len() != contexts.len() {
         return Err(FetchError::SubrequestBatchingError {
-            service,
+            service: service_name.clone(),
             reason: format!(
                 "number of contexts ({}) is not equal to number of graphql responses ({})",
                 contexts.len(),
@@ -473,12 +469,10 @@ pub(crate) async fn process_batch(
 
     // We are going to pop contexts from the back, so let's reverse our contexts
     contexts.reverse();
-    let subgraph_name = service.clone();
     // Build an http Response for each graphql response
     let subgraph_responses: Result<Vec<_>, _> = graphql_responses
         .into_iter()
         .map(|res| {
-            let subgraph_name = subgraph_name.clone();
             http::Response::builder()
                 .status(parts.status)
                 .version(parts.version)
@@ -488,8 +482,12 @@ pub(crate) async fn process_batch(
                     // Use the original context for the request to create the response
                     let (context, id) =
                         contexts.pop().expect("we have a context for each response");
-                    let resp =
-                        SubgraphResponse::new_from_response(http_res, context, subgraph_name, id);
+                    let resp = SubgraphResponse::new_from_response(
+                        http_res,
+                        context,
+                        service_name.clone(),
+                        id,
+                    );
 
                     // Avoid `{resp:?}`: SubgraphResponse's derived Debug prints
                     // the response HeaderMap unmasked. Log the non-header parts.
@@ -517,7 +515,7 @@ pub(crate) async fn process_batch(
 }
 
 /// Notify all listeners of a batch query of the results
-pub(crate) async fn notify_batch_query(
+async fn notify_batch_query(
     service: String,
     senders: Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     responses: Result<Vec<SubgraphResponse>, FetchError>,
@@ -591,33 +589,51 @@ pub(crate) async fn notify_batch_query(
     Ok(())
 }
 
-type BatchInfo = (
-    (
-        String,
-        http::Request<RouterBody>,
-        Vec<(Context, SubgraphRequestId)>,
-        usize,
-    ),
+struct BatchInfo {
+    service: String,
+    /// A pre-readied HTTP client service for this subgraph.
+    http_client: crate::services::http::BoxCloneService,
+    request: http::Request<RouterBody>,
+    contexts: Vec<(Context, SubgraphRequestId)>,
+}
+
+type BatchResult = (
+    BatchInfo,
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
 /// Collect all batch requests and process them concurrently
+///
+/// # Panics
+/// The HTTP client services inside the svc_map must already be readied: otherwise, it may panic.
 #[instrument(skip_all)]
 pub(crate) async fn process_batches(
-    client_factory: HttpClientServiceFactory,
     svc_map: HashMap<String, Vec<BatchQueryInfo>>,
 ) -> Result<(), BoxError> {
     // We need to strip out the senders so that we can work with them separately.
     let mut errors = vec![];
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
-            let (_op_name, contexts, request, txs) = assemble_batch(requests).await?;
+            let SubgraphBatchRequest {
+                http_client,
+                contexts,
+                request,
+                txs,
+            } = assemble_batch(requests).await?;
 
-            Ok(((service, request, contexts, txs.len()), txs))
+            Ok((
+                BatchInfo {
+                    service,
+                    http_client,
+                    request,
+                    contexts,
+                },
+                txs,
+            ))
         }))
         .await
         .into_iter()
-        .filter_map(|x: Result<BatchInfo, BoxError>| x.map_err(|e| errors.push(e)).ok())
+        .filter_map(|x: Result<BatchResult, BoxError>| x.map_err(|e| errors.push(e)).ok())
         .unzip();
 
     // If errors isn't empty, then process_batches cannot proceed. Let's log out the errors and
@@ -631,8 +647,6 @@ pub(crate) async fn process_batches(
         )
         .into());
     }
-    // Collect all of the processing logic and run them concurrently, collecting all errors
-    let cf = &client_factory;
     // It is not ok to panic if the length of the txs and info do not match. Let's make sure they
     // do
     if txs.len() != info.len() {
@@ -642,15 +656,18 @@ pub(crate) async fn process_batches(
         .into());
     }
     let batch_futures = info.into_iter().zip_eq(txs).map(
-        |((service, request, contexts, listener_count), senders)| async move {
-            let batch_result = process_batch(
-                cf.clone(),
-                service.clone(),
-                contexts,
+        |(
+            BatchInfo {
+                service,
+                http_client,
                 request,
-                listener_count,
-            )
-            .await;
+                contexts,
+            },
+            senders,
+        )| async move {
+            let listener_count = senders.len();
+            let batch_result =
+                process_batch(http_client, &service, contexts, request, listener_count).await;
 
             notify_batch_query(service, senders, batch_result).await
         },
@@ -663,7 +680,6 @@ pub(crate) async fn process_batches(
 
 async fn call_http(
     request: SubgraphRequest,
-    client_factory: HttpClientServiceFactory,
     http_client: crate::services::http::BoxCloneService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -683,9 +699,7 @@ async fn call_http(
 
     // If we have a batch query, then it's time for batching
     if let Some(query) = opt_batch_query {
-        // The batch path needs the factory because a single batch handler may
-        // create clients for different subgraph names.
-        let response_rx = query.signal_progress(client_factory, request).await?;
+        let response_rx = query.signal_progress(http_client, request).await?;
 
         // Park this query until we have our response and pass it back up
         response_rx
@@ -701,7 +715,7 @@ async fn call_http(
 }
 
 /// call_single_http makes http calls with modified graphql::Request (body)
-pub(crate) async fn call_single_http(
+async fn call_single_http(
     request: SubgraphRequest,
     client: crate::services::http::BoxCloneService,
     service_name: &str,
@@ -770,9 +784,6 @@ pub(crate) async fn call_single_http(
     // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
-
-    // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
-    let request = file_uploads::http_request_wrapper(request).await;
 
     if let Some(level) = log_request_level {
         let mut attrs = Vec::with_capacity(5);
@@ -1138,7 +1149,6 @@ mod tests {
     use url::Url;
 
     use super::*;
-    use crate::Configuration;
     use crate::Context;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::configuration::subgraph::SubgraphConfiguration;
@@ -1158,6 +1168,7 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
 
     async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
@@ -1613,15 +1624,8 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
         let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "testbis",
-                HttpClientServiceFactory::from_config(
-                    "testbis",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                ),
-            )
-            .expect("can create a SubgraphService"),
+            SubgraphService::new("testbis", HttpClientServiceFactory::for_test("testbis"))
+                .expect("can create a SubgraphService"),
         );
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
@@ -1655,15 +1659,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1686,15 +1684,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1718,15 +1710,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_panic(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1753,15 +1739,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1787,15 +1767,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_large_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let context = Context::new();
         context
@@ -1834,15 +1808,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let context = Context::new();
         // Limit of 1000 bytes — well above {"data": null} (14 bytes)
@@ -1877,15 +1845,9 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
         );
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1917,15 +1879,9 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
         );
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1956,15 +1912,8 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
         let subgraph_service = with_subscription_layer(
-            SubgraphService::new(
-                "test",
-                HttpClientServiceFactory::from_config(
-                    "test",
-                    &Configuration::default(),
-                    crate::configuration::shared::Client::default(),
-                ),
-            )
-            .expect("can create a SubgraphService"),
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService"),
         );
         let (tx, rx) = mpsc::channel(2);
         let mut rx_stream = ReceiverStream::new(rx);
@@ -2009,15 +1958,8 @@ mod tests {
             let socket_addr = listener.local_addr().unwrap();
             tokio::task::spawn(emulate_incorrect_websocket_server(listener));
             let subgraph_service = with_subscription_layer(
-                SubgraphService::new(
-                    "test",
-                    HttpClientServiceFactory::from_config(
-                        "test",
-                        &Configuration::default(),
-                        crate::configuration::shared::Client::default(),
-                    ),
-                )
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                    .expect("can create a SubgraphService"),
             );
             let (tx, _rx) = mpsc::channel(2);
 
@@ -2063,15 +2005,8 @@ mod tests {
             let spawned_task =
                 tokio::task::spawn(emulate_websocket_server_that_completes(listener));
             let subgraph_service = with_subscription_layer(
-                SubgraphService::new(
-                    "test",
-                    HttpClientServiceFactory::from_config(
-                        "test",
-                        &Configuration::default(),
-                        crate::configuration::shared::Client::default(),
-                    ),
-                )
-                .expect("can create a SubgraphService"),
+                SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                    .expect("can create a SubgraphService"),
             );
             let (tx, rx) = mpsc::channel(2);
             let mut rx_stream = ReceiverStream::new(rx);
@@ -2131,15 +2066,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2170,15 +2099,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2205,15 +2128,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2240,15 +2157,9 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
 
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2274,15 +2185,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            HttpClientServiceFactory::from_config(
-                "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+        let subgraph_service =
+            SubgraphService::new("test", HttpClientServiceFactory::for_test("test"))
+                .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service

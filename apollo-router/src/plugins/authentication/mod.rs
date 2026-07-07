@@ -257,8 +257,10 @@ impl PluginPrivate for AuthenticationPlugin {
 
         ServiceBuilder::new()
             .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                Ok(authenticate(&configuration, &jwks_manager, request))
+            .checkpoint_async(move |request: router::Request| {
+                let configuration = configuration.clone();
+                let jwks_manager = jwks_manager.clone();
+                async move { Ok(authenticate(&configuration, &jwks_manager, request)) }
             })
             .service(service)
             .boxed_clone()

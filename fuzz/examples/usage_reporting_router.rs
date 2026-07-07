@@ -48,7 +48,7 @@ impl Plugin for ExposeReferencedFieldsByType {
 
     fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
-            .checkpoint(|req: execution::Request| {
+            .checkpoint_async(|req: execution::Request| async move {
                 let as_json: serde_json_bytes::Value =
                     serde_json_bytes::to_value(&req.query_plan).unwrap();
 

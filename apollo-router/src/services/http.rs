@@ -43,7 +43,7 @@ impl HttpClientServiceFactory {
 
     #[cfg(test)]
     pub(crate) fn from_config(
-        service: impl Into<String>,
+        service: &str,
         configuration: &crate::Configuration,
         client_config: crate::configuration::shared::Client,
     ) -> Self {
@@ -71,6 +71,16 @@ impl HttpClientServiceFactory {
             .fold(service.boxed_clone(), |acc, (_, e)| {
                 e.http_client_service(name, acc)
             })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(name: &str) -> BoxCloneService {
+        Self::from_config(
+            name,
+            &crate::Configuration::default(),
+            crate::configuration::shared::Client::default(),
+        )
+        .create(name)
     }
 }
 

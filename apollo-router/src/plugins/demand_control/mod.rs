@@ -537,43 +537,46 @@ impl Plugin for DemandControl {
         } else {
             let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
-                .checkpoint(move |req: execution::Request| {
-                    req.context
-                        .insert_demand_control_context(DemandControlContext {
-                            strategy: strategy.clone(),
-                            variables: req.supergraph_request.body().variables.clone(),
-                        });
-
-                    // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
-                    Ok(match strategy.on_execution_request(&req) {
-                        Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => {
-                            let mut graphql_errors = err
-                                .into_graphql_errors()
-                                .expect("must be able to convert to graphql error");
-                            graphql_errors.iter_mut().for_each(|mapped_error| {
-                                if let Some(Value::String(error_code)) =
-                                    mapped_error.extensions.get("code")
-                                {
-                                    // Emit here so the event attaches to the demand_control
-                                    // checkpoint span; mark so the centralized emit skips it.
-                                    emit_error_event(
-                                        error_code.as_str(),
-                                        &mapped_error.message,
-                                        mapped_error.path.clone(),
-                                    );
-                                    mapped_error.set_span_event_emitted(true);
-                                }
+                .checkpoint_async(move |req: execution::Request| {
+                    let strategy = strategy.clone();
+                    async move {
+                        req.context
+                            .insert_demand_control_context(DemandControlContext {
+                                strategy: strategy.clone(),
+                                variables: req.supergraph_request.body().variables.clone(),
                             });
-                            ControlFlow::Break(
-                                execution::Response::builder()
-                                    .errors(graphql_errors)
-                                    .context(req.context.clone())
-                                    .build()
-                                    .expect("Must be able to build response"),
-                            )
-                        }
-                    })
+
+                        // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
+                        Ok(match strategy.on_execution_request(&req) {
+                            Ok(_) => ControlFlow::Continue(req),
+                            Err(err) => {
+                                let mut graphql_errors = err
+                                    .into_graphql_errors()
+                                    .expect("must be able to convert to graphql error");
+                                graphql_errors.iter_mut().for_each(|mapped_error| {
+                                    if let Some(Value::String(error_code)) =
+                                        mapped_error.extensions.get("code")
+                                    {
+                                        // Emit here so the event attaches to the demand_control
+                                        // checkpoint span; mark so the centralized emit skips it.
+                                        emit_error_event(
+                                            error_code.as_str(),
+                                            &mapped_error.message,
+                                            mapped_error.path.clone(),
+                                        );
+                                        mapped_error.set_span_event_emitted(true);
+                                    }
+                                });
+                                ControlFlow::Break(
+                                    execution::Response::builder()
+                                        .errors(graphql_errors)
+                                        .context(req.context.clone())
+                                        .build()
+                                        .expect("Must be able to build response"),
+                                )
+                            }
+                        })
+                    }
                 })
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
@@ -644,25 +647,28 @@ impl Plugin for DemandControl {
             let subgraph_name = subgraph_name.to_owned();
             let subgraph_name_map_fut = subgraph_name.to_owned();
             ServiceBuilder::new()
-                .checkpoint(move |req: subgraph::Request| {
-                    let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
+                .checkpoint_async(move |req: subgraph::Request| {
+                    let subgraph_name = subgraph_name.clone();
+                    async move {
+                        let strategy = req.context.get_demand_control_context().map(|c| c.strategy).expect("must have strategy");
 
-                    // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
-                    Ok(match strategy.on_subgraph_request(&req) {
-                        Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => ControlFlow::Break(
-                            subgraph::Response::builder()
-                                .errors(
-                                    err.into_graphql_errors()
-                                        .expect("must be able to convert to graphql error"),
-                                )
-                                .id(req.id)
-                                .context(req.context.clone())
-                                .extensions(crate::json_ext::Object::new())
-                                .subgraph_name(subgraph_name.clone())
-                                .build(),
-                        ),
-                    })
+                        // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
+                        Ok(match strategy.on_subgraph_request(&req) {
+                            Ok(_) => ControlFlow::Continue(req),
+                            Err(err) => ControlFlow::Break(
+                                subgraph::Response::builder()
+                                    .errors(
+                                        err.into_graphql_errors()
+                                            .expect("must be able to convert to graphql error"),
+                                    )
+                                    .id(req.id)
+                                    .context(req.context.clone())
+                                    .extensions(crate::json_ext::Object::new())
+                                    .subgraph_name(subgraph_name.clone())
+                                    .build(),
+                            ),
+                        })
+                    }
                 })
                 .map_future_with_request_data(
                     move |req: &subgraph::Request| {
