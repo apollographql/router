@@ -1,5 +1,4 @@
 //! Tower layer that enforces license limits on the main router pipeline.
-use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -150,12 +149,12 @@ mod tests {
     // The mock's `Error` is `tower_test::mock::error::Error`, but `LicenseService` requires an
     // `Infallible` inner error to match what the rest of the axum stack guarantees; the mock
     // never sends an error in these tests, so the conversion is unreachable.
-    fn mock_never_errors(_: BoxError) -> Infallible {
+    fn mock_never_errors(_: BoxError) -> BoxError {
         unreachable!("test mock never sends an error")
     }
 
     type MockedInner =
-        tower::util::MapErr<mock::Mock<Request<Body>, Response>, fn(BoxError) -> Infallible>;
+        tower::util::MapErr<mock::Mock<Request<Body>, Response>, fn(BoxError) -> BoxError>;
 
     fn mocked_service(
         license: LicenseState,
@@ -164,7 +163,7 @@ mod tests {
         mock::Handle<Request<Body>, Response>,
     ) {
         let (mock_service, handle) = mock::pair::<Request<Body>, Response>();
-        let inner = mock_service.map_err(mock_never_errors as fn(BoxError) -> Infallible);
+        let inner = mock_service.map_err(mock_never_errors as fn(BoxError) -> BoxError);
         (LicenseLayer::new(Arc::new(license)).layer(inner), handle)
     }
 
