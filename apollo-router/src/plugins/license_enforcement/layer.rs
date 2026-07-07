@@ -53,12 +53,6 @@ impl<S> Layer<S> for LicenseLayer {
 
 /// Logs [`APOLLO_ROUTER_LICENSE_EXPIRED`] at most once a second while the license is
 /// in a `LicensedHalt` or `LicensedWarn` state.
-///
-/// `start` and `delta` together track rate limiting: `delta` stores the seconds-since-`start`
-/// at which we last logged, and we only log again once the current elapsed time has moved past
-/// it — using `fetch_max` so that if multiple requests race to log for the same second, only the
-/// one that actually advances the watermark logs. The ordering only needs to be `Relaxed` since
-/// `delta` isn't guarding access to any other data.
 fn log_license_expired_rate_limited(license: &LicenseState, start: Instant, delta: &AtomicU64) {
     if !matches!(
         license,
@@ -68,6 +62,9 @@ fn log_license_expired_rate_limited(license: &LicenseState, start: Instant, delt
     }
 
     let elapsed_seconds = start.elapsed().as_secs();
+    // Using `fetch_max` so that if multiple requests race to log for the same second, only the
+    // one that actually advances the watermark logs. The ordering only needs to be `Relaxed` since
+    // `delta` isn't guarding access to any other data.
     let last_elapsed_seconds = delta.fetch_max(elapsed_seconds, Ordering::Relaxed);
     if elapsed_seconds > last_elapsed_seconds {
         ::tracing::error!(
@@ -132,6 +129,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
     use tower_test::mock;
+    use tower_test::mock::Mock;
 
     use super::*;
 
@@ -146,25 +144,18 @@ mod tests {
             .unwrap()
     }
 
-    // The mock's `Error` is `tower_test::mock::error::Error`, but `LicenseService` requires an
-    // `Infallible` inner error to match what the rest of the axum stack guarantees; the mock
-    // never sends an error in these tests, so the conversion is unreachable.
-    fn mock_never_errors(_: BoxError) -> BoxError {
-        unreachable!("test mock never sends an error")
-    }
-
-    type MockedInner =
-        tower::util::MapErr<mock::Mock<Request<Body>, Response>, fn(BoxError) -> BoxError>;
-
+    #[allow(clippy::type_complexity)]
     fn mocked_service(
         license: LicenseState,
     ) -> (
-        LicenseService<MockedInner>,
+        LicenseService<Mock<Request<Body>, Response>>,
         mock::Handle<Request<Body>, Response>,
     ) {
         let (mock_service, handle) = mock::pair::<Request<Body>, Response>();
-        let inner = mock_service.map_err(mock_never_errors as fn(BoxError) -> BoxError);
-        (LicenseLayer::new(Arc::new(license)).layer(inner), handle)
+        (
+            LicenseLayer::new(Arc::new(license)).layer(mock_service),
+            handle,
+        )
     }
 
     #[tokio::test]
