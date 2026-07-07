@@ -303,6 +303,7 @@ impl YamlRouterFactory {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)] // True, but internal, and probably not anymore in the future
     pub(crate) async fn inner_create_supergraph(
         &mut self,
         configuration: Arc<Configuration>,
