@@ -16,6 +16,7 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
 
@@ -219,8 +220,8 @@ async fn execute(
     .map_err(BoxError::from)?
     .into_iter()
     .map(move |request| {
-        let connector_request_service = connector_request_service.clone();
-        async move { connector_request_service.oneshot(request).await }
+        let mut connector_request_service = connector_request_service.clone();
+        async move { connector_request_service.call(request).await }
     });
 
     aggregate_responses(
