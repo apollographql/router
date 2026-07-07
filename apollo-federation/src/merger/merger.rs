@@ -2333,6 +2333,9 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         }
     }
 
+    /// Returns whether the second type is a strict subtype of the first type. This code resembles
+    /// [Type::is_assignable_to], except it (1) does not allow strict equality and (2) allows for
+    /// the named types to be subtypes.
     pub(in crate::merger) fn is_strict_subtype(
         &self,
         potential_supertype: &Type,
@@ -2345,54 +2348,58 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // - NonNullablePropagation: NonNull T is subtype of NonNull U if T is subtype of U
         // - ListUpgrade is NOT supported (was excluded by default)
 
-        match (potential_subtype, potential_supertype) {
-            // -------- List & NonNullList --------
-            // ListPropagation: [T] is subtype of [U] if T is subtype of U
-            (Type::List(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullableDowngrade: [T]! is subtype of [T]
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) if inner_sub == inner_super => {
-                Ok(true)
-            }
-            // NonNullablePropagation: [T]! is subtype of [U]! if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::NonNullList(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-            // NonNullablePropagation + NonNullableDowngrade: [T]! is subtype of [U] if T is subtype of U
-            (Type::NonNullList(inner_sub), Type::List(inner_super)) => {
-                self.is_strict_subtype(inner_super, inner_sub)
-            }
-
-            // Anything else with list on the left is not a strict subtype
-            (Type::List(_), _) | (Type::NonNullList(_), _) => Ok(false),
-
-            // -------- Named & NonNullNamed --------
-            // Same named type => not strict subtype
-            (Type::Named(a), Type::Named(b)) | (Type::Named(a), Type::NonNullNamed(b))
-                if a == b =>
-            {
+        match (potential_supertype, potential_subtype) {
+            // A nullable type cannot be a subtype of a non-nullable type.
+            (Type::NonNullNamed(_) | Type::NonNullList(_), Type::Named(_) | Type::List(_)) => {
                 Ok(false)
             }
-            (Type::NonNullNamed(a), Type::NonNullNamed(b)) if a == b => Ok(false),
-
-            // NonNull downgrade: T! ⊑ T
-            (Type::NonNullNamed(sub), Type::Named(super_)) if sub == super_ => Ok(true),
-
-            // Interface/Union relationships (includes downgrade handled above)
-            (Type::Named(sub), Type::Named(super_))
-            | (Type::Named(sub), Type::NonNullNamed(super_))
-            | (Type::NonNullNamed(sub), Type::Named(super_))
-            | (Type::NonNullNamed(sub), Type::NonNullNamed(super_)) => {
-                self.is_named_type_subtype(super_, sub)
+            // A list type cannot be a subtype of a non-list type.
+            (Type::Named(_) | Type::NonNullNamed(_), Type::List(_) | Type::NonNullList(_)) => {
+                Ok(false)
             }
-
-            // ListUpgrade not supported; any other combination is not strict
-            _ => Ok(false),
+            // A non-list type cannot be a subtype of a list type (no list upgrades).
+            (Type::List(_) | Type::NonNullList(_), Type::Named(_) | Type::NonNullNamed(_)) => {
+                Ok(false)
+            }
+            // A nullable named type can be a subtype of another nullable named type if the inner
+            // types are strict subtypes.
+            (Type::Named(potential_supertype), Type::Named(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of another non-null named type if the inner
+            // types are strict subtypes.
+            (Type::NonNullNamed(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                self.is_named_type_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A nullable list type can be a subtype of another nullable list type if the inner
+            // types are strict subtypes.
+            (Type::List(potential_supertype), Type::List(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null list type can be a subtype of another non-null list type if the inner
+            // types are strict subtypes.
+            (Type::NonNullList(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                self.is_strict_subtype(potential_supertype, potential_subtype)
+            }
+            // A non-null named type can be a subtype of a nullable named type if the inner types
+            // are subtypes.
+            (Type::Named(potential_supertype), Type::NonNullNamed(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_named_type_strict_subtype(potential_supertype, potential_subtype)?)
+            }
+            // A non-null list type can be a subtype of a nullable list type if the inner types are
+            // subtypes.
+            (Type::List(potential_supertype), Type::NonNullList(potential_subtype)) => {
+                Ok(potential_supertype == potential_subtype
+                    || self.is_strict_subtype(potential_supertype, potential_subtype)?)
+            } // You'll notice we didn't need a "_ => Ok(false)" at the end here. That's because the
+              // compiler can prove that the above match arms cover all cases. If you ever change
+              // this code, try to keep it that way.
         }
     }
 
-    fn is_named_type_subtype(
+    /// Returns whether the second named type is a strict subtype of the first named type.
+    fn is_named_type_strict_subtype(
         &self,
         potential_supertype: &NamedType,
         potential_subtype: &NamedType,
