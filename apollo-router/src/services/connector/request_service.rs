@@ -236,7 +236,7 @@ impl tower::Service<Request> for ConnectorRequestService {
     fn call(&mut self, request: Request) -> Self::Future {
         let original_subgraph_name = request.connector.id.subgraph_name.to_string();
         let fresh_client = self.http_client.clone();
-        let http_client = std::mem::replace(&mut self.http_client, fresh_client);
+        let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
         let (debug, connector_request_event, request_limit) =
@@ -316,7 +316,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                             http::Request::from_parts(parts, router::body::from_bytes(body));
 
                         let result = http_client
-                            .oneshot(crate::services::http::HttpRequest {
+                            .call(crate::services::http::HttpRequest {
                                 http_request,
                                 context: request.context.clone(),
                             })
