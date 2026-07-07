@@ -182,12 +182,6 @@ where
     pub(crate) fn activate(&self) {
         self.storage.activate()
     }
-
-    #[allow(unused)] // FIXME(@goto-bus-stop): might be in use again in the new test
-    #[cfg(test)]
-    pub(crate) async fn len(&self) -> usize {
-        self.storage.len().await
-    }
 }
 
 pub(crate) struct Entry<K: KeyType, V: ValueType, UncachedError> {
