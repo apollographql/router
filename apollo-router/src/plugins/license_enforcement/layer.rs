@@ -52,6 +52,40 @@ impl<S> Layer<S> for LicenseLayer {
     }
 }
 
+/// Logs [`APOLLO_ROUTER_LICENSE_EXPIRED`] at most once a second while the license is
+/// in a `LicensedHalt` or `LicensedWarn` state.
+///
+/// `start` and `delta` together track rate limiting: `delta` stores the seconds-since-`start`
+/// at which we last logged, and we only log again once the current elapsed time has moved past
+/// it — using a `compare_exchange` so that if multiple requests race to log for the same second,
+/// only one of them wins.
+fn log_license_expired_rate_limited(license: &LicenseState, start: Instant, delta: &AtomicU64) {
+    if !matches!(
+        license,
+        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
+    ) {
+        return;
+    }
+
+    let last_elapsed_seconds = delta.load(Ordering::SeqCst);
+    let elapsed_seconds = start.elapsed().as_secs();
+    if elapsed_seconds > last_elapsed_seconds
+        && delta
+            .compare_exchange(
+                last_elapsed_seconds,
+                elapsed_seconds,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+    {
+        ::tracing::error!(
+            code = APOLLO_ROUTER_LICENSE_EXPIRED,
+            LICENSE_EXPIRED_SHORT_MESSAGE
+        );
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct LicenseService<S> {
     inner: S,
@@ -87,32 +121,7 @@ where
         let mut inner = std::mem::replace(&mut self.inner, service);
 
         Box::pin(async move {
-            // This will rate limit logs about license to 1 a second.
-            // The way it works is storing the delta in seconds from a starting instant.
-            // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
-            // If not successful some other thread will have logged.
-            if matches!(
-                &*license,
-                LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
-            ) {
-                let last_elapsed_seconds = delta.load(Ordering::SeqCst);
-                let elapsed_seconds = start.elapsed().as_secs();
-                if elapsed_seconds > last_elapsed_seconds
-                    && delta
-                        .compare_exchange(
-                            last_elapsed_seconds,
-                            elapsed_seconds,
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                        )
-                        .is_ok()
-                {
-                    ::tracing::error!(
-                        code = APOLLO_ROUTER_LICENSE_EXPIRED,
-                        LICENSE_EXPIRED_SHORT_MESSAGE
-                    );
-                }
-            }
+            log_license_expired_rate_limited(&license, start, &delta);
 
             if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
                 return Ok(http::Response::builder()
