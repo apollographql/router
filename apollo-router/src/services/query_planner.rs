@@ -14,6 +14,7 @@ use super::layers::query_analysis::ParsedDocument;
 use crate::Context;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
+use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -135,5 +136,8 @@ impl Response {
 }
 
 pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
+pub(crate) type CacheBoxCloneService =
+    tower::util::BoxCloneService<CachingRequest, Response, CacheResolverError>;
 #[allow(dead_code)]
 pub(crate) type ServiceResult = Result<Response, ServiceError>;

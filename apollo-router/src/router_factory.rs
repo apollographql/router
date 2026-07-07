@@ -32,6 +32,7 @@ use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::warmup;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
@@ -265,10 +266,16 @@ impl YamlRouterFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<RouterCreator, BoxError> {
-        let supergraph_creator = self
+        // Instantiate the parser here so we can use it to warm up the planner below
+        let query_analysis_layer =
+            Arc::new(QueryAnalysisLayer::new(schema.clone(), configuration.clone()).await);
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+
+        let (supergraph_creator, warmup) = self
             .inner_create_supergraph(
                 configuration.clone(),
-                schema.clone(),
+                schema,
+                query_analysis_layer.clone(),
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
@@ -276,22 +283,16 @@ impl YamlRouterFactory {
             )
             .await?;
 
-        // Instantiate the parser here so we can use it to warm up the planner below
-        let query_analysis_layer = QueryAnalysisLayer::new(schema, configuration.clone()).await;
-
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
-
-        supergraph_creator
-            .warm_up_query_planner(
-                Arc::new(query_analysis_layer.clone()),
-                &persisted_query_layer,
-                previous_router.map(|previous| previous.previous_cache()),
-                configuration.supergraph.query_planning.warmed_up_queries,
-                &configuration
-                    .persisted_queries
-                    .experimental_prewarm_query_plan_cache,
-            )
-            .await;
+        SupergraphCreator::warm_up_query_planner(
+            warmup,
+            &persisted_query_layer,
+            previous_router.map(|previous| previous.previous_cache()),
+            configuration.supergraph.query_planning.warmed_up_queries,
+            &configuration
+                .persisted_queries
+                .experimental_prewarm_query_plan_cache,
+        )
+        .await;
 
         RouterCreator::new(
             query_analysis_layer,
@@ -306,11 +307,12 @@ impl YamlRouterFactory {
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
+        query_analysis: Arc<QueryAnalysisLayer>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
         previous_router: Option<&crate::services::router::service::RouterCreator>,
-    ) -> Result<SupergraphCreator, BoxError> {
+    ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
 
         let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
@@ -334,6 +336,7 @@ impl YamlRouterFactory {
                 configuration.clone(),
                 planner.clone(),
             )?
+            .boxed_clone()
         };
 
         // Process the plugins.
@@ -359,6 +362,7 @@ impl YamlRouterFactory {
                 query_planner_service,
                 schema.clone(),
                 subgraph_schemas,
+                query_analysis,
             );
             builder = builder.with_configuration(configuration.clone());
             let http_service_factory =
@@ -370,9 +374,9 @@ impl YamlRouterFactory {
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-            let supergraph_creator = builder.with_plugins(plugins).build().await?;
+            let pair = builder.with_plugins(plugins).build().await?;
 
-            Ok(supergraph_creator)
+            Ok(pair)
         }
         .instrument(tracing::info_span!("supergraph_creation"))
         .await

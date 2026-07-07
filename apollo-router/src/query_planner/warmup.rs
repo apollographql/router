@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use rand::seq::SliceRandom as _;
-use tower::Service as _;
 use tower::ServiceExt as _;
 
 use crate::Context;
@@ -188,7 +187,10 @@ pub(crate) async fn queries_to_warm_up(
 }
 
 /// Warm up the cache inside the given service by pushing requests through.
-pub(crate) async fn warm_up(mut service: BoxCloneService, requests: Vec<WarmupRequest>) {
+pub(crate) async fn warm_up(
+    mut service: impl tower::Service<WarmupRequest, Response = (), Error = CacheResolverError>,
+    requests: Vec<WarmupRequest>,
+) {
     let _timer = Timer::new(|duration| {
         f64_histogram!(
             "apollo.router.query_planning.warmup.duration",
@@ -208,7 +210,7 @@ pub(crate) async fn warm_up(mut service: BoxCloneService, requests: Vec<WarmupRe
             Ok(()) => {
                 count += 1;
             }
-            Err(CacheResolverError::RetrievalError(_err)) => {
+            Err(CacheResolverError::RetrievalError(_)) => {
                 count += 1;
             }
             Err(_) => {
