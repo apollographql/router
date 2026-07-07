@@ -88,18 +88,15 @@ pub(crate) struct LicenseService<S> {
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for LicenseService<S>
 where
-    S: Service<Request<ReqBody>, Response = http::Response<ResBody>, Error = Infallible>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     ReqBody: Send + 'static,
     ResBody: http_body::Body<Data = Bytes> + Send + 'static,
     ResBody::Error: Into<BoxError>,
 {
     type Response = Response;
-    type Error = Infallible;
-    type Future = BoxFuture<'static, Result<Response, Infallible>>;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Response, S::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
