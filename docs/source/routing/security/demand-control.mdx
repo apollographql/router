@@ -168,6 +168,46 @@ query BestsellersQuery {
 
 </ExpansionPanel>
 
+#### Field-level cost vs. type-level cost
+
+A `@cost` directive on a list-returning field is a per-call cost: the router charges it once, no matter how large the list is. This differs from `@cost` on a *type*, like the `Address` example [above](#customizing-cost), which is a per-instance cost that multiplies by the number of instances the list returns.
+
+For example, extend the schema with a field that carries its own weight:
+
+```graphql
+type Query {
+  book(id: ID): Book
+  bestsellers: [Book] @listSize(assumedSize: 5)
+  #highlight-start
+  topProducts: [Product] @listSize(assumedSize: 50) @cost(weight: 40)
+  #highlight-end
+}
+
+type Product {
+  name: String
+}
+```
+
+The following query has a cost of 40, not 2000 (50 × 40), because `topProducts` charges its own weight once, and `name` is a free scalar with no cost of its own:
+
+```graphql
+query TopProducts {
+  topProducts {
+    name
+  }
+}
+```
+
+<ExpansionPanel title="Cost of topProducts query">
+
+```text disableCopy=true showLineNumbers=false
+40 (topProducts, charged once) + 50 * (0 name field) = 40 total cost
+```
+
+</ExpansionPanel>
+
+If a selected child field has its own cost, that cost still scales with the list size. For example, if `Product` had a field `shippingEstimate: Float @cost(weight: 2)` and the query selected it, the total cost would be 40 + (50 × 2) = 140.
+
 The second field we will add is a paginated resolver. It returns the latest additions to the inventory:
 
 ```graphql

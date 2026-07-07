@@ -11,6 +11,8 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_federation::link::cost_spec_definition::CostDirective;
+use apollo_federation::link::cost_spec_definition::CostDirectiveOrigin;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
@@ -147,6 +149,24 @@ fn score_variable(
     }
 }
 
+/// The weight to charge for one occurrence of a response field's value. An explicit `@cost`
+/// declared directly on the field (`CostDirectiveOrigin::Field`) is a per-call cost: when we're
+/// scoring one item of a list (`is_list_item`), that cost was already charged once for the whole
+/// list, so it must not be charged again per item. A weight inherited from the field's return
+/// type (`CostDirectiveOrigin::Type`), or the default weight for the value's shape, is a
+/// per-instance cost and applies to every item.
+fn per_instance_weight(
+    cost_directive: Option<&CostDirective>,
+    is_list_item: bool,
+    default_weight: f64,
+) -> f64 {
+    match cost_directive {
+        Some(cost) if cost.origin() == CostDirectiveOrigin::Field && is_list_item => 0.0,
+        Some(cost) => cost.weight(),
+        None => default_weight,
+    }
+}
+
 impl StaticCostCalculator {
     pub(crate) fn new(
         supergraph_schema: Arc<DemandControlledSchema>,
@@ -243,18 +263,23 @@ impl StaticCostCalculator {
         };
 
         // Determine the cost for this particular field. Scalars are free, non-scalars are not.
-        // For fields with selections, add in the cost of the selections as well.
-        let mut type_cost = if let Some(cost_directive) = definition.cost_directive() {
-            cost_directive.weight()
-        } else if definition.ty().is_interface()
-            || definition.ty().is_object()
-            || definition.ty().is_union()
-        {
-            1.0
-        } else {
-            0.0
+        // An explicit `@cost` declared directly on the field is a per-call cost, so it's charged
+        // once rather than scaled by the field's list size. A default weight, or a weight
+        // inherited from the field's return type, is a per-instance cost and does scale with the
+        // list size.
+        let cost_directive = definition.cost_directive();
+        let (field_call_cost, per_instance_cost) = match cost_directive {
+            Some(cost) if cost.origin() == CostDirectiveOrigin::Field => (cost.weight(), 0.0),
+            Some(cost) => (0.0, cost.weight()),
+            None if definition.ty().is_interface()
+                || definition.ty().is_object()
+                || definition.ty().is_union() =>
+            {
+                (0.0, 1.0)
+            }
+            None => (0.0, 0.0),
         };
-        type_cost += self.score_selection_set(
+        let selection_set_cost = self.score_selection_set(
             ctx,
             &field.selection_set,
             field.ty().inner_named_type(),
@@ -298,12 +323,17 @@ impl StaticCostCalculator {
             }
         }
 
-        let cost = (instance_count as f64) * type_cost + arguments_cost + requirements_cost;
+        let cost = field_call_cost
+            + (instance_count as f64) * (per_instance_cost + selection_set_cost)
+            + arguments_cost
+            + requirements_cost;
         tracing::debug!(
-            "Field {} cost breakdown: (count) {} * (type cost) {} + (arguments) {} + (requirements) {} = {}",
+            "Field {} cost breakdown: (per-call) {} + (count) {} * ((per-instance) {} + (selections) {}) + (arguments) {} + (requirements) {} = {}",
             field.name,
+            field_call_cost,
             instance_count,
-            type_cost,
+            per_instance_cost,
+            selection_set_cost,
             arguments_cost,
             requirements_cost,
             cost
@@ -631,6 +661,15 @@ pub(crate) struct ResponseCostCalculator<'a> {
     schema: &'a DemandControlledSchema,
 }
 
+/// `include_argument_score` is false when scoring a list item, since the field's arguments were
+/// already scored once for the field itself. `is_list_item` is true when scoring one item of a
+/// list, so that a per-call `@cost` on the field (already charged once for the whole list) isn't
+/// charged again for each item.
+struct FieldScoringOptions {
+    include_argument_score: bool,
+    is_list_item: bool,
+}
+
 impl<'schema> ResponseCostCalculator<'schema> {
     pub(crate) fn new(schema: &'schema DemandControlledSchema) -> Self {
         Self { cost: 0.0, schema }
@@ -643,8 +682,13 @@ impl<'schema> ResponseCostCalculator<'schema> {
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
-        include_argument_score: bool,
+        options: FieldScoringOptions,
     ) {
+        let FieldScoringOptions {
+            include_argument_score,
+            is_list_item,
+        } = options;
+
         // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
             return;
@@ -664,21 +708,27 @@ impl<'schema> ResponseCostCalculator<'schema> {
             return;
         }
 
+        let cost_directive = definition.and_then(|d| d.cost_directive());
+
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                self.cost += definition
-                    .and_then(|d| d.cost_directive())
-                    .map_or(0.0, |cost| cost.weight());
+                self.cost += per_instance_weight(cost_directive, is_list_item, 0.0);
             }
             Value::Array(items) => {
+                // A field-level `@cost` is a per-call cost, so it's charged once for the whole
+                // list here, rather than once per item in the loop below.
+                if !is_list_item
+                    && let Some(cost) = cost_directive
+                    && cost.origin() == CostDirectiveOrigin::Field
+                {
+                    self.cost += cost.weight();
+                }
                 for item in items {
                     self.visit_list_item(request, variables, parent_ty, field, item);
                 }
             }
             Value::Object(children) => {
-                self.cost += definition
-                    .and_then(|d| d.cost_directive())
-                    .map_or(1.0, |cost| cost.weight());
+                self.cost += per_instance_weight(cost_directive, is_list_item, 1.0);
                 self.visit_selections(request, variables, &field.selection_set, children);
             }
         }
@@ -713,7 +763,17 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
         field: &Field,
         value: &Value,
     ) {
-        self.score_response_field(request, variables, parent_ty, field, value, true);
+        self.score_response_field(
+            request,
+            variables,
+            parent_ty,
+            field,
+            value,
+            FieldScoringOptions {
+                include_argument_score: true,
+                is_list_item: false,
+            },
+        );
     }
 
     fn visit_list_item(
@@ -724,7 +784,17 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        self.score_response_field(request, variables, parent_ty, field, value, false);
+        self.score_response_field(
+            request,
+            variables,
+            parent_ty,
+            field,
+            value,
+            FieldScoringOptions {
+                include_argument_score: false,
+                is_list_item: true,
+            },
+        );
     }
 }
 
@@ -1352,6 +1422,57 @@ mod tests {
             #[case] expected_cost: f64,
         ) {
             assert_eq!(estimated_cost(SCHEMA, query, variables), expected_cost);
+        }
+    }
+
+    /// Tests for ROUTER-1978: an explicit `@cost` directly on a list-returning field is a
+    /// per-call cost and must be charged once, not multiplied by the field's list size. Only a
+    /// default or type-level weight is a per-instance cost that scales with the list size.
+    mod field_level_cost_with_list_size_tests {
+        use super::actual_cost;
+        use super::estimated_cost;
+
+        const SCHEMA: &str = include_str!("./fixtures/custom_cost_schema.graphql");
+
+        #[test]
+        fn field_level_cost_with_free_scalar_child_is_charged_once() {
+            let query = "query { topProducts { id } }";
+            let variables = "{}";
+            let response = br#"{"data": {"topProducts": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}}"#;
+
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 40.0);
+            assert_eq!(actual_cost(SCHEMA, query, variables, response), 40.0);
+        }
+
+        #[test]
+        fn field_level_cost_with_weighted_child_scales_only_the_child() {
+            let query = "query { topProductsWithExpensiveChild { id expensiveField } }";
+            let variables = "{}";
+            let response = br#"{"data": {"topProductsWithExpensiveChild": [
+                {"id": "1", "expensiveField": 1},
+                {"id": "2", "expensiveField": 2},
+                {"id": "3", "expensiveField": 3}
+            ]}}"#;
+
+            // 40 (field's own cost, charged once) + 3 * 2 (expensiveField's cost, scaled by list size)
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 46.0);
+            assert_eq!(actual_cost(SCHEMA, query, variables, response), 46.0);
+        }
+
+        #[test]
+        fn type_level_cost_on_list_still_scales_with_list_size() {
+            // Guards against inverting the fix: a @cost declared on the *type* returned by a
+            // list field (as opposed to the field itself) must still scale with the list size.
+            let query = "query { expensiveObjectList { id } }";
+            let variables = "{}";
+            let response = br#"{"data": {"expensiveObjectList": [
+                {"id": "1"},
+                {"id": "2"},
+                {"id": "3"}
+            ]}}"#;
+
+            assert_eq!(estimated_cost(SCHEMA, query, variables), 120.0);
+            assert_eq!(actual_cost(SCHEMA, query, variables, response), 120.0);
         }
     }
 

@@ -375,13 +375,43 @@ pub(crate) static COST_VERSIONS: LazyLock<SpecDefinitions<CostSpecDefinition>> =
         definitions
     });
 
+/// Where a `@cost` weight was declared: directly on the field or argument itself, or inherited
+/// by falling back to a `@cost` on the referenced type. `Field` weight is a per-call cost;
+/// `Type` weight (like the default per-kind weight) is a per-instance cost that scales with the
+/// number of instances returned (e.g. list size).
+///
+/// ```graphql
+/// type Query {
+///   # `Field`: `@cost` is declared directly on this field, so it's charged once per call,
+///   # no matter how many products `@listSize` estimates or the response actually returns.
+///   topProducts: [Product] @cost(weight: 40) @listSize(assumedSize: 50)
+/// }
+///
+/// # `Type`: `@cost` is declared on the type, not on any particular field. A field that
+/// # returns a list of `Address` inherits this weight per instance, so a list of 50
+/// # addresses costs 50 * 5 = 250.
+/// type Address @cost(weight: 5) {
+///   zipCode: Int!
+/// }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CostDirectiveOrigin {
+    Field,
+    Type,
+}
+
 pub struct CostDirective {
     weight: i32,
+    origin: CostDirectiveOrigin,
 }
 
 impl CostDirective {
     pub fn weight(&self) -> f64 {
         self.weight as f64
+    }
+
+    pub fn origin(&self) -> CostDirectiveOrigin {
+        self.origin
     }
 
     pub(crate) fn from_directives(
@@ -392,7 +422,10 @@ impl CostDirective {
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
             .to_i32()
-            .map(|weight| Self { weight })
+            .map(|weight| Self {
+                weight,
+                origin: CostDirectiveOrigin::Field,
+            })
     }
 
     pub(crate) fn from_schema_directives(
@@ -403,7 +436,10 @@ impl CostDirective {
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
             .to_i32()
-            .map(|weight| Self { weight })
+            .map(|weight| Self {
+                weight,
+                origin: CostDirectiveOrigin::Type,
+            })
     }
 }
 
