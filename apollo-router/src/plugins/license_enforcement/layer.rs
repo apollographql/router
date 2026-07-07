@@ -57,8 +57,9 @@ impl<S> Layer<S> for LicenseLayer {
 ///
 /// `start` and `delta` together track rate limiting: `delta` stores the seconds-since-`start`
 /// at which we last logged, and we only log again once the current elapsed time has moved past
-/// it — using a `compare_exchange` so that if multiple requests race to log for the same second,
-/// only one of them wins.
+/// it — using `fetch_max` so that if multiple requests race to log for the same second, only the
+/// one that actually advances the watermark logs. The ordering only needs to be `Relaxed` since
+/// `delta` isn't guarding access to any other data.
 fn log_license_expired_rate_limited(license: &LicenseState, start: Instant, delta: &AtomicU64) {
     if !matches!(
         license,
@@ -67,18 +68,9 @@ fn log_license_expired_rate_limited(license: &LicenseState, start: Instant, delt
         return;
     }
 
-    let last_elapsed_seconds = delta.load(Ordering::SeqCst);
     let elapsed_seconds = start.elapsed().as_secs();
-    if elapsed_seconds > last_elapsed_seconds
-        && delta
-            .compare_exchange(
-                last_elapsed_seconds,
-                elapsed_seconds,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            )
-            .is_ok()
-    {
+    let last_elapsed_seconds = delta.fetch_max(elapsed_seconds, Ordering::Relaxed);
+    if elapsed_seconds > last_elapsed_seconds {
         ::tracing::error!(
             code = APOLLO_ROUTER_LICENSE_EXPIRED,
             LICENSE_EXPIRED_SHORT_MESSAGE
