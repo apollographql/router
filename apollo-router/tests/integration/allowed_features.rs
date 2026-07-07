@@ -407,7 +407,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_schema() {
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer should return a 500
      * */
     router.start().await;
     router
@@ -453,7 +453,7 @@ async fn canned_response_when_license_halted_with_restricted_config_and_valid_sc
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer should return a 500
      * */
     router.start().await;
     router
@@ -496,7 +496,7 @@ async fn canned_response_when_license_halted_with_valid_config_and_invalid_schem
     /*
      * THEN
      *  - since the license is expired and using restricted features the router should start but
-     *    the axum middleware, license_handler, should return a 500
+     *    the LicenseLayer tower layer should return a 500
      * */
     router.start().await;
     router
