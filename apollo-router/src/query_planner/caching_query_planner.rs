@@ -136,9 +136,11 @@ fn init_query_plan_from_redis(
     if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
         // Arc freshly deserialized from Redis should be unique, so this doesn't clone:
         let plan = Arc::make_mut(plan);
-        let root = Arc::make_mut(&mut plan.root);
-        root.init_parsed_operations(subgraph_schemas)
-            .map_err(|e| format!("Invalid subgraph operation: {e}"))?
+        if let Some(root) = plan.root.as_mut() {
+            let root = Arc::make_mut(root);
+            root.init_parsed_operations(subgraph_schemas)
+                .map_err(|e| format!("Invalid subgraph operation: {e}"))?
+        }
     }
     Ok(())
 }
@@ -368,15 +370,16 @@ where
                 .await;
             if entry.is_first() {
                 loop {
-                    let request = QueryPlannerRequest {
-                        query: query.clone(),
-                        operation_name: operation_name.clone(),
-                        document: doc.clone(),
-                        metadata: caching_key.metadata.clone(),
-                        plan_options: caching_key.plan_options.clone(),
-                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
-                        variables: Default::default(),
-                    };
+                    let request = QueryPlannerRequest::builder()
+                        .query(query.clone())
+                        .and_operation_name(operation_name.clone())
+                        .document(doc.clone())
+                        .metadata(caching_key.metadata.clone())
+                        .plan_options(caching_key.plan_options.clone())
+                        .compute_job_type(ComputeJobType::QueryPlanningWarmup)
+                        .variables(Default::default())
+                        .build();
+
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
                         Err(_) => break 'all_cache_keys_loop,
@@ -493,6 +496,17 @@ where
         + 'static,
     <T as Service<QueryPlannerRequest>>::Future: Send,
 {
+    /// Plan a query, first hitting the cache.
+    ///
+    /// Uses context keys:
+    /// - apollo::authentication::jwt_claims
+    /// - apollo::authorization::required_scopes
+    /// - apollo::authorization::required_policies
+    /// - apollo::progressive_override::labels_to_override
+    /// - ParsedDocument
+    ///
+    /// Inserts context:
+    /// - Arc<UsageReporting>
     async fn plan(
         mut self,
         request: query_planner::CachingRequest,
@@ -509,20 +523,18 @@ where
                 .unwrap_or_default(),
         };
 
-        let doc = match request
+        let Some(doc) = request
             .context
             .extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
-        {
-            None => {
-                return Err(CacheResolverError::RetrievalError(Arc::new(
-                    // TODO: dedicated error variant?
-                    QueryPlannerError::SpecError(SpecError::TransformError(
-                        "missing parsed document".to_string(),
-                    )),
-                )));
-            }
-            Some(d) => d.clone(),
+        else {
+            return Err(CacheResolverError::RetrievalError(Arc::new(
+                // FIXME(@goto-bus-stop): we should make it impossible to call the query planning
+                // service without having a ParsedDocument available.
+                QueryPlannerError::SpecError(SpecError::TransformError(
+                    "missing parsed document".to_string(),
+                )),
+            )));
         };
 
         let metadata = request
@@ -531,17 +543,34 @@ where
             .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned())
             .unwrap_or_default();
 
+        let query_planner::CachingRequest {
+            query,
+            operation_name,
+            context,
+            variables,
+        } = request;
+
+        // Build the inner query planner request.
+        let request = QueryPlannerRequest::builder()
+            .query(&query)
+            .and_operation_name(operation_name.clone())
+            .document(doc.clone())
+            .metadata(metadata.clone())
+            .plan_options(plan_options.clone())
+            .compute_job_type(ComputeJobType::QueryPlanning)
+            .variables(variables)
+            .build();
+
+        // Check the cache first
         let caching_key = CachingQueryKey {
-            query: request.query.clone(),
-            operation: request.operation_name.to_owned(),
+            query: query.clone(),
+            operation: operation_name.clone(),
             hash: doc.hash.clone(),
-            schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
+            schema_id: self.schema.schema_id.clone(),
             config_mode_hash: self.config_mode_hash.clone(),
         };
-
-        let context = request.context.clone();
         let entry = self
             .cache
             .get(&caching_key, |v| {
@@ -550,23 +579,6 @@ where
             .await;
 
         if entry.is_first() {
-            let query_planner::CachingRequest {
-                query,
-                operation_name,
-                context,
-                variables,
-            } = request;
-
-            let request = QueryPlannerRequest::builder()
-                .query(&query)
-                .and_operation_name(operation_name)
-                .document(doc)
-                .metadata(caching_key.metadata)
-                .plan_options(caching_key.plan_options)
-                .compute_job_type(ComputeJobType::QueryPlanning)
-                .variables(variables)
-                .build();
-
             let planning_task = async move {
                 let service = match self.delegate.ready().await {
                     Ok(service) => service,
@@ -829,8 +841,8 @@ where
                         crate::spec::operation_limits::check_measured(
                             &plan.query_metrics,
                             &self.config_limits,
-                            &caching_key.query,
-                            caching_key.operation.as_deref(),
+                            &query,
+                            operation_name.as_deref(),
                         )
                         .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e.into())))?;
                     }

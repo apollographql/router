@@ -39,6 +39,7 @@ pub(crate) struct Request {
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) compute_job_type: ComputeJobType,
+    /// Only for introspection queries.
     pub(crate) variables: Object,
 }
 
@@ -77,6 +78,7 @@ pub(crate) struct CachingRequest {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
+    /// Only for introspection queries.
     pub(crate) variables: Object,
 }
 

@@ -1,0 +1,5 @@
+query {
+  me @skip(if: true) {
+    username
+  }
+}
