@@ -112,7 +112,7 @@ pub(crate) fn get_graphql_content_type(
 /// making up a batch passes through `SubgraphContentNegotiationLayer` before being diverted into batching.
 pub(crate) fn inject_subgraph_request_headers(headers: &mut HeaderMap) {
     headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
-    headers.append(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
+    headers.insert(ACCEPT, ACCEPT_GRAPHQL_JSON.clone());
 }
 
 /// A layer for the subgraph service that injects `Accept` and `Content-Type` headers on outbound
