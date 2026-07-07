@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.15.1"
+version = "2.16.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -38,7 +38,7 @@ http.workspace = true
 hashbrown = "0.17.0"
 heck.workspace = true
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.14.0"
+itertools = "0.15.0"
 line-col = "0.2.1"
 levenshtein = "1"
 multimap = "0.10.0"

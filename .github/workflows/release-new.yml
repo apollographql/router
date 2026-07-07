@@ -27,7 +27,7 @@
 # and open the draft release PR.  workflow_dispatch defaults dry_run to
 # true.
 
-name: Test release new
+name: Release: new
 
 on:
   workflow_dispatch:
