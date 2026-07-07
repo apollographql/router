@@ -360,32 +360,27 @@ impl QueryPlannerService {
             &self.signature_normalization_algorithm,
         );
 
-        if let Some(node) = query_plan_root_node {
-            u64_histogram!(
-                "apollo.router.query_planning.plan.evaluated_plans",
-                "Number of query plans evaluated for a query before choosing the best one",
-                evaluated_plan_count
-            );
-            u64_histogram!(
-                "apollo.router.query_planning.plan.evaluated_paths",
-                "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
-                evaluated_plan_paths
-            );
+        u64_histogram!(
+            "apollo.router.query_planning.plan.evaluated_plans",
+            "Number of query plans evaluated for a query before choosing the best one",
+            evaluated_plan_count
+        );
+        u64_histogram!(
+            "apollo.router.query_planning.plan.evaluated_paths",
+            "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
+            evaluated_plan_paths
+        );
 
-            Ok(QueryPlannerContent::Plan {
-                plan: Arc::new(super::QueryPlan {
-                    usage_reporting: Arc::new(usage_reporting),
-                    root: node,
-                    formatted_query_plan,
-                    query: Arc::new(selections),
-                    query_metrics,
-                    estimated_size: Default::default(),
-                }),
-            })
-        } else {
-            failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting.get_stats_report_key()).into())
-        }
+        Ok(QueryPlannerContent::Plan {
+            plan: Arc::new(super::QueryPlan {
+                usage_reporting: Arc::new(usage_reporting),
+                root: query_plan_root_node,
+                formatted_query_plan,
+                query: Arc::new(selections),
+                query_metrics,
+                estimated_size: Default::default(),
+            }),
+        })
     }
 }
 
@@ -500,18 +495,6 @@ impl QueryPlannerService {
             )
             .await?;
 
-        if selections.operation.selection_set.is_empty() {
-            // All selections have @skip(true) or @include(false)
-            // Return an empty response now to avoid dealing with an empty query plan later
-            return Ok(QueryPlannerContent::Response {
-                response: Box::new(
-                    graphql::Response::builder()
-                        .data(Value::Object(Default::default()))
-                        .build(),
-                ),
-            });
-        }
-
         match self
             .introspection
             .maybe_execute(&self.schema, &key, &doc, variables)
@@ -525,6 +508,7 @@ impl QueryPlannerService {
             }
         }
 
+        // TODO(@goto-bus-stop): this is not a query planning concern
         let filter_res = if self.enable_authorization_directives {
             match AuthorizationPlugin::filter_query(&self.authorization_config, &key, &self.schema)
             {
@@ -663,26 +647,49 @@ mod tests {
     use crate::spec::query::subselections::SubSelectionValue;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
+    const SUBSCRIPTION_SCHEMA: &str = include_str!("testdata/schema_subscription.graphql");
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let result = plan(
-            EXAMPLE_SCHEMA,
-            include_str!("testdata/query.graphql"),
-            include_str!("testdata/query.graphql"),
-            None,
-            PlanOptions::default(),
-        )
-        .await
-        .unwrap();
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
 
-        if let QueryPlannerContent::Plan { plan, .. } = result {
+        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
+
+        let query = include_str!("testdata/query.graphql");
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        if let QueryPlannerContent::Plan { plan, .. } =
+            response.content.expect("successful response")
+        {
             insta::with_settings!({sort_maps => true}, {
                 insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
             });
-            insta::assert_debug_snapshot!("plan_root", plan.root);
+            insta::assert_debug_snapshot!(
+                "plan_root",
+                plan.root.as_deref().expect("non-empty plan")
+            );
         } else {
-            panic!()
+            panic!("unexpected query planner content")
         }
     }
 
@@ -719,78 +726,129 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn empty_query_plan_should_be_a_planner_error() {
-        let config = Default::default();
+    async fn noop_query_should_produce_empty_plan() {
+        let mut config = Configuration::default();
+        config.supergraph.introspection = true;
+        let config = Arc::new(config);
+
         let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
-        let query = include_str!("testdata/unknown_introspection_query.graphql");
+        let query = include_str!("testdata/noop_query.graphql");
 
-        let planner = QueryPlannerService::new(schema.clone(), Default::default())
+        let mut service = QueryPlannerService::new(schema.clone(), config)
             .await
             .unwrap();
 
-        let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
+        let document =
+            Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
-        let mut query_metrics = Default::default();
-        let selections = planner
-            .parse_selections(query.to_string(), None, &doc, &mut query_metrics)
+        let response = service
+            .ready()
             .await
-            .unwrap();
-        let err =
-            // test the planning part separately because it is a valid introspection query
-            // it should be caught by the introspection part, but just in case, we check
-            // that the query planner would return an empty plan error if it received an
-            // introspection query
-            planner.plan(
-                include_str!("testdata/unknown_introspection_query.graphql").to_string(),
-                include_str!("testdata/unknown_introspection_query.graphql").to_string(),
-                None,
-                CacheKeyMetadata::default(),
-                selections,
-                PlanOptions::default(),
-                &doc,
-                ComputeJobType::QueryPlanning,
-                query_metrics
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
             )
-                .await
-                .unwrap_err();
+            .await
+            .unwrap();
 
-        match err {
-            MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
-                stats_report_key,
-            )) => {
-                insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", stats_report_key);
-                });
-            }
-            e => {
-                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
-            }
-        }
+        let content = response.content.expect("expected a successful response");
+
+        let plan = match content {
+            QueryPlannerContent::Plan { plan, .. } => plan,
+            _ => panic!("expected a Plan response, received {content:?}"),
+        };
+
+        assert_eq!(plan.root, None, "expected an empty plan");
     }
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let query = "";
-        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default()).await;
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(Schema::parse(SUBSCRIPTION_SCHEMA, &config).unwrap());
+
+        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
+
+        // subscription with @defer cannot be query planned
+        let query = r#"
+            subscription {
+                userWasCreated {
+                  ... @defer(label: "name") { username }
+                }
+            }
+        "#;
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let result = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
+            .await;
+
+        let err = match result {
+            Ok(response) => panic!("expected error, got {:?}", response.content),
+            Err(MaybeBackPressureError::TemporaryError(err)) => {
+                panic!("expected permanent error, got {err:?}")
+            }
+            Err(MaybeBackPressureError::PermanentError(err)) => err,
+        };
 
         assert_eq!(
-            "spec error: parsing error: [1:1] syntax error: Unexpected <EOF>.",
-            result.unwrap_err().to_string()
+            "Federation error: @defer is not supported on subscriptions",
+            err.to_string()
         );
     }
 
     #[test(tokio::test)]
     async fn test_single_aliased_root_typename() {
-        let result = plan(
-            EXAMPLE_SCHEMA,
-            "{ x: __typename }",
-            "{ x: __typename }",
-            None,
-            PlanOptions::default(),
-        )
-        .await
-        .unwrap();
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
+
+        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
+
+        let query = "{ x: __typename }";
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
+            response.content.expect("successful response")
+        {
             assert_eq!(
                 r#"{"data":{"x":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -802,16 +860,36 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_two_root_typenames() {
-        let result = plan(
-            EXAMPLE_SCHEMA,
-            "{ x: __typename __typename }",
-            "{ x: __typename __typename }",
-            None,
-            PlanOptions::default(),
-        )
-        .await
-        .unwrap();
-        if let QueryPlannerContent::CachedIntrospectionResponse { response } = result {
+        let config = Arc::new(Configuration::default());
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
+
+        let mut service = QueryPlannerService::new(schema.clone(), config.clone())
+            .await
+            .unwrap();
+
+        let query = "{ x: __typename __typename }";
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        if let QueryPlannerContent::CachedIntrospectionResponse { response } =
+            response.content.expect("successful response")
+        {
             assert_eq!(
                 r#"{"data":{"x":"Query","__typename":"Query"}}"#,
                 serde_json::to_string(&response).unwrap()
@@ -1108,7 +1186,11 @@ mod tests {
             .unwrap();
 
         if let QueryPlannerContent::Plan { plan, .. } = result {
-            check_query_plan_coverage(&plan.root, None, &plan.query.subselections);
+            check_query_plan_coverage(
+                plan.root.as_ref().expect("non-empty query plan"),
+                None,
+                &plan.query.subselections,
+            );
 
             let mut keys: Vec<String> = Vec::new();
             for (key, value) in plan.query.subselections.iter() {
@@ -1123,50 +1205,6 @@ mod tests {
             keys.join("\n")
         } else {
             panic!()
-        }
-    }
-
-    async fn plan(
-        schema: &str,
-        original_query: &str,
-        filtered_query: &str,
-        operation_name: Option<String>,
-        plan_options: PlanOptions,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let mut configuration: Configuration = Default::default();
-        configuration.supergraph.introspection = true;
-        let configuration = Arc::new(configuration);
-
-        let schema = Schema::parse(schema, &configuration).unwrap();
-        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
-            .await
-            .unwrap();
-
-        let doc = Query::parse_document(
-            original_query,
-            operation_name.as_deref(),
-            &planner.schema(),
-            &configuration,
-        )?;
-
-        let result = planner
-            .get(
-                QueryKey {
-                    original_query: original_query.to_string(),
-                    filtered_query: filtered_query.to_string(),
-                    operation_name,
-                    metadata: CacheKeyMetadata::default(),
-                    plan_options,
-                },
-                doc,
-                ComputeJobType::QueryPlanning,
-                Default::default(),
-            )
-            .await;
-        match result {
-            Ok(x) => Ok(x),
-            Err(MaybeBackPressureError::PermanentError(e)) => Err(e),
-            Err(MaybeBackPressureError::TemporaryError(e)) => panic!("{e:?}"),
         }
     }
 
@@ -1259,15 +1297,32 @@ mod tests {
     #[test(tokio::test)]
     async fn test_evaluated_plans_histogram() {
         async {
-            let _ = plan(
-                EXAMPLE_SCHEMA,
-                include_str!("testdata/query.graphql"),
-                include_str!("testdata/query.graphql"),
-                None,
-                PlanOptions::default(),
-            )
-            .await
-            .unwrap();
+            let config = Arc::new(Configuration::default());
+            let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
+
+            let mut service = QueryPlannerService::new(schema.clone(), config.clone())
+                .await
+                .unwrap();
+
+            let query = include_str!("testdata/query.graphql");
+            let document = Query::parse_document(query, None, &schema, &config).unwrap();
+
+            let _response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(
+                    QueryPlannerRequest::builder()
+                        .query(query)
+                        .and_operation_name(document.operation.name.as_deref())
+                        .document(document)
+                        .compute_job_type(ComputeJobType::QueryPlanning)
+                        .metadata(CacheKeyMetadata::default())
+                        .plan_options(PlanOptions::default())
+                        .build(),
+                )
+                .await
+                .unwrap();
 
             assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
         }
