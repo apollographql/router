@@ -35,7 +35,6 @@ use tracing::instrument::WithSubscriber;
 
 use super::ENDPOINT_CALLBACK;
 use super::ListenAddrAndRouter;
-use super::license_layer::LicenseLayer;
 use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
@@ -51,6 +50,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
