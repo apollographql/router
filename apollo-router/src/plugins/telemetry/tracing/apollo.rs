@@ -27,8 +27,8 @@ impl TracingConfigurator for Config {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
-            .otlp_endpoint(&self.experimental_otlp_endpoint)
-            .otlp_tracing_protocol(&self.experimental_otlp_tracing_protocol)
+            .otlp_endpoint(&self.otlp_endpoint)
+            .otlp_tracing_protocol(&self.otlp_tracing_protocol)
             .otlp_tracing_sampler(&self.otlp_tracing_sampler)
             .apollo_key(
                 self.apollo_key
