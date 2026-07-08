@@ -859,6 +859,7 @@ mod tests {
             planner_subgraph_schemas.clone(),
             config.clone(),
             qp_arc,
+            Arc::new(crate::introspection::IntrospectionCache::new(&config)),
         )
         .unwrap();
 

@@ -23,6 +23,7 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
+use crate::introspection::IntrospectionCache;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
@@ -317,6 +318,7 @@ impl YamlRouterFactory {
         let query_planner_span = tracing::info_span!("query_planner_creation");
 
         let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
+        let introspection = Arc::new(IntrospectionCache::new(&configuration));
 
         // We have a few different subgraph schema structures in different parts of the router
         // Should probably consolidate at some point, but it's not the biggest deal in the world!
@@ -336,6 +338,7 @@ impl YamlRouterFactory {
                 subgraph_schemas.clone(),
                 configuration.clone(),
                 planner.clone(),
+                introspection.clone(),
             )?
             .boxed_clone()
         };
@@ -376,6 +379,9 @@ impl YamlRouterFactory {
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
             let pair = builder.with_plugins(plugins).build().await?;
+
+            // Only now can we build telemetry instruments
+            introspection.activate();
 
             Ok(pair)
         }

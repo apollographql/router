@@ -255,9 +255,16 @@ impl QueryPlannerService {
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
         let planner = Self::create_planner(&schema, &configuration)?;
+        let introspection = Arc::new(IntrospectionCache::new(&configuration));
         let subgraph_schemas = build_subgraph_schemas(&planner);
 
-        Self::new(schema, subgraph_schemas, configuration, planner)
+        Self::new(
+            schema,
+            subgraph_schemas,
+            configuration,
+            planner,
+            introspection,
+        )
     }
 
     pub(crate) fn new(
@@ -265,8 +272,8 @@ impl QueryPlannerService {
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
+        introspection: Arc<IntrospectionCache>,
     ) -> Result<Self, ServiceBuildError> {
-        let introspection = Arc::new(IntrospectionCache::new(&configuration));
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
         let federation_instrument = federation_version_instrument(schema.federation_version());
