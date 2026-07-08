@@ -305,16 +305,32 @@ impl HttpClientService {
 
         #[cfg(unix)]
         let unix_client = {
+            let mut unix_client_builder =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new());
             // NOTE: pool_timer is intentionally not set; see comment on client_builder above.
-            let unix_client_inner =
-                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                    .pool_idle_timeout(pool_idle_timeout)
-                    .http2_only(http2 == Http2Config::Http2Only)
-                    .build(ConnectionTimingConnector::new(
-                        UnixConnector,
-                        service_target,
-                        "unix",
-                    ));
+            unix_client_builder
+                .pool_idle_timeout(pool_idle_timeout)
+                .http2_only(http2 == Http2Config::Http2Only);
+            // Apply the same http2 keep-alive configuration as the TCP client above. Without it,
+            // experimental_http2_keep_alive_* was silently ignored for Unix domain sockets: a dead
+            // coprocessor peer is still detected promptly via EOF, but a hung-but-open peer (e.g.
+            // long GC pause, deadlock) went undetected, so idle pooled UDS connections were never
+            // pinged and stale connections were only discovered when a request rode them.
+            if let Some(interval) = http2_keep_alive_interval {
+                unix_client_builder
+                    // WARN: http2 keep-alive requires a timer; don't remove this
+                    .timer(TokioTimer::new())
+                    .http2_keep_alive_interval(Some(interval))
+                    .http2_keep_alive_timeout(http2_keep_alive_timeout)
+                    // Send pings even when the connection is idle in the pool, so stale
+                    // connections are detected before a request is made on them
+                    .http2_keep_alive_while_idle(true);
+            }
+            let unix_client_inner = unix_client_builder.build(ConnectionTimingConnector::new(
+                UnixConnector,
+                service_target,
+                "unix",
+            ));
 
             ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
