@@ -2,13 +2,9 @@
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use axum::Router;
 use axum::extract::Extension;
-use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::middleware::Next;
@@ -54,14 +50,13 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::license_enforcement::layer::LicenseLayer;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecording;
 use crate::plugins::telemetry::config_new::router::instruments::ResponseBodySizeRecordingStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -361,10 +356,7 @@ where
             // browser clients will not be able to view the error response body.
             .layer(cors)
             .layer(Extension(service_factory))
-            .layer(middleware::from_fn_with_state(
-                (license, Instant::now(), Arc::new(AtomicU64::new(0))),
-                license_handler,
-            ))
+            .layer(LicenseLayer::new(license))
             .layer(decompression),
     );
 
@@ -396,48 +388,6 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
         "http.response.status_code" = resp.status().as_u16() as i64
     );
     resp
-}
-
-async fn license_handler(
-    State((license, start, delta)): State<(Arc<LicenseState>, Instant, Arc<AtomicU64>)>,
-    request: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    if matches!(
-        &*license,
-        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
-    ) {
-        // This will rate limit logs about license to 1 a second.
-        // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
-        // If not successful some other thread will have logged.
-        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
-        let elapsed_seconds = start.elapsed().as_secs();
-        if elapsed_seconds > last_elapsed_seconds
-            && delta
-                .compare_exchange(
-                    last_elapsed_seconds,
-                    elapsed_seconds,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_ok()
-        {
-            ::tracing::error!(
-                code = APOLLO_ROUTER_LICENSE_EXPIRED,
-                LICENSE_EXPIRED_SHORT_MESSAGE
-            );
-        }
-    }
-
-    if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
-        http::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::default())
-            .expect("canned response must be valid")
-    } else {
-        next.run(request).await
-    }
 }
 
 #[derive(Clone)]
