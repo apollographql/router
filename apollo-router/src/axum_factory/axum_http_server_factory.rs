@@ -63,26 +63,6 @@ static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
 
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-fn jemalloc_metrics_instruments() -> (
-    tokio::task::JoinHandle<()>,
-    Vec<opentelemetry::metrics::ObservableGauge<u64>>,
-) {
-    use crate::axum_factory::metrics::jemalloc;
-
-    (
-        jemalloc::start_epoch_advance_loop(),
-        vec![
-            jemalloc::create_active_gauge(),
-            jemalloc::create_allocated_gauge(),
-            jemalloc::create_metadata_gauge(),
-            jemalloc::create_mapped_gauge(),
-            jemalloc::create_resident_gauge(),
-            jemalloc::create_retained_gauge(),
-        ],
-    )
-}
-
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
@@ -415,14 +395,8 @@ where
     }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
-        use tower::layer::layer_fn;
-        let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
-        // Tie the lifetime of the jemalloc instruments to the lifetime of the router
-        // by referencing them in a no-op layer.
-        router = router.layer(layer_fn(move |service| {
-            let _jemalloc_instrument = &jemalloc_instrument;
-            service
-        }));
+        router =
+            router.layer(crate::services::layers::jemalloc_metrics::JemallocMetricsLayer::new());
     }
 
     router
