@@ -659,12 +659,8 @@ impl PluggableSupergraphServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        // Buffer requests to the query planner service used for warmup so it's `Sync`.
-        // Otherwise we can't store it in the SupergraphCreator.
-        // Long-term we'd want to do this differently, but especially the fact that we create the
-        // query planner in the router factory but the CachingQueryPlanner in the
-        // SupergraphCreator makes it very difficult to _not_ store the service in a Sync-required
-        // way here.
+        // XXX(@goto-bus-stop): this shouldn't really be created here, but it's the one
+        // place we have access to the caching query planner service!
         let warmup_query_planner_service = ServiceBuilder::new()
             .layer(warmup::WarmupParseQueryLayer::new(
                 self.query_analysis.clone(),
