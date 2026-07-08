@@ -21,7 +21,7 @@ use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::batching::PrepareBatchingExecutionLayer;
+use crate::batching::BatchQueryPlanAnalysisLayer;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::mode::Mode;
 use crate::error::CacheResolverError;
@@ -575,7 +575,7 @@ impl PluggableSupergraphServiceBuilder {
             .map(|t| t.config.apollo.clone());
 
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
-            .layer(PrepareBatchingExecutionLayer::new())
+            .layer(BatchQueryPlanAnalysisLayer::new())
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
