@@ -28,4 +28,4 @@ telemetry:
 Default values are unchanged. Configurations using the old field names are
 migrated automatically at startup.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/PR_NUMBER
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/9784
