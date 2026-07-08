@@ -108,17 +108,15 @@ pub(crate) enum ConditionResolutionCacheResult {
     NotApplicable,
 }
 
+struct CachedConditionEntry {
+    resolution: ConditionResolution,
+    context: OpGraphPathContext,
+    excluded_destinations: ExcludedDestinations,
+    excluded_conditions: ExcludedConditions,
+}
+
 pub(crate) struct ConditionResolverCache {
-    // For every edge having a condition, we cache the resolution its conditions when possible.
-    // We save resolution with the set of excluded edges that were used to compute it: the reason we do this is
-    // that excluded edges impact the resolution, so we should only used a cached value if we know the excluded
-    // edges are the same as when caching, and while we could decide to cache only when we have no excluded edges
-    // at all, this would sub-optimal for types that have multiple keys, as the algorithm will always at least
-    // include the previous key edges to the excluded edges of other keys. In other words, if we only cached
-    // when we have no excluded edges, we'd only ever use the cache for the first key of every type. However,
-    // as the algorithm always try keys in the same order (the order of the edges in the query graph), including
-    // the excluded edges we see on the first ever call is actually the proper thing to do.
-    edge_states: IndexMap<EdgeIndex, (ConditionResolution, ExcludedDestinations)>,
+    edge_states: IndexMap<EdgeIndex, Vec<CachedConditionEntry>>,
 }
 
 impl ConditionResolverCache {
@@ -139,29 +137,18 @@ impl ConditionResolverCache {
         if extra_conditions.is_some() {
             return ConditionResolutionCacheResult::NotApplicable;
         }
-        // We don't cache if there is a context or excluded conditions because those would impact the resolution and
-        // we don't want to cache a value per-context and per-excluded-conditions (we also don't cache per-excluded-edges though
-        // instead we cache a value only for the first-see excluded edges; see above why that work in practice).
-        // TODO: we could actually have a better handling of the context: it doesn't really change how we'd resolve the condition, it's only
-        // that the context, if not empty, would have to be added to the trigger of key edges in the resolution path tree when appropriate
-        // and we currently don't handle that. But we could cache with an empty context, and then apply the proper transformation on the
-        // cached value `pathTree` when the context is not empty. That said, the context is about active @include/@skip and it's not use
-        // that commonly, so this is probably not an urgent improvement.
-        if !context.is_empty() || !excluded_conditions.is_empty() {
-            return ConditionResolutionCacheResult::NotApplicable;
-        }
 
-        if let Some((cached_resolution, cached_excluded_destinations)) = self.edge_states.get(&edge)
-        {
-            // Cache hit.
-            // Ensure we have the same excluded destinations as when we cached the value.
-            if cached_excluded_destinations == excluded_destinations {
-                return ConditionResolutionCacheResult::Hit(cached_resolution.clone());
+        if let Some(entries) = self.edge_states.get(&edge) {
+            for cached in entries {
+                if &cached.context == context
+                    && &cached.excluded_destinations == excluded_destinations
+                    && &cached.excluded_conditions == excluded_conditions
+                {
+                    return ConditionResolutionCacheResult::Hit(cached.resolution.clone());
+                }
             }
-            // Otherwise, fall back to non-cached computation
-            ConditionResolutionCacheResult::NotApplicable
+            ConditionResolutionCacheResult::Miss
         } else {
-            // Cache miss
             ConditionResolutionCacheResult::Miss
         }
     }
@@ -170,10 +157,19 @@ impl ConditionResolverCache {
         &mut self,
         edge: EdgeIndex,
         resolution: ConditionResolution,
+        context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
+        excluded_conditions: ExcludedConditions,
     ) {
         self.edge_states
-            .insert(edge, (resolution, excluded_destinations));
+            .entry(edge)
+            .or_default()
+            .push(CachedConditionEntry {
+                resolution,
+                context,
+                excluded_destinations,
+                excluded_conditions,
+            });
     }
 }
 
@@ -188,7 +184,7 @@ pub(crate) trait CachingConditionResolver {
     fn query_graph(&self) -> &QueryGraph;
 
     fn resolve_without_cache(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
@@ -225,10 +221,14 @@ pub(crate) trait CachingConditionResolver {
             excluded_conditions,
             extra_conditions,
         )?;
-        // See if this resolution is eligible to be inserted into the cache.
         if cache_result.is_miss() {
-            self.resolver_cache()
-                .insert(edge, resolution.clone(), excluded_destinations.clone());
+            self.resolver_cache().insert(
+                edge,
+                resolution.clone(),
+                context.clone(),
+                excluded_destinations.clone(),
+                excluded_conditions.clone(),
+            );
         }
         Ok(resolution)
     }
@@ -293,7 +293,9 @@ mod tests {
         cache.insert(
             edge1,
             ConditionResolution::unsatisfied_conditions(),
+            empty_context.clone(),
             empty_destinations.clone(),
+            empty_conditions.clone(),
         );
 
         assert!(

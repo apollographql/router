@@ -44,7 +44,7 @@ mod log {
 
     use crate::query_planner::PlanNode;
 
-    pub(crate) fn trace_query_plan(plan: &PlanNode) {
+    pub(crate) fn trace_query_plan(plan: Option<&PlanNode>) {
         tracing::trace!("query plan\n{:?}", plan);
     }
 

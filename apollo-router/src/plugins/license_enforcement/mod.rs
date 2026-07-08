@@ -3,6 +3,8 @@
 //! Currently includes:
 //! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a certain interval can be serviced
 
+pub(crate) mod layer;
+
 use std::num::NonZeroU64;
 use std::time::Duration;
 

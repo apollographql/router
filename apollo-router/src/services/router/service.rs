@@ -43,8 +43,6 @@ use crate::configuration::Batching;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
-use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -510,12 +508,6 @@ where
 
                     let response = match response.subscribed {
                         Some(true) => {
-                            let subgraph_name: Option<String> = context
-                                .get(SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY)
-                                .ok()
-                                .flatten();
-                            let client_name: Option<String> =
-                                context.get(CLIENT_NAME).ok().flatten();
                             let terminated_counter = context.extensions().with_lock(|lock| {
                                 lock.get::<SubscriptionsTerminatedCounter>().cloned()
                             });
@@ -523,8 +515,6 @@ where
                                 parts,
                                 router::body::from_result_stream(
                                     Multipart::new(body, ProtocolMode::Subscription)
-                                        .with_subgraph_name(subgraph_name)
-                                        .with_client_name(client_name)
                                         .with_terminated_counter(terminated_counter),
                                 ),
                             )
@@ -714,13 +704,15 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.make(),
-            apq_layer,
-            persisted_query_layer,
-            query_analysis_layer,
-            configuration.batching.clone(),
-        ));
+        let router_service = content_negotiation::RouterContentNegotiationLayer::default().layer(
+            RouterService::new(
+                supergraph_creator.make(),
+                apq_layer,
+                persisted_query_layer,
+                query_analysis_layer,
+                configuration.batching.clone(),
+            ),
+        );
 
         // NOTE: This is the start of the router pipeline (router_service).
         // The buffer provides backpressure for the full router pipeline and is required

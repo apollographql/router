@@ -611,7 +611,11 @@ impl StaticCostCalculator {
         query_plan: &QueryPlan,
         variables: &Object,
     ) -> Result<CostBySubgraph, DemandControlError> {
-        self.score_plan_node(&query_plan.root, variables)
+        if let Some(plan) = query_plan.root.as_ref() {
+            self.score_plan_node(plan, variables)
+        } else {
+            Ok(CostBySubgraph::default())
+        }
     }
 
     pub(crate) fn actual(
