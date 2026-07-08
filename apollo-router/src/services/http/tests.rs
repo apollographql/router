@@ -1120,6 +1120,99 @@ mod h2c_keep_alive {
     }
 }
 
+#[cfg(unix)]
+mod h2c_keep_alive_unix {
+    use std::future::pending;
+    use std::time::Duration;
+
+    use tokio::net::UnixListener;
+
+    use super::*;
+    use crate::configuration::shared::Client;
+
+    /// Accept one Unix-socket connection, complete the HTTP/2 server handshake so the client
+    /// considers the connection established and sends its request, then FREEZE: hold the
+    /// connection open but never poll it again. Incoming frames — the request HEADERS and, more
+    /// importantly, the client's keep-alive PINGs — are therefore never read or ACKed. This
+    /// models a coprocessor whose event loop has stalled (e.g. a stop-the-world GC pause) while
+    /// the socket stays open, so no FIN/EOF is delivered to the client to signal the peer is gone.
+    async fn serve_hung_after_handshake(listener: UnixListener) {
+        let (stream, _) = listener.accept().await.expect("accept unix connection");
+        let _conn = h2::server::handshake(stream)
+            .await
+            .expect("h2 server handshake");
+        // Deliberately never poll `_conn`: the connection is left open and completely
+        // unresponsive, holding the socket fd so the client sees no EOF.
+        pending::<()>().await;
+    }
+
+    /// Regression test for HTTP/2 keep-alive over Unix domain sockets.
+    ///
+    /// The `unix://` client used to be built without any keep-alive configuration, so
+    /// `experimental_http2_keep_alive_*` was silently ignored for Unix-socket transports (only the
+    /// TCP client honored it). Against a hung-but-open peer — one that never closes the socket, so
+    /// there is no EOF to detect — the client would then wait indefinitely for a response.
+    ///
+    /// With keep-alive applied to the UDS client, the unanswered pings trip the keep-alive timeout
+    /// and the client tears the connection down after roughly interval + timeout, so the request
+    /// fails promptly instead of hanging. The `no_keep_alive` case guards the regression property:
+    /// it confirms that without keep-alive the very same hung server leaves the request pending,
+    /// i.e. keep-alive is what causes the teardown (not some other client-side timeout).
+    #[rstest]
+    #[case::keep_alive_detects_hang(
+        Some((Duration::from_millis(100), Duration::from_millis(100))),
+        true
+    )]
+    #[case::no_keep_alive_hangs(None, false)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_keep_alive_tears_down_hung_unix_socket_connection(
+        #[case] keep_alive: Option<(Duration, Duration)>,
+        #[case] expect_torn_down: bool,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hung.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        tokio::spawn(serve_hung_after_handshake(listener));
+
+        let client_config = match keep_alive {
+            Some((interval, timeout)) => Client::builder()
+                .experimental_http2(Http2Config::Http2Only)
+                .experimental_http2_keep_alive_interval(interval)
+                .experimental_http2_keep_alive_timeout(timeout)
+                .build(),
+            None => Client::builder()
+                .experimental_http2(Http2Config::Http2Only)
+                .build(),
+        };
+        let service = HttpClientService::from_client_config(client_config).unwrap();
+
+        let uri: Uri = hyperlocal::Uri::new(path.to_str().unwrap(), "/").into();
+
+        // Bound the wait well above interval + timeout but far below any real hang: with keep-alive
+        // the request resolves (as an error) inside this window; without it, the request is still
+        // pending when the window elapses.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            try_send_request(service, uri, r#"{"query":"{ me }"}"#),
+        )
+        .await;
+
+        if expect_torn_down {
+            let result = outcome
+                .expect("keep-alive should tear down the hung connection, but the request hung past the timeout");
+            assert!(
+                result.is_err(),
+                "expected the request to fail once the hung connection was torn down, got success"
+            );
+        } else {
+            assert!(
+                outcome.is_err(),
+                "without keep-alive the request should still be hanging on the unresponsive peer, but it resolved"
+            );
+        }
+    }
+}
+
 mod compressed_req_res {
     use super::*;
 
