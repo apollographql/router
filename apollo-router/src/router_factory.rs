@@ -315,14 +315,28 @@ impl YamlRouterFactory {
         license: Arc<LicenseState>,
         previous_router: Option<&crate::services::router::service::RouterCreator>,
     ) -> Result<(SupergraphCreator, warmup::BoxCloneService), BoxError> {
-        let query_planner_span = tracing::info_span!("query_planner_creation");
-
-        let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
         let introspection = Arc::new(IntrospectionCache::new(&configuration));
+
+        let (query_planner_service, subgraph_schemas) = {
+            let _span = tracing::info_span!("query_planner_creation").entered();
+
+            let planner = QueryPlannerService::create_planner(&schema, &configuration)?;
+            let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
+
+            let query_planner_service = QueryPlannerService::new(
+                schema.clone(),
+                subgraph_schemas.clone(),
+                configuration.clone(),
+                planner.clone(),
+                introspection.clone(),
+            )?
+            .boxed_clone();
+
+            (query_planner_service, subgraph_schemas)
+        };
 
         // We have a few different subgraph schema structures in different parts of the router
         // Should probably consolidate at some point, but it's not the biggest deal in the world!
-        let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&planner);
         let plugin_subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> =
             Arc::new(
                 subgraph_schemas
@@ -331,20 +345,7 @@ impl YamlRouterFactory {
                     .collect(),
             );
 
-        let query_planner_service = {
-            let _span = query_planner_span.enter();
-            QueryPlannerService::new(
-                schema.clone(),
-                subgraph_schemas.clone(),
-                configuration.clone(),
-                planner.clone(),
-                introspection.clone(),
-            )?
-            .boxed_clone()
-        };
-
         // Process the plugins.
-        let span = tracing::info_span!("plugins");
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
@@ -355,7 +356,7 @@ impl YamlRouterFactory {
                 license,
                 previous_router,
             )
-            .instrument(span)
+            .instrument(tracing::info_span!("plugins"))
             .await?
             .into_iter()
             .collect(),
